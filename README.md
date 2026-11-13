@@ -46,3 +46,7 @@
 - [DeskRPG](docs/research/deskrpg.md) — 3D 가상 사무실 (Sustainable Use License: 개인·비상업 용도, 고지 유지)
 - [DeskRPG Hermes 플러그인](docs/research/deskrpg-hermes-plugin.md) — DeskRPG와 Hermes를 잇는 플러그인의 동작 명세 (LICENSE 없음: 코드는 쓰지 않고 명세만 참고)
 - [OpenClaw](docs/research/openclaw.md) — Hermes에서 부족한 트리거 · 승인 한도 · 장기 기억 · OAuth 보완 (MIT)
+
+## 투자 원칙 조사
+
+- [주식 투자 철학 · 원칙](docs/research/stock-investing-principles.md) — 학파별 원칙, 공통 리스크 원칙, 자동매매 위험, 스타일별 차이, 국내 · 미국 시장 규칙, 가격인하 기본 원칙 후보 (특정 종목 추천이나 투자 조언이 아닌 시스템 설계용 정리)
