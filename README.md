@@ -37,3 +37,10 @@
 
 - TradingAgents (arXiv 2412.20138) · AI Hedge Fund (github.com/virattt/ai-hedge-fund) · FinMem (arXiv 2311.13743)
 - 시각화: Generative Agents (arXiv 2304.03442) · AI Town (github.com/a16z-infra/ai-town) · ChatDev (github.com/OpenBMB/ChatDev)
+
+## 리버스 엔지니어링 자료
+
+서버는 Rust로 다시 만들고 3D 사무실 화면만 웹으로 남깁니다. 아래 두 오픈소스에서 가격인하에 필요한 기능만 골라, 원본과 같은 동작으로 재현하기 위한 구조를 정리했습니다.
+
+- [Hermes Agent](docs/research/hermes-agent.md) — 에이전트 실행기 (MIT)
+- [DeskRPG](docs/research/deskrpg.md) — 3D 가상 사무실 (Sustainable Use License: 개인·비상업 용도, 고지 유지)
