@@ -28,13 +28,13 @@ external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait
 dir = "crates/market"
 component = "A9 시장 어댑터"
 internal = ["pi-secrets"]
-external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait", "zeroize", "tracing", "url", "rust_decimal", "time", "futures", "tokio-stream"]
+external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait", "zeroize", "tracing", "url", "rust_decimal", "chrono", "futures", "tokio-stream"]
 
 [crates.pi-gate]
 dir = "crates/gate"
 component = "A2 접속 관문"
 internal = ["pi-store"]
-external = ["axum", "tokio", "tower", "tower-http", "serde", "serde_json", "thiserror", "tracing", "rand", "sha2", "hex", "base64", "time", "futures", "tokio-stream", "http", "subtle"]
+external = ["axum", "tokio", "tower", "tower-http", "serde", "serde_json", "thiserror", "tracing", "rand", "sha2", "hex", "base64", "chrono", "futures", "tokio-stream", "http", "subtle"]
 
 [crates.price-inha]
 dir = "crates/server"
