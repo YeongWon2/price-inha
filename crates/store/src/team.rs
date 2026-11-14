@@ -15,6 +15,8 @@ enum Condition {
     NextTradingDayStart,
     /// "내 승인" 표시가 있을 때만.
     OwnerApproved,
+    /// 사유가 "최대 손실"일 때만.
+    MaxLoss,
 }
 
 /// 허용 표([`TeamState`]의 문서 주석과 같다). 표에 없으면 `None`.
@@ -22,7 +24,8 @@ fn rule(from: TeamState, to: TeamState) -> Option<Condition> {
     use TeamState::{AnomalyHalt, DailyLimitHalt, FullStop, Operating, Resting};
     match (from, to) {
         (Resting, Operating | AnomalyHalt) => Some(Condition::Always),
-        (Operating, Resting | DailyLimitHalt | AnomalyHalt | FullStop) => Some(Condition::Always),
+        (Operating, Resting | DailyLimitHalt | AnomalyHalt) => Some(Condition::Always),
+        (Operating | DailyLimitHalt | AnomalyHalt, FullStop) => Some(Condition::MaxLoss),
         (DailyLimitHalt, Resting) => Some(Condition::NextTradingDayStart),
         (AnomalyHalt, Resting) => Some(Condition::Always),
         (FullStop, Resting) => Some(Condition::OwnerApproved),
@@ -40,6 +43,13 @@ fn check(from: TeamState, change: &TeamChange) -> Result<(), DenyReason> {
                 Ok(())
             } else {
                 Err(DenyReason::NextTradingDayOnly)
+            }
+        }
+        Some(Condition::MaxLoss) => {
+            if change.cause == TeamCause::MaxLoss {
+                Ok(())
+            } else {
+                Err(DenyReason::MaxLossOnly)
             }
         }
         Some(Condition::OwnerApproved) => {

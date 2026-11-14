@@ -29,7 +29,7 @@ pub use model::{
 };
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// 저장소 손잡이. 복제하면 같은 파일을 함께 쓴다. 스레드 사이에 넘겨도 된다.
 #[derive(Clone)]
@@ -148,8 +148,7 @@ impl Store {
         reason: BlockReason,
         at: UnixMillis,
     ) -> Result<Trade, StoreError> {
-        let _ = (id, reason, at);
-        todo!("2차: 막힘 전이와 막힌 이유 저장")
+        self.write(|conn| trade::block(conn, id, reason, at))
     }
 
     /// 승인 번호와 내용 지문을 매매에 붙인다. 이미 있으면 바꿔 넣는다.
@@ -157,6 +156,9 @@ impl Store {
     /// 2차:
     /// - 주문됨 이후(주문됨 · 보유중 · 팔림 · 복기됨)의 매매에는 붙이거나 바꿀 수 없다:
     ///   [`StoreError::ApprovalLocked`].
+    ///   미체결 취소로 막힌 매매도 주문됨을 지나왔으므로 같다(이때 `state`는 막힘이다).
+    /// - 한 번 매매에 붙은 번호는 그 매매의 것으로 남는다. 주문되거나 막히거나 다른 번호로 바꿔 넣은
+    ///   뒤에도 다른 매매는 그 번호를 쓸 수 없다.
     /// - 다른 매매에 이미 붙은 승인 번호는 붙일 수 없다: [`StoreError::ApprovalNumberReused`].
     /// - 거부되면 두 매매 모두 그대로다.
     pub fn set_trade_approval(

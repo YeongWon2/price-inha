@@ -1,7 +1,7 @@
 //! 값과 파일에 적는 것 사이의 변환. 파일에는 이 글자가 남으므로 한 번 정한 글자는 바꾸지 않는다.
 
 use crate::error::StoreError;
-use crate::model::{AccountKind, TeamCause, TeamState, TradeState};
+use crate::model::{AccountKind, BlockKind, TeamCause, TeamState, TradeState};
 
 fn unknown(what: &str, code: &str) -> StoreError {
     StoreError::Incompatible(format!("모르는 {what} 값: {code}"))
@@ -98,6 +98,21 @@ pub(crate) fn account_from(code: &str) -> Result<AccountKind, StoreError> {
         .ok_or_else(|| unknown("계좌 종류", code))
 }
 
+pub(crate) fn block_kind_code(kind: BlockKind) -> &'static str {
+    match kind {
+        BlockKind::PrincipleOrRationale => "principle_or_rationale",
+        BlockKind::ApprovalRejected => "approval_rejected",
+        BlockKind::UnfilledCancelled => "unfilled_cancelled",
+    }
+}
+
+pub(crate) fn block_kind_from(code: &str) -> Result<BlockKind, StoreError> {
+    BlockKind::ALL
+        .into_iter()
+        .find(|kind| block_kind_code(*kind) == code)
+        .ok_or_else(|| unknown("막힌 이유", code))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +127,9 @@ mod tests {
         }
         for state in TradeState::ALL {
             assert_eq!(trade_state_from(trade_state_code(state)).unwrap(), state);
+        }
+        for kind in BlockKind::ALL {
+            assert_eq!(block_kind_from(block_kind_code(kind)).unwrap(), kind);
         }
         for account in [AccountKind::Paper, AccountKind::Live] {
             assert_eq!(account_from(account_code(account)).unwrap(), account);

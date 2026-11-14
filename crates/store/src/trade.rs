@@ -7,26 +7,54 @@ use rusqlite::{Connection, Row, params};
 use crate::codec;
 use crate::error::{DenyReason, StoreError, Transition};
 use crate::model::{
-    Amount, Approval, Judgment, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, Trade,
-    TradeId, TradeState, UnixMillis,
+    Amount, Approval, BlockKind, BlockReason, Judgment, NewTrade, Rationale, RationaleField,
+    RoleScore, SourceRef, Trade, TradeId, TradeState, UnixMillis,
 };
 
 const COLUMNS: &str = "id, symbol, account, state, created_at, updated_at, hypothesis, \
     trigger_note, entry, stop, target, expected_value, decided_at, consensus_score, \
-    approval_number, approval_fingerprint";
+    approval_number, approval_fingerprint, block_kind, block_detail";
 
 /// 전이 호출로 갈 수 있는 길([`TradeState`]의 문서 주석과 같다).
 /// 논의중 → 판단됨은 여기에 없다. 그 길은 [`judge`]만 쓴다.
+/// 막힘으로 가는 길도 여기에 없다. 그 길은 [`block`]만 쓴다.
 fn allowed(from: TradeState, to: TradeState) -> bool {
-    use TradeState::{AwaitingApproval, Blocked, Holding, Judged, Ordered, Reviewed, Sold};
+    use TradeState::{AwaitingApproval, Holding, Judged, Ordered, Reviewed, Sold};
     matches!(
         (from, to),
-        (Judged, AwaitingApproval | Blocked | Ordered)
+        (Judged, AwaitingApproval | Ordered)
             | (AwaitingApproval, Ordered)
             | (Ordered, Holding)
             | (Holding, Sold)
             | (Sold, Reviewed)
     )
+}
+
+/// 그 상태에서 막힘으로 갈 때 짝이 맞는 이유 종류. 막힘으로 가는 길이 없는 상태는 `None`.
+fn block_kind_for(from: TradeState) -> Option<BlockKind> {
+    match from {
+        TradeState::Judged => Some(BlockKind::PrincipleOrRationale),
+        TradeState::AwaitingApproval => Some(BlockKind::ApprovalRejected),
+        TradeState::Ordered => Some(BlockKind::UnfilledCancelled),
+        TradeState::Discussing
+        | TradeState::Blocked
+        | TradeState::Holding
+        | TradeState::Sold
+        | TradeState::Reviewed => None,
+    }
+}
+
+/// 주문된 적이 있는 매매인가. 이런 매매에는 승인을 붙이거나 바꿀 수 없다.
+/// 미체결 취소로 막힌 매매도 주문됨을 지나왔으므로 여기에 든다.
+fn approval_locked(trade: &Trade) -> bool {
+    match trade.state {
+        TradeState::Ordered | TradeState::Holding | TradeState::Sold | TradeState::Reviewed => true,
+        TradeState::Blocked => trade
+            .blocked
+            .as_ref()
+            .is_some_and(|b| b.kind == BlockKind::UnfilledCancelled),
+        TradeState::Discussing | TradeState::Judged | TradeState::AwaitingApproval => false,
+    }
 }
 
 fn denied(from: TradeState, to: TradeState, reason: DenyReason) -> StoreError {
@@ -159,6 +187,15 @@ pub(crate) fn transition(
     at: UnixMillis,
 ) -> Result<Trade, StoreError> {
     let trade = get(conn, id)?;
+    if to == TradeState::Blocked {
+        // 막힘은 이유를 받는 [`block`]으로만 간다. 길이 있는 상태에서는 그 점을 알려 준다.
+        let reason = if block_kind_for(trade.state).is_some() {
+            DenyReason::BlockReasonRequired
+        } else {
+            DenyReason::NotAllowed
+        };
+        return Err(denied(trade.state, to, reason));
+    }
     if !allowed(trade.state, to) {
         return Err(denied(trade.state, to, DenyReason::NotAllowed));
     }
@@ -179,21 +216,85 @@ pub(crate) fn transition(
     get(conn, id)
 }
 
-/// 승인 번호와 내용 지문을 붙인다(있으면 바꿔 넣는다).
+/// 매매를 막힘으로 보내고 이유를 남긴다. 이유 종류와 출발 상태의 짝이 맞아야 한다.
+///
+/// 미체결 취소에서 "하나도 체결되지 않았는가"는 여기서 알 수 없다. 호출하는 쪽이 확인한다.
+pub(crate) fn block(
+    conn: &Connection,
+    id: TradeId,
+    reason: BlockReason,
+    at: UnixMillis,
+) -> Result<Trade, StoreError> {
+    let trade = get(conn, id)?;
+    let Some(expected) = block_kind_for(trade.state) else {
+        return Err(denied(
+            trade.state,
+            TradeState::Blocked,
+            DenyReason::NotAllowed,
+        ));
+    };
+    if reason.kind != expected {
+        return Err(denied(
+            trade.state,
+            TradeState::Blocked,
+            DenyReason::BlockReasonMismatch,
+        ));
+    }
+    conn.execute(
+        "UPDATE trades SET state = ?1, updated_at = ?2, block_kind = ?3, block_detail = ?4
+         WHERE id = ?5",
+        params![
+            codec::trade_state_code(TradeState::Blocked),
+            at.0,
+            codec::block_kind_code(reason.kind),
+            reason.detail,
+            id.0,
+        ],
+    )?;
+    get(conn, id)
+}
+
+/// 승인 번호와 내용 지문을 붙인다(주문 전이면 바꿔 넣을 수 있다).
+///
+/// 한 번 매매에 붙은 번호는 `approval_numbers`에 그 매매의 것으로 남는다. 그 매매가 주문되거나
+/// 막히거나 다른 번호로 바꿔 넣은 뒤에도 다른 매매는 그 번호를 쓸 수 없다.
 pub(crate) fn set_approval(
     conn: &Connection,
     id: TradeId,
     approval: Approval,
     at: UnixMillis,
 ) -> Result<Trade, StoreError> {
-    let changed = conn.execute(
+    let trade = get(conn, id)?;
+    if approval_locked(&trade) {
+        return Err(StoreError::ApprovalLocked { state: trade.state });
+    }
+    let owner = {
+        let mut stmt = conn.prepare("SELECT trade_id FROM approval_numbers WHERE number = ?1")?;
+        let mut rows = stmt.query([approval.number])?;
+        match rows.next()? {
+            Some(row) => Some(row.get::<_, i64>(0)?),
+            None => None,
+        }
+    };
+    match owner {
+        Some(owner) if owner != id.0 => {
+            return Err(StoreError::ApprovalNumberReused {
+                number: approval.number,
+            });
+        }
+        Some(_) => {}
+        None => {
+            conn.execute(
+                "INSERT INTO approval_numbers (number, trade_id) VALUES (?1, ?2)",
+                params![approval.number, id.0],
+            )?;
+        }
+    }
+    conn.execute(
         "UPDATE trades SET approval_number = ?1, approval_fingerprint = ?2, updated_at = ?3
          WHERE id = ?4",
         params![approval.number, approval.content_fingerprint, at.0, id.0],
     )?;
-    if changed == 0 {
-        return Err(StoreError::TradeNotFound(id));
-    }
     get(conn, id)
 }
 
@@ -236,6 +337,14 @@ fn trade_from(row: &Row<'_>) -> Result<Trade, StoreError> {
         }),
         _ => None,
     };
+    // 버전 1에서 막힌 매매는 이유 칸이 비어 있다. 그때는 이유 없이 읽힌다.
+    let blocked = match row.get::<_, Option<String>>(16)? {
+        Some(code) => Some(BlockReason {
+            kind: codec::block_kind_from(&code)?,
+            detail: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+        }),
+        None => None,
+    };
     Ok(Trade {
         id: TradeId(row.get(0)?),
         symbol: row.get(1)?,
@@ -256,7 +365,7 @@ fn trade_from(row: &Row<'_>) -> Result<Trade, StoreError> {
         scores: Vec::new(),
         consensus_score: row.get(13)?,
         approval,
-        blocked: None,
+        blocked,
     })
 }
 
@@ -283,4 +392,93 @@ fn scores(conn: &Connection, id: TradeId) -> Result<Vec<RoleScore>, StoreError> 
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::AccountKind;
+
+    fn store() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::schema::open(&dir.path().join("pi.sqlite")).unwrap();
+        (dir, conn)
+    }
+
+    fn judged(conn: &Connection) -> TradeId {
+        let id = create(
+            conn,
+            NewTrade {
+                symbol: "005930".to_string(),
+                account: AccountKind::Paper,
+                at: UnixMillis(0),
+            },
+        )
+        .unwrap()
+        .id;
+        let judgment = Judgment {
+            decided_at: UnixMillis(10),
+            rationale: Rationale {
+                hypothesis: Some("가설".to_string()),
+                trigger: Some("계기".to_string()),
+                entry: Some(Amount(100)),
+                stop: Some(Amount(90)),
+                target: Some(Amount(120)),
+                expected_value: Some(Amount(5)),
+            },
+            sources: Vec::new(),
+            scores: Vec::new(),
+            consensus_score: 60,
+        };
+        judge(conn, id, judgment).unwrap();
+        id
+    }
+
+    fn approval(number: i64) -> Approval {
+        Approval {
+            number,
+            content_fingerprint: format!("sha256:{number}"),
+        }
+    }
+
+    #[test]
+    fn 바꿔_넣어_떼어_낸_승인_번호도_다른_매매는_쓸_수_없고_같은_매매는_다시_쓸_수_있다() {
+        let (_dir, conn) = store();
+        let a = judged(&conn);
+        let b = judged(&conn);
+        set_approval(&conn, a, approval(1), UnixMillis(20)).unwrap();
+        set_approval(&conn, a, approval(2), UnixMillis(21)).unwrap();
+        assert!(matches!(
+            set_approval(&conn, b, approval(1), UnixMillis(22)),
+            Err(StoreError::ApprovalNumberReused { number: 1 })
+        ));
+        let again = set_approval(&conn, a, approval(1), UnixMillis(23)).unwrap();
+        assert_eq!(again.approval, Some(approval(1)));
+    }
+
+    #[test]
+    fn 미체결_취소로_막힌_매매에는_승인을_붙일_수_없고_주문_전에_막힌_매매에는_된다() {
+        let (_dir, conn) = store();
+        let ordered = judged(&conn);
+        transition(&conn, ordered, TradeState::Ordered, UnixMillis(20)).unwrap();
+        let reason = BlockReason {
+            kind: BlockKind::UnfilledCancelled,
+            detail: "체결 없음".to_string(),
+        };
+        block(&conn, ordered, reason, UnixMillis(30)).unwrap();
+        assert!(matches!(
+            set_approval(&conn, ordered, approval(1), UnixMillis(40)),
+            Err(StoreError::ApprovalLocked {
+                state: TradeState::Blocked
+            })
+        ));
+
+        let early = judged(&conn);
+        let reason = BlockReason {
+            kind: BlockKind::PrincipleOrRationale,
+            detail: "근거 부족".to_string(),
+        };
+        block(&conn, early, reason, UnixMillis(30)).unwrap();
+        set_approval(&conn, early, approval(2), UnixMillis(40)).unwrap();
+    }
 }

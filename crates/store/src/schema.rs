@@ -16,7 +16,7 @@ const APPLICATION_ID: i64 = 0x5049_5354;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 버전 n에서 n+1로 올리는 SQL. `MIGRATIONS[n]`이 n → n+1이다. 이미 나간 것은 고치지 않고 뒤에 더한다.
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1];
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2];
 
 /// 기록 표(team_history · events · access_log)는 고치기 · 지우기를 SQLite가 막는다.
 const V1: &str = "
@@ -85,6 +85,42 @@ BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 CREATE TRIGGER access_log_no_update BEFORE UPDATE ON access_log
 BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
 CREATE TRIGGER access_log_no_delete BEFORE DELETE ON access_log
+BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
+";
+
+/// 버전 2(2차 작업). 버전 1의 표와 줄은 그대로 두고 더하기만 한다.
+///
+/// - 매매에 막힌 이유 칸 둘. 버전 1에서 막힌 매매는 이유가 비어 있다.
+/// - 한 번이라도 매매에 붙은 승인 번호의 목록(`approval_numbers`). 번호의 주인은 처음 붙인 매매이고
+///   바뀌거나 지워지지 않는다. 버전 1 파일에 같은 번호가 여러 매매에 붙어 있으면 번호가 가장 작은
+///   매매가 주인이 된다(매매 줄은 고치지 않는다).
+/// - 기록 표에 "이미 있는 번호로 넣기"를 막는 트리거. `INSERT OR REPLACE`는 지우기 트리거를
+///   부르지 않고 줄을 갈아 끼우므로, 넣기 전에 같은 번호가 있는지 보고 막는다.
+///   기록 표의 줄은 건드리지 않으므로 버전 1의 보호 트리거와 부딪히지 않는다.
+const V2: &str = "
+ALTER TABLE trades ADD COLUMN block_kind TEXT;
+ALTER TABLE trades ADD COLUMN block_detail TEXT;
+CREATE TABLE approval_numbers (
+    number   INTEGER PRIMARY KEY,
+    trade_id INTEGER NOT NULL REFERENCES trades (id)
+);
+INSERT OR IGNORE INTO approval_numbers (number, trade_id)
+SELECT approval_number, id FROM trades WHERE approval_number IS NOT NULL ORDER BY id;
+CREATE TRIGGER approval_numbers_no_replace BEFORE INSERT ON approval_numbers
+WHEN EXISTS (SELECT 1 FROM approval_numbers WHERE number = NEW.number)
+BEGIN SELECT RAISE(ABORT, 'approval number is already used'); END;
+CREATE TRIGGER approval_numbers_no_update BEFORE UPDATE ON approval_numbers
+BEGIN SELECT RAISE(ABORT, 'approval_numbers is append-only'); END;
+CREATE TRIGGER approval_numbers_no_delete BEFORE DELETE ON approval_numbers
+BEGIN SELECT RAISE(ABORT, 'approval_numbers is append-only'); END;
+CREATE TRIGGER team_history_no_replace BEFORE INSERT ON team_history
+WHEN EXISTS (SELECT 1 FROM team_history WHERE seq = NEW.seq)
+BEGIN SELECT RAISE(ABORT, 'team_history is append-only'); END;
+CREATE TRIGGER events_no_replace BEFORE INSERT ON events
+WHEN EXISTS (SELECT 1 FROM events WHERE seq = NEW.seq)
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+CREATE TRIGGER access_log_no_replace BEFORE INSERT ON access_log
+WHEN EXISTS (SELECT 1 FROM access_log WHERE seq = NEW.seq)
 BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
 ";
 
@@ -253,6 +289,117 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(rows, 1);
+        }
+    }
+
+    /// 버전 1 스키마만 가진 파일을 만든다.
+    fn v1_file(path: &std::path::Path, extra_sql: &str) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.execute_batch(extra_sql).unwrap();
+        conn.pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+
+    #[test]
+    fn 기록_표는_같은_번호로_다시_넣어도_바뀌지_않는다() {
+        let (_dir, path) = temp_path();
+        let conn = open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO events (seq, kind, payload) VALUES (1, 'chat', '{}');
+             INSERT INTO access_log (seq, at, origin, action) VALUES (1, 1, 'a', 'b');
+             INSERT INTO team_history VALUES (1, 1, 'resting', 'operating', 'trading_start', '', 0);",
+        )
+        .unwrap();
+        for sql in [
+            "INSERT OR REPLACE INTO events (seq, kind, payload) VALUES (1, 'x', '{}')",
+            "REPLACE INTO events (rowid, kind, payload) VALUES ('1', 'x', '{}')",
+            "INSERT OR REPLACE INTO access_log (seq, at, origin, action) VALUES (1.0, 9, 'x', 'x')",
+            "REPLACE INTO team_history VALUES (1, 9, 'resting', 'resting', 'market_close', 'x', 1)",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
+        }
+        let kind: String = conn
+            .query_row("SELECT kind FROM events WHERE seq = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kind, "chat");
+        // 번호를 정하지 않고 넣는 것과 새 번호로 넣는 것은 된다.
+        conn.execute(
+            "INSERT INTO events (kind, payload) VALUES ('chat', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (seq, kind, payload) VALUES (3, 'chat', '{}')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn 버전_1에서_같은_승인_번호가_두_매매에_있어도_이전이_되고_매매는_그대로다() {
+        let (_dir, path) = temp_path();
+        v1_file(
+            &path,
+            "INSERT INTO trades (symbol, account, state, created_at, updated_at,
+                 approval_number, approval_fingerprint)
+             VALUES ('A', 'paper', 'judged', 1, 1, 7, 'fa'), ('B', 'paper', 'judged', 1, 1, 7, 'fb');",
+        );
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
+        let owner: i64 = conn
+            .query_row(
+                "SELECT trade_id FROM approval_numbers WHERE number = 7",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner, 1);
+        let kept: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM trades WHERE approval_number = 7",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 2);
+    }
+
+    #[test]
+    fn 이전이_중간에_실패하면_버전_1_그대로_남는다() {
+        let (_dir, path) = temp_path();
+        // 버전 2가 만들 표 이름을 미리 차지해 이전이 중간(칸을 더한 뒤)에 실패하게 한다.
+        v1_file(&path, "CREATE TABLE approval_numbers (x);");
+        assert!(open(&path).is_err());
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), 1);
+        let added: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('trades') WHERE name = 'block_kind'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(added, 0);
+    }
+
+    #[test]
+    fn 승인_번호_목록은_고치거나_지울_수_없다() {
+        let (_dir, path) = temp_path();
+        let conn = open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO trades (symbol, account, state, created_at, updated_at)
+                 VALUES ('A', 'paper', 'judged', 1, 1), ('B', 'paper', 'judged', 1, 1);
+             INSERT INTO approval_numbers (number, trade_id) VALUES (7, 1);",
+        )
+        .unwrap();
+        for sql in [
+            "UPDATE approval_numbers SET trade_id = 2",
+            "DELETE FROM approval_numbers",
+            "INSERT OR REPLACE INTO approval_numbers (number, trade_id) VALUES (7, 2)",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
         }
     }
 }
