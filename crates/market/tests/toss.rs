@@ -621,7 +621,7 @@ async fn 동시에_여러_요청이_와도_토큰_발급은_한_번이다() {
 
 // 검증: D5
 #[tokio::test]
-async fn 현재가는_정해진_경로에_symbols와_Bearer_토큰으로_묻는다() {
+async fn 현재가는_정해진_경로에_symbols와_bearer_토큰으로_묻는다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1], 86400).await;
     mount_echo_prices(&server).await;
@@ -849,7 +849,7 @@ async fn 종목이_없으면_요청을_보내지_않는다() {
 
 // 검증: D5
 #[tokio::test]
-async fn 국내_장_시간은_KR_경로에_date로_묻고_세션을_읽는다() {
+async fn 국내_장_시간은_kr_경로에_date로_묻고_세션을_읽는다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1], 86400).await;
     mount_calendar(&server, KR_PATH, kr_business_day_body()).await;
@@ -983,7 +983,7 @@ async fn 국내_부분_휴장은_null인_세션만_뺀다() {
 
 // 검증: D5
 #[tokio::test]
-async fn 미국_장_시간은_US_경로로_묻고_네_세션을_읽는다() {
+async fn 미국_장_시간은_us_경로로_묻고_네_세션을_읽는다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1], 86400).await;
     mount_calendar(&server, US_PATH, us_business_day_body()).await;
@@ -1146,7 +1146,7 @@ async fn 토큰_발급이_401_invalid_client면_인증_실패다() {
 
 // 검증: D5
 #[tokio::test]
-async fn 토큰_발급이_403_access_denied면_허용_IP가_아니다() {
+async fn 토큰_발급이_403_access_denied면_허용_ip가_아니다() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(TOKEN_PATH))
@@ -1189,7 +1189,7 @@ async fn 요청이_401_invalid_token이면_다시_발급하지_않고_인증_실
 
 // 검증: D5
 #[tokio::test]
-async fn 요청이_403_ip_not_allowed면_허용_IP가_아니다() {
+async fn 요청이_403_ip_not_allowed면_허용_ip가_아니다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1, TOKEN_2], 86400).await;
     Mock::given(method("GET"))
@@ -1217,7 +1217,7 @@ fn rate_limited(retry_after: &str) -> ResponseTemplate {
 
 // 검증: D5
 #[tokio::test]
-async fn 한도_초과는_Retry_After만큼_기다렸다가_다시_시도한다() {
+async fn 한도_초과는_retry_after만큼_기다렸다가_다시_시도한다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1, TOKEN_2], 86400).await;
     Mock::given(method("GET"))
@@ -1442,7 +1442,7 @@ async fn 현재가_응답_모양이_다르면_응답_모양_오류다() {
 
 // 검증: D5
 #[tokio::test]
-async fn 본문이_JSON이_아니면_응답_모양_오류다() {
+async fn 본문이_json이_아니면_응답_모양_오류다() {
     let server = MockServer::start().await;
     mount_tokens(&server, &[TOKEN_1], 86400).await;
     Mock::given(method("GET"))
@@ -1677,7 +1677,7 @@ async fn verify는_토큰_발급_한_번으로_키가_닿는지_확인한다() {
 
 // 검증: V31
 #[tokio::test]
-async fn verify는_틀린_키와_허용되지_않은_IP와_연결_실패를_구분한다() {
+async fn verify는_틀린_키와_허용되지_않은_ip와_연결_실패를_구분한다() {
     let credentials = Credentials::new(CLIENT_ID, CLIENT_SECRET);
 
     let server = MockServer::start().await;
