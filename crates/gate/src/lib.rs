@@ -42,6 +42,19 @@
 //!   (다시 보내도, 프로그램을 다시 켠 뒤에 보내도 같은 값이다).
 //! - 지나가는 이벤트: `{"kind": 종류, "payload": 내용, "at": 유닉스 밀리초}`. `seq` 칸이 없다.
 //!
+//! 4차(store 3차 검토 · 원본 대조 C9 · D17):
+//!
+//! - 저장되는 이벤트는 `pi_store::Store::append_at`으로 시각 칸에 시각을 쓰고, 내용은 받은 그대로
+//!   저장한다(시각 봉투 `{"at", "payload"}`로 싸지 않는다). 프레임의 `at`은 저장소의 시각 칸에서
+//!   온다(`pi_store::Store::read_events`). 시각 칸이 비어 있으면 `null`이다.
+//! - 버전 2 이하에서 올라온 옛 봉투 줄(`{"at": 정수, "payload": …}`)은 예전처럼 풀어서 보낸다
+//!   (다시 보내도 시각과 내용이 같다).
+//! - 프레임의 `kind`는 저장소가 저장한 이름이다(저장소가 앞뒤 공백을 떼어 저장한다).
+//! - 종류 이름은 [`valid_event_kind`] 규칙을 지킨다. 지나가는 이벤트도 검사하고, 어긋나면 보내지 않는다.
+//! - 연결마다 [`GateConfig::keepalive_interval`]마다 ping을 보내고, [`GateConfig::pong_timeout`] 안에
+//!   pong이 없으면 그 연결을 끊는다(시세가 흐르지 않을 때도).
+//! - 모든 응답에 [`SECURITY_HEADERS`]를 붙인다(처리기가 붙인 것은 덮어쓰지 않는다).
+//!
 //! 연결하면 이 순서로 보낸다:
 //!
 //! 1. 종류마다 가장 최근의 지나가는 이벤트 하나씩(없으면 없다).
@@ -113,6 +126,36 @@ pub const WS_PATH: &str = "/ws";
 pub const LAST_SEQ_PARAM: &str = "last_seq";
 /// 접속 기록의 "무엇을": 들어옴.
 pub const ACCESS_ENTER: &str = "들어옴";
+/// 실시간 연결의 살아 있음 신호(ping) 간격 기본값. (4차, 원본 대조 D17)
+///
+/// 원본(Hermes api_server)은 조용할 때 10초마다 keepalive를 보낸다
+/// (`CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 10.0`). 우리는 SSE가 아니라 WebSocket이라(D11)
+/// 같은 뜻을 WebSocket ping으로 낸다.
+pub const DEFAULT_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// ping을 보낸 뒤 pong을 기다리는 가장 긴 시간의 기본값. 넘으면 그 연결을 끊는다. (4차)
+///
+/// 원본에는 없는 값이다(SSE는 답을 받지 않는다). 간격과 같게 둔다.
+pub const DEFAULT_PONG_TIMEOUT: Duration = Duration::from_secs(10);
+/// 모든 응답에 붙이는 보안 응답 헤더(이름, 값). (4차, 원본 대조 D21)
+///
+/// 원본(Hermes api_server의 `_SECURITY_HEADERS`)과 같은 이름 · 값이다. 오류 응답 · 401 · 403에도
+/// 붙는다. 처리기가 이미 같은 이름의 헤더를 붙였으면 덮어쓰지 않는다(원본의 `setdefault`).
+/// 화면의 `Content-Security-Policy`는 화면을 내주는 쪽이 정한다.
+pub const SECURITY_HEADERS: [(&str, &str); 3] = [
+    ("X-Content-Type-Options", "nosniff"),
+    ("X-Frame-Options", "DENY"),
+    ("Referrer-Policy", "no-referrer"),
+];
+
+/// 이벤트 종류 이름이 규칙에 맞는가. (4차, 원본 대조 C9)
+///
+/// 규칙은 저장소와 같다: `^[a-z][a-z0-9_.-]*$`이고 `pi_store::EVENT_KIND_MAX_CHARS`자 이하.
+/// 받은 글자 그대로 본다(앞뒤 공백을 떼지 않는다). 지나가는 이벤트도 이 검사를 거치고,
+/// 맞지 않으면 보내지도 기억하지도 않는다.
+pub fn valid_event_kind(kind: &str) -> bool {
+    let _ = kind;
+    todo!()
+}
 
 /// 시계. 접속 기록과 이벤트의 시각에 쓴다. 테스트가 시각을 정한다.
 pub trait Clock: Send + Sync {
@@ -169,11 +212,17 @@ pub struct GateConfig {
     /// 발행하는 내용 하나(JSON으로 적은 글)의 크기 상한(바이트). 넘으면 발행을 거부한다.
     /// 기본은 [`DEFAULT_MAX_FRAME_BYTES`].
     pub max_frame_bytes: usize,
+    /// 실시간 연결마다 ping을 보내는 간격. 시세가 흐르지 않을 때도 보낸다. (4차, D17)
+    /// 기본은 [`DEFAULT_KEEPALIVE_INTERVAL`].
+    pub keepalive_interval: Duration,
+    /// ping을 보낸 뒤 이 시간 안에 pong이 없으면 그 연결을 끊는다. (4차, D17)
+    /// 기본은 [`DEFAULT_PONG_TIMEOUT`].
+    pub pong_timeout: Duration,
 }
 
 impl Default for GateConfig {
     /// `127.0.0.1:`[`DEFAULT_PORT`], [`DEFAULT_ALLOWED_HOSTS`], [`DEFAULT_SEND_BUFFER`],
-    /// [`DEFAULT_MAX_FRAME_BYTES`].
+    /// [`DEFAULT_MAX_FRAME_BYTES`], [`DEFAULT_KEEPALIVE_INTERVAL`], [`DEFAULT_PONG_TIMEOUT`].
     fn default() -> Self {
         Self::local(DEFAULT_PORT)
     }
@@ -190,6 +239,8 @@ impl GateConfig {
                 .collect(),
             send_buffer: DEFAULT_SEND_BUFFER,
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+            keepalive_interval: DEFAULT_KEEPALIVE_INTERVAL,
+            pong_timeout: DEFAULT_PONG_TIMEOUT,
         }
     }
 }

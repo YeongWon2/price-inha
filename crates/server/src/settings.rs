@@ -45,6 +45,14 @@ pub const ENV_REGISTER_WINDOW_MS: &str = "PRICE_INHA_REGISTER_WINDOW_MS";
 pub const DEFAULT_REGISTER_ATTEMPTS: u32 = 5;
 /// 키 등록 시도를 세는 시간의 기본값.
 pub const DEFAULT_REGISTER_WINDOW: Duration = Duration::from_secs(60);
+/// 종목 등록 시도 횟수 환경 변수. (4차)
+pub const ENV_SYMBOLS_ATTEMPTS: &str = "PRICE_INHA_SYMBOLS_ATTEMPTS";
+/// 종목 등록 시도를 세는 시간 환경 변수(밀리초). (4차)
+pub const ENV_SYMBOLS_WINDOW_MS: &str = "PRICE_INHA_SYMBOLS_WINDOW_MS";
+/// 종목 등록 시도 횟수의 기본값([`DEFAULT_SYMBOLS_WINDOW`] 동안). (4차)
+pub const DEFAULT_SYMBOLS_ATTEMPTS: u32 = 10;
+/// 종목 등록 시도를 세는 시간의 기본값. (4차)
+pub const DEFAULT_SYMBOLS_WINDOW: Duration = Duration::from_secs(60);
 
 /// 실행 설정.
 ///
@@ -61,6 +69,8 @@ pub const DEFAULT_REGISTER_WINDOW: Duration = Duration::from_secs(60);
 /// | 달력 다시 받는 간격 | `--calendar-retry-ms <수>` | [`ENV_CALENDAR_RETRY_MS`] | [`DEFAULT_CALENDAR_RETRY`] |
 /// | 키 등록 시도 횟수 | `--register-attempts <수>` | [`ENV_REGISTER_ATTEMPTS`] | [`DEFAULT_REGISTER_ATTEMPTS`] |
 /// | 키 등록 시도를 세는 시간 | `--register-window-ms <수>` | [`ENV_REGISTER_WINDOW_MS`] | [`DEFAULT_REGISTER_WINDOW`] |
+/// | 종목 등록 시도 횟수 (4차) | `--symbols-attempts <수>` | [`ENV_SYMBOLS_ATTEMPTS`] | [`DEFAULT_SYMBOLS_ATTEMPTS`] |
+/// | 종목 등록 시도를 세는 시간 (4차) | `--symbols-window-ms <수>` | [`ENV_SYMBOLS_WINDOW_MS`] | [`DEFAULT_SYMBOLS_WINDOW`] |
 /// | 시연 | `--demo` | 없음 | 끔 |
 ///
 /// 인자가 환경 변수를 이긴다. 비밀 값(키 · 토큰)을 받는 인자와 환경 변수는 없다.
@@ -92,6 +102,12 @@ pub struct Settings {
     pub register_attempts: u32,
     /// 키 등록 시도를 세는 시간. 0은 받지 않는다([`SettingsError::InvalidValue`]).
     pub register_window: Duration,
+    /// `symbols_window` 동안 받는 종목 등록 시도 횟수. 넘으면 저장하지 않고 거부한다(429
+    /// `too_many_attempts`). 입력 검사를 지난 시도만 센다. 키 등록과 따로 센다.
+    /// 0은 받지 않는다([`SettingsError::InvalidValue`]). (4차)
+    pub symbols_attempts: u32,
+    /// 종목 등록 시도를 세는 시간. 0은 받지 않는다([`SettingsError::InvalidValue`]). (4차)
+    pub symbols_window: Duration,
     /// 시연 모드: 가짜 어댑터로 시세를 흘린다. 필수 설정 없이 바로 시작한다.
     pub demo: bool,
 }
@@ -178,6 +194,9 @@ impl Settings {
             calendar_retry,
             register_attempts,
             register_window,
+            // 4차 뼈대: 인자 · 환경 변수(`--symbols-attempts` · `--symbols-window-ms`)는 아직 읽지 않는다.
+            symbols_attempts: DEFAULT_SYMBOLS_ATTEMPTS,
+            symbols_window: DEFAULT_SYMBOLS_WINDOW,
             demo: given.demo,
         })
     }

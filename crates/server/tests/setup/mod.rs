@@ -1442,10 +1442,8 @@ fn 화면에_설정_화면이_있다() {
         hidden_inputs >= 5,
         "키 입력 칸은 모두 가려진 칸이어야 한다: {hidden_inputs}개"
     );
-    assert!(
-        page.contains("autocomplete=\"off\""),
-        "브라우저가 키를 기억해 채우지 않게 한다"
-    );
+    // 키 칸이 브라우저에 저장되지 않게 하는 속성은 4차(참고 5)에서 `autocomplete="new-password"`로
+    // 바뀌었다. `round4/`의 `키_입력_칸은_브라우저가_저장을_권하지_않게_한다`가 본다.
     let buttons = page.matches("<button").count();
     assert!(buttons >= 3, "항목마다 등록 단추가 있다: {buttons}개");
     // 등록한 뒤 칸을 비운다.

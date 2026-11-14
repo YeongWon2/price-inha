@@ -58,6 +58,10 @@
 //!   모양은 `{"symbols": ["005930", "000660"]}`. 비밀이 아니다.
 //! - 인자 · 환경 변수로 종목을 줬으면 그것이 먼저다: 그 실행 동안 그것만 쓰고, 저장된 파일을 덮지 않는다.
 //!   이때 종목 등록은 [`SetupRefusal::FixedByArgument`]로 거부한다(저장된 것과 쓰는 것이 어긋나지 않게).
+//! - (4차) 종목 등록에도 횟수 제한이 있다(`Settings::symbols_attempts` · `Settings::symbols_window`,
+//!   키 등록과 따로 센다). 넘으면 [`SetupRefusal::TooManyAttempts`]이고 저장하지 않는다.
+//! - (4차) 지켜보는 목록이 실제로 바뀌었을 때만 흐름을 깨운다(같은 목록을 다시 등록하면 깨우지 않는다).
+//! - (4차) 종목 글자에 `..`가 들어 있으면 받지 않는다(인자 · 화면 · 저장된 파일 모두).
 //!
 //! # 알림 (실시간 연결의 지나가는 이벤트 [`KIND_SETUP`])
 //!
@@ -260,6 +264,15 @@ impl KeyRequest {
             values = values.with(name, value);
         }
         Ok(KeyRequest { kind, values })
+    }
+
+    /// [`KeyRequest::parse`]와 같이 읽고, 다 읽은 뒤 받은 본문을 0으로 덮는다. (4차, 참고 6)
+    ///
+    /// 성공해도 실패해도 돌아올 때 `body`의 모든 바이트는 0이다. 읽는 동안 만든 중간 값(JSON 글자 등)도
+    /// 다 쓰면 바로 0으로 덮는다. 키 등록 경로는 받은 본문을 이것으로 읽는다.
+    pub fn parse_wiping(body: &mut [u8]) -> Result<KeyRequest, SetupRefusal> {
+        let _ = body;
+        todo!()
     }
 }
 

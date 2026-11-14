@@ -1,6 +1,9 @@
 //! pi-gate 통합 테스트. 서버를 `127.0.0.1:0`에 띄워 실제 HTTP · 웹소켓으로 확인한다.
 //!
 //! 근거: `docs/dev/modules/gate.md`의 "pi-gate가 만드는 것" 1~8.
+//! 4차(원본 대조 D17 · D21 · C9, 참고 8)는 `round4/`가 본다.
+
+mod round4;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
