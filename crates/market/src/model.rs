@@ -1,0 +1,130 @@
+//! 시세 · 달력 값.
+
+use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
+
+/// 시장. 나중에 코인이 더해질 수 있어 `non_exhaustive`다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Market {
+    /// 국내 주식 (토스증권 `market-calendar/KR`).
+    Kr,
+    /// 미국 주식 (토스증권 `market-calendar/US`).
+    Us,
+}
+
+/// 종목 심볼. 예: `005930`, `AAPL`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Symbol(String);
+
+impl Symbol {
+    /// 글자 그대로 심볼을 만든다(바꾸지 않는다).
+    pub fn new(value: impl Into<String>) -> Self {
+        todo!()
+    }
+
+    /// 심볼 글자.
+    pub fn as_str(&self) -> &str {
+        todo!()
+    }
+}
+
+/// 통화. 공식 명세가 "모르는 값도 받아들이라"고 해서 `Other`가 있다.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Currency {
+    /// 한국 원화.
+    Krw,
+    /// 미국 달러.
+    Usd,
+    /// 명세에 없는 통화 코드(받은 글자 그대로).
+    Other(String),
+}
+
+/// 시세 하나.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Quote {
+    /// 종목.
+    pub symbol: Symbol,
+    /// 가격. 십진수다(부동소수점을 거치지 않는다).
+    pub price: Decimal,
+    /// 통화.
+    pub currency: Currency,
+    /// 거래소가 준 시각. 체결이 없으면 없다.
+    pub exchange_time: Option<DateTime<Utc>>,
+    /// 우리가 받은 시각([`crate::Clock::now`]). 늦은 시세(N6) 판단의 기준이다.
+    pub received_at: DateTime<Utc>,
+}
+
+/// 세션 종류.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SessionKind {
+    /// 데이마켓 (미국만).
+    DayMarket,
+    /// 프리마켓.
+    PreMarket,
+    /// 정규장.
+    Regular,
+    /// 애프터마켓.
+    AfterMarket,
+}
+
+/// 세션 하나. `start`는 포함하고 `end`는 포함하지 않는다(`start <= t < end`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Session {
+    /// 종류.
+    pub kind: SessionKind,
+    /// 시작 시각(포함).
+    pub start: DateTime<Utc>,
+    /// 종료 시각(제외).
+    pub end: DateTime<Utc>,
+}
+
+/// 영업일 하나와 그날의 세션들.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TradingDay {
+    /// 날짜. 국내는 KST 기준, 미국은 미국 현지 기준(공식 명세 그대로).
+    pub date: NaiveDate,
+    /// 그날 열리는 세션들(시작 시각 순). 휴장이면 비어 있다.
+    pub sessions: Vec<Session>,
+}
+
+impl TradingDay {
+    /// 세션이 하나도 없으면(휴장) 참.
+    pub fn is_holiday(&self) -> bool {
+        todo!()
+    }
+
+    /// 그 종류의 세션. 없으면(부분 휴장 포함) `None`.
+    pub fn session(&self, kind: SessionKind) -> Option<&Session> {
+        todo!()
+    }
+}
+
+/// 기준일과 앞뒤 영업일의 세션들.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketCalendar {
+    /// 어느 시장의 달력인가.
+    pub market: Market,
+    /// 기준일.
+    pub today: TradingDay,
+    /// 이전 영업일.
+    pub previous_business_day: TradingDay,
+    /// 다음 영업일.
+    pub next_business_day: TradingDay,
+}
+
+impl MarketCalendar {
+    /// 그 시각에 열려 있는 세션. 없으면 장 닫힘(`None`).
+    ///
+    /// 규칙:
+    /// - 세 날(이전 영업일 · 기준일 · 다음 영업일)의 세션을 모두 본다. 미국 정규장처럼
+    ///   날짜를 넘는 세션도 그래서 찾는다.
+    /// - 시작 시각은 포함하고 종료 시각은 제외한다(`start <= at < end`). 프리마켓이
+    ///   09:00에 끝나고 정규장이 09:00에 시작하면 09:00은 정규장이다.
+    /// - 국내 단일가 구간(`singlePriceAuction*`)은 따로 나누지 않고 그 세션에 넣는다.
+    pub fn session_at(&self, at: DateTime<Utc>) -> Option<Session> {
+        todo!()
+    }
+}
