@@ -2,10 +2,10 @@
 
 use rusqlite::{Connection, params};
 
-use crate::EVENT_KIND_MAX_CHARS;
 use crate::codec::{self, insert_returning_seq};
 use crate::error::StoreError;
 use crate::model::{AccessRecord, Event, EventRange, NewAccess, TimedEvent, UnixMillis};
+use crate::{EVENT_KIND_MAX_CHARS, REJECTED_KIND_KEEP_CHARS};
 
 /// 이벤트를 쌓고 번호를 준다. 시각은 있으면 칸에 둔다(내용에 싸 넣지 않는다).
 ///
@@ -31,7 +31,8 @@ pub(crate) fn append(
 ///
 /// 원본(Hermes `gateway/hosted_rooms_common.py`의 이름 검사)과 같게: 앞뒤 공백을 떼어 낸 뒤
 /// 비어 있지 않고, [`EVENT_KIND_MAX_CHARS`]자 이하이고, 전체가 `^[a-z][a-z0-9_.-]*$`여야 한다.
-/// 공백은 원본(Python `str.strip`)이 떼는 것과 같게 본다. 거부할 때는 받은 이름 그대로를 담는다.
+/// 공백은 원본(Python `str.strip`)이 떼는 것과 같게 본다. 거부할 때는 받은 이름 그대로를 담되,
+/// [`REJECTED_KIND_KEEP_CHARS`]자보다 길면 잘라 담는다([`rejected_name`]).
 fn checked_kind(kind: &str) -> Result<&str, StoreError> {
     let trimmed = kind.trim_matches(is_strip_space);
     let mut chars = trimmed.chars();
@@ -41,8 +42,16 @@ fn checked_kind(kind: &str) -> Result<&str, StoreError> {
         Ok(trimmed)
     } else {
         Err(StoreError::InvalidEventKind {
-            kind: kind.to_string(),
+            kind: rejected_name(kind),
         })
+    }
+}
+
+/// 오류에 담을 거부한 이름(4차): 글자 단위로 앞 [`REJECTED_KIND_KEEP_CHARS`]자까지, 더 길면 뒤에 `…`.
+fn rejected_name(kind: &str) -> String {
+    match kind.char_indices().nth(REJECTED_KIND_KEEP_CHARS) {
+        Some((cut, _)) => format!("{}…", &kind[..cut]),
+        None => kind.to_string(),
     }
 }
 
@@ -91,16 +100,14 @@ pub(crate) fn read_events(
         return Ok(Vec::new());
     };
     let limit = i64::try_from(max).unwrap_or(i64::MAX);
-    let mut stmt = conn.prepare(
-        "SELECT seq, kind, at, payload FROM events
-         WHERE seq > ?1
-           AND (?2 IS NULL OR at > ?2)
-           AND (?3 IS NULL OR at < ?3)
-         ORDER BY seq LIMIT ?4",
-    )?;
     let after_at = range.after_at.map(|at| at.0);
     let before_at = range.before_at.map(|at| at.0);
-    let mut rows = stmt.query(params![after, after_at, before_at, limit])?;
+    let mut stmt = conn.prepare(&events_query(after_at.is_some(), before_at.is_some()))?;
+    let mut binds: Vec<i64> = vec![after];
+    binds.extend(after_at);
+    binds.extend(before_at);
+    binds.push(limit);
+    let mut rows = stmt.query(rusqlite::params_from_iter(binds))?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
         let at: Option<i64> = row.get(2)?;
@@ -113,6 +120,29 @@ pub(crate) fn read_events(
         });
     }
     Ok(out)
+}
+
+/// [`read_events`]의 질의. 시각 조건은 주어진 것만 넣는다(4차): `?2 IS NULL OR at > ?2` 모양은
+/// SQLite가 `events(at)` 색인을 쓰지 못하므로 조건마다 질의를 따로 만든다.
+/// 시각 조건이 있으면 `INDEXED BY events_by_at`로 시각 색인을 쓰게 못 박는다: 시각 한 끝만 있고
+/// `ORDER BY seq LIMIT`이 붙으면 SQLite는 통계 없이 번호 순서로 표를 훑는 쪽을 고르기 때문이다
+/// (그러면 30만 줄을 다 훑을 수 있다). 색인을 쓸 수 없게 되면 질의가 조용히 훑지 않고 오류를 낸다.
+/// 자리 표시는 차례대로 번호 · (아래 끝 시각) · (위 끝 시각) · 개수다.
+fn events_query(after_at: bool, before_at: bool) -> String {
+    let source = if after_at || before_at {
+        "events INDEXED BY events_by_at"
+    } else {
+        "events"
+    };
+    let mut sql = format!("SELECT seq, kind, at, payload FROM {source} WHERE seq > ?");
+    if after_at {
+        sql.push_str(" AND at > ?");
+    }
+    if before_at {
+        sql.push_str(" AND at < ?");
+    }
+    sql.push_str(" ORDER BY seq LIMIT ?");
+    sql
 }
 
 /// 접속 기록 한 줄을 쌓고 번호를 준다.
@@ -162,6 +192,61 @@ mod tests {
                 other => panic!("{bad:?}: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn 거부한_이름은_글자_단위로_잘라_담는다() {
+        let keep = "가".repeat(REJECTED_KIND_KEEP_CHARS);
+        assert_eq!(rejected_name(&keep), keep);
+        assert_eq!(rejected_name(&format!("{keep}나")), format!("{keep}…"));
+        assert_eq!(rejected_name(""), "");
+    }
+
+    /// 실제 `read_events` 질의의 계획 줄들.
+    fn plan_of(conn: &Connection, after_at: bool, before_at: bool) -> Vec<String> {
+        let sql = format!("EXPLAIN QUERY PLAN {}", events_query(after_at, before_at));
+        let mut binds = vec![0_i64];
+        binds.extend(after_at.then_some(1));
+        binds.extend(before_at.then_some(5));
+        binds.push(100);
+        conn.prepare(&sql)
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(binds), |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    #[test]
+    fn 시각_조건이_있는_실제_질의는_시각_색인을_쓰고_표를_훑지_않는다() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pi.sqlite");
+        let store = crate::Store::open(&path).unwrap();
+        for n in 0..50 {
+            store
+                .append_at("chat", &serde_json::json!(n), UnixMillis(n))
+                .unwrap();
+        }
+        let conn = store.lock();
+        for (after_at, before_at) in [(true, true), (true, false), (false, true)] {
+            let lines = plan_of(&conn, after_at, before_at);
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.starts_with("SEARCH events USING INDEX events_by_at")),
+                "{after_at} {before_at}: {lines:?}"
+            );
+            assert!(
+                !lines.iter().any(|l| l.starts_with("SCAN events")),
+                "{lines:?}"
+            );
+        }
+        // 시각 조건이 없으면 번호로 찾는다.
+        let lines = plan_of(&conn, false, false);
+        assert!(
+            lines.iter().any(|l| l.contains("INTEGER PRIMARY KEY")),
+            "{lines:?}"
+        );
     }
 
     #[test]

@@ -13,10 +13,14 @@ mod perm;
 mod v1;
 mod v2;
 mod v3;
+mod v4;
 
 use v1::V1;
 use v2::V2;
 use v3::V3;
+use v4::V4;
+
+pub(crate) use v4::legacy_envelope_until;
 
 /// 이 저장소가 만든 파일이라는 표시(`application_id`). 글자 "PIST".
 const APPLICATION_ID: i64 = 0x5049_5354;
@@ -25,17 +29,19 @@ const APPLICATION_ID: i64 = 0x5049_5354;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 버전 n에서 n+1로 올리는 SQL. `MIGRATIONS[n]`이 n → n+1이다. 이미 나간 것은 고치지 않고 뒤에 더한다.
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3];
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4];
 
 /// 파일을 열고, 이 저장소의 파일인지 본 뒤, 설정을 켜고 스키마를 최신으로 올린다.
 ///
-/// 연결 전과 WAL을 켠 뒤에 저장 파일 권한을 본인만 읽게 맞춘다([`perm`]).
+/// 저장 파일 권한([`perm`]): 연결 전에는 없는 파일만 0600으로 만든다. 이미 있는 파일은
+/// 이 저장소의 파일임을 확인한 뒤에야 좁히고(거부한 파일은 권한도 그대로다), WAL을 켠 뒤 한 번 더 맞춘다.
 pub(crate) fn open(path: &Path) -> Result<Connection, StoreError> {
-    perm::before_connect(path)?;
+    perm::create_if_missing(path)?;
     let mut conn = Connection::open(path)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     // 파일을 건드리기 전에 먼저 읽어 본다. SQLite 파일이 아니면 여기서 오류가 난다.
     let version = check_ownership(&conn)?;
+    perm::tighten(path)?;
     let mode: String =
         conn.pragma_update_and_check(None, "journal_mode", "wal", |row| row.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
@@ -43,7 +49,7 @@ pub(crate) fn open(path: &Path) -> Result<Connection, StoreError> {
             "WAL을 켤 수 없다(journal_mode={mode})"
         )));
     }
-    perm::after_wal(path)?;
+    perm::tighten(path)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     if version < SCHEMA_VERSION {
         migrate(&mut conn)?;
@@ -103,8 +109,17 @@ fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // 쓰기 잠금을 잡은 뒤 다시 본다(그 사이 다른 연결이 올렸을 수 있다).
     let version = check_ownership(&tx)?;
+    // 경계 번호는 시각 칸을 더하고 옮겨 적기 전의 모양으로 정한다(버전 4 단계 문서).
+    let boundary = if version < v4::VERSION {
+        Some(v4::boundary_before(&tx, version)?)
+    } else {
+        None
+    };
     for step in MIGRATIONS.iter().skip(version as usize) {
         tx.execute_batch(step)?;
+    }
+    if let Some(boundary) = boundary {
+        v4::seal(&tx, boundary)?;
     }
     if version < SCHEMA_VERSION {
         tx.pragma_update(None, "application_id", APPLICATION_ID)?;

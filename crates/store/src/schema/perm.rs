@@ -4,6 +4,9 @@
 //!
 //! - 연결을 만들기 전에 본 파일이 없으면 0600으로 새로 만든다(`O_CREAT | O_EXCL`이라 이미 있는
 //!   파일 · 심볼릭 링크 · 폴더는 열지 않는다). 프로세스의 umask가 넓어도 새 파일이 드러나지 않는다.
+//! - (4차) 이미 있는 파일은 이 저장소의 파일임을 확인한 뒤에야 맞춘다. 거부한 파일(다른 프로그램의
+//!   파일 · 더 새 버전)은 권한도 그대로다(원본과 의도해서 다름, `docs/dev/conformance.md`).
+//! - (4차) 파일 시스템 오류는 [`StoreError::FileAccess`]로 낸다.
 //! - 본 파일과 딸린 파일(`-wal` · `-shm`)을 0600으로 맞춘다. 없는 파일 · 심볼릭 링크 · 보통 파일이
 //!   아닌 것은 건너뛴다. 이미 있는 파일은 열지 않고 경로로 `chmod`한다(파일을 열었다 닫으면 같은
 //!   프로세스가 그 파일에 건 SQLite 잠금이 풀린다).
@@ -14,20 +17,22 @@ use std::path::Path;
 
 use crate::error::StoreError;
 
-/// 연결 전에: 본 파일이 없으면 0600으로 만들고, 있는 파일들을 0600으로 맞춘다.
-pub(super) fn before_connect(path: &Path) -> Result<(), StoreError> {
-    imp::create_private(path)?;
-    imp::tighten_all(path)
+/// 연결 전에: 본 파일이 없으면 0600으로 만든다. 이미 있는 파일은 건드리지 않는다.
+pub(super) fn create_if_missing(path: &Path) -> Result<(), StoreError> {
+    imp::create_private(path)
 }
 
-/// WAL을 켠 뒤에: 그 사이 생긴 딸린 파일까지 0600으로 맞춘다.
-pub(super) fn after_wal(path: &Path) -> Result<(), StoreError> {
+/// 이 저장소의 파일임을 확인한 뒤(그리고 WAL을 켠 뒤 한 번 더): 본 파일과 딸린 파일을 0600으로 맞춘다.
+pub(super) fn tighten(path: &Path) -> Result<(), StoreError> {
     imp::tighten_all(path)
 }
 
 #[cfg(unix)]
-fn io_error(what: &str, path: &Path, err: &std::io::Error) -> StoreError {
-    StoreError::Incompatible(format!("{what}: {} ({err})", path.display()))
+fn io_error(path: &Path, err: std::io::Error) -> StoreError {
+    StoreError::FileAccess {
+        path: path.to_path_buf(),
+        source: err,
+    }
 }
 
 #[cfg(unix)]
@@ -55,7 +60,7 @@ mod imp {
             // 이미 있는 것은 아래에서 좁히거나, 저장 파일이 아니면 SQLite가 오류를 준다.
             Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(()),
             Err(err) if err.kind() == ErrorKind::IsADirectory => Ok(()),
-            Err(err) => Err(io_error("저장 파일을 만들 수 없다", path, &err)),
+            Err(err) => Err(io_error(path, err)),
         }
     }
 
@@ -81,7 +86,7 @@ mod imp {
         let meta = match fs::symlink_metadata(path) {
             Ok(meta) => meta,
             Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(io_error("저장 파일 권한을 볼 수 없다", path, &err)),
+            Err(err) => return Err(io_error(path, err)),
         };
         // 심어 둔 링크를 따라가지 않는다. 보통 파일이 아니면 SQLite가 다룰 일이다.
         if !meta.file_type().is_file() {
@@ -91,7 +96,7 @@ mod imp {
             return Ok(());
         }
         fs::set_permissions(path, Permissions::from_mode(PRIVATE))
-            .map_err(|err| io_error("저장 파일 권한을 좁힐 수 없다", path, &err))
+            .map_err(|err| io_error(path, err))
     }
 }
 
