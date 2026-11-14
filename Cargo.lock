@@ -961,12 +961,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-paper"
+version = "0.1.0"
+
+[[package]]
 name = "pi-secrets"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "percent-encoding",
  "serde",
+ "serde_json",
  "static_assertions",
  "tempfile",
  "thiserror",
