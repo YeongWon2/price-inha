@@ -9,6 +9,15 @@ use crate::SCHEMA_VERSION;
 use crate::error::StoreError;
 use crate::model::StoreInfo;
 
+mod perm;
+mod v1;
+mod v2;
+mod v3;
+
+use v1::V1;
+use v2::V2;
+use v3::V3;
+
 /// 이 저장소가 만든 파일이라는 표시(`application_id`). 글자 "PIST".
 const APPLICATION_ID: i64 = 0x5049_5354;
 
@@ -16,116 +25,13 @@ const APPLICATION_ID: i64 = 0x5049_5354;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 버전 n에서 n+1로 올리는 SQL. `MIGRATIONS[n]`이 n → n+1이다. 이미 나간 것은 고치지 않고 뒤에 더한다.
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2];
-
-/// 기록 표(team_history · events · access_log)는 고치기 · 지우기를 SQLite가 막는다.
-const V1: &str = "
-CREATE TABLE team_history (
-    seq            INTEGER PRIMARY KEY,
-    at             INTEGER NOT NULL,
-    from_state     TEXT    NOT NULL,
-    to_state       TEXT    NOT NULL,
-    cause          TEXT    NOT NULL,
-    detail         TEXT    NOT NULL,
-    owner_approved INTEGER NOT NULL
-);
-CREATE TABLE trades (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol               TEXT    NOT NULL,
-    account              TEXT    NOT NULL,
-    state                TEXT    NOT NULL,
-    created_at           INTEGER NOT NULL,
-    updated_at           INTEGER NOT NULL,
-    hypothesis           TEXT,
-    trigger_note         TEXT,
-    entry                INTEGER,
-    stop                 INTEGER,
-    target               INTEGER,
-    expected_value       INTEGER,
-    decided_at           INTEGER,
-    consensus_score      INTEGER,
-    approval_number      INTEGER,
-    approval_fingerprint TEXT
-);
-CREATE INDEX trades_by_state ON trades (state, id);
-CREATE TABLE trade_sources (
-    trade_id INTEGER NOT NULL REFERENCES trades (id),
-    pos      INTEGER NOT NULL,
-    name     TEXT    NOT NULL,
-    known_at INTEGER NOT NULL,
-    PRIMARY KEY (trade_id, pos)
-);
-CREATE TABLE trade_scores (
-    trade_id INTEGER NOT NULL REFERENCES trades (id),
-    pos      INTEGER NOT NULL,
-    role     TEXT    NOT NULL,
-    score    INTEGER NOT NULL,
-    reason   TEXT    NOT NULL,
-    PRIMARY KEY (trade_id, pos)
-);
-CREATE TABLE events (
-    seq     INTEGER PRIMARY KEY,
-    kind    TEXT NOT NULL,
-    payload TEXT NOT NULL
-);
-CREATE TABLE access_log (
-    seq    INTEGER PRIMARY KEY,
-    at     INTEGER NOT NULL,
-    origin TEXT    NOT NULL,
-    action TEXT    NOT NULL
-);
-CREATE TRIGGER team_history_no_update BEFORE UPDATE ON team_history
-BEGIN SELECT RAISE(ABORT, 'team_history is append-only'); END;
-CREATE TRIGGER team_history_no_delete BEFORE DELETE ON team_history
-BEGIN SELECT RAISE(ABORT, 'team_history is append-only'); END;
-CREATE TRIGGER events_no_update BEFORE UPDATE ON events
-BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
-CREATE TRIGGER events_no_delete BEFORE DELETE ON events
-BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
-CREATE TRIGGER access_log_no_update BEFORE UPDATE ON access_log
-BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
-CREATE TRIGGER access_log_no_delete BEFORE DELETE ON access_log
-BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
-";
-
-/// 버전 2(2차 작업). 버전 1의 표와 줄은 그대로 두고 더하기만 한다.
-///
-/// - 매매에 막힌 이유 칸 둘. 버전 1에서 막힌 매매는 이유가 비어 있다.
-/// - 한 번이라도 매매에 붙은 승인 번호의 목록(`approval_numbers`). 번호의 주인은 처음 붙인 매매이고
-///   바뀌거나 지워지지 않는다. 버전 1 파일에 같은 번호가 여러 매매에 붙어 있으면 번호가 가장 작은
-///   매매가 주인이 된다(매매 줄은 고치지 않는다).
-/// - 기록 표에 "이미 있는 번호로 넣기"를 막는 트리거. `INSERT OR REPLACE`는 지우기 트리거를
-///   부르지 않고 줄을 갈아 끼우므로, 넣기 전에 같은 번호가 있는지 보고 막는다.
-///   기록 표의 줄은 건드리지 않으므로 버전 1의 보호 트리거와 부딪히지 않는다.
-const V2: &str = "
-ALTER TABLE trades ADD COLUMN block_kind TEXT;
-ALTER TABLE trades ADD COLUMN block_detail TEXT;
-CREATE TABLE approval_numbers (
-    number   INTEGER PRIMARY KEY,
-    trade_id INTEGER NOT NULL REFERENCES trades (id)
-);
-INSERT OR IGNORE INTO approval_numbers (number, trade_id)
-SELECT approval_number, id FROM trades WHERE approval_number IS NOT NULL ORDER BY id;
-CREATE TRIGGER approval_numbers_no_replace BEFORE INSERT ON approval_numbers
-WHEN EXISTS (SELECT 1 FROM approval_numbers WHERE number = NEW.number)
-BEGIN SELECT RAISE(ABORT, 'approval number is already used'); END;
-CREATE TRIGGER approval_numbers_no_update BEFORE UPDATE ON approval_numbers
-BEGIN SELECT RAISE(ABORT, 'approval_numbers is append-only'); END;
-CREATE TRIGGER approval_numbers_no_delete BEFORE DELETE ON approval_numbers
-BEGIN SELECT RAISE(ABORT, 'approval_numbers is append-only'); END;
-CREATE TRIGGER team_history_no_replace BEFORE INSERT ON team_history
-WHEN EXISTS (SELECT 1 FROM team_history WHERE seq = NEW.seq)
-BEGIN SELECT RAISE(ABORT, 'team_history is append-only'); END;
-CREATE TRIGGER events_no_replace BEFORE INSERT ON events
-WHEN EXISTS (SELECT 1 FROM events WHERE seq = NEW.seq)
-BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
-CREATE TRIGGER access_log_no_replace BEFORE INSERT ON access_log
-WHEN EXISTS (SELECT 1 FROM access_log WHERE seq = NEW.seq)
-BEGIN SELECT RAISE(ABORT, 'access_log is append-only'); END;
-";
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3];
 
 /// 파일을 열고, 이 저장소의 파일인지 본 뒤, 설정을 켜고 스키마를 최신으로 올린다.
+///
+/// 연결 전과 WAL을 켠 뒤에 저장 파일 권한을 본인만 읽게 맞춘다([`perm`]).
 pub(crate) fn open(path: &Path) -> Result<Connection, StoreError> {
+    perm::before_connect(path)?;
     let mut conn = Connection::open(path)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
     // 파일을 건드리기 전에 먼저 읽어 본다. SQLite 파일이 아니면 여기서 오류가 난다.
@@ -137,6 +43,7 @@ pub(crate) fn open(path: &Path) -> Result<Connection, StoreError> {
             "WAL을 켤 수 없다(journal_mode={mode})"
         )));
     }
+    perm::after_wal(path)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     if version < SCHEMA_VERSION {
         migrate(&mut conn)?;

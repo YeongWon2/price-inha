@@ -30,7 +30,7 @@ pub use model::{
 };
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///
@@ -204,8 +204,10 @@ impl Store {
     ///   시각을 함께 남기려면 [`Store::append_at`]을 쓴다.
     /// - 종류 이름이 규칙(`^[a-z][a-z0-9_.-]*$`, [`EVENT_KIND_MAX_CHARS`]자 이하)에 어긋나면
     ///   [`StoreError::InvalidEventKind`]이고 아무것도 쌓지 않는다(번호를 쓰지 않는다).
+    /// - 원본(Hermes 팀 논의 방 로그)처럼 검사 전에 이름의 앞뒤 공백을 떼어 내고, 떼어 낸 이름으로
+    ///   검사하고 저장한다(`" chat "`은 `"chat"`으로 쌓인다). 거부할 때 오류에는 받은 이름 그대로가 담긴다.
     pub fn append(&self, kind: &str, payload: &serde_json::Value) -> Result<u64, StoreError> {
-        self.write(|conn| log::append(conn, kind, payload))
+        self.write(|conn| log::append(conn, kind, payload, None))
     }
 
     /// 이벤트를 시각과 함께 쌓고 번호를 준다. (3차)
@@ -221,8 +223,7 @@ impl Store {
         payload: &serde_json::Value,
         at: UnixMillis,
     ) -> Result<u64, StoreError> {
-        let _ = (kind, payload, at);
-        todo!("3차: 시각과 함께 쌓기")
+        self.write(|conn| log::append(conn, kind, payload, Some(at)))
     }
 
     /// 번호가 `after`보다 큰 이벤트를 번호 순서로 `max`개까지 준다.
@@ -242,8 +243,7 @@ impl Store {
         range: EventRange,
         max: usize,
     ) -> Result<Vec<TimedEvent>, StoreError> {
-        let _ = (range, max);
-        todo!("3차: 번호와 시각 범위로 읽기")
+        self.read(|conn| log::read_events(conn, range, max))
     }
 
     // ───────────── 접속 기록 (M6) ─────────────
