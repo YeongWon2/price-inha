@@ -21,6 +21,17 @@ pub const DB_FILE: &str = "price-inha.sqlite";
 pub const KIND_FEED_STATUS: &str = "feed_status";
 /// 시세 상태: 증권사 키가 없어 시세를 받지 않는다(V31).
 pub const FEED_NO_BROKER_KEY: &str = "no_broker_key";
+/// 시세 상태: 필수 설정이 빠져 시작하지 않았다(3차). 바깥으로 요청을 보내지 않는다(V31).
+/// 무엇이 빠졌는지는 [`crate::KIND_SETUP`] 알림에 있다. 3차부터 시작 전의 시세 상태는 언제나 이것이고,
+/// [`FEED_NO_BROKER_KEY`]는 더 알리지 않는다.
+pub const FEED_SETUP_REQUIRED: &str = "setup_required";
+/// 시세 상태: 증권사가 요청을 거절했다(4xx, 종목 없음 등 — 종목을 확인). "닿지 않음"과 다르다.
+/// 받을 수 있는 종목이 하나도 없을 때의 상태다. 일부 종목만 거절됐으면 나머지의 시세는 나오고
+/// 시세 상태는 [`FEED_LIVE`]다. 어느 종목이 거절됐는지는 [`KIND_SYMBOLS_REJECTED`]에 있다.
+pub const FEED_REQUEST_REJECTED: &str = "request_rejected";
+/// 지나가는 이벤트 종류: 증권사가 거절한 종목들. 내용은 `{"symbols": [거절된 종목들]}`.
+/// 거절된 종목이 없어지면 빈 목록을 알린다.
+pub const KIND_SYMBOLS_REJECTED: &str = "symbols_rejected";
 /// 시세 상태: 시연용 가짜 시세다.
 pub const FEED_DEMO: &str = "demo";
 /// 시세 상태: 증권사에서 받는 실제 시세다. **시세를 실제로 한 번 받은 뒤에만** 알린다.
@@ -48,6 +59,9 @@ pub struct Wiring {
     pub upstreams: Upstreams,
     /// 시계. 시세를 받은 시각과 늦은 시세 판단(N6)에 쓴다.
     pub clock: Arc<dyn Clock>,
+    /// 상대 주소를 바꿔 본다(`pi_gate::GateBuilder::peer_override`에 넘긴다). **테스트용이다.**
+    /// 실행 파일은 `None`으로 둔다.
+    pub peer_override: Option<pi_gate::PeerOverride>,
 }
 
 impl Default for Wiring {
@@ -56,6 +70,7 @@ impl Default for Wiring {
         Self {
             upstreams: Upstreams::default(),
             clock: Arc::new(SystemClock),
+            peer_override: None,
         }
     }
 }

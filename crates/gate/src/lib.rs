@@ -10,6 +10,7 @@
 //! | `GET` [`WS_PATH`]`?`[`LAST_SEQ_PARAM`]`=N` | 실시간 연결(C2). 세션 쿠키가 있어야 한다 |
 //! | [`GateBuilder::public_routes`] | 세션 없이 열리는 경로(화면 한 장). Host 확인은 받는다 |
 //! | [`GateBuilder::protected_routes`] | 세션이 있어야 열리는 경로. 없으면 401 |
+//! | [`GateBuilder::local_routes`] | 세션이 있어야 하고 그 컴퓨터에서만 열리는 경로([`local_only`]) |
 //!
 //! # 요청마다 보는 것 (이 순서)
 //!
@@ -92,6 +93,7 @@ use crate::guard::Shared;
 use crate::hub::Hub;
 
 pub use error::GateError;
+pub use guard::{LOCAL_ONLY_STATUS, Peer, local_only};
 
 /// 기본 포트.
 pub const DEFAULT_PORT: u16 = 7878;
@@ -229,6 +231,17 @@ impl GateBuilder {
             protected: self.protected.merge(routes),
             ..self
         }
+    }
+
+    /// 세션이 있어야 하고 **그 컴퓨터에서만** 열리는 경로를 더한다(키 등록처럼 밖에서는
+    /// 접속 키가 있어도 할 수 없는 일).
+    ///
+    /// [`GateBuilder::protected_routes`]와 같은 확인(세션, 상태를 바꾸는 요청의 Origin)을 받고,
+    /// 거기에 [`local_only`]를 씌운다: 세션이 없으면 401, 다른 출처면 4xx, 상대가 루프백이
+    /// 아니면 거부이고 어느 경우에도 핸들러는 불리지 않는다.
+    pub fn local_routes(self, routes: axum::Router) -> Self {
+        let _ = routes;
+        todo!("3차: local_only를 씌워 보호된 경로에 더한다")
     }
 
     /// 상대 주소를 바꿔 본다. **테스트용이다.** 실행 파일은 부르지 않는다.

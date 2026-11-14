@@ -33,6 +33,19 @@ pub const DEFAULT_RETRY_INITIAL: Duration = Duration::from_secs(1);
 /// 다시 시도하는 간격 상한의 기본값.
 pub const DEFAULT_RETRY_MAX: Duration = Duration::from_secs(60);
 
+/// 달력을 받지 못했을 때 다시 받기까지의 간격 환경 변수(밀리초).
+pub const ENV_CALENDAR_RETRY_MS: &str = "PRICE_INHA_CALENDAR_RETRY_MS";
+/// 달력을 다시 받는 간격의 기본값.
+pub const DEFAULT_CALENDAR_RETRY: Duration = Duration::from_secs(30);
+/// 키 등록 시도 횟수 환경 변수.
+pub const ENV_REGISTER_ATTEMPTS: &str = "PRICE_INHA_REGISTER_ATTEMPTS";
+/// 키 등록 시도를 세는 시간 환경 변수(밀리초).
+pub const ENV_REGISTER_WINDOW_MS: &str = "PRICE_INHA_REGISTER_WINDOW_MS";
+/// 키 등록 시도 횟수의 기본값([`DEFAULT_REGISTER_WINDOW`] 동안).
+pub const DEFAULT_REGISTER_ATTEMPTS: u32 = 5;
+/// 키 등록 시도를 세는 시간의 기본값.
+pub const DEFAULT_REGISTER_WINDOW: Duration = Duration::from_secs(60);
+
 /// 실행 설정.
 ///
 /// | 값 | 인자 | 환경 변수 | 기본값 |
@@ -45,6 +58,9 @@ pub const DEFAULT_RETRY_MAX: Duration = Duration::from_secs(60);
 /// | 시세 간격 | `--interval-ms <수>` | [`ENV_QUOTE_INTERVAL_MS`] | [`DEFAULT_QUOTE_INTERVAL`] |
 /// | 다시 시도 첫 간격 | `--retry-initial-ms <수>` | [`ENV_RETRY_INITIAL_MS`] | [`DEFAULT_RETRY_INITIAL`] |
 /// | 다시 시도 간격 상한 | `--retry-max-ms <수>` | [`ENV_RETRY_MAX_MS`] | [`DEFAULT_RETRY_MAX`] |
+/// | 달력 다시 받는 간격 | `--calendar-retry-ms <수>` | [`ENV_CALENDAR_RETRY_MS`] | [`DEFAULT_CALENDAR_RETRY`] |
+/// | 키 등록 시도 횟수 | `--register-attempts <수>` | [`ENV_REGISTER_ATTEMPTS`] | [`DEFAULT_REGISTER_ATTEMPTS`] |
+/// | 키 등록 시도를 세는 시간 | `--register-window-ms <수>` | [`ENV_REGISTER_WINDOW_MS`] | [`DEFAULT_REGISTER_WINDOW`] |
 /// | 시연 | `--demo` | 없음 | 끔 |
 ///
 /// 인자가 환경 변수를 이긴다. 비밀 값(키 · 토큰)을 받는 인자와 환경 변수는 없다.
@@ -68,7 +84,15 @@ pub struct Settings {
     /// 다시 시도하는 간격의 상한. 이보다 길게 기다리지 않는다.
     /// 0은 받지 않는다([`SettingsError::InvalidValue`]).
     pub retry_max: Duration,
-    /// 시연 모드: 가짜 어댑터로 시세를 흘린다.
+    /// 달력을 받지 못했을 때(인증 실패가 아닌 실패) 다시 받기까지의 간격.
+    /// 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    pub calendar_retry: Duration,
+    /// `register_window` 동안 받는 키 등록 시도 횟수. 넘으면 확인기를 부르지 않고 거부한다.
+    /// 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    pub register_attempts: u32,
+    /// 키 등록 시도를 세는 시간. 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    pub register_window: Duration,
+    /// 시연 모드: 가짜 어댑터로 시세를 흘린다. 필수 설정 없이 바로 시작한다.
     pub demo: bool,
 }
 
@@ -148,6 +172,10 @@ impl Settings {
             quote_interval,
             retry_initial,
             retry_max,
+            // 3차 뼈대: 아직 인자 · 환경 변수에서 읽지 않는다(기본값만).
+            calendar_retry: DEFAULT_CALENDAR_RETRY,
+            register_attempts: DEFAULT_REGISTER_ATTEMPTS,
+            register_window: DEFAULT_REGISTER_WINDOW,
             demo: given.demo,
         })
     }

@@ -2,6 +2,10 @@
 //! 증권사 · AI는 로컬 가짜 서버(wiremock)로 대신한다.
 //!
 //! 근거: `docs/dev/modules/gate.md`의 "price-inha(실행 파일)가 만드는 것" 1~6.
+//! 3차 작업(시작 전 필수 설정 · 시세 흐름)의 테스트는 `setup/` · `flow/`에 있고 이 파일의 도우미를 함께 쓴다.
+
+mod flow;
+mod setup;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -19,7 +23,7 @@ use price_inha::{
     AiKeys, App, BrokerKeys, DEFAULT_QUOTE_INTERVAL, DEFAULT_RETRY_INITIAL, DEFAULT_RETRY_MAX,
     ENV_BIND, ENV_HOME, ENV_MARKET, ENV_PORT, ENV_QUOTE_INTERVAL_MS, ENV_RETRY_INITIAL_MS,
     ENV_RETRY_MAX_MS, ENV_SYMBOLS, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING,
-    FEED_DEMO, FEED_LIVE, FEED_NO_BROKER_KEY, KIND_FEED_STATUS, KIND_QUOTES, KIND_QUOTES_STALE,
+    FEED_DEMO, FEED_LIVE, FEED_SETUP_REQUIRED, KIND_FEED_STATUS, KIND_QUOTES, KIND_QUOTES_STALE,
     KeyVerifier, Settings, SettingsError, Upstreams, Wiring,
 };
 use serde_json::{Value, json};
@@ -123,6 +127,16 @@ struct FakeToss {
     calendar_broken: Arc<AtomicBool>,
     /// 현재가 응답을 이만큼 늦춘다(밀리초).
     price_delay_ms: Arc<AtomicU64>,
+    /// 달력이 돌려줄 HTTP 상태. 0이면 달력을 준다. 401은 `invalid-token`(공식 명세의 오류 모양).
+    calendar_status: Arc<AtomicU16>,
+    /// 참이면 현재가가 `{"result": []}`다(요청한 종목의 시세를 하나도 주지 않는다).
+    empty: Arc<AtomicBool>,
+    /// 0이 아니면 현재가가 429이고 `Retry-After`가 이 값(초)이다.
+    rate_limited_secs: Arc<AtomicU64>,
+    /// 증권사에 없는 종목들. 요청에 하나라도 들어 있으면 그 요청은 404 `stock-not-found`다.
+    unknown_symbols: Arc<Mutex<Vec<String>>>,
+    /// 시세가 오지 않는 종목들. 요청은 성공하지만 결과에서 빠진다.
+    silent_symbols: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeToss {
@@ -134,6 +148,11 @@ impl FakeToss {
         let token_status = Arc::new(AtomicU16::new(0));
         let calendar_broken = Arc::new(AtomicBool::new(false));
         let price_delay_ms = Arc::new(AtomicU64::new(0));
+        let calendar_status = Arc::new(AtomicU16::new(0));
+        let empty = Arc::new(AtomicBool::new(false));
+        let rate_limited_secs = Arc::new(AtomicU64::new(0));
+        let unknown_symbols = Arc::new(Mutex::new(Vec::<String>::new()));
+        let silent_symbols = Arc::new(Mutex::new(Vec::<String>::new()));
         let status = Arc::clone(&token_status);
         Mock::given(method("POST"))
             .and(path(TOKEN_PATH))
@@ -153,6 +172,8 @@ impl FakeToss {
             .await;
         let (p, f) = (Arc::clone(&price), Arc::clone(&failing));
         let delay = Arc::clone(&price_delay_ms);
+        let (none, limited) = (Arc::clone(&empty), Arc::clone(&rate_limited_secs));
+        let (unknown, silent) = (Arc::clone(&unknown_symbols), Arc::clone(&silent_symbols));
         Mock::given(method("GET"))
             .and(path(PRICES_PATH))
             .respond_with(move |req: &Request| {
@@ -162,16 +183,29 @@ impl FakeToss {
                         "error": { "requestId": "r-1", "code": "maintenance", "message": "점검" }
                     }));
                 }
-                let wanted = req
-                    .url
-                    .query_pairs()
-                    .find(|(k, _)| k == "symbols")
-                    .map(|(_, v)| v.into_owned())
-                    .unwrap_or_default();
+                let wait_secs = limited.load(Ordering::SeqCst);
+                if wait_secs > 0 {
+                    return ResponseTemplate::new(429)
+                        .insert_header("Retry-After", wait_secs.to_string().as_str())
+                        .set_body_json(json!({ "error": {
+                            "requestId": "r-3", "code": "rate-limit-exceeded", "message": "한도"
+                        }}));
+                }
+                let wanted = asked_symbols(req);
+                let unknown = unknown.lock().unwrap().clone();
+                if wanted.iter().any(|s| unknown.contains(s)) {
+                    return ResponseTemplate::new(404).set_body_json(json!({ "error": {
+                        "requestId": "r-4", "code": "stock-not-found", "message": "종목 없음"
+                    }}));
+                }
+                if none.load(Ordering::SeqCst) {
+                    return ResponseTemplate::new(200).set_body_json(json!({ "result": [] }));
+                }
+                let silent = silent.lock().unwrap().clone();
                 let now = p.lock().unwrap().clone();
                 let items: Vec<Value> = wanted
-                    .split(',')
-                    .filter(|s| !s.is_empty())
+                    .iter()
+                    .filter(|s| !silent.contains(s))
                     .map(|s| {
                         json!({
                             "symbol": s,
@@ -188,9 +222,16 @@ impl FakeToss {
             .mount(&server)
             .await;
         let broken = Arc::clone(&calendar_broken);
+        let refused = Arc::clone(&calendar_status);
         Mock::given(method("GET"))
             .and(path(CALENDAR_KR_PATH))
             .respond_with(move |_: &Request| {
+                let refused = refused.load(Ordering::SeqCst);
+                if refused != 0 {
+                    return ResponseTemplate::new(refused).set_body_json(json!({ "error": {
+                        "requestId": "r-5", "code": "invalid-token", "message": "토큰"
+                    }}));
+                }
                 if broken.load(Ordering::SeqCst) {
                     return ResponseTemplate::new(404).set_body_json(json!({
                         "error": { "requestId": "r-2", "code": "not-found", "message": "없음" }
@@ -211,6 +252,11 @@ impl FakeToss {
             token_status,
             calendar_broken,
             price_delay_ms,
+            calendar_status,
+            empty,
+            rate_limited_secs,
+            unknown_symbols,
+            silent_symbols,
         }
     }
 
@@ -221,6 +267,61 @@ impl FakeToss {
     async fn requests(&self, wanted: &str) -> Vec<Request> {
         let all = self.server.received_requests().await.unwrap();
         all.into_iter().filter(|r| r.url.path() == wanted).collect()
+    }
+
+    async fn total_requests(&self) -> usize {
+        self.server.received_requests().await.unwrap().len()
+    }
+}
+
+/// 현재가 요청이 달라고 한 종목들(`symbols` 쿼리).
+fn asked_symbols(request: &Request) -> Vec<String> {
+    request
+        .url
+        .query_pairs()
+        .find(|(k, _)| k == "symbols")
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// 가짜 Anthropic. 모델 목록 경로만 있다: 시험용 API 키나 접근 토큰이면 200, 아니면 401.
+struct FakeAi {
+    server: MockServer,
+}
+
+impl FakeAi {
+    async fn start() -> Self {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(MODELS_PATH))
+            .respond_with(|req: &Request| {
+                let key_ok = req
+                    .headers
+                    .get("x-api-key")
+                    .is_some_and(|v| v.as_bytes() == AI_KEY.as_bytes());
+                let bearer = format!("Bearer {OAUTH_ACCESS}");
+                let token_ok = req
+                    .headers
+                    .get("authorization")
+                    .is_some_and(|v| v.as_bytes() == bearer.as_bytes());
+                if key_ok || token_ok {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": [], "has_more": false, "first_id": null, "last_id": null
+                    }))
+                } else {
+                    ResponseTemplate::new(401).set_body_json(json!({
+                        "type": "error",
+                        "error": { "type": "authentication_error", "message": "invalid x-api-key" }
+                    }))
+                }
+            })
+            .mount(&server)
+            .await;
+        Self { server }
     }
 
     async fn total_requests(&self) -> usize {
@@ -278,6 +379,27 @@ async fn register_broker(home: &Path, toss: &FakeToss) {
         .expect("가짜 서버가 토큰을 주면 등록된다");
 }
 
+/// 가짜 Anthropic으로 확인해 AI API 키를 보관 폴더에 등록한다.
+async fn register_ai(home: &Path, ai: &FakeAi) {
+    let secrets = SecretStore::open(home).unwrap();
+    let verifier = KeyVerifier::new(upstreams(None, Some(&ai.server.uri())));
+    secrets
+        .register(
+            KeyKind::AiApiKey,
+            Credentials::new().with("api_key", AI_KEY),
+            &verifier,
+        )
+        .await
+        .expect("가짜 서버가 키를 받으면 등록된다");
+}
+
+/// 필수인 키(증권사 키와 AI 키)를 모두 보관 폴더에 등록한다. 3차부터는 둘 다 있어야 시작한다.
+/// AI 키는 이 안에서만 쓰는 가짜 서버로 확인한다.
+async fn register_keys(home: &Path, toss: &FakeToss) {
+    register_broker(home, toss).await;
+    register_ai(home, &FakeAi::start().await).await;
+}
+
 fn no_env(_name: &str) -> Option<String> {
     None
 }
@@ -286,19 +408,17 @@ fn args(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| (*s).to_string()).collect()
 }
 
-/// 임시 보관 폴더 · 빈 포트 · 짧은 시세 간격의 설정.
+/// 임시 보관 폴더 · 빈 포트 · 짧은 시세 간격의 설정. 지켜볼 종목은 인자로 준다.
 fn settings(home: &Path, extra: &[&str]) -> Settings {
+    let mut list = vec!["--symbols", "005930,000660"];
+    list.extend_from_slice(extra);
+    settings_without_symbols(home, &list)
+}
+
+/// [`settings`]와 같되 지켜볼 종목을 주지 않는다(`extra`에 넣으면 준 것이다).
+fn settings_without_symbols(home: &Path, extra: &[&str]) -> Settings {
     let home = home.to_str().unwrap();
-    let mut list = vec![
-        "--home",
-        home,
-        "--port",
-        "0",
-        "--interval-ms",
-        INTERVAL_MS,
-        "--symbols",
-        "005930,000660",
-    ];
+    let mut list = vec!["--home", home, "--port", "0", "--interval-ms", INTERVAL_MS];
     list.extend_from_slice(extra);
     Settings::parse(&args(&list), &no_env, None).expect("설정을 읽어야 한다")
 }
@@ -315,6 +435,16 @@ fn wiring(toss: Option<&FakeToss>, clock: Arc<TestClock>) -> Wiring {
     Wiring {
         upstreams: upstreams(uri.as_deref(), None),
         clock,
+        peer_override: None,
+    }
+}
+
+/// 가짜 토스증권과 가짜 Anthropic을 모두 잇는다(키 등록을 화면 쪽 경로로 해 볼 때).
+fn wiring_both(toss: &FakeToss, ai: &FakeAi, clock: Arc<TestClock>) -> Wiring {
+    Wiring {
+        upstreams: upstreams(Some(&toss.server.uri()), Some(&ai.server.uri())),
+        clock,
+        peer_override: None,
     }
 }
 
@@ -873,7 +1003,7 @@ async fn 확인할_곳이_없는_자료_키는_저장하지_않는다() {
 
 // 검증: V31
 #[tokio::test]
-async fn 증권사_키가_없으면_시세를_받지_않고_키가_없다고_알린다() {
+async fn 키가_없으면_시세를_받지_않고_설정이_필요하다고_알린다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
     let app = start_app(
@@ -883,8 +1013,9 @@ async fn 증권사_키가_없으면_시세를_받지_않고_키가_없다고_알
     .await;
     let mut ws = connect(app.local_addr(), 0).await;
 
+    // 3차: 시작 전의 시세 상태는 "설정이 필요함"이다("증권사 키가 없음"을 넓힌 것).
     let status = wait_feed_status(&mut ws).await;
-    assert_eq!(status["state"], json!(FEED_NO_BROKER_KEY));
+    assert_eq!(status["state"], json!(FEED_SETUP_REQUIRED));
     let quotes = find_frame(&mut ws, QUIET, |frame| transient(frame, KIND_QUOTES)).await;
     assert!(
         quotes.is_none(),
@@ -900,7 +1031,7 @@ async fn 증권사_키가_없으면_시세를_받지_않고_키가_없다고_알
     let mut late = connect(app.local_addr(), 0).await;
     assert_eq!(
         wait_feed_status(&mut late).await["state"],
-        json!(FEED_NO_BROKER_KEY)
+        json!(FEED_SETUP_REQUIRED)
     );
     stop(app).await;
 }
@@ -910,7 +1041,7 @@ async fn 증권사_키가_없으면_시세를_받지_않고_키가_없다고_알
 async fn 키를_넣은_뒤에는_증권사_시세가_실시간_연결로_오고_바뀐다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     let app = start_app(
         settings(dir.path(), &[]),
         wiring(Some(&toss), TestClock::at(kst(10, 0, 0))),
@@ -1002,7 +1133,7 @@ async fn 시연_모드는_가짜_시세를_흘리고_시연용이라고_알린�
 async fn 장_중에_시세가_30초_넘게_늦으면_시세_늦음을_알린다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     let clock = TestClock::at(kst(10, 0, 0));
     let app = start_app(
         settings(dir.path(), &[]),
@@ -1041,7 +1172,7 @@ async fn 장_중에_시세가_30초_넘게_늦으면_시세_늦음을_알린다(
 async fn 장이_닫힌_동안은_시세_늦음을_알리지_않는다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     // 가짜 달력에서 20:00에 애프터마켓이 끝난다.
     let clock = TestClock::at(kst(21, 0, 0));
     let app = start_app(
@@ -1110,7 +1241,7 @@ async fn 서버가_화면_한_장을_내주고_화면은_바깥_주소를_부르
 async fn 등록된_키_값은_화면으로_나가지_않는다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     let app = start_app(
         settings(dir.path(), &[]),
         wiring(Some(&toss), TestClock::at(kst(10, 0, 0))),
@@ -1257,7 +1388,7 @@ async fn wait_stale(ws: &mut Ws, wait: Duration) -> Option<Value> {
 async fn assert_backs_off(token_status: u16, expected: &str) {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     toss.token_status.store(token_status, Ordering::SeqCst);
     let registered = toss.requests(TOKEN_PATH).await.len();
     let app = start_app(
@@ -1327,7 +1458,7 @@ async fn 증권사가_장애여도_물러서며_닿지_않는다고_알린다() 
 async fn 증권사에_연결되지_않으면_닿지_않는다고_알린다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     let registered = toss.total_requests().await;
     // 증권사 주소는 아무도 듣지 않는 로컬 주소다.
     let app = start_app(
@@ -1362,7 +1493,7 @@ async fn 증권사에_연결되지_않으면_닿지_않는다고_알린다() {
 async fn 거절이_풀리면_증권사_시세가_되고_원래_간격으로_돌아온다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     toss.token_status.store(401, Ordering::SeqCst);
     let app = start_app(
         fast_retry(settings(dir.path(), &[])),
@@ -1396,7 +1527,7 @@ async fn 거절이_풀리면_증권사_시세가_되고_원래_간격으로_돌�
 async fn 시세를_받기_전에는_연결_중이고_받은_뒤에만_증권사_시세다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     // 첫 시세가 늦게 온다.
     toss.price_delay_ms.store(700, Ordering::SeqCst);
     let app = start_app(
@@ -1433,7 +1564,7 @@ async fn 시세를_받기_전에는_연결_중이고_받은_뒤에만_증권사_
 async fn 달력을_한_번도_못_받으면_늦은_시세를_늦었다고_알리고_장_시간을_모른다고_한다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     toss.calendar_broken.store(true, Ordering::SeqCst);
     let clock = TestClock::at(kst(10, 0, 0));
     let app = start_app(
@@ -1473,7 +1604,7 @@ async fn 달력을_한_번도_못_받으면_늦은_시세를_늦었다고_알리
 async fn 가진_달력이_지금을_덮지_않으면_장이_닫혔다고_보지_않는다() {
     let toss = FakeToss::start().await;
     let dir = tempfile::tempdir().unwrap();
-    register_broker(dir.path(), &toss).await;
+    register_keys(dir.path(), &toss).await;
     let clock = TestClock::at(kst(10, 0, 0));
     let app = start_app(
         settings(dir.path(), &[]),

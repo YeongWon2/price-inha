@@ -33,9 +33,29 @@ pub(crate) struct Shared {
     pub(crate) live: Arc<AtomicUsize>,
 }
 
-/// 확인을 지난 상대 주소(포트 없이). 뒤의 핸들러가 접속 기록에 쓴다.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Peer(pub(crate) IpAddr);
+/// 확인을 지난 상대 주소(포트 없이). 접속 관문이 요청의 확장(extension)에 넣는다.
+///
+/// 뒤의 핸들러와 [`local_only`]가 읽는다: 접속 기록의 "어디서", 그리고 "그 컴퓨터에서 온
+/// 요청인가"의 판단. IPv4로 적을 수 있는 IPv6 주소는 IPv4로 바꾼 값이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Peer(pub IpAddr);
+
+/// [`local_only`]가 그 컴퓨터 밖의 요청을 거부할 때의 HTTP 상태.
+pub const LOCAL_ONLY_STATUS: u16 = 403;
+
+/// 그 컴퓨터에서 온 요청만 받는 경로로 만든다(3차 규칙 4: 키 등록은 그 컴퓨터에서만).
+///
+/// 접속 관문의 "보호된 경로" 확인과 **별개로**, 이 경로 자체가 한 번 더 본다:
+/// 요청의 확장에 든 [`Peer`]가 루프백이면 핸들러로 넘기고, 루프백이 아니거나 [`Peer`]가
+/// **없으면** [`LOCAL_ONLY_STATUS`]로 거부한다(핸들러는 불리지 않는다).
+///
+/// 지금은 루프백이 아닌 요청이 관문에서 모두 401이라 이 확인까지 오지 않는다. 접속 키(T17)가
+/// 생겨 밖에서 온 요청이 관문을 지나게 되어도 이 경로들은 닫혀 있게 하려는 것이다.
+/// 전달 헤더(`X-Forwarded-For` 등)는 읽지 않는다.
+pub fn local_only(routes: axum::Router) -> axum::Router {
+    let _ = routes;
+    todo!("3차: Peer가 루프백일 때만 지나가게 하는 층을 씌운다")
+}
 
 fn reject(status: StatusCode, why: &'static str) -> Response {
     (status, why).into_response()
