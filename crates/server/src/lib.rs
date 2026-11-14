@@ -4,8 +4,11 @@
 //! 띄우고([`App::start`]), Ctrl+C를 기다렸다가 끈다([`App::shutdown`]).
 
 mod app;
+mod demo;
 mod error;
+mod feed;
 mod keys;
+mod page;
 mod settings;
 
 pub use app::{

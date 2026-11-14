@@ -10,14 +10,19 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1.92"
+axum = "0.8.9"
+chrono = "0.4.45"
 pi-ai = { version = "0.1.0", path = "../ai" }
 pi-gate = { version = "0.1.0", path = "../gate" }
 pi-market = { version = "0.1.0", path = "../market" }
 pi-secrets = { version = "0.1.0", path = "../secrets" }
 pi-store = { version = "0.1.0", path = "../store" }
+rust_decimal = "1.43.0"
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "ansi"] }
 
 [dev-dependencies]
 chrono = "0.4.45"

@@ -3,10 +3,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use pi_gate::Publisher;
-use pi_market::Clock;
+use pi_gate::{Gate, GateConfig, GateServer, Publisher};
+use pi_market::{Clock, CredentialSource, MarketAdapter, SystemClock, TossClient};
+use pi_secrets::SecretStore;
+use pi_store::{Store, UnixMillis};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
-use crate::{AppError, Settings, Upstreams};
+use crate::demo::DemoAdapter;
+use crate::feed::{Feed, Source};
+use crate::{AppError, BrokerKeys, SecretsRedactor, Settings, Upstreams, page};
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -37,7 +43,19 @@ pub struct Wiring {
 impl Default for Wiring {
     /// 실제 서버 주소와 실제 시계.
     fn default() -> Self {
-        todo!()
+        Self {
+            upstreams: Upstreams::default(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+}
+
+/// 접속 관문의 시계 자리에 시세와 같은 시계를 끼운다(이벤트 시각과 접속 기록).
+struct GateClock(Arc<dyn Clock>);
+
+impl pi_gate::Clock for GateClock {
+    fn now(&self) -> UnixMillis {
+        UnixMillis(self.0.now().timestamp_millis())
     }
 }
 
@@ -56,28 +74,93 @@ impl Default for Wiring {
 /// 4. 받은 시세는 [`KIND_QUOTES`] 지나가는 이벤트로 보낸다. 가진 시세가 `pi_market::is_stale`
 ///    (기본 30초)이면 [`KIND_QUOTES_STALE`]을 보낸다(N6). 받기에 실패해도 흐름은 이어진다.
 pub struct App {
-    _private: (),
+    gate: GateServer,
+    /// 시세 흐름을 멈추는 알림.
+    stop: watch::Sender<bool>,
+    feed: JoinHandle<()>,
+    /// 끌 때 닫는다(놓는다).
+    store: Store,
 }
 
 impl App {
     /// 서버를 띄운다.
     pub async fn start(settings: Settings, wiring: Wiring) -> Result<App, AppError> {
-        todo!()
+        // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
+        let secrets = Arc::new(SecretStore::open(settings.home.clone())?);
+        let store = Store::open(settings.home.join(DB_FILE))?;
+        if !settings.bind.is_loopback() {
+            tracing::warn!(
+                bind = %settings.bind,
+                "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
+            );
+        }
+        let config = GateConfig {
+            bind: SocketAddr::new(settings.bind, settings.port),
+            ..GateConfig::default()
+        };
+        let gate = Gate::builder(store.clone(), config)
+            .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
+            .redactor(Arc::new(SecretsRedactor::new(Arc::clone(&secrets))))
+            .public_routes(page::routes())
+            .build()
+            .serve()
+            .await?;
+
+        let source = if settings.demo {
+            let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
+            Source::Demo(Arc::new(demo))
+        } else {
+            let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));
+            let client = TossClient::new(
+                wiring.upstreams.toss,
+                Arc::clone(&keys),
+                Arc::clone(&wiring.clock),
+            );
+            let adapter: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
+            Source::Broker { adapter, keys }
+        };
+        let feed = Feed::new(
+            gate.publisher(),
+            wiring.clock,
+            settings.market,
+            settings.symbols,
+            settings.quote_interval,
+        );
+        let (stop, mut stopping) = watch::channel(false);
+        let feed = tokio::spawn(async move {
+            tokio::select! {
+                // 알리는 쪽이 사라져도 멈춘다.
+                _ = stopping.wait_for(|stop| *stop) => {}
+                () = feed.run(source) => {}
+            }
+        });
+        Ok(App {
+            gate,
+            stop,
+            feed,
+            store,
+        })
     }
 
     /// 실제로 연 주소.
     pub fn local_addr(&self) -> SocketAddr {
-        todo!()
+        self.gate.local_addr()
     }
 
     /// 이벤트를 내보내는 손잡이(다른 모듈이 쓴다).
     pub fn publisher(&self) -> Publisher {
-        todo!()
+        self.gate.publisher()
     }
 
     /// 끈다(Ctrl+C): 시세 받기를 멈추고, 연결을 정리하고, 저장소를 닫는다.
     /// 같은 보관 폴더로 다시 띄우면 이벤트 번호가 이어진다(V6).
     pub async fn shutdown(self) -> Result<(), AppError> {
-        todo!()
+        self.stop.send_replace(true);
+        let feed = self.feed.await.map_err(|_| AppError::Task);
+        // 시세 흐름이 비정상으로 끝났어도 연결과 저장소는 정리한다.
+        let gate = self.gate.shutdown().await;
+        drop(self.store);
+        gate?;
+        feed
     }
 }

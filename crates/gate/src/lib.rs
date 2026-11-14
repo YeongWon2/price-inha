@@ -59,11 +59,26 @@
 //! 직접 쓰지 않고, 조립하는 쪽이 `SecretStore::redact`를 끼운다.
 
 mod error;
+mod frame;
+mod guard;
+mod hub;
+mod session;
+mod ws;
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::Router;
+use axum::middleware::{from_fn, from_fn_with_state};
+use axum::routing::{get, post};
 use pi_store::{Store, UnixMillis};
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
+
+use crate::guard::Shared;
+use crate::hub::Hub;
 
 pub use error::GateError;
 
@@ -96,7 +111,13 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now(&self) -> UnixMillis {
-        todo!()
+        // 시계가 1970년보다 앞이면 0으로, i64를 넘으면 가장 큰 값으로 둔다.
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+            });
+        UnixMillis(millis)
     }
 }
 
@@ -112,7 +133,7 @@ pub struct NoRedaction;
 
 impl Redactor for NoRedaction {
     fn redact(&self, text: &str) -> String {
-        todo!()
+        text.to_owned()
     }
 }
 
@@ -135,106 +156,238 @@ pub struct GateConfig {
 impl Default for GateConfig {
     /// `127.0.0.1:`[`DEFAULT_PORT`], [`DEFAULT_ALLOWED_HOSTS`], [`DEFAULT_SEND_BUFFER`].
     fn default() -> Self {
-        todo!()
+        Self::local(DEFAULT_PORT)
     }
 }
 
 impl GateConfig {
     /// `127.0.0.1:port`에 여는 기본 설정.
     pub fn local(port: u16) -> Self {
-        todo!()
+        Self {
+            bind: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            allowed_hosts: DEFAULT_ALLOWED_HOSTS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+            send_buffer: DEFAULT_SEND_BUFFER,
+        }
     }
 }
 
 /// 접속 관문을 만드는 자리.
 pub struct GateBuilder {
-    _private: (),
+    store: Store,
+    config: GateConfig,
+    clock: Arc<dyn Clock>,
+    redactor: Arc<dyn Redactor>,
+    public: Router,
+    protected: Router,
+    peer_override: Option<PeerOverride>,
 }
 
 impl GateBuilder {
     /// 시계를 바꾼다. 기본은 [`SystemClock`].
     pub fn clock(self, clock: Arc<dyn Clock>) -> Self {
-        todo!()
+        Self { clock, ..self }
     }
 
     /// 가리기 함수를 끼운다. 기본은 [`NoRedaction`].
     pub fn redactor(self, redactor: Arc<dyn Redactor>) -> Self {
-        todo!()
+        Self { redactor, ..self }
     }
 
     /// 세션 없이 열리는 경로를 더한다(화면 한 장). Host 확인과 상대 주소 확인은 받는다.
     pub fn public_routes(self, routes: axum::Router) -> Self {
-        todo!()
+        Self {
+            public: self.public.merge(routes),
+            ..self
+        }
     }
 
     /// 세션이 있어야 열리는 경로를 더한다. 세션이 없으면 401이고 핸들러는 불리지 않는다.
     /// 상태를 바꾸는 요청은 Origin 확인도 받는다.
     pub fn protected_routes(self, routes: axum::Router) -> Self {
-        todo!()
+        Self {
+            protected: self.protected.merge(routes),
+            ..self
+        }
     }
 
     /// 상대 주소를 바꿔 본다. **테스트용이다.** 실행 파일은 부르지 않는다.
     pub fn peer_override(self, peer: PeerOverride) -> Self {
-        todo!()
+        Self {
+            peer_override: Some(peer),
+            ..self
+        }
     }
 
     /// 접속 관문을 만든다. 아직 주소를 열지 않는다.
     pub fn build(self) -> Gate {
-        todo!()
+        let hub = Arc::new(Hub::new(
+            self.store,
+            self.clock,
+            self.redactor,
+            self.config.send_buffer,
+        ));
+        Gate {
+            hub,
+            config: self.config,
+            public: self.public,
+            protected: self.protected,
+            peer_override: self.peer_override,
+        }
     }
 }
 
 /// 접속 관문. 아직 주소를 열지 않은 상태다.
 pub struct Gate {
-    _private: (),
+    hub: Arc<Hub>,
+    config: GateConfig,
+    public: Router,
+    protected: Router,
+    peer_override: Option<PeerOverride>,
 }
+
+/// 끌 때 요청 처리와 실시간 연결이 끝나기를 기다리는 가장 긴 시간.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 impl Gate {
     /// 저장소와 설정으로 만들기 시작한다.
     pub fn builder(store: Store, config: GateConfig) -> GateBuilder {
-        todo!()
+        GateBuilder {
+            store,
+            config,
+            clock: Arc::new(SystemClock),
+            redactor: Arc::new(NoRedaction),
+            public: Router::new(),
+            protected: Router::new(),
+            peer_override: None,
+        }
     }
 
     /// 이벤트를 내보내는 손잡이. 주소를 열기 전에도 쓸 수 있다(저장은 되고, 연결된 화면이 없을 뿐이다).
     pub fn publisher(&self) -> Publisher {
-        todo!()
+        Publisher {
+            hub: Arc::clone(&self.hub),
+        }
     }
 
     /// [`GateConfig::bind`]를 열고 요청을 받기 시작한다. tokio 런타임 안에서 부른다.
     ///
     /// 열지 못하면 [`GateError::Bind`].
     pub async fn serve(self) -> Result<GateServer, GateError> {
-        todo!()
+        let bind_error = |error: std::io::Error| GateError::Bind { kind: error.kind() };
+        let listener = tokio::net::TcpListener::bind(self.config.bind)
+            .await
+            .map_err(bind_error)?;
+        let addr = listener.local_addr().map_err(bind_error)?;
+        let (stop, stop_rx) = watch::channel(false);
+        let (done_tx, done) = mpsc::channel(1);
+        let shared = Arc::new(Shared {
+            hub: Arc::clone(&self.hub),
+            sessions: session::Sessions::default(),
+            allowed_hosts: self.config.allowed_hosts,
+            port: addr.port(),
+            peer_override: self.peer_override,
+            stop: stop_rx.clone(),
+            _done: done_tx,
+            live: Arc::new(AtomicUsize::new(0)),
+        });
+        let app = routes(shared, self.public, self.protected);
+        let task = tokio::spawn(async move {
+            let mut stop = stop_rx;
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move { ws::stopped(&mut stop).await })
+            .await
+        });
+        Ok(GateServer {
+            addr,
+            hub: self.hub,
+            stop,
+            task,
+            done,
+        })
     }
+}
+
+/// 경로를 잇는다. 바깥 층부터: Host · 상대 주소 → Origin → 세션 → 핸들러.
+fn routes(shared: Arc<Shared>, public: Router, protected: Router) -> Router {
+    let session = || from_fn_with_state(Arc::clone(&shared), guard::session);
+    let enter = Router::new()
+        .route(SESSION_PATH, post(guard::enter))
+        .layer(from_fn(guard::origin_if_changing));
+    let live = Router::new()
+        .route(WS_PATH, get(ws::upgrade))
+        .layer(session())
+        .layer(from_fn(guard::origin_always));
+    let protected = protected
+        .layer(session())
+        .layer(from_fn(guard::origin_if_changing));
+    Router::new()
+        .merge(enter)
+        .merge(live)
+        .with_state(Arc::clone(&shared))
+        .merge(public)
+        .merge(protected)
+        .layer(from_fn_with_state(shared, guard::host_and_peer))
 }
 
 /// 열려 있는 접속 관문.
 pub struct GateServer {
-    _private: (),
+    addr: SocketAddr,
+    hub: Arc<Hub>,
+    stop: watch::Sender<bool>,
+    task: JoinHandle<std::io::Result<()>>,
+    done: mpsc::Receiver<()>,
 }
 
 impl GateServer {
     /// 실제로 연 주소(포트 0을 줬으면 고른 포트가 들어 있다).
     pub fn local_addr(&self) -> SocketAddr {
-        todo!()
+        self.addr
     }
 
     /// 이벤트를 내보내는 손잡이.
     pub fn publisher(&self) -> Publisher {
-        todo!()
+        Publisher {
+            hub: Arc::clone(&self.hub),
+        }
     }
 
     /// 끈다: 새 연결을 받지 않고, 열린 실시간 연결을 닫고, 돌던 작업이 끝나기를 기다린다.
     /// 끝난 뒤에는 그 주소로 연결되지 않는다. 저장소는 닫지 않는다(가진 쪽이 닫는다).
-    pub async fn shutdown(self) -> Result<(), GateError> {
-        todo!()
+    pub async fn shutdown(mut self) -> Result<(), GateError> {
+        self.hub.close().await;
+        self.stop.send_replace(true);
+        let served = match tokio::time::timeout(SHUTDOWN_GRACE, &mut self.task).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(_)) | Err(_)) => Err(GateError::Task),
+            Err(_) => {
+                // 끝나지 않는 요청이 있어도 주소는 닫는다.
+                tracing::warn!("요청 처리가 시간 안에 끝나지 않아 그만둡니다");
+                self.task.abort();
+                let _ = (&mut self.task).await;
+                Ok(())
+            }
+        };
+        // 실시간 연결이 모두 닫힐 때까지 기다린다(쥐고 있던 쪽이 다 사라지면 `None`이 온다).
+        if tokio::time::timeout(SHUTDOWN_GRACE, self.done.recv())
+            .await
+            .is_err()
+        {
+            tracing::warn!("실시간 연결이 시간 안에 닫히지 않았습니다");
+        }
+        served
     }
 }
 
 /// 이벤트를 내보내는 손잡이. 복제해 여러 모듈이 함께 쓴다.
 #[derive(Clone)]
 pub struct Publisher {
-    _private: (),
+    hub: Arc<Hub>,
 }
 
 impl Publisher {
@@ -244,7 +397,13 @@ impl Publisher {
     /// - 여러 곳에서 함께 불러도 화면에는 번호 순서로 간다.
     /// - 느린 연결을 기다리지 않는다.
     pub async fn publish(&self, kind: &str, payload: serde_json::Value) -> Result<u64, GateError> {
-        todo!()
+        // 따로 띄운 작업에서 한다: 부른 쪽이 기다리다 그만둬도 "저장은 됐는데 화면에는 안 간"
+        // 이벤트(번호가 빠져 보인다)가 생기지 않는다.
+        let hub = Arc::clone(&self.hub);
+        let kind = kind.to_owned();
+        tokio::spawn(async move { hub.publish(kind, payload).await })
+            .await
+            .map_err(|_| GateError::Task)?
     }
 
     /// 지나가는 이벤트를 보낸다. 저장하지 않고 번호도 없다(시세처럼 자주 바뀌는 것).
@@ -252,6 +411,6 @@ impl Publisher {
     /// 종류마다 가장 최근 것 하나를 기억해 두었다가, 새로 연결한 화면에 먼저 보낸다.
     /// 기다리지 않는다(느린 연결은 끊긴다).
     pub fn publish_transient(&self, kind: &str, payload: serde_json::Value) {
-        todo!()
+        self.hub.publish_transient(kind, payload);
     }
 }
