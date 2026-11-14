@@ -1,0 +1,22 @@
+//! 이 모듈의 오류 타입. 어떤 변형도 세션 값이나 요청 본문을 담지 않는다.
+
+/// 접속 관문의 오류.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum GateError {
+    /// 주소를 열지 못했다(이미 쓰는 포트 등). 종류만 싣는다.
+    #[error("주소를 열지 못했습니다: {kind}")]
+    Bind {
+        /// 실패 종류.
+        kind: std::io::ErrorKind,
+    },
+    /// 저장소 오류(이벤트 쌓기 · 읽기 · 접속 기록).
+    #[error("저장소 오류: {0}")]
+    Store(#[from] pi_store::StoreError),
+    /// 관문이 이미 닫혔다. 이벤트를 저장하지 않았다.
+    #[error("접속 관문이 닫혔습니다")]
+    Closed,
+    /// 안에서 돌던 작업이 끝나지 못했다.
+    #[error("서버 작업이 비정상으로 끝났습니다")]
+    Task,
+}
