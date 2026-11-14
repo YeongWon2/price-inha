@@ -48,6 +48,7 @@
 - [DeskRPG](docs/research/deskrpg.md) — 3D 가상 사무실 (Sustainable Use License: 개인·비상업 용도, 고지 유지)
 - [DeskRPG Hermes 플러그인](docs/research/deskrpg-hermes-plugin.md) — DeskRPG와 Hermes를 잇는 플러그인의 동작 명세 (LICENSE 없음: 코드는 쓰지 않고 명세만 참고)
 - [OpenClaw](docs/research/openclaw.md) — Hermes에서 부족한 트리거 · 승인 한도 · 장기 기억 · OAuth 보완 (MIT)
+- [원격 접속 보안](docs/research/remote-access-security.md) — Tailscale · TOTP · 승인 보호 · 비밀 저장 · 암호화 백업
 
 ## 투자 원칙 조사
 
