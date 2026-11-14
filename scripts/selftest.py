@@ -225,6 +225,14 @@ def main():
             sh(["git", "tag", "-f", "red/secrets"], fx)
         case(fx, "필수 번호가 빠지면 잡는다", drop_ids, verify, "✗ 5 필수 번호 빠짐 (secrets)")
 
+        def drop_origin():
+            p = fx / "docs/dev/modules/ai.md"
+            t = p.read_text()
+            a = t.index("## 원본 동작 근거")
+            b = t.index("\n## ", a + 5)
+            p.write_text(t[:a] + t[b + 1:])
+        case(fx, "지시서에 원본 동작 근거가 없으면 잡는다", drop_origin, verify, "✗ 5b 원본 동작 근거 없음 (ai)")
+
         fake_key = "sk-" + "ant-" + "A" * 30
         case(fx, "키처럼 생긴 글자를 잡는다",
              lambda: (fx / "docs/note.md").write_text(f"key = {fake_key}\n"), verify, "✗ 7 비밀 글자")

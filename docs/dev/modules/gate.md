@@ -6,6 +6,13 @@
 
 store · secrets · ai · market 모듈이 끝난 뒤에 한다. 그 모듈들의 공개 API를 읽고 그대로 쓴다(고치지 않는다).
 
+## 원본 동작 근거
+
+- 대조표: `docs/dev/conformance.md` 4장 "접속 관문 · 실시간 연결 · 설정".
+- 따르는 원본: DeskRPG의 실시간 이벤트 — `docs/research/deskrpg.md` 3-2. Hermes api_server와 스트리밍 전달 계약 — `docs/research/hermes-agent.md` 5.2 · 5.3. 플러그인 이벤트 스트림과 다시 잇기 — `docs/research/deskrpg-hermes-plugin.md` 3-4 · 5장. 로컬 접속 — `docs/research/remote-access-security.md`.
+- 의도해서 다른 것: Socket.IO · SSE 대신 WebSocket 하나 + REST(D11), 그 컴퓨터에서만 열고 접속 키는 나중(D2), 처음 설정은 브라우저 화면(사용자 결정).
+- 모르고 달랐던 것(다음 차례에 고친다): 연결 keepalive, 이벤트 종류 이름 규칙, 보안 응답 헤더, 저장되는(번호 있는) 이벤트를 내는 곳.
+
 ## pi-gate가 만드는 것
 
 1. **그 컴퓨터에서만 열기 (D2)**: 기본 주소는 `127.0.0.1`이다. 다른 주소로 열려면 설정을 분명히 줘야 한다.

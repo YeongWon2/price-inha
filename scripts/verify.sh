@@ -69,6 +69,13 @@ for m in $mods; do
   else ok "5 필수 번호: $m"; fi
 done
 
+# 5b 원본 동작 근거
+for m in $mods; do
+  [ -f "docs/dev/modules/$m.md" ] || continue
+  if origin_ok "$m"; then ok "5b 원본 동작 근거: $m"
+  else bad "5b 원본 동작 근거 없음 ($m) — 고치기: 지시서에 '## 원본 동작 근거' 절을 두고 따르는 조사 문서(docs/research/…)의 절을 적는다. 원본에 없는 기능이면 '원본에 없음(우리 고유)'이라고 적는다"; fi
+done
+
 # 6 아키텍처 · 컨벤션
 PY=$(find_python)
 if [ -z "$PY" ]; then bad "6 아키텍처 · 컨벤션: Python 3.11 이상이 없다"

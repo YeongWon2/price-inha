@@ -57,3 +57,9 @@ find_python() { # tomllib가 있는 Python
 rules_hash() {
   cat scripts/*.sh scripts/*.py docs/dev/architecture.toml docs/dev/graph.toml Cargo.toml clippy.toml 2>/dev/null | shasum -a 256 | cut -d' ' -f1
 }
+
+# 지시서에 "## 원본 동작 근거" 절이 있고, 조사 문서를 가리키거나 "원본에 없음"이라고 적었는가.
+origin_ok() {
+  awk '/^## 원본 동작 근거/{p=1;next} /^## /{p=0} p' "docs/dev/modules/$1.md" \
+    | grep -qE 'docs/research/[a-z-]+\.md|원본에 없음'
+}

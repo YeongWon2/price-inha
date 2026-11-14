@@ -3,6 +3,13 @@
 크레이트 `pi-secrets`, 폴더 `crates/secrets/`. 구성 요소 A13 비밀 보관.
 근거: `dev.md`의 D3 · C3 · C16 · E4 · E38 · N8 · V46.
 
+## 원본 동작 근거
+
+- 대조표: `docs/dev/conformance.md` 2장 "비밀 보관".
+- 따르는 원본: Hermes의 `.env` · `auth.json` 보관(위치, 권한, 원자 쓰기) — `docs/research/hermes-agent.md` 3.8 · 4.2 · 7.5. 사용자 결정 "Hermes 방식 파일"(D3).
+- 의도해서 다른 것: 등록 전에 실제로 닿는지 확인한다(C3 · E4), 가리기(E38).
+- 모르고 달랐던 것(다음 차례에 고친다): `auth.json`의 구조(만료 시각 · 공급자 · 버전 칸), refresh 토큰 필수, `.env` 줄 이름에 공급자 이름, 깨진 `auth.json`의 사본.
+
 ## 만드는 것
 
 1. **보관 폴더**: 기본은 홈 폴더 아래 `.price-inha/`. 환경 변수 `PRICE_INHA_HOME`이나 생성자 인자로 바꿀 수 있다(테스트는 임시 폴더). 폴더 권한 0700.

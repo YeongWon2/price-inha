@@ -3,6 +3,13 @@
 크레이트 `pi-store`, 폴더 `crates/store/`. 구성 요소 A12 저장소.
 근거: `dev.md`의 D6 · M1 · M2 · M6(기록만) · C2 · E3, `spec.md`의 상태표(투자 팀 · 매매).
 
+## 원본 동작 근거
+
+- 대조표: `docs/dev/conformance.md` 3장 "저장소".
+- 따르는 원본: Hermes `state.db`의 저장 방식 — `docs/research/hermes-agent.md` 3.5 · 7.1. 이벤트 로그와 다시 잇기 — `docs/research/deskrpg-hermes-plugin.md` 3-4.
+- 의도해서 다른 것: SQLite 파일 하나(D6), 더 새 버전의 파일은 열지 않는다(원본은 연다 — 우리 쪽이 더 안전해서).
+- 모르고 달랐던 것(다음 차례에 고친다): 이벤트 종류 이름 규칙, 이벤트 시각 칸, DB 파일 권한 0600, 이벤트 행의 방 · 멱등 키 · 행위자 칸.
+
 ## 만드는 것
 
 1. **열기와 이전**: SQLite 파일 하나를 연다. 스키마 버전을 두고 순서대로 올린다. 다시 열면 자료가 그대로다. WAL과 외래 키를 켠다.

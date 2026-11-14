@@ -3,6 +3,11 @@
 크레이트 `pi-paper`, 폴더 `crates/paper/`. 구성 요소 A8 주문 실행기 가운데 **모의계좌와 체결**. `pi-market`만 쓸 수 있다.
 근거: `dev.md`의 C10 · E12 · E13 · E25 · E29 · E30 · E33 · N4 · V29, `spec.md`의 F3 4 · 4b · 4c · 4d와 F4, `docs/research/stock-investing-principles.md` 5장(국내 · 미국 시장 기본 규칙), `docs/dev/toss-api-notes.md`.
 
+## 원본 동작 근거
+
+- 원본에 없음(우리 고유): Hermes · DeskRPG · OpenClaw에는 모의계좌가 없다. `docs/dev/conformance.md` 5장.
+- 기준은 토스증권 공식 명세의 주문 · 계좌 API 모양과 시장 규칙 조사다 — `docs/research/stock-investing-principles.md` 5장.
+
 ## 왜 만드나 (2026-11-14 사용자 결정)
 
 토스증권 Open API에는 모의투자가 없다. 그래서 **실제 돈이 움직이는 것과 같은 흐름으로 도는 모의계좌를 직접 만든다.**

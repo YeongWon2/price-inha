@@ -3,6 +3,13 @@
 크레이트 `pi-ai`, 폴더 `crates/ai/`. 구성 요소 A11 AI 공급자 어댑터. `pi-secrets`만 쓸 수 있다.
 근거: `dev.md`의 D4 · A11 · V31 · E38.
 
+## 원본 동작 근거
+
+- 대조표: `docs/dev/conformance.md` 1장 "AI 공급자 어댑터".
+- 따르는 원본: Hermes의 공급자 구조와 Anthropic 인증 — `docs/research/hermes-agent.md` 4.1 · 4.2 · 4.3. OpenClaw의 구독 OAuth — `docs/research/openclaw.md` 2.4.
+- 의도해서 다른 것: CLI를 띄우지 않고 직접 부른다(D4).
+- 모르고 달랐던 것(다음 차례에 고친다): `Retry-After` 읽는 법과 상한, 시간 초과 · 연결 실패의 다시 시도, 다시 시도 간격과 jitter, 연결 시간 제한. 구독 OAuth의 헤더 · 본문 · 자격 순서는 사용자 결정이 필요하다.
+
 ## 만드는 것
 
 1. **공급자 trait**: 비동기 `complete(요청) → 응답`. 요청은 모델 이름, 시스템 글, 대화(역할 · 글), 최대 토큰. 응답은 글, 멈춘 이유, 쓴 토큰 수(입력 · 출력). 에이전트 실행기(나중 작업)는 이 trait만 안다.

@@ -3,6 +3,11 @@
 크레이트 `pi-market`, 폴더 `crates/market/`. 구성 요소 A9 시장 어댑터. `pi-secrets`만 쓸 수 있다.
 근거: `dev.md`의 D5 · A9 · N6 · V31 · V32, `docs/dev/toss-api-notes.md`.
 
+## 원본 동작 근거
+
+- 원본에 없음(우리 고유): Hermes · DeskRPG · OpenClaw에는 증권사 시세 기능이 없다. `docs/dev/conformance.md` 5장.
+- 기준은 토스증권 공식 명세다 — `docs/dev/toss-api-notes.md`.
+
 ## 만드는 것
 
 1. **시장 어댑터 trait (D5)**: 시장 이름(국내 · 미국, 나중에 코인이 더해질 수 있게), 비동기 `quotes(종목들) → 시세들`, 비동기 `calendar(날짜) → 그날과 앞뒤 영업일의 세션들`, `session_at(달력, 시각) → 지금 어떤 세션인가(없으면 장 닫힘)`. 에이전트와 규칙 엔진은 이 trait만 안다.
