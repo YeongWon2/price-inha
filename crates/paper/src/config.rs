@@ -1,5 +1,6 @@
 //! 설정. 시장마다 숫자 규칙(수수료 · 세금 · 호가 단위 · 상하한 · 결제일 · 미끄러짐 ·
-//! 세션별 허용)을 [`MarketRules`] 하나에 모은다. 기본값마다 출처를 적는다.
+//! 세션별 허용 · 큰 주문)을 [`MarketRules`] 하나에 모은다. 기본값마다 출처를 적는다.
+//! 공식 출처로 확인하지 못한 숫자에는 기본값이 없다([`UnverifiedRules`]).
 
 use pi_market::{Currency, Market, SessionKind, StalePolicy};
 use rust_decimal::Decimal;
@@ -105,6 +106,24 @@ impl SessionRules {
     }
 }
 
+/// 공식 출처로 확인하지 못해 **기본값이 없는** 숫자들. 계좌를 열 때 분명히 줘야 한다.
+///
+/// [`MarketRules::kr`] · [`MarketRules::us`]가 이 값을 인자로 받는다. 주지 않고는 규칙을 만들 수
+/// 없으니 계좌도 열 수 없다(조용히 0으로 돌지 않는다). 준 값은 그대로 규칙에 들어간다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnverifiedRules {
+    /// 수수료율(소수 비율). → [`MarketRules::commission_rate`].
+    pub commission_rate: Decimal,
+    /// 시장가의 미끄러짐(소수 비율). → [`MarketRules::market_slippage_rate`].
+    pub market_slippage_rate: Decimal,
+    /// 수수료 · 세금의 반올림 방향. → [`MoneyRounding::mode`].
+    pub rounding_mode: RoundingMode,
+    /// 시세 한 번에 체결되는 최대 수량. → [`MarketRules::max_fill`].
+    pub max_fill: MaxFill,
+    /// 판 돈을 다시 쓸 수 있는 때. → [`Settlement::proceeds_usable`].
+    pub proceeds_usable: ProceedsUsable,
+}
+
 /// 시장 하나의 규칙.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketRules {
@@ -132,10 +151,20 @@ pub struct MarketRules {
     pub max_fill: MaxFill,
     /// 세션별로 받는 호가 유형.
     pub sessions: SessionRules,
+    /// 큰 주문의 금액 확인. `Some(a)`이면 주문 금액(수량 × 값)이 `a` **이상**인 주문은
+    /// 확인 표시([`crate::OrderRequest::confirm_high_value`])가 있어야 받는다. 없으면
+    /// [`BrokerError::ConfirmHighValueRequired`]. `None`이면 보지 않는다.
+    ///
+    /// 주문 금액: 지정가는 `수량 × 지정가`, 시장가 사기는 `수량 × 묶는 돈을 셈하는 값`.
+    /// 시장가 팔기는 값이 없어 보지 않는다(명세에 셈법이 없다. **미확인**).
+    pub high_value_confirm_from: Option<Decimal>,
+    /// 최대 주문 금액. `Some(a)`이면 주문 금액이 `a`를 **넘는** 주문은 확인 표시와 상관없이
+    /// 받지 않는다([`BrokerError::MaxOrderAmountExceeded`]). `None`이면 보지 않는다.
+    pub max_order_amount: Option<Decimal>,
 }
 
 impl MarketRules {
-    /// 국내 주식의 기본 규칙.
+    /// 국내 주식의 규칙. 공식 출처로 확인된 값만 기본값이고, 확인되지 않은 값은 `unverified`로 받는다.
     ///
     /// | 값 | 기본 | 출처 |
     /// |---|---|---|
@@ -144,14 +173,14 @@ impl MarketRules {
     /// | 가격제한폭 | 0.30 | `docs/research/stock-investing-principles.md` 5.1 |
     /// | 증권거래세 | 0.0020 (코스피 · 코스닥 같음, 2026년) | 같은 문서 5.1. 코넥스(0.10%)는 나누지 않았다 |
     /// | 결제일 | 2영업일 (T+2) | 같은 문서 5.1 |
-    /// | 판 돈 | 결제일 뒤에 쓴다(보수적) | **미확인**. 실제 증권사의 재매수 가능 여부는 확인하지 못했다 |
-    /// | 수수료율 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다.** 토스증권 수수료 안내를 확인하지 못해 지어내지 않고 0으로 뒀다 |
-    /// | 반올림 방향 | [`RoundingMode::Up`] | **확인되지 않은 값이며 사용자가 설정해야 한다.** 가장 보수적인 쪽(수수료 · 세금을 더 뗀다)으로 뒀다 |
-    /// | 미끄러짐 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다.** 근거 있는 값이 없어 0으로 뒀다 |
+    /// | 큰 주문 확인 | 100,000,000원 이상 | 토스 명세의 주문 생성 · 정정 요청 `confirmHighValueOrder` 설명과 `confirm-high-value-required` 오류 예(`threshold` 100000000, KRW) |
+    /// | 최대 주문 금액 | 3,000,000,000원 초과는 거부 | 토스 명세의 `max-order-amount-exceeded` 오류 예("30억원 초과 주문 (KR)", `maxAmount` 3000000000). 명세의 정정 요청 설명 한 곳은 "30억원 이상"이라 적어 딱 30억 원이 어느 쪽인지는 **미확인** |
     /// | 지정가 체결 값 | [`LimitFillPrice::Limit`] | 지시서(보수적인 쪽) |
-    /// | 최대 체결 수량 | [`MaxFill::Unlimited`] | 지시서(설정) |
     /// | 세션 | 정규장에서만 지정가 · 시장가 | 보수적으로 잡았다. 프리 · 애프터마켓의 허용 유형은 **미확인** |
-    pub fn kr() -> Self {
+    /// | 수수료율 · 미끄러짐 · 반올림 방향 · 최대 체결 수량 · 판 돈을 쓰는 때 | **기본값 없음** | `unverified`에 준 값이 그대로 들어간다 |
+    pub fn kr(unverified: UnverifiedRules) -> Self {
+        // 2차 뼈대: 인자를 받아 두기만 한다. 구현에서 `unverified`의 값을 그대로 넣는다.
+        let _ = unverified;
         let band = |below: Option<i64>, tick: i64| TickBand {
             below: below.map(Decimal::from),
             tick: Decimal::from(tick),
@@ -182,10 +211,12 @@ impl MarketRules {
             limit_fill_price: LimitFillPrice::Limit,
             max_fill: MaxFill::Unlimited,
             sessions: SessionRules::regular_only(),
+            high_value_confirm_from: Some(Decimal::from(100_000_000_i64)),
+            max_order_amount: Some(Decimal::from(3_000_000_000_i64)),
         }
     }
 
-    /// 미국 주식의 기본 규칙.
+    /// 미국 주식의 규칙. 확인되지 않은 값은 `unverified`와 `sell_cost_rate`로 받는다.
     ///
     /// | 값 | 기본 | 출처 |
     /// |---|---|---|
@@ -193,12 +224,13 @@ impl MarketRules {
     /// | 호가 단위 | 1달러 미만 0.0001 · 그 이상 0.01 | 토스 명세의 주문 생성 요청 `price` 설명 |
     /// | 가격제한폭 | 없음 | 토스 명세의 상/하한가 응답(미국은 null), 조사 문서 5.2 |
     /// | 결제일 | 1영업일 (T+1) | 조사 문서 5.2 |
-    /// | 팔 때 세금(SEC Fee 등) | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
-    /// | 수수료율 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
-    /// | 반올림 방향 | [`RoundingMode::Up`] | **확인되지 않은 값이며 사용자가 설정해야 한다.** 가장 보수적인 쪽으로 뒀다 |
-    /// | 미끄러짐 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
+    /// | 큰 주문 확인 · 최대 주문 금액 | 없음(`None`) | 명세의 기준은 원화 금액이다. 환전을 하지 않아 달러 주문의 원화 금액을 셈할 수 없다. 미국 주문에 어떻게 적용되는지는 **미확인** |
+    /// | 팔 때 비용(SEC Fee 등) | **기본값 없음** | `sell_cost_rate`에 준 값이 그대로 [`MarketRules::sell_tax_rate`]에 들어간다 |
+    /// | 수수료율 · 미끄러짐 · 반올림 방향 · 최대 체결 수량 · 판 돈을 쓰는 때 | **기본값 없음** | `unverified`에 준 값이 그대로 들어간다 |
     /// | 그 밖 | 국내와 같다 | |
-    pub fn us() -> Self {
+    pub fn us(unverified: UnverifiedRules, sell_cost_rate: Decimal) -> Self {
+        // 2차 뼈대: 인자를 받아 두기만 한다. 구현에서 받은 값을 그대로 넣는다.
+        let _ = (unverified, sell_cost_rate);
         Self {
             currency: Currency::Usd,
             commission_rate: Decimal::ZERO,
@@ -226,6 +258,8 @@ impl MarketRules {
             limit_fill_price: LimitFillPrice::Limit,
             max_fill: MaxFill::Unlimited,
             sessions: SessionRules::regular_only(),
+            high_value_confirm_from: None,
+            max_order_amount: None,
         }
     }
 
@@ -258,18 +292,27 @@ pub struct PaperConfig {
     pub kr: MarketRules,
     /// 미국 주식 규칙.
     pub us: MarketRules,
-    /// 늦은 시세 기준 (N6). 이 기준으로 늦은 시세로는 체결하지 않는다.
+    /// 늦은 시세 기준 (N6). 이 기준으로 늦은 시세로는 체결하지 않고, 기억하지도 않는다.
     pub stale: StalePolicy,
+    /// 체결 알림 구독 하나가 쥐는 이벤트의 최대 개수 (N1). 받는 쪽이 읽지 않아 이 개수가 차면
+    /// 그 구독만 끊는다. 1 이상이어야 한다(0이면 [`BrokerError::InvalidConfig`]).
+    pub event_buffer: usize,
 }
 
+/// [`PaperConfig::event_buffer`]의 기본값.
+pub const DEFAULT_EVENT_BUFFER: usize = 1024;
+
 impl PaperConfig {
-    /// 기본 규칙([`MarketRules::kr`] · [`MarketRules::us`] · [`StalePolicy::default`])에 처음 돈만 정한 설정.
-    pub fn new(initial_cash: InitialCash) -> Self {
+    /// 처음 돈과 두 시장의 규칙으로 설정을 만든다. 규칙은 [`MarketRules::kr`] · [`MarketRules::us`]로
+    /// 만들어 준다(확인되지 않은 숫자는 거기서 분명히 받는다). 늦은 시세 기준은
+    /// [`StalePolicy::default`](30초, N6), 구독이 쥐는 개수는 [`DEFAULT_EVENT_BUFFER`]다.
+    pub fn new(initial_cash: InitialCash, kr: MarketRules, us: MarketRules) -> Self {
         Self {
             initial_cash,
-            kr: MarketRules::kr(),
-            us: MarketRules::us(),
+            kr,
+            us,
             stale: StalePolicy::default(),
+            event_buffer: DEFAULT_EVENT_BUFFER,
         }
     }
 

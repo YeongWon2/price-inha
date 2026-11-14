@@ -30,6 +30,38 @@ pub enum InvalidReason {
     ModifyQuantityRequired,
 }
 
+/// 상태 값을 되살릴 수 없는 이유 (V6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SnapshotReason {
+    /// 모르는 모양 번호다.
+    UnknownVersion(u32),
+    /// 현금(쓸 수 있는 돈 · 결제 전인 돈)이 음수다.
+    NegativeCash,
+    /// 보유 수량이 0 이하다.
+    NonPositiveHolding,
+    /// 같은 종목 · 같은 시장의 보유가 둘 이상이다.
+    DuplicateHolding,
+    /// 주문 식별자가 겹친다.
+    DuplicateOrderId,
+    /// 주문 수량이 0 이하다.
+    NonPositiveOrderQuantity,
+    /// 주문의 체결 수량이 음수이거나 주문 수량보다 많다.
+    BadFilledQuantity,
+    /// 주문이 묶은 돈이 음수다.
+    NegativeHeldCash,
+    /// 끝난 주문에 묶인 돈이 남아 있다.
+    ClosedOrderHoldsCash,
+    /// 열린 사는 주문이 묶은 돈이 그 주문 전체에 필요한 돈(주문 수량 × 묶는 돈을 셈하는 값 +
+    /// 올린 수수료)보다 많다. 묶인 돈이 계좌의 돈을 부풀린다.
+    HeldCashTooLarge,
+    /// 열린 파는 주문들의 남은 수량 합이 그 종목의 보유 수량보다 많다.
+    SellExceedsHolding,
+    /// 다음 식별자 번호가 이미 낸 식별자(주문 · 체결 기록 · 멱등성 키가 가리키는 것)의 번호보다
+    /// 크지 않다. 되살린 뒤 새 주문의 식별자가 앞의 것과 겹치게 된다.
+    NextIdNotAhead,
+}
+
 /// 증권사가 돌려주는 오류.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -43,19 +75,38 @@ pub enum BrokerError {
     /// 팔 수 있는 수량이 모자란다. 없는 주식은 팔 수 없다(공매도 없음).
     #[error("판매 가능 수량이 부족합니다")]
     InsufficientSellableQuantity,
-    /// 장이 닫혀 있거나 그 시장의 달력을 모른다 (`order-hours-closed`).
+    /// 장이 닫혀 있다 (`order-hours-closed`). 달력은 지금을 덮는데 그 시각에 열린 세션이 없다.
     #[error("지금은 주문을 접수할 수 없는 시간입니다")]
     OrderHoursClosed,
+    /// 달력이 낡았다: 그 시장의 달력을 넣은 적이 없거나, 넣어 준 달력이 지금을 덮지 않는다
+    /// ([`crate::PaperBroker::set_calendar`]의 "덮는다" 참고). 장이 닫힌 것과 구분된다.
+    /// 조립하는 쪽이 달력을 날마다 넣지 않으면 이것으로 드러난다.
+    #[error("달력이 지금 시각을 덮지 않아 주문을 받을 수 없습니다")]
+    CalendarStale,
+    /// 주문 금액이 확인 기준 이상인데 확인 표시가 없다 (`confirm-high-value-required`).
+    #[error("{threshold} 이상의 주문은 확인이 필요합니다")]
+    ConfirmHighValueRequired {
+        /// 확인이 필요해지는 금액(이 금액 이상). 명세 오류의 `data.limits.threshold`.
+        threshold: Decimal,
+    },
+    /// 주문 금액이 최대 주문 금액을 넘는다 (`max-order-amount-exceeded`).
+    #[error("최대 주문 가능 금액({max_amount})을 초과하였습니다")]
+    MaxOrderAmountExceeded {
+        /// 최대 주문 금액. 명세 오류의 `data.limits.maxAmount`.
+        max_amount: Decimal,
+    },
     /// 열린 세션에서 그 호가 유형을 쓸 수 없다 (`order-type-not-allowed`).
     #[error("지금 쓸 수 없는 호가 유형입니다")]
     OrderTypeNotAllowed,
     /// 값이 상 · 하한가를 벗어났다 (`price-out-of-range`).
     #[error("주문 가격이 허용 범위를 벗어났습니다")]
     PriceOutOfRange,
-    /// 상 · 하한가가 있는 시장인데 그 종목의 기준가(전일 종가)를 모른다. 확인할 수 없으니 받지 않는다.
+    /// 상 · 하한가가 있는 시장인데 그 종목의 기준가(전일 종가)를 모른다: 넣은 적이 없거나,
+    /// 넣은 기준가가 오늘(달력에서 지금이 든 세션의 날) 것이 아니다. 확인할 수 없으니 받지 않는다.
     #[error("기준가를 몰라 상·하한가를 확인할 수 없습니다")]
     ReferencePriceUnknown,
-    /// 시장가로 살 때 묶을 돈을 셈할 시세를 아직 한 번도 받지 못했다.
+    /// 시장가로 살 때 묶을 돈을 셈할 **늦지 않은** 시세가 없다: 그 종목의 시세를 받은 적이 없거나,
+    /// 마지막으로 기억한 시세가 지금 기준으로 늦었다(N6). 늦은 시세는 기억하지도 않는다.
     #[error("시세를 몰라 시장가 주문을 받을 수 없습니다")]
     QuoteUnknown,
     /// 같은 종목에 반대 방향의 열린 주문이 있다 (`opposite-pending-order-exists`).
@@ -111,7 +162,7 @@ pub enum BrokerError {
     /// 설정 값이 틀렸다(음수인 처음 돈 · 비율 등).
     #[error("모의계좌 설정이 올바르지 않습니다: {0}")]
     InvalidConfig(String),
-    /// 되살릴 수 없는 상태 값이다.
-    #[error("모의계좌 상태 값을 되살릴 수 없습니다: {0}")]
-    InvalidSnapshot(String),
+    /// 되살릴 수 없는 상태 값이다 (V6).
+    #[error("모의계좌 상태 값을 되살릴 수 없습니다: {0:?}")]
+    InvalidSnapshot(SnapshotReason),
 }

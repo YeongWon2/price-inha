@@ -3,7 +3,7 @@
 //! 실시간 본인 주문 이벤트). 명세의 필드 이름은 문서 주석에 `backtick`으로 적는다.
 //!
 //! 명세에 있지만 이번에 다루지 않는 것: 금액 기반 주문(`orderAmount`), 소수점 수량,
-//! 주문 유효 조건(`timeInForce`의 `CLS` · `OPG`), 고액 주문 확인(`confirmHighValueOrder`).
+//! 주문 유효 조건(`timeInForce`의 `CLS` · `OPG`).
 
 use std::time::Duration;
 
@@ -110,9 +110,13 @@ pub enum OrderGroup {
 /// 체결되지 않은 주문을 언제 취소하는가 (N4 · E12 · E29).
 ///
 /// 접수한 시각부터 잰다. 그 시각이 **되면**(`지금 >= 마감`) 남은 부분을 취소한다.
+///
+/// 주문은 장 마감을 넘기지 않는다(토스 명세의 당일 주문과 같게): 어느 값을 주든 마감은
+/// **주문을 접수한 세션이 끝나는 시각보다 늦지 않다**(`마감 = min(접수 시각 + 기다리는 시간,
+/// 접수한 세션의 끝)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UnfilledTimeout {
-    /// 접수하고 이만큼 지나면 취소한다.
+    /// 접수하고 이만큼 지나면 취소한다. 그 전에 접수한 세션이 끝나면 그때 취소한다.
     After(Duration),
     /// 주문을 접수한 세션이 끝나면 취소한다(장 마감까지).
     SessionClose,
@@ -166,6 +170,10 @@ pub struct OrderRequest {
     pub account_kind: AccountKind,
     /// 체결되지 않으면 언제 취소할지 (N4).
     pub timeout: UnfilledTimeout,
+    /// 큰 주문 확인 표시 (`confirmHighValueOrder`). 주문 금액이
+    /// [`crate::MarketRules::high_value_confirm_from`] 이상인데 `false`면 받지 않는다.
+    /// 최대 주문 금액을 넘는 주문은 이 값과 상관없이 받지 않는다.
+    pub confirm_high_value: bool,
     /// 규칙 엔진이 낸 점검 통과 표시. 없으면 받지 않는다 (E33).
     pub permit: Option<CheckPermit>,
 }
@@ -180,6 +188,8 @@ pub struct ModifyRequest {
     pub quantity: Option<Decimal>,
     /// 바꿀 값 (`price`). 지정가면 반드시 있고, 시장가면 없어야 한다.
     pub price: Option<Decimal>,
+    /// 큰 주문 확인 표시 (`confirmHighValueOrder`). 정정 뒤 새 주문의 금액으로 접수 때와 같이 본다.
+    pub confirm_high_value: bool,
     /// 바뀐 내용에 대한 점검 통과 표시. 없으면 받지 않는다 (E33).
     pub permit: Option<CheckPermit>,
 }
@@ -272,6 +282,16 @@ pub struct Fill {
     pub filled_at: DateTime<Utc>,
     /// 결제 예정일.
     pub settlement_date: NaiveDate,
+}
+
+/// 계좌에서 덜어 낸 끝난 것들 (N1). [`crate::PaperBroker::archive_before`]가 돌려준다.
+/// 조립하는 쪽이 저장소로 옮긴다. 덜어 낸 것은 계좌의 조회 · 상태 값에 더는 나오지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Archived {
+    /// 덜어 낸 끝난 주문(접수한 순서대로).
+    pub orders: Vec<Order>,
+    /// 덜어 낸 체결 기록(일어난 순서대로).
+    pub fills: Vec<Fill>,
 }
 
 /// 보유 종목 하나 (`HoldingsItem` 가운데 수량과 평균 산 값).

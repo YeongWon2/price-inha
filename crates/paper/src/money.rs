@@ -122,7 +122,9 @@ pub(crate) fn affordable_quantity(
 #[cfg(test)]
 mod tests {
     use super::{affordable_quantity, buy_cost, buy_hold, charge, market_price, price_band};
-    use crate::{MarketRules, MoneyRounding, RoundingMode, Side};
+    use crate::{
+        MarketRules, MaxFill, MoneyRounding, ProceedsUsable, RoundingMode, Side, UnverifiedRules,
+    };
     use rust_decimal::Decimal;
 
     fn d(text: &str) -> Decimal {
@@ -130,7 +132,13 @@ mod tests {
     }
 
     fn rules(mode: RoundingMode) -> MarketRules {
-        let mut rules = MarketRules::kr();
+        let mut rules = MarketRules::kr(UnverifiedRules {
+            commission_rate: d("0.00015"),
+            market_slippage_rate: d("0.001"),
+            rounding_mode: mode,
+            max_fill: MaxFill::Unlimited,
+            proceeds_usable: ProceedsUsable::AfterSettlement,
+        });
         rules.commission_rate = d("0.00015");
         rules.market_slippage_rate = d("0.001");
         rules.rounding = MoneyRounding { scale: 0, mode };

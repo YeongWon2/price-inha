@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use pi_market::{Currency, Symbol};
 use rust_decimal::Decimal;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::{
     AccountKind, BrokerError, Commission, Holding, ModifyRequest, Order, OrderAck, OrderEvent,
@@ -15,6 +15,9 @@ use crate::{
 ///
 /// 모의계좌([`crate::PaperBroker`])가 이것의 구현이다. 나중에 실제 증권사 구현을 더해도
 /// 주문을 내는 쪽 코드는 바뀌지 않는다. 시각은 부르는 쪽이 `now`로 준다.
+///
+/// 주문 내기 · 정정 · 취소 · 조회는 모두 **먼저 `now`까지 마감이 된 주문을 취소한 뒤** 제 일을 한다.
+/// 시간이 흘렀다고 따로 알려 주지 않아도 마감 지난 주문이 열린 채로 보이거나 정정되지 않는다.
 #[async_trait]
 pub trait Broker: Send + Sync {
     /// 이 구현의 계좌 종류 (E25 · V29).
@@ -50,23 +53,40 @@ pub trait Broker: Send + Sync {
         &self,
         group: OrderGroup,
         symbol: Option<&Symbol>,
+        now: DateTime<Utc>,
     ) -> Result<Vec<Order>, BrokerError>;
 
     /// 주문 상세 API. 모든 상태의 주문을 볼 수 있다.
-    async fn order(&self, order_id: &OrderId) -> Result<Order, BrokerError>;
+    async fn order(&self, order_id: &OrderId, now: DateTime<Utc>) -> Result<Order, BrokerError>;
 
     /// 매수 가능 금액 API. 그 통화로 지금 살 수 있는 현금(묶인 돈 · 결제 전인 돈은 뺀다).
-    async fn buying_power(&self, currency: Currency) -> Result<Decimal, BrokerError>;
+    async fn buying_power(
+        &self,
+        currency: Currency,
+        now: DateTime<Utc>,
+    ) -> Result<Decimal, BrokerError>;
 
     /// 판매 가능 수량 API. 보유 수량에서 열린 파는 주문에 묶인 수량을 뺀 것. 없는 종목은 0.
-    async fn sellable_quantity(&self, symbol: &Symbol) -> Result<Decimal, BrokerError>;
+    async fn sellable_quantity(
+        &self,
+        symbol: &Symbol,
+        now: DateTime<Utc>,
+    ) -> Result<Decimal, BrokerError>;
 
     /// 매매 수수료 API. 시장별 수수료율.
     async fn commissions(&self) -> Result<Vec<Commission>, BrokerError>;
 
     /// 보유 주식 API. 종목 글자 순서로 돌려준다. `symbol`을 주면 그 종목만. 없으면 빈 목록.
-    async fn holdings(&self, symbol: Option<&Symbol>) -> Result<Vec<Holding>, BrokerError>;
+    async fn holdings(
+        &self,
+        symbol: Option<&Symbol>,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Holding>, BrokerError>;
 
-    /// 실시간 본인 주문 이벤트(체결 알림). 구독한 뒤에 일어난 이벤트를 빠짐없이 순서대로 받는다.
-    fn subscribe(&self) -> UnboundedReceiver<OrderEvent>;
+    /// 실시간 본인 주문 이벤트(체결 알림). 구독한 뒤에 일어난 이벤트를 순서대로 받는다.
+    ///
+    /// 끝없이 쌓이지 않는다 (N1): 받는 쪽이 읽지 않으면 정한 개수까지만 쥐고, 그 개수가 찬 뒤에
+    /// 이벤트가 또 생기면 **그 구독만** 끊는다(이미 쥔 것은 읽을 수 있고, 그 뒤로는 닫힌다).
+    /// 다른 구독과 계좌의 동작은 그대로다. 끊긴 쪽은 다시 구독하고 조회로 상태를 맞춘다.
+    fn subscribe(&self) -> Receiver<OrderEvent>;
 }

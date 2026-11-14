@@ -406,14 +406,23 @@ fn 한_시세에서_체결되는_수량은_설정한_최대까지다() {
     assert_eq!(desk.order(&order_id).execution.filled_quantity, d("9"));
     assert_eq!(desk.order(&order_id).status, OrderStatus::PartialFilled);
 
-    // 마지막 1주: 70,000, 수수료 10.5 → 10. 수수료 합 31 × 3 + 10 = 103.
+    // 2차 6번: 수수료는 주문 단위로 누적해 뗀다. 누적 금액 210,000 → 420,000 → 630,000 → 700,000의
+    // 수수료는 31.5 → 63 → 94.5 → 105, 버려서 31 → 63 → 94 → 105. 체결마다 뗀 것은 31 · 32 · 31 · 11.
+    // 뗀 합 105는 10주가 한 번에 체결됐을 때(700,000 × 0.015% = 105)와 같다.
     let events = desk.quote(SAM, "70000", at(4));
     assert_eq!(kinds(&events), vec![OrderEventKind::Fill]);
     let order = desk.order(&order_id);
     assert_eq!(order.status, OrderStatus::Filled);
     assert_eq!(order.execution.filled_quantity, d("10"));
-    assert_eq!(order.execution.commission, d("103"));
-    assert_eq!(desk.krw(), cash("9299897", "0", "0"));
+    assert_eq!(order.execution.commission, d("105"));
+    assert_eq!(desk.krw(), cash("9299895", "0", "0"));
+    let taken: Vec<_> = desk
+        .broker
+        .fills()
+        .iter()
+        .map(|fill| fill.commission)
+        .collect();
+    assert_eq!(taken, vec![d("31"), d("32"), d("31"), d("11")]);
     assert_eq!(desk.broker.fills().len(), 4);
 
     // 다 체결된 주문은 더 체결되지 않는다.
@@ -454,7 +463,7 @@ fn 늦은_시세로는_체결하지_않는다() {
 
     // 받은 지 31초 된 시세: 늦었다(30초를 넘었다).
     let late = quote_received(SAM, "70000", Currency::Krw, at(9));
-    assert!(desk.broker.on_quote(&late, at(40)).is_empty());
+    assert!(desk.on_quote(&late, at(40)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
     assert!(desk.broker.fills().is_empty());
     assert_eq!(desk.krw(), cash("9929989", "70011", "0"));
@@ -462,7 +471,7 @@ fn 늦은_시세로는_체결하지_않는다() {
     // 받은 지 딱 30초 된 시세: 아직 늦지 않았다.
     let fresh = quote_received(SAM, "70000", Currency::Krw, at(11));
     assert_eq!(
-        kinds(&desk.broker.on_quote(&fresh, at(41))),
+        kinds(&desk.on_quote(&fresh, at(41))),
         vec![OrderEventKind::Fill]
     );
     assert_eq!(desk.order(&order_id).status, OrderStatus::Filled);
@@ -476,22 +485,31 @@ fn 늦은_시세_기준은_설정을_따른다() {
     let desk = Desk::open(config);
     let order_id = desk.accepted(&buy(SAM, "1", "70000"), at(0));
     let six_seconds_old = quote_received(SAM, "70000", Currency::Krw, at(4));
-    assert!(desk.broker.on_quote(&six_seconds_old, at(10)).is_empty());
+    assert!(desk.on_quote(&six_seconds_old, at(10)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
 }
 
-// 검증: C10
+// 검증: C10, E12
+// 2차 8번: 주문은 장 마감을 넘기지 않는다. 기다리는 시간이 사흘이어도 접수한 세션(정규장)이
+// 끝나면 취소되므로, 그 뒤 세션의 시세로는 체결될 주문이 남아 있지 않다.
 #[test]
 fn 장이_닫힌_시각이나_받지_않는_세션의_시세로는_체결하지_않는다() {
     let desk = Desk::standard();
     let long = UnfilledTimeout::After(std::time::Duration::from_secs(3 * 24 * 3600));
     let order_id = desk.accepted(&buy(SAM, "1", "70000").timeout(long), at(0));
 
-    // 애프터마켓(테스트 설정은 정규장만 받는다)과 완전히 닫힌 시각.
-    assert!(desk.quote(SAM, "70000", utc(monday(), 7, 0, 0)).is_empty());
+    // 애프터마켓(테스트 설정은 정규장만 받는다)의 시세: 체결 없이, 정규장 끝에 마감이 된 주문이 취소된다.
+    let events = desk.quote(SAM, "70000", utc(monday(), 7, 0, 0));
+    assert_eq!(kinds(&events), vec![OrderEventKind::Canceled]);
+    // 완전히 닫힌 시각의 시세: 아무 일도 없다.
     assert!(desk.quote(SAM, "70000", utc(monday(), 12, 0, 0)).is_empty());
-    assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
+
+    let order = desk.order(&order_id);
+    assert_eq!(order.status, OrderStatus::Canceled);
+    assert_eq!(order.close_reason, Some(CloseReason::UnfilledTimeout));
+    assert_eq!(order.execution.filled_quantity, d("0"));
     assert!(desk.broker.fills().is_empty());
+    assert_eq!(desk.krw(), cash("10000000", "0", "0"));
 }
 
 // 검증: C10
@@ -502,7 +520,7 @@ fn 다른_종목이나_다른_통화의_시세로는_체결하지_않는다() {
 
     assert!(desk.quote(HYN, "30000", at(1)).is_empty());
     let dollars = quote_received(SAM, "70000", Currency::Usd, at(2));
-    assert!(desk.broker.on_quote(&dollars, at(2)).is_empty());
+    assert!(desk.on_quote(&dollars, at(2)).is_empty());
 
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
     assert!(desk.broker.fills().is_empty());

@@ -15,11 +15,11 @@ fn 단타_주문은_1분이_되면_취소되고_이유가_남는다() {
         at(0),
     );
 
-    assert!(desk.broker.on_time(at(59)).is_empty());
+    assert!(desk.on_time(at(59)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
     assert_eq!(desk.krw(), cash("9299895", "700105", "0"));
 
-    let events = desk.broker.on_time(at(60));
+    let events = desk.on_time(at(60));
     assert_eq!(kinds(&events), vec![OrderEventKind::Canceled]);
     let order = desk.order(&order_id);
     assert_eq!(events[0].order, order);
@@ -35,7 +35,7 @@ fn 단타_주문은_1분이_되면_취소되고_이유가_남는다() {
     assert_eq!(desk.orders(OrderGroup::Closed), vec![order]);
 
     // 한 번 취소된 주문은 다시 취소되지 않는다.
-    assert!(desk.broker.on_time(at(61)).is_empty());
+    assert!(desk.on_time(at(61)).is_empty());
 }
 
 // 검증: E12, N4
@@ -46,10 +46,10 @@ fn 스윙_주문은_10분이_되면_취소된다() {
         &buy(SAM, "1", "70000").timeout(UnfilledTimeout::SWING),
         at(0),
     );
-    assert!(desk.broker.on_time(at(599)).is_empty());
+    assert!(desk.on_time(at(599)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
     assert_eq!(
-        kinds(&desk.broker.on_time(at(600))),
+        kinds(&desk.on_time(at(600))),
         vec![OrderEventKind::Canceled]
     );
     assert_eq!(
@@ -67,14 +67,11 @@ fn 중장기_주문은_장_마감에_취소된다() {
         at(0),
     );
     // 정규장은 06:30 UTC(15:30 KST)에 끝난다.
-    assert!(desk.broker.on_time(utc(monday(), 6, 29, 59)).is_empty());
+    assert!(desk.on_time(utc(monday(), 6, 29, 59)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
 
     let close = utc(monday(), 6, 30, 0);
-    assert_eq!(
-        kinds(&desk.broker.on_time(close)),
-        vec![OrderEventKind::Canceled]
-    );
+    assert_eq!(kinds(&desk.on_time(close)), vec![OrderEventKind::Canceled]);
     let order = desk.order(&order_id);
     assert_eq!(order.status, OrderStatus::Canceled);
     assert_eq!(order.close_reason, Some(CloseReason::UnfilledTimeout));
@@ -92,8 +89,8 @@ fn 취소_시간은_주문마다_준_값을_따른다() {
         at(0),
     );
 
-    assert!(desk.broker.on_time(at(4)).is_empty());
-    let events = desk.broker.on_time(at(5));
+    assert!(desk.on_time(at(4)).is_empty());
+    let events = desk.on_time(at(5));
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].order.order_id, short);
     assert_eq!(desk.order(&long).status, OrderStatus::Pending);
@@ -112,7 +109,7 @@ fn 일부만_체결되면_남은_부분만_취소하고_체결된_만큼은_보�
     desk.quote(SAM, "70000", at(10));
     assert_eq!(desk.order(&order_id).status, OrderStatus::PartialFilled);
 
-    let events = desk.broker.on_time(at(60));
+    let events = desk.on_time(at(60));
     assert_eq!(kinds(&events), vec![OrderEventKind::Canceled]);
     let order = desk.order(&order_id);
     assert_eq!(order.status, OrderStatus::Canceled);
@@ -157,7 +154,7 @@ fn 마감_전에_온_시세로는_체결한다() {
     desk.quote(SAM, "70000", at(59));
     assert_eq!(desk.order(&order_id).status, OrderStatus::Filled);
     // 다 체결된 주문은 마감이 지나도 그대로다.
-    assert!(desk.broker.on_time(at(60)).is_empty());
+    assert!(desk.on_time(at(60)).is_empty());
     assert_eq!(desk.order(&order_id).status, OrderStatus::Filled);
     assert_eq!(desk.order(&order_id).close_reason, None);
 }
@@ -172,7 +169,7 @@ fn 파는_주문이_취소되면_묶인_수량이_풀린다() {
         at(0),
     );
     assert_eq!(desk.sellable(SAM), d("0"));
-    desk.broker.on_time(at(60));
+    desk.on_time(at(60));
     assert_eq!(desk.order(&order_id).status, OrderStatus::Canceled);
     assert_eq!(desk.sellable(SAM), d("10"));
     assert_eq!(desk.holding(SAM).unwrap().quantity, d("10"));
@@ -186,7 +183,7 @@ fn 시간이_지나_취소된_주문은_다시_취소할_수_없다() {
         &buy(SAM, "1", "70000").timeout(UnfilledTimeout::SCALP),
         at(0),
     );
-    desk.broker.on_time(at(60));
+    desk.on_time(at(60));
     assert_eq!(
         desk.cancel(&order_id, at(61)),
         Err(BrokerError::AlreadyCanceled)

@@ -148,13 +148,14 @@ fn 장이_닫혀_있으면_받지_않는다() {
 }
 
 // 검증: C10
+// 2차 13번: 달력을 넣은 적이 없는 것은 "장 닫힘"이 아니라 "달력이 낡음"이다.
 #[test]
 fn 달력을_모르는_시장의_주문은_받지_않는다() {
     let desk = Desk::bare(config());
-    desk.broker.set_reference_price(sym(SAM), d("70000"));
+    desk.reference(monday());
     assert_eq!(
         desk.place(&buy(SAM, "1", "70000"), at(0)),
-        Err(BrokerError::OrderHoursClosed)
+        Err(BrokerError::CalendarStale)
     );
 }
 
@@ -294,7 +295,8 @@ fn 기준가를_모르는_종목의_지정가는_받지_않는다() {
         desk.place(&buy(SAM, "1", "70000"), at(0)),
         Err(BrokerError::ReferencePriceUnknown)
     );
-    desk.broker.set_reference_price(sym(SAM), d("70000"));
+    desk.broker
+        .set_reference_price(sym(SAM), d("70000"), monday());
     desk.place(&buy(SAM, "1", "70000"), at(1)).unwrap();
 }
 

@@ -24,14 +24,14 @@ mod permit;
 
 pub use broker::Broker;
 pub use config::{
-    InitialCash, LimitFillPrice, MarketRules, MaxFill, MoneyRounding, PaperConfig, ProceedsUsable,
-    RoundingMode, SessionRules, Settlement, TickBand,
+    DEFAULT_EVENT_BUFFER, InitialCash, LimitFillPrice, MarketRules, MaxFill, MoneyRounding,
+    PaperConfig, ProceedsUsable, RoundingMode, SessionRules, Settlement, TickBand, UnverifiedRules,
 };
-pub use error::{BrokerError, InvalidReason};
+pub use error::{BrokerError, InvalidReason, SnapshotReason};
 pub use model::{
-    AccountKind, CashBalance, CloseReason, Commission, Execution, Fill, Holding, ModifyRequest,
-    Order, OrderAck, OrderEvent, OrderEventKind, OrderGroup, OrderId, OrderRequest, OrderStatus,
-    OrderType, Side, UnfilledTimeout,
+    AccountKind, Archived, CashBalance, CloseReason, Commission, Execution, Fill, Holding,
+    ModifyRequest, Order, OrderAck, OrderEvent, OrderEventKind, OrderGroup, OrderId, OrderRequest,
+    OrderStatus, OrderType, Side, UnfilledTimeout,
 };
 pub use paper::{Fault, IDEMPOTENCY_WINDOW, PaperBroker, Snapshot};
 pub use permit::{ApprovedOrder, CheckAuthority, CheckPermit};

@@ -12,10 +12,12 @@ use crate::support::{
 };
 
 /// 10주를 70,000에 사서 71,000에 다 판다. 판 돈 710,000 − 106(106.5 버림) − 1,420 = 708,474.
+/// 주문 뒤에 온 시세로만 체결되므로 1초씩 띄운다: 사기 `now`, 팔기 1초 뒤, 파는 시세 2초 뒤.
 fn buy_then_sell_all(desk: &Desk, now: DateTime<Utc>) {
+    let second = chrono::Duration::seconds(1);
     desk.own(SAM, "10", "70000", now);
-    desk.accepted(&sell(SAM, "10", "71000"), now);
-    desk.quote(SAM, "71000", now);
+    desk.accepted(&sell(SAM, "10", "71000"), now + second);
+    desk.quote(SAM, "71000", now + second * 2);
 }
 
 // 검증: C10
@@ -31,7 +33,7 @@ fn 국내에서_판_돈은_이틀_뒤_영업일에_쓸_수_있다() {
 
     // 결제 전인 돈으로는 살 수 없다: 9,300,000 + 수수료는 쓸 수 있는 돈을 넘는다.
     assert_eq!(
-        desk.place(&buy(SAM, "133", "70000"), at(1)),
+        desk.place(&buy(SAM, "133", "70000"), at(3)),
         Err(BrokerError::InsufficientBuyingPower)
     );
 
@@ -63,7 +65,8 @@ fn friday() -> NaiveDate {
 fn 금요일에_체결하면_주말을_건너_화요일에_결제된다() {
     let desk = Desk::bare(config());
     desk.broker.set_calendar(kr_calendar(friday()));
-    desk.broker.set_reference_price(sym(SAM), d("70000"));
+    desk.broker
+        .set_reference_price(sym(SAM), d("70000"), friday());
     buy_then_sell_all(&desk, utc(friday(), 1, 0, 0));
 
     let fills = desk.broker.fills();
@@ -118,11 +121,12 @@ fn 결제까지의_영업일_수는_설정을_따른다() {
 fn 미국에서_판_돈은_다음_영업일에_쓸_수_있고_시장마다_따로_결제된다() {
     let desk = Desk::bare(config());
     desk.broker.set_calendar(us_calendar(friday()));
-    let now = utc(friday(), 15, 0, 0);
-    desk.accepted(&us_buy(AAPL, "10", "150.25"), now);
-    desk.us_quote(AAPL, "150.25", now);
-    desk.accepted(&us_sell(AAPL, "10", "151.00"), now);
-    desk.us_quote(AAPL, "151.00", now);
+    // 주문 뒤에 온 시세로만 체결되므로 1초씩 띄운다.
+    let now = |seconds: i64| utc(friday(), 15, 0, 0) + chrono::Duration::seconds(seconds);
+    desk.accepted(&us_buy(AAPL, "10", "150.25"), now(0));
+    desk.us_quote(AAPL, "150.25", now(1));
+    desk.accepted(&us_sell(AAPL, "10", "151.00"), now(2));
+    desk.us_quote(AAPL, "151.00", now(3));
 
     // 금요일 체결 → 월요일 결제(T+1).
     let fills = desk.broker.fills();

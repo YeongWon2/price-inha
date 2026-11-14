@@ -171,6 +171,7 @@ fn 정정도_접수와_같은_확인을_거친다() {
         order_type: OrderType::Limit,
         quantity: Some(d("10")),
         price: Some(d("69500")),
+        confirm_high_value: false,
         permit: None,
     };
     assert_eq!(
@@ -245,6 +246,7 @@ fn 끝난_주문과_없는_주문은_정정할_수_없다() {
         order_type: OrderType::Limit,
         quantity: Some(d("1")),
         price: Some(d("70000")),
+        confirm_high_value: false,
         permit: None,
     };
     assert_eq!(
@@ -296,7 +298,9 @@ fn 주문_목록은_진행_중과_끝난_것을_나누고_종목으로_거른다
     let broker = desk.as_broker();
     let list = |group, code: Option<&str>| {
         let symbol = code.map(sym);
-        ids(desk.run(broker.orders(group, symbol.as_ref())).unwrap())
+        ids(desk
+            .run(broker.orders(group, symbol.as_ref(), at(5)))
+            .unwrap())
     };
 
     // 접수한 순서대로.
@@ -320,7 +324,10 @@ fn 주문_목록은_진행_중과_끝난_것을_나누고_종목으로_거른다
 fn 없는_주문의_상세는_찾을_수_없다고_알려_준다() {
     let desk = Desk::standard();
     assert_eq!(
-        desk.run(desk.as_broker().order(&OrderId::new("no-such-order"))),
+        desk.run(
+            desk.as_broker()
+                .order(&OrderId::new("no-such-order"), at(0))
+        ),
         Err(BrokerError::OrderNotFound)
     );
 }
@@ -382,8 +389,8 @@ async fn buy_and_report(broker: &dyn Broker, desk: &Desk) -> (OrderStatus, rust_
         .place_order(req.request(Some(permit)), at(0))
         .await
         .unwrap();
-    let order = broker.order(&ack.order_id).await.unwrap();
-    let power = broker.buying_power(Currency::Krw).await.unwrap();
+    let order = broker.order(&ack.order_id, at(0)).await.unwrap();
+    let power = broker.buying_power(Currency::Krw, at(0)).await.unwrap();
     (order.status, power)
 }
 

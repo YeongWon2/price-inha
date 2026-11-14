@@ -1,5 +1,6 @@
 //! 테스트가 함께 쓰는 도우미: 설정 · 달력 · 시세 · 주문 요청 · 계좌를 다루는 책상(`Desk`).
 
+use std::cell::Cell;
 use std::future::Future;
 use std::time::Duration;
 
@@ -159,6 +160,11 @@ pub fn krx_ticks() -> Vec<TickBand> {
     ]
 }
 
+/// 그 날짜의 국내 정규장이 끝나는 시각(06:30 UTC = 15:30 KST).
+pub fn kr_close(date: NaiveDate) -> DateTime<Utc> {
+    utc(date, 6, 30, 0)
+}
+
 fn regular_only() -> SessionRules {
     SessionRules {
         limit: vec![SessionKind::Regular],
@@ -169,7 +175,8 @@ fn regular_only() -> SessionRules {
 /// 테스트 설정. 기본값에 기대지 않게 모든 숫자를 적는다.
 ///
 /// 원화 10,000,000 · 달러 10,000. 국내: 수수료 0.015%, 거래세 0.20%, 원 미만 버림, 미끄러짐 0.1%,
-/// T+2 결제 뒤 사용. 미국: 수수료 0.1%, 팔 때 0.01%, 센트 미만 버림, 미끄러짐 0.1%, T+1.
+/// T+2 결제 뒤 사용, 1억 원 이상은 확인 · 30억 원 초과는 거부. 미국: 수수료 0.1%, 팔 때 0.01%,
+/// 센트 미만 버림, 미끄러짐 0.1%, T+1. 구독 하나가 쥐는 이벤트는 64개까지.
 pub fn config() -> PaperConfig {
     PaperConfig {
         initial_cash: InitialCash {
@@ -194,6 +201,8 @@ pub fn config() -> PaperConfig {
             limit_fill_price: LimitFillPrice::Limit,
             max_fill: MaxFill::Unlimited,
             sessions: regular_only(),
+            high_value_confirm_from: Some(d("100000000")),
+            max_order_amount: Some(d("3000000000")),
         },
         us: MarketRules {
             currency: Currency::Usd,
@@ -222,10 +231,13 @@ pub fn config() -> PaperConfig {
             limit_fill_price: LimitFillPrice::Limit,
             max_fill: MaxFill::Unlimited,
             sessions: regular_only(),
+            high_value_confirm_from: None,
+            max_order_amount: None,
         },
         stale: StalePolicy {
             max_age: Duration::from_secs(30),
         },
+        event_buffer: 64,
     }
 }
 
@@ -236,18 +248,29 @@ pub fn config_with_krw(krw: &str) -> PaperConfig {
     config
 }
 
-/// 시세 하나. 받은 시각을 따로 정한다.
+/// 시세 하나. 받은 시각을 따로 정한다. 거래소 시각은 받은 시각과 같다(그때 막 체결된 값).
 pub fn quote_received(
     code: &str,
     price: &str,
     currency: Currency,
     received_at: DateTime<Utc>,
 ) -> Quote {
+    quote_full(code, price, currency, Some(received_at), received_at)
+}
+
+/// 시세 하나. 거래소 시각과 받은 시각을 저마다 정한다.
+pub fn quote_full(
+    code: &str,
+    price: &str,
+    currency: Currency,
+    exchange_time: Option<DateTime<Utc>>,
+    received_at: DateTime<Utc>,
+) -> Quote {
     Quote {
         symbol: sym(code),
         price: d(price),
         currency,
-        exchange_time: None,
+        exchange_time,
         received_at,
     }
 }
@@ -264,6 +287,7 @@ pub struct Req {
     pub price: Option<Decimal>,
     pub account_kind: AccountKind,
     pub timeout: UnfilledTimeout,
+    pub confirm_high_value: bool,
 }
 
 impl Req {
@@ -282,7 +306,14 @@ impl Req {
             price: price.map(d),
             account_kind: AccountKind::Paper,
             timeout: UnfilledTimeout::LONG_TERM,
+            confirm_high_value: false,
         }
+    }
+
+    /// 큰 주문 확인 표시를 붙인다.
+    pub fn confirmed(mut self) -> Self {
+        self.confirm_high_value = true;
+        self
     }
 
     /// 멱등성 키를 붙인다.
@@ -322,6 +353,7 @@ impl Req {
             price: self.price,
             account_kind: self.account_kind,
             timeout: self.timeout,
+            confirm_high_value: self.confirm_high_value,
             permit,
         }
     }
@@ -372,10 +404,15 @@ pub fn cash(available: &str, held: &str, unsettled: &str) -> CashBalance {
 }
 
 /// 모의계좌 하나와 그 권한, 그리고 async 메서드를 돌릴 실행기.
+///
+/// 조회에는 시각이 필요하다(조회도 먼저 마감이 된 주문을 취소한다). 책상은 이 책상을 거쳐 간
+/// 마지막 호출의 시각을 기억해 두고, 시각 없이 부르는 조회(`order` · `krw` …)에 그 시각을 쓴다.
+/// 시각을 정해 조회하려면 `_at`이 붙은 것을 쓴다.
 pub struct Desk {
     pub broker: PaperBroker,
     pub authority: CheckAuthority,
     runtime: Runtime,
+    clock: Cell<DateTime<Utc>>,
 }
 
 impl Desk {
@@ -384,7 +421,22 @@ impl Desk {
             broker,
             authority,
             runtime: Builder::new_current_thread().build().unwrap(),
+            clock: Cell::new(DateTime::<Utc>::MIN_UTC),
         }
+    }
+
+    /// 이 책상을 거쳐 간 마지막 호출의 시각.
+    fn seen(&self) -> DateTime<Utc> {
+        self.clock.get()
+    }
+
+    fn see(&self, now: DateTime<Utc>) {
+        self.clock.set(now);
+    }
+
+    /// 계좌를 부르지 않고 책상이 기억하는 시각만 바꾼다. 뒤따르는 시각 없는 조회가 이 시각으로 간다.
+    pub fn set_clock(&self, now: DateTime<Utc>) {
+        self.see(now);
     }
 
     /// 달력도 기준가도 넣지 않은 새 계좌.
@@ -404,19 +456,27 @@ impl Desk {
         Self::open(config())
     }
 
-    /// 월요일 달력(국내 · 미국)과 기준가(삼성 70,000 · 하이닉스 30,000)를 넣는다.
+    /// 월요일 달력(국내 · 미국)과 월요일의 기준가(삼성 70,000 · 하이닉스 30,000)를 넣는다.
     pub fn feed(&self) {
         self.broker.set_calendar(kr_calendar(monday()));
         self.broker.set_calendar(us_calendar(monday()));
-        self.broker.set_reference_price(sym(SAM), d("70000"));
-        self.broker.set_reference_price(sym(HYN), d("30000"));
+        self.reference(monday());
+    }
+
+    /// 그 날짜의 기준가(삼성 70,000 · 하이닉스 30,000)를 넣는다.
+    pub fn reference(&self, date: NaiveDate) {
+        self.broker.set_reference_price(sym(SAM), d("70000"), date);
+        self.broker.set_reference_price(sym(HYN), d("30000"), date);
     }
 
     /// 상태를 글자(JSON)로 내보냈다가 그 글자에서 새 계좌로 되살린다(달력 · 기준가는 넣지 않는다).
+    /// 책상이 기억한 시각은 이어진다.
     pub fn reopen_bare(&self, config: PaperConfig) -> Self {
         let text = serde_json::to_string(&self.broker.snapshot()).unwrap();
         let snapshot: Snapshot = serde_json::from_str(&text).unwrap();
-        Self::wrap(PaperBroker::restore(config, snapshot).unwrap())
+        let desk = Self::wrap(PaperBroker::restore(config, snapshot).unwrap());
+        desk.clock.set(self.seen());
+        desk
     }
 
     /// 되살린 뒤 월요일 달력과 기준가를 다시 넣는다.
@@ -448,6 +508,7 @@ impl Desk {
         request: OrderRequest,
         now: DateTime<Utc>,
     ) -> Result<OrderAck, BrokerError> {
+        self.see(now);
         self.run(self.as_broker().place_order(request, now))
     }
 
@@ -458,6 +519,7 @@ impl Desk {
 
     /// 취소.
     pub fn cancel(&self, order_id: &OrderId, now: DateTime<Utc>) -> Result<OrderId, BrokerError> {
+        self.see(now);
         self.run(self.as_broker().cancel_order(order_id, now))
     }
 
@@ -471,7 +533,21 @@ impl Desk {
         approved_quantity: &str,
         now: DateTime<Utc>,
     ) -> Result<OrderId, BrokerError> {
-        let original = self.order(order_id);
+        self.modify_with(order_id, quantity, price, approved_quantity, false, now)
+    }
+
+    /// 큰 주문 확인 표시를 정해서 하는 정정.
+    pub fn modify_with(
+        &self,
+        order_id: &OrderId,
+        quantity: Option<&str>,
+        price: Option<&str>,
+        approved_quantity: &str,
+        confirm_high_value: bool,
+        now: DateTime<Utc>,
+    ) -> Result<OrderId, BrokerError> {
+        // 원주문의 내용은 정정하는 시각보다 앞선 시각으로 본다(이 조회가 마감을 처리하지 않게).
+        let original = self.order_at(order_id, self.seen().min(now));
         let order_type = if price.is_some() {
             OrderType::Limit
         } else {
@@ -490,6 +566,7 @@ impl Desk {
             order_type,
             quantity: quantity.map(d),
             price: price.map(d),
+            confirm_high_value,
             permit: Some(permit),
         };
         self.modify_raw(order_id, request, now)
@@ -502,69 +579,112 @@ impl Desk {
         request: ModifyRequest,
         now: DateTime<Utc>,
     ) -> Result<OrderId, BrokerError> {
+        self.see(now);
         self.run(self.as_broker().modify_order(order_id, request, now))
     }
 
-    /// 주문 상세.
+    /// 주문 상세(책상이 기억한 시각으로).
     pub fn order(&self, order_id: &OrderId) -> Order {
-        self.run(self.as_broker().order(order_id)).unwrap()
+        self.order_at(order_id, self.seen())
     }
 
-    /// 주문 목록(모든 종목).
+    /// 그 시각의 주문 상세.
+    pub fn order_at(&self, order_id: &OrderId, now: DateTime<Utc>) -> Order {
+        self.run(self.as_broker().order(order_id, now)).unwrap()
+    }
+
+    /// 주문 목록(모든 종목, 책상이 기억한 시각으로).
     pub fn orders(&self, group: OrderGroup) -> Vec<Order> {
-        self.run(self.as_broker().orders(group, None)).unwrap()
+        self.orders_at(group, self.seen())
     }
 
-    /// 방금 받은 원화 시세를 준다.
+    /// 그 시각의 주문 목록(모든 종목).
+    pub fn orders_at(&self, group: OrderGroup, now: DateTime<Utc>) -> Vec<Order> {
+        self.run(self.as_broker().orders(group, None, now)).unwrap()
+    }
+
+    /// 시세 하나를 그대로 준다.
+    pub fn on_quote(&self, quote: &Quote, now: DateTime<Utc>) -> Vec<OrderEvent> {
+        self.see(now);
+        self.broker.on_quote(quote, now)
+    }
+
+    /// 시각만 알려 준다.
+    pub fn on_time(&self, now: DateTime<Utc>) -> Vec<OrderEvent> {
+        self.see(now);
+        self.broker.on_time(now)
+    }
+
+    /// 방금 받은 원화 시세를 준다(거래소 시각 = 받은 시각 = `now`. 그때 막 체결된 새 값이다).
     pub fn quote(&self, code: &str, price: &str, now: DateTime<Utc>) -> Vec<OrderEvent> {
-        self.broker
-            .on_quote(&quote_received(code, price, Currency::Krw, now), now)
+        self.on_quote(&quote_received(code, price, Currency::Krw, now), now)
     }
 
     /// 방금 받은 달러 시세를 준다.
     pub fn us_quote(&self, code: &str, price: &str, now: DateTime<Utc>) -> Vec<OrderEvent> {
-        self.broker
-            .on_quote(&quote_received(code, price, Currency::Usd, now), now)
+        self.on_quote(&quote_received(code, price, Currency::Usd, now), now)
     }
 
     /// 원화 현금.
     pub fn krw(&self) -> CashBalance {
-        self.broker.cash(&Currency::Krw)
+        self.krw_at(self.seen())
+    }
+
+    /// 그 시각의 원화 현금.
+    pub fn krw_at(&self, now: DateTime<Utc>) -> CashBalance {
+        self.broker.cash(&Currency::Krw, now)
     }
 
     /// 달러 현금.
     pub fn usd(&self) -> CashBalance {
-        self.broker.cash(&Currency::Usd)
+        self.broker.cash(&Currency::Usd, self.seen())
     }
 
     /// 매수 가능 금액.
     pub fn buying_power(&self, currency: Currency) -> Decimal {
-        self.run(self.as_broker().buying_power(currency)).unwrap()
+        self.buying_power_at(currency, self.seen())
+    }
+
+    /// 그 시각의 매수 가능 금액.
+    pub fn buying_power_at(&self, currency: Currency, now: DateTime<Utc>) -> Decimal {
+        self.run(self.as_broker().buying_power(currency, now))
+            .unwrap()
     }
 
     /// 판매 가능 수량.
     pub fn sellable(&self, code: &str) -> Decimal {
-        self.run(self.as_broker().sellable_quantity(&sym(code)))
+        self.sellable_at(code, self.seen())
+    }
+
+    /// 그 시각의 판매 가능 수량.
+    pub fn sellable_at(&self, code: &str, now: DateTime<Utc>) -> Decimal {
+        self.run(self.as_broker().sellable_quantity(&sym(code), now))
             .unwrap()
     }
 
     /// 보유 전부.
     pub fn holdings(&self) -> Vec<Holding> {
-        self.run(self.as_broker().holdings(None)).unwrap()
+        self.holdings_at(self.seen())
+    }
+
+    /// 그 시각의 보유 전부.
+    pub fn holdings_at(&self, now: DateTime<Utc>) -> Vec<Holding> {
+        self.run(self.as_broker().holdings(None, now)).unwrap()
     }
 
     /// 그 종목의 보유. 없으면 `None`.
     pub fn holding(&self, code: &str) -> Option<Holding> {
-        self.run(self.as_broker().holdings(Some(&sym(code))))
+        self.run(self.as_broker().holdings(Some(&sym(code)), self.seen()))
             .unwrap()
             .into_iter()
             .next()
     }
 
-    /// 지정가로 사서 바로 체결시켜 보유를 만든다(국내).
+    /// 지정가로 사서 바로 체결시켜 보유를 만든다(국내). 주문은 `now`에 내고, 체결시키는 시세는
+    /// 그 0.5초 뒤에 준다(주문 뒤에 온 시세로만 체결되므로).
     pub fn own(&self, code: &str, quantity: &str, price: &str, now: DateTime<Utc>) {
         let order_id = self.accepted(&buy(code, quantity, price), now);
-        self.quote(code, price, now);
+        self.quote(code, price, now + chrono::Duration::milliseconds(500));
         assert_eq!(
             self.order(&order_id).execution.filled_quantity,
             d(quantity),
