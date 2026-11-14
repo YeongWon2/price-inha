@@ -14,8 +14,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use pi_secrets::{
-    AUTH_FILE, Credentials, ENV_FILE, KeyKind, MIN_SECRET_CHARS, REDACT_PREVIOUS_KEPT, REDACTED,
-    SecretStore, SecretsError, Verifier, VerifyFailure, resolve_dir,
+    Credentials, ENV_FILE, KeyKind, MIN_SECRET_CHARS, REDACT_PREVIOUS_KEPT, REDACTED, SecretStore,
+    SecretsError, Verifier, VerifyFailure, resolve_dir,
 };
 use tempfile::tempdir;
 
@@ -24,8 +24,7 @@ const SECRET_1: &str = "시험용-비밀-값-0001";
 const ID_2: &str = "시험용-아이디-0002";
 const SECRET_2: &str = "시험용-비밀-값-0002";
 const AI_KEY: &str = "시험용-에이아이-값-0001";
-const ACCESS: &str = "시험용-접근-토큰-0001";
-const REFRESH: &str = "시험용-갱신-토큰-0001";
+const DATA_KEY: &str = "시험용-자료-값-0001";
 
 fn broker(id: &str, secret: &str) -> Credentials {
     Credentials::new()
@@ -35,12 +34,6 @@ fn broker(id: &str, secret: &str) -> Credentials {
 
 fn api_key(value: &str) -> Credentials {
     Credentials::new().with("api_key", value)
-}
-
-fn oauth(access: &str, refresh: &str) -> Credentials {
-    Credentials::new()
-        .with("access_token", access)
-        .with("refresh_token", refresh)
 }
 
 /// 언제나 통과하는 확인기.
@@ -280,20 +273,20 @@ async fn 서버에_닿지_못한_값도_확인_중과_그_뒤에_계속_가린�
 
 // 검증: N8, E38, E4
 #[tokio::test]
-async fn auth_json에_둘_토큰도_확인에_실패한_뒤_계속_가린다() {
+async fn 자료_키도_확인에_실패한_뒤_계속_가린다() {
     let tmp = tempdir().unwrap();
     let store = open_shared(tmp.path());
     let verifier = WatchingVerifier::new(&store, Err(VerifyFailure::Rejected));
 
     let result = store
-        .register(KeyKind::AiOAuth, oauth(ACCESS, REFRESH), &verifier)
+        .register(KeyKind::Data, api_key(DATA_KEY), &verifier)
         .await;
 
     assert!(matches!(result, Err(SecretsError::VerifyFailed(_))));
-    verifier.assert_saw_redacted(&[ACCESS, REFRESH]);
-    assert_redacted(&store, ACCESS, "거부된 뒤");
-    assert_redacted(&store, REFRESH, "거부된 뒤");
-    assert!(!tmp.path().join(AUTH_FILE).exists());
+    verifier.assert_saw_redacted(&[DATA_KEY]);
+    assert_redacted(&store, DATA_KEY, "거부된 뒤");
+    assert!(!is_registered(&store, KeyKind::Data));
+    assert!(!tmp.path().join(ENV_FILE).exists());
 }
 
 // 검증: N8, E38, D3
@@ -406,20 +399,20 @@ async fn 한_칸만_짧아도_그_종류는_등록되지_않은_것이고_옆_�
 
 // 검증: N8, E38, D3
 #[tokio::test]
-async fn auth_json에_손으로_적힌_여덟_자_미만_토큰도_등록된_것으로_보지_않는다() {
+async fn 손으로_적힌_여덟_자_미만_ai_api_키도_등록된_것으로_보지_않는다() {
     let seven = "일곱글자시험값";
 
     let tmp = tempdir().unwrap();
     {
         let store = SecretStore::open(tmp.path()).unwrap();
-        register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
+        register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
     }
-    rewrite_by_hand(&tmp.path().join(AUTH_FILE), REFRESH, seven);
+    rewrite_by_hand(&tmp.path().join(ENV_FILE), AI_KEY, seven);
 
     let store = SecretStore::open(tmp.path()).unwrap();
 
-    assert!(!is_registered(&store, KeyKind::AiOAuth));
-    assert!(matches!(store.read(KeyKind::AiOAuth), Ok(None)));
+    assert!(!is_registered(&store, KeyKind::AiApiKey));
+    assert!(matches!(store.read(KeyKind::AiApiKey), Ok(None)));
 }
 
 // ───────────────────────── 2차 3번: 보관 폴더는 절대 경로여야 한다 ─────────────────────────
@@ -525,26 +518,26 @@ async fn 같은_칸을_여러_번_다시_등록하면_오래된_값은_가리기
 async fn 개수는_칸마다_따로_세고_바뀌지_않은_칸과_다른_종류는_계속_가린다() {
     let tmp = tempdir().unwrap();
     let store = SecretStore::open(tmp.path()).unwrap();
-    register_ok(&store, KeyKind::Broker, broker(ID_1, SECRET_1)).await;
     register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
+    register_ok(&store, KeyKind::Data, api_key(DATA_KEY)).await;
 
-    // 접근 토큰만 돌린다. 갱신 토큰은 내내 같은 값이다.
+    // 증권사 비밀만 돌린다. 증권사 아이디는 내내 같은 값이다.
     let total = REDACT_PREVIOUS_KEPT + 5;
-    let access: Vec<String> = (0..total).map(|n| rotated("접근", n)).collect();
-    for value in &access {
-        register_ok(&store, KeyKind::AiOAuth, oauth(value, REFRESH)).await;
+    let secrets: Vec<String> = (0..total).map(|n| rotated("비밀", n)).collect();
+    for value in &secrets {
+        register_ok(&store, KeyKind::Broker, broker(ID_1, value)).await;
     }
 
     let current = total - 1;
     let oldest_kept = current - REDACT_PREVIOUS_KEPT;
-    for value in &access[oldest_kept..] {
+    for value in &secrets[oldest_kept..] {
         assert_redacted(&store, value, "지금 값과 정한 개수 안의 앞 값");
     }
-    for value in &access[..oldest_kept] {
-        assert_not_redacted(&store, value, "정한 개수를 넘은 옛 접근 토큰");
+    for value in &secrets[..oldest_kept] {
+        assert_not_redacted(&store, value, "정한 개수를 넘은 옛 증권사 비밀");
     }
     // 같은 종류의 바뀌지 않은 칸, 한 번만 등록한 다른 종류는 밀려나지 않는다.
-    for value in [REFRESH, ID_1, SECRET_1, AI_KEY] {
+    for value in [ID_1, AI_KEY, DATA_KEY] {
         assert_redacted(&store, value, "지금 등록된 값");
     }
 }

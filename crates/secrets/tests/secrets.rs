@@ -8,9 +8,8 @@ use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use pi_secrets::{
-    AUTH_FILE, Credentials, DEFAULT_DIR_NAME, ENV_FILE, HOME_ENV, KeyKind, KeyStatus,
-    MIN_SECRET_CHARS, REDACTED, Registered, SecretStore, SecretString, SecretsError, VerifyFailure,
-    resolve_dir,
+    Credentials, DEFAULT_DIR_NAME, ENV_FILE, HOME_ENV, KeyKind, KeyStatus, MIN_SECRET_CHARS,
+    REDACTED, Registered, SecretStore, SecretString, SecretsError, VerifyFailure, resolve_dir,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -23,8 +22,8 @@ const ID_2: &str = "시험용-아이디-0002";
 const SECRET_2: &str = "시험용-비밀-값-0002";
 const AI_KEY: &str = "시험용-에이아이-값-0001";
 const DATA_KEY: &str = "시험용-자료-값-0001";
-const ACCESS: &str = "시험용-접근-토큰-0001";
-const REFRESH: &str = "시험용-갱신-토큰-0001";
+/// 예전(1 · 2차)에 구독 토큰을 두던 파일 이름. 3차부터 보관소는 이 파일을 만들지도 읽지도 않는다.
+const LEGACY_AUTH_FILE: &str = "auth.json";
 
 /// 테스트가 함께 쓰는 도구.
 #[cfg(test)]
@@ -42,7 +41,7 @@ mod support {
     };
     use tempfile::tempdir;
 
-    use super::{ACCESS, AI_KEY, DATA_KEY, ID_1, REFRESH, SECRET_1};
+    use super::{AI_KEY, DATA_KEY, ID_1, SECRET_1};
 
     /// 확인기가 받은 것: 종류와 (칸 이름, 값)들.
     pub(super) type Seen = (KeyKind, Vec<(String, String)>);
@@ -110,12 +109,6 @@ mod support {
         Credentials::new().with("api_key", value)
     }
 
-    pub(super) fn oauth(access: &str, refresh: &str) -> Credentials {
-        Credentials::new()
-            .with("access_token", access)
-            .with("refresh_token", refresh)
-    }
-
     /// 통과하는 확인기로 등록한다.
     pub(super) async fn register_ok(
         store: &SecretStore,
@@ -128,15 +121,14 @@ mod support {
             .expect("확인을 지난 값은 등록된다")
     }
 
-    /// 네 종류를 모두 등록한다.
+    /// 세 종류를 모두 등록한다.
     pub(super) async fn register_all(store: &SecretStore) {
         register_ok(store, KeyKind::Broker, broker(ID_1, SECRET_1)).await;
         register_ok(store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
-        register_ok(store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
         register_ok(store, KeyKind::Data, api_key(DATA_KEY)).await;
     }
 
-    pub(super) const ALL_VALUES: [&str; 6] = [ID_1, SECRET_1, AI_KEY, ACCESS, REFRESH, DATA_KEY];
+    pub(super) const ALL_VALUES: [&str; 4] = [ID_1, SECRET_1, AI_KEY, DATA_KEY];
 
     /// 칸의 값을 꺼낸다.
     pub(super) fn value_of(store: &SecretStore, kind: KeyKind, field: &str) -> Option<String> {
@@ -246,7 +238,7 @@ mod support {
 
 use support::{
     ALL_VALUES, FakeVerifier, api_key, assert_env_round_trip, assert_no_value, broker, names_in,
-    oauth, register_all, register_ok, registered_kinds, value_of,
+    register_all, register_ok, registered_kinds, value_of,
 };
 #[cfg(unix)]
 use support::{mode_of, set_mode};
@@ -299,7 +291,7 @@ async fn 생성자에_준_폴더에만_파일을_쓴다() {
     register_all(&store).await;
 
     assert!(dir.join(ENV_FILE).is_file());
-    assert!(dir.join(AUTH_FILE).is_file());
+    assert!(!dir.join(LEGACY_AUTH_FILE).exists());
     assert_eq!(names_in(tmp.path()), vec!["보관".to_string()]);
 }
 
@@ -335,40 +327,27 @@ async fn 이미_있는_넓은_보관_폴더는_0700으로_좁힌다() {
 
 // 검증: D3, C3
 #[tokio::test]
-async fn api_키는_env에_oauth_토큰은_auth_json에_둔다() {
+async fn 모든_키는_env에_두고_auth_json은_만들지_않는다() {
     assert_eq!(ENV_FILE, ".env");
-    assert_eq!(AUTH_FILE, "auth.json");
+    assert_eq!(KeyKind::ALL.len(), 3);
     assert_eq!(KeyKind::Broker.file_name(), ENV_FILE);
     assert_eq!(KeyKind::AiApiKey.file_name(), ENV_FILE);
     assert_eq!(KeyKind::Data.file_name(), ENV_FILE);
-    assert_eq!(KeyKind::AiOAuth.file_name(), AUTH_FILE);
 
     let tmp = tempdir().unwrap();
     let store = SecretStore::open(tmp.path()).unwrap();
 
     register_ok(&store, KeyKind::Broker, broker(ID_1, SECRET_1)).await;
     assert_eq!(names_in(tmp.path()), vec![ENV_FILE.to_string()]);
-    let env = fs::read_to_string(tmp.path().join(ENV_FILE)).unwrap();
-    assert!(env.contains(SECRET_1));
 
-    register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
-    assert_eq!(
-        names_in(tmp.path()),
-        vec![ENV_FILE.to_string(), AUTH_FILE.to_string()]
-    );
-    let auth = fs::read_to_string(tmp.path().join(AUTH_FILE)).unwrap();
-    assert!(auth.contains(ACCESS));
-    assert!(auth.contains(REFRESH));
+    register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
+    register_ok(&store, KeyKind::Data, api_key(DATA_KEY)).await;
+    assert_eq!(names_in(tmp.path()), vec![ENV_FILE.to_string()]);
 
     let env = fs::read_to_string(tmp.path().join(ENV_FILE)).unwrap();
-    assert!(
-        !env.contains(ACCESS) && !env.contains(REFRESH),
-        "OAuth 토큰이 .env에 들어갔다"
-    );
-    assert!(
-        !auth.contains(SECRET_1) && !auth.contains(ID_1),
-        "API 키가 auth.json에 들어갔다"
-    );
+    for value in ALL_VALUES {
+        assert!(env.contains(value), "값이 .env에 없다");
+    }
 }
 
 // 검증: D3
@@ -415,19 +394,19 @@ async fn env_파일은_0600이다() {
 // 검증: D3, N8
 #[cfg(unix)]
 #[tokio::test]
-async fn auth_json_파일은_0600이다() {
+async fn ai_api_키만_든_env_파일도_0600이다() {
     let tmp = tempdir().unwrap();
     let store = SecretStore::open(tmp.path()).unwrap();
-    register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
-    assert_eq!(mode_of(&tmp.path().join(AUTH_FILE)), 0o600);
+    register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
+    assert_eq!(mode_of(&tmp.path().join(ENV_FILE)), 0o600);
 
     register_ok(
         &store,
-        KeyKind::AiOAuth,
-        oauth(ACCESS, "시험용-갱신-토큰-0002"),
+        KeyKind::AiApiKey,
+        api_key("시험용-에이아이-값-0002"),
     )
     .await;
-    assert_eq!(mode_of(&tmp.path().join(AUTH_FILE)), 0o600);
+    assert_eq!(mode_of(&tmp.path().join(ENV_FILE)), 0o600);
 }
 
 // 검증: D3, N8
@@ -452,20 +431,20 @@ async fn 넓은_권한의_env는_읽기_전에_0600으로_좁힌다() {
 // 검증: D3, N8
 #[cfg(unix)]
 #[tokio::test]
-async fn 넓은_권한의_auth_json은_읽기_전에_0600으로_좁힌다() {
+async fn 모두가_쓸_수_있는_env도_ai_키를_읽기_전에_0600으로_좁힌다() {
     let tmp = tempdir().unwrap();
     {
         let store = SecretStore::open(tmp.path()).unwrap();
-        register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
+        register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
     }
-    let auth = tmp.path().join(AUTH_FILE);
-    set_mode(&auth, 0o666);
+    let env = tmp.path().join(ENV_FILE);
+    set_mode(&env, 0o666);
 
     let store = SecretStore::open(tmp.path()).unwrap();
-    let access = value_of(&store, KeyKind::AiOAuth, "access_token");
+    let key = value_of(&store, KeyKind::AiApiKey, "api_key");
 
-    assert_eq!(mode_of(&auth), 0o600);
-    assert_eq!(access.as_deref(), Some(ACCESS));
+    assert_eq!(mode_of(&env), 0o600);
+    assert_eq!(key.as_deref(), Some(AI_KEY));
 }
 
 // 검증: D3
@@ -478,15 +457,12 @@ async fn 쓰고_나면_임시_파일이_남지_않는다() {
     register_ok(&store, KeyKind::Broker, broker(ID_2, SECRET_2)).await;
     register_ok(
         &store,
-        KeyKind::AiOAuth,
-        oauth(ACCESS, "시험용-갱신-토큰-0002"),
+        KeyKind::AiApiKey,
+        api_key("시험용-에이아이-값-0002"),
     )
     .await;
 
-    assert_eq!(
-        names_in(tmp.path()),
-        vec![ENV_FILE.to_string(), AUTH_FILE.to_string()]
-    );
+    assert_eq!(names_in(tmp.path()), vec![ENV_FILE.to_string()]);
 }
 
 // 검증: D3, E4
@@ -504,7 +480,7 @@ async fn 거부되거나_확인에_실패한_등록도_임시_파일을_남기�
         .register(KeyKind::Data, api_key("짧은-값-07"), &FakeVerifier::ok())
         .await;
     let _ = store
-        .register(KeyKind::AiOAuth, oauth(ACCESS, REFRESH), &failing)
+        .register(KeyKind::AiApiKey, api_key(AI_KEY), &failing)
         .await;
 
     assert_eq!(names_in(tmp.path()), vec![ENV_FILE.to_string()]);
@@ -639,19 +615,13 @@ async fn 종류마다_이름이_정해진_칸을_가진다() {
         Some(AI_KEY)
     );
     assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "access_token").as_deref(),
-        Some(ACCESS)
-    );
-    assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "refresh_token").as_deref(),
-        Some(REFRESH)
-    );
-    assert_eq!(
         value_of(&store, KeyKind::Data, "api_key").as_deref(),
         Some(DATA_KEY)
     );
     // 그 종류에 없는 칸은 없다.
     assert_eq!(value_of(&store, KeyKind::Broker, "api_key"), None);
+    assert_eq!(KeyKind::AiApiKey.fields(), ["api_key"]);
+    assert_eq!(value_of(&store, KeyKind::AiApiKey, "access_token"), None);
 }
 
 // 검증: C3
@@ -760,7 +730,7 @@ async fn 확인에_실패한_키는_저장하지_않는다() {
     assert!(registered_kinds(&store).is_empty());
     assert!(store.read(KeyKind::Broker).unwrap().is_none());
     assert!(!tmp.path().join(ENV_FILE).exists());
-    assert!(!tmp.path().join(AUTH_FILE).exists());
+    assert!(!tmp.path().join(LEGACY_AUTH_FILE).exists());
 
     // 다시 열어도 없다.
     let reopened = SecretStore::open(tmp.path()).unwrap();
@@ -775,7 +745,7 @@ async fn 확인할_서버에_닿지_못해도_저장하지_않는다() {
     let verifier = FakeVerifier::failing(VerifyFailure::Unreachable);
 
     let result = store
-        .register(KeyKind::AiOAuth, oauth(ACCESS, REFRESH), &verifier)
+        .register(KeyKind::AiApiKey, api_key(AI_KEY), &verifier)
         .await;
 
     assert!(matches!(
@@ -783,7 +753,7 @@ async fn 확인할_서버에_닿지_못해도_저장하지_않는다() {
         Err(SecretsError::VerifyFailed(VerifyFailure::Unreachable))
     ));
     assert!(registered_kinds(&store).is_empty());
-    assert!(!tmp.path().join(AUTH_FILE).exists());
+    assert!(!tmp.path().join(ENV_FILE).exists());
 }
 
 // 검증: E4, C16
@@ -793,31 +763,29 @@ async fn 다시_등록이_확인에_실패하면_파일과_옛_값이_그대로�
     let store = SecretStore::open(tmp.path()).unwrap();
     register_all(&store).await;
     let env_before = fs::read(tmp.path().join(ENV_FILE)).unwrap();
-    let auth_before = fs::read(tmp.path().join(AUTH_FILE)).unwrap();
 
     let failing = FakeVerifier::failing(VerifyFailure::Rejected);
     let broker_result = store
         .register(KeyKind::Broker, broker(ID_2, SECRET_2), &failing)
         .await;
-    let oauth_result = store
+    let ai_result = store
         .register(
-            KeyKind::AiOAuth,
-            oauth("시험용-접근-토큰-0002", "시험용-갱신-토큰-0002"),
+            KeyKind::AiApiKey,
+            api_key("시험용-에이아이-값-0002"),
             &failing,
         )
         .await;
 
     assert!(matches!(broker_result, Err(SecretsError::VerifyFailed(_))));
-    assert!(matches!(oauth_result, Err(SecretsError::VerifyFailed(_))));
+    assert!(matches!(ai_result, Err(SecretsError::VerifyFailed(_))));
     assert_eq!(fs::read(tmp.path().join(ENV_FILE)).unwrap(), env_before);
-    assert_eq!(fs::read(tmp.path().join(AUTH_FILE)).unwrap(), auth_before);
     assert_eq!(
         value_of(&store, KeyKind::Broker, "client_secret").as_deref(),
         Some(SECRET_1)
     );
     assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "access_token").as_deref(),
-        Some(ACCESS)
+        value_of(&store, KeyKind::AiApiKey, "api_key").as_deref(),
+        Some(AI_KEY)
     );
     // 실패한 새 값은 가릴 대상도 아니다: 옛 값은 계속 가린다.
     assert!(!store.redact(SECRET_1).contains(SECRET_1));
@@ -850,31 +818,24 @@ async fn 다시_등록하면_덮어쓴다() {
 
 // 검증: C16
 #[tokio::test]
-async fn oauth_토큰도_다시_등록하면_덮어쓴다() {
+async fn ai_api_키도_다시_등록하면_덮어쓴다() {
     let tmp = tempdir().unwrap();
     let store = SecretStore::open(tmp.path()).unwrap();
-    register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
+    register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
 
     register_ok(
         &store,
-        KeyKind::AiOAuth,
-        oauth("시험용-접근-토큰-0002", "시험용-갱신-토큰-0002"),
+        KeyKind::AiApiKey,
+        api_key("시험용-에이아이-값-0002"),
     )
     .await;
 
     assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "access_token").as_deref(),
-        Some("시험용-접근-토큰-0002")
+        value_of(&store, KeyKind::AiApiKey, "api_key").as_deref(),
+        Some("시험용-에이아이-값-0002")
     );
-    assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "refresh_token").as_deref(),
-        Some("시험용-갱신-토큰-0002")
-    );
-    let auth = fs::read_to_string(tmp.path().join(AUTH_FILE)).unwrap();
-    assert!(
-        !auth.contains(ACCESS) && !auth.contains(REFRESH),
-        "옛 값이 파일에 남았다"
-    );
+    let env = fs::read_to_string(tmp.path().join(ENV_FILE)).unwrap();
+    assert!(!env.contains(AI_KEY), "옛 값이 파일에 남았다");
 }
 
 // 검증: C3, C16
@@ -885,12 +846,6 @@ async fn 한_종류를_덮어써도_같은_파일의_다른_종류는_그대로�
     register_all(&store).await;
 
     register_ok(&store, KeyKind::Broker, broker(ID_2, SECRET_2)).await;
-    register_ok(
-        &store,
-        KeyKind::AiApiKey,
-        api_key("시험용-에이아이-값-0002"),
-    )
-    .await;
 
     assert_eq!(
         value_of(&store, KeyKind::Broker, "client_secret").as_deref(),
@@ -898,15 +853,11 @@ async fn 한_종류를_덮어써도_같은_파일의_다른_종류는_그대로�
     );
     assert_eq!(
         value_of(&store, KeyKind::AiApiKey, "api_key").as_deref(),
-        Some("시험용-에이아이-값-0002")
+        Some(AI_KEY)
     );
     assert_eq!(
         value_of(&store, KeyKind::Data, "api_key").as_deref(),
         Some(DATA_KEY)
-    );
-    assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "refresh_token").as_deref(),
-        Some(REFRESH)
     );
     assert_eq!(registered_kinds(&store), KeyKind::ALL.to_vec());
 }
@@ -936,14 +887,6 @@ async fn 보관소를_다시_열어도_등록한_값을_읽는다() {
         Some(AI_KEY)
     );
     assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "access_token").as_deref(),
-        Some(ACCESS)
-    );
-    assert_eq!(
-        value_of(&store, KeyKind::AiOAuth, "refresh_token").as_deref(),
-        Some(REFRESH)
-    );
-    assert_eq!(
         value_of(&store, KeyKind::Data, "api_key").as_deref(),
         Some(DATA_KEY)
     );
@@ -964,7 +907,6 @@ async fn 등록하지_않은_종류를_읽으면_없다고_한다() {
     assert!(store.read(KeyKind::Data).unwrap().is_some());
     assert!(store.read(KeyKind::AiApiKey).unwrap().is_none());
     assert!(store.read(KeyKind::Broker).unwrap().is_none());
-    assert!(store.read(KeyKind::AiOAuth).unwrap().is_none());
 }
 
 // ───────────────────────── 상태 보기 (만드는 것 5) ─────────────────────────
@@ -988,13 +930,13 @@ async fn 상태_보기는_종류별_등록_여부만_알려_준다() {
     );
 
     register_ok(&store, KeyKind::Broker, broker(ID_1, SECRET_1)).await;
-    register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
+    register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
 
     let expected: Vec<KeyStatus> = KeyKind::ALL
         .iter()
         .map(|&kind| KeyStatus {
             kind,
-            registered: kind == KeyKind::Broker || kind == KeyKind::AiOAuth,
+            registered: kind == KeyKind::Broker || kind == KeyKind::AiApiKey,
         })
         .collect();
     assert_eq!(store.status().unwrap(), expected);
@@ -1107,7 +1049,6 @@ async fn 등록한_뒤_어떤_반환값과_출력에도_값이_없다() {
     for (kind, values) in [
         (KeyKind::Broker, broker(ID_1, SECRET_1)),
         (KeyKind::AiApiKey, api_key(AI_KEY)),
-        (KeyKind::AiOAuth, oauth(ACCESS, REFRESH)),
         (KeyKind::Data, api_key(DATA_KEY)),
     ] {
         let done = store
@@ -1332,12 +1273,12 @@ async fn 여덟_자보다_짧은_값은_등록할_때_거부한다() {
         })
     ));
     let result = store
-        .register(KeyKind::AiOAuth, oauth("abcd123", REFRESH), &verifier)
+        .register(KeyKind::AiApiKey, api_key("abcd123"), &verifier)
         .await;
     assert!(matches!(
         result,
         Err(SecretsError::TooShort {
-            field: "access_token",
+            field: "api_key",
             ..
         })
     ));
@@ -1468,21 +1409,19 @@ async fn 깨진_키_파일의_내용이_결과나_오류에_실리지_않는다(
     let tmp = tempdir().unwrap();
     {
         let store = SecretStore::open(tmp.path()).unwrap();
-        register_ok(&store, KeyKind::AiOAuth, oauth(ACCESS, REFRESH)).await;
+        register_ok(&store, KeyKind::AiApiKey, api_key(AI_KEY)).await;
     }
-    // 파일을 반쯤 잘린 모양으로 망가뜨린다.
+    // 파일을 UTF-8이 아닌 바이트가 섞인 모양으로 망가뜨린다.
     let broken = "시험용-깨진-내용-0001";
-    fs::write(
-        tmp.path().join(AUTH_FILE),
-        format!("{{\"{broken}\": \"{broken}"),
-    )
-    .unwrap();
+    let mut bytes = format!("PRICE_INHA_AI_API_KEY={broken}").into_bytes();
+    bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+    fs::write(tmp.path().join(ENV_FILE), bytes).unwrap();
 
     let mut shown: Vec<String> = Vec::new();
     match SecretStore::open(tmp.path()) {
         Ok(store) => {
             shown.push(format!("{store:?}"));
-            let read = store.read(KeyKind::AiOAuth);
+            let read = store.read(KeyKind::AiApiKey);
             shown.push(format!("{read:?}"));
             if let Err(e) = &read {
                 shown.push(format!("{e}"));

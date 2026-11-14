@@ -1,10 +1,12 @@
 //! pi-secrets: 비밀 보관 (구성 요소 A13). `docs/dev/modules/secrets.md`를 따른다.
 //!
-//! 증권사 · AI · 자료 키를 홈 폴더 아래 파일에 본인만 읽는 권한으로 두고(D3),
+//! 증권사 · AI(API 키) · 자료 키를 홈 폴더 아래 파일에 본인만 읽는 권한으로 두고(D3),
 //! 등록할 때 확인기로 실제로 닿는지 본 뒤에만 저장하며(C3 · C16 · E4),
 //! 바깥으로 나가는 글에서 등록된 값과 확인 중인 값을 가린다(E38 · N8).
 //! 가리기 대상은 칸마다 개수에 끝이 있다(N1, [`REDACT_PREVIOUS_KEPT`]).
 //! 보관 폴더는 절대 경로만 받는다(현재 폴더 아래에 키를 쓰지 않는다).
+//! 구독 토큰은 받지도 쥐지도 않는다(D4: 구독은 공식 Claude Code CLI에 맡긴다). 예전에 쓰던
+//! `auth.json`이 보관 폴더에 남아 있어도 읽지 않고 · 등록된 것으로 보지 않고 · 고치지 않는다.
 //!
 //! # 값이 새지 않게 하는 모양
 //!
@@ -45,7 +47,6 @@
 //! # }
 //! ```
 
-mod authfile;
 mod envfile;
 mod error;
 mod fsio;
@@ -71,9 +72,6 @@ pub const DEFAULT_DIR_NAME: &str = ".price-inha";
 
 /// API 키 파일 이름. `이름=값` 줄로 쓴다. 권한 0600.
 pub const ENV_FILE: &str = ".env";
-
-/// 구독 OAuth 토큰 파일 이름. 권한 0600.
-pub const AUTH_FILE: &str = "auth.json";
 
 /// 비밀 값 자리에 대신 들어가는 글자.
 pub const REDACTED: &str = "[가려짐]";

@@ -7,9 +7,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError, RwLock};
 use crate::targets::{Outcome, Targets};
 use crate::verify::check_fields;
 use crate::{
-    AUTH_FILE, Credentials, HOME_ENV, KeyKind, MIN_SECRET_CHARS, SecretsError, Verifier, authfile,
-    envfile, fsio,
+    Credentials, HOME_ENV, KeyKind, MIN_SECRET_CHARS, SecretsError, Verifier, envfile, fsio,
 };
+
+/// 예전(1 · 2차)에 구독 토큰을 두던 파일 이름. 3차부터 이 보관소는 이 파일을 읽지도 고치지도 않는다.
+const LEGACY_AUTH_FILE: &str = "auth.json";
 
 /// 등록 성공 표시. 값은 없다 (C3: "키 값은 돌려주지 않는다").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,11 +52,7 @@ fn load_kind(dir: &Path, kind: KeyKind) -> Result<Option<Credentials>, SecretsEr
     let Some(text) = fsio::read_private(&dir.join(file), file)? else {
         return Ok(None);
     };
-    let found = if file == AUTH_FILE {
-        authfile::read_kind(&text, kind)?
-    } else {
-        envfile::read_kind(&text, kind)?
-    };
+    let found = envfile::read_kind(&text, kind)?;
     Ok(found.filter(|values| {
         values
             .values()
@@ -112,6 +110,11 @@ impl SecretStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, SecretsError> {
         let dir = dir.into();
         fsio::require_absolute(&dir)?;
+        if dir.join(LEGACY_AUTH_FILE).exists() {
+            // 3차 2번: 옛 auth.json이 있어도 읽지 않고 · 등록된 것으로 보지 않고 · 고치지 않으며,
+            // 깨져 있어도 다른 키를 읽는 데 지장이 없어야 한다. 아직 구현 안 됨.
+            todo!("3차 2번: 옛 auth.json을 건드리지 않는다")
+        }
         fsio::prepare_dir(&dir)?;
         let mut targets = Targets::default();
         for kind in KeyKind::ALL {
@@ -239,18 +242,9 @@ impl SecretStore {
         fsio::prepare_dir(&self.dir)?;
         let file = kind.file_name();
         let path = self.dir.join(file);
-        let new_text = if file == AUTH_FILE {
-            // 깨진 auth.json은 새로 쓴다(다시 등록이 되살리는 길이다).
-            let old = match fsio::read_private(&path, file) {
-                Ok(old) => old,
-                Err(SecretsError::Corrupt { .. }) => None,
-                Err(other) => return Err(other),
-            };
-            authfile::replace_kind(old.as_ref().map(|text| text.as_str()), kind, values)
-        } else {
-            let old = fsio::read_private(&path, file)?;
-            envfile::replace_kind(old.as_ref().map_or("", |text| text.as_str()), kind, values)
-        };
+        let old = fsio::read_private(&path, file)?;
+        let new_text =
+            envfile::replace_kind(old.as_ref().map_or("", |text| text.as_str()), kind, values);
         fsio::write_atomic(&self.dir, file, new_text.as_bytes())
     }
 }
@@ -277,34 +271,6 @@ mod tests {
         async fn verify(&self, _kind: KeyKind, _values: &Credentials) -> Result<(), VerifyFailure> {
             Ok(())
         }
-    }
-
-    fn oauth() -> Credentials {
-        Credentials::new()
-            .with("access_token", "시험용-접근-토큰-0009")
-            .with("refresh_token", "시험용-갱신-토큰-0009")
-    }
-
-    #[tokio::test]
-    async fn 깨진_auth_json은_읽기는_오류고_다시_등록하면_고쳐진다() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join(AUTH_FILE), "{\"ai_oauth\": {\"잘린").unwrap();
-
-        let store = SecretStore::open(tmp.path()).unwrap();
-        assert!(matches!(
-            store.read(KeyKind::AiOAuth),
-            Err(SecretsError::Corrupt { file: AUTH_FILE })
-        ));
-        assert!(matches!(store.status(), Err(SecretsError::Corrupt { .. })));
-        // 다른 파일의 종류는 읽힌다.
-        assert!(store.read(KeyKind::Broker).unwrap().is_none());
-
-        store
-            .register(KeyKind::AiOAuth, oauth(), &Pass)
-            .await
-            .unwrap();
-        assert!(store.read(KeyKind::AiOAuth).unwrap().is_some());
-        assert!(store.status().is_ok());
     }
 
     #[tokio::test]

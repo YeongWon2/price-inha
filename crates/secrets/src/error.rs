@@ -50,7 +50,7 @@ pub enum SecretsError {
     /// 키 파일 내용을 읽을 수 없다. 파일 내용은 싣지 않는다.
     #[error("키 파일을 읽을 수 없는 모양입니다: {file}")]
     Corrupt {
-        /// 파일 이름([`ENV_FILE`](crate::ENV_FILE) 또는 [`AUTH_FILE`](crate::AUTH_FILE)).
+        /// 파일 이름([`ENV_FILE`](crate::ENV_FILE)).
         file: &'static str,
     },
     /// 파일 · 폴더 작업 실패. 종류만 싣는다.
