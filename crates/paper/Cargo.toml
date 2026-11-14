@@ -9,5 +9,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+pi-market = { path = "../market" }
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "serde"] }
+rust_decimal = { version = "1.43.0", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["sync"] }
 
 [dev-dependencies]
+proptest = "1.7.0"
+tokio = { version = "1.54.1", features = ["rt", "sync"] }
