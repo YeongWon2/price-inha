@@ -42,3 +42,18 @@ outside_hosts() { # 테스트가 실제 바깥 주소를 쓰는가
   # shellcheck disable=SC2046
   grep -rnE 'tossinvest\.com|anthropic\.com|openai\.com|googleapis\.com' $(module_test_dirs "$1") 2>/dev/null
 }
+
+# 키처럼 생긴 글자. 이 줄 자체가 걸리지 않게 모양을 쪼개 쓴다.
+SECRET_RX='sk-ant''-[A-Za-z0-9_-]{20,}|sk''-[A-Za-z0-9]{32,}|gh[pousr]''_[A-Za-z0-9]{30,}|AGE-SECRET''-KEY-1[A-Z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE'' KEY|eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.'
+
+find_python() { # tomllib가 있는 Python
+  local c
+  for c in python3.14 python3.13 python3.12 python3.11 python3; do
+    if command -v "$c" >/dev/null && "$c" -c 'import tomllib' 2>/dev/null; then echo "$c"; return; fi
+  done
+}
+
+# 검사 규칙 전체의 지문. 규칙이 바뀌면 자체 시험을 다시 돌려야 한다.
+rules_hash() {
+  cat scripts/*.sh scripts/*.py docs/dev/architecture.toml docs/dev/graph.toml Cargo.toml clippy.toml 2>/dev/null | shasum -a 256 | cut -d' ' -f1
+}

@@ -1,0 +1,36 @@
+# 구현 그래프. scripts/pipeline.py가 읽어 "지금 무엇을 할 수 있는가"를 정한다.
+# 사람이 읽는 설명은 docs/dev/pipeline.md.
+
+max_same_failure = 3   # 같은 실패가 이만큼 되풀이되면 멈추고 사람에게 넘긴다
+max_review_rounds = 2  # AI 검토에서 되돌아가는 횟수 한도
+
+# 모듈과 순서. needs의 모듈이 green 이상이어야 시작할 수 있다. needs가 같은 모듈끼리는 병렬이다.
+[modules.store]
+needs = []
+[modules.secrets]
+needs = []
+[modules.ai]
+needs = []
+[modules.market]
+needs = []
+[modules.gate]
+needs = ["store", "secrets", "ai", "market"]
+
+# 노드. writes: 그 노드가 고칠 수 있는 곳({dir}은 모듈 폴더마다 펼쳐진다). gate: 끝났다고 인정하는 검사.
+[nodes.N1]
+name = "테스트 작성 (red)"
+prompt = "docs/dev/prompts/n1-test.md"
+writes = ["{dir}/**", "Cargo.lock"]
+gate = "G1"
+
+[nodes.N2]
+name = "구현 (green)"
+prompt = "docs/dev/prompts/n2-impl.md"
+writes = ["{dir}/src/**", "{dir}/web/**", "{dir}/Cargo.toml", "Cargo.lock"]
+gate = "G2"
+
+[nodes.N3]
+name = "AI 검토"
+prompt = "docs/dev/prompts/n3-review.md"
+writes = []
+gate = "판정"

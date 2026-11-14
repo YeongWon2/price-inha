@@ -4,12 +4,13 @@
 
 ## 1. 층
 
-| 층 | 여기서는 무엇인가 |
-|---|---|
-| Context | `AGENTS.md`(지도) → `docs/product/`(스펙) → `docs/dev/modules/<모듈>.md`(그 모듈에 필요한 것만) |
-| Harness | Rust 워크스페이스, `scripts/verify.sh`, `scripts/red.sh`, clippy 규칙, 로컬 가짜 서버 |
-| Loop | 노드 하나 안에서 "고친다 → 검사한다"를 통과할 때까지 되풀이 |
-| Graph | 아래 노드들을 잇는 순서와 넘겨주는 것 |
+| 층 | 묻는 것 | 여기서는 무엇인가 | 기계로 확인 |
+|---|---|---|---|
+| Prompt | 무엇을 말할까 | 노드마다 고정된 프롬프트 틀 `docs/dev/prompts/n1-test.md` · `n2-impl.md` · `n3-review.md`. `pipeline.py prompt <노드> <모듈>`이 틀에 모듈을 끼워 내준다 | 틀 밖의 말로 시키지 않는다 |
+| Context | 무엇을 보여줄까 | `AGENTS.md`(짧은 지도) → `docs/product/`(스펙) → `docs/dev/modules/<모듈>.md`(그 모듈에 필요한 것만) | 지시서의 필수 번호가 테스트에 있는지 |
+| Harness | 어떤 환경에서 일하게 할까 | Rust 워크스페이스, `scripts/red.sh`(G1), `scripts/verify.sh`(G2), `scripts/check_arch.py` + `docs/dev/architecture.toml`, clippy 규칙, 로컬 가짜 서버 | `scripts/selftest.py`가 검사기 자체를 시험한다 |
+| Loop | 어떻게 되풀이할까 | 노드 안에서 "고친다 → 검사한다". `pipeline.py gate`가 실패를 세고 같은 실패 3번이면 멈춘다 | 실패 지문과 횟수 기록 |
+| Graph | 어떻게 나누고 이을까 | `docs/dev/graph.toml`의 모듈 순서 · 병렬 · 노드별 권한. `scripts/pipeline.py`가 순서를 지키게 한다 | 앞 단계가 안 끝나면 시작을 거부, 맡지 않은 곳을 고치면 실패 |
 
 ## 2. 그래프
 
@@ -89,3 +90,26 @@ fn 확인에_실패한_키는_저장하지_않는다() { ... }
 ```
 
 지시서의 `## 필수 번호` 줄에 있는 번호가 그 모듈 `tests/` 어디에도 없으면 G1 · G2가 실패한다.
+
+## 8. 실행기 (`scripts/pipeline.py`)
+
+조정자는 이 명령으로만 그래프를 나아가게 한다. 상태는 `.pipeline/state.json`에 있다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `status` | 모듈마다 지금 단계와 다음에 할 수 있는 것 |
+| `next` | 지금 시작할 수 있는 노드(여러 개면 병렬로 돌린다) |
+| `prompt <노드> <모듈>` | 그 노드에 줄 프롬프트 |
+| `start <노드> <모듈>` | 노드 시작. 앞 단계가 안 끝났으면 거부한다 |
+| `gate <G1\|G2> <모듈>` | 기계 검사와 권한 검사를 돌리고 기록한다. 같은 실패 3번이면 사람에게 넘긴다 |
+| `lock <모듈>` | G1 통과 뒤 테스트를 커밋하고 `red/<모듈>` 태그로 잠근다 |
+| `review <모듈> <통과\|되돌림>` | AI 검토 판정. 되돌림이면 N2로 돌아가고, 2번을 넘으면 사람에게 넘긴다 |
+| `scope` | 진행 중인 노드가 맡지 않은 곳을 고쳤는지 |
+| `resume <모듈>` | 사람에게 넘어간 모듈을 사람이 다시 연다 |
+
+## 9. 검사기 자체 시험 (`scripts/selftest.py`)
+
+검사기가 위반을 실제로 잡는지 확인한다. 깨끗한 가짜 저장소를 만들어 규칙을 하나씩 어기고, 그 규칙 이름으로 잡히는지 본다. 깨끗할 때 통과하는지도 본다.
+
+- 규칙(`architecture.toml`), 검사 스크립트, 그래프, 루트 `Cargo.toml` · `clippy.toml`을 고치면 자체 시험을 다시 돌려야 한다. `verify.sh`의 0번 검사가 규칙의 지문이 마지막 자체 시험 때와 같은지 본다.
+- `architecture.toml`에 금지 모양을 더하면 `selftest.py`의 표본에도 "어긴 코드 한 줄"을 더해야 한다. 없으면 자체 시험이 실패한다.

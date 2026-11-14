@@ -15,7 +15,7 @@ except ModuleNotFoundError:  # Python 3.10 이하
     print("✗ [TOOL] Python 3.11 이상이 필요하다 (tomllib)")
     sys.exit(2)
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(sys.argv[sys.argv.index("--root") + 1]).resolve() if "--root" in sys.argv else Path(__file__).resolve().parent.parent
 RULES = tomllib.loads((ROOT / "docs/dev/architecture.toml").read_text(encoding="utf-8"))
 problems = []
 
@@ -45,11 +45,12 @@ def strip_comment(line):
 
 
 # 1. 의존 방향과 바깥 의존
-meta = json.loads(
-    subprocess.check_output(
-        ["cargo", "metadata", "--format-version", "1"], cwd=ROOT, stderr=subprocess.DEVNULL
-    )
-)
+_m = subprocess.run(["cargo", "metadata", "--format-version", "1"], cwd=ROOT, capture_output=True, text=True)
+if _m.returncode != 0:
+    print("✗ [ARCH-MANIFEST] Cargo.toml\n    왜: cargo 가 워크스페이스를 읽지 못한다\n    고치기: 아래 cargo 오류를 고친다\n"
+          + "\n".join("    " + l for l in _m.stderr.strip().splitlines()[-8:]))
+    sys.exit(1)
+meta = json.loads(_m.stdout)
 members = set(meta["workspace_members"])
 local = {p["name"]: p for p in meta["packages"] if p["id"] in members}
 crates = RULES["crates"]

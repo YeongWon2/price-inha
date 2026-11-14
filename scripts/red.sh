@@ -16,14 +16,14 @@ say "✓ 컴파일됨"
 
 # shellcheck disable=SC2046
 n=$(grep -rhcE '^\s*#\[(tokio::)?test' $(module_test_dirs "$m") 2>/dev/null | awk '{s+=$1} END{print s+0}')
-if [ "$n" -lt 1 ]; then say "✗ 테스트 없음"; fail=1; else say "✓ 테스트 $n개"; fi
+if [ "$n" -lt 1 ]; then say "✗ 테스트 없음"; fail=1; else say "✓ 테스트 ${n}개"; fi
 
 # shellcheck disable=SC2046
 out=$(cargo test $(module_pkgs "$m") --no-fail-fast 2>&1); code=$?
 passed=$(printf '%s\n' "$out" | grep -E '^test result:' | sed -E 's/.* ([0-9]+) passed.*/\1/' | awk '{s+=$1} END{print s+0}')
 failed=$(printf '%s\n' "$out" | grep -E '^test result:' | sed -E 's/.* ([0-9]+) failed.*/\1/' | awk '{s+=$1} END{print s+0}')
 if [ "$code" -eq 0 ]; then say "✗ 테스트가 이미 통과함 (red가 아니다)"; fail=1
-else say "✓ red: 실패 $failed개 · 통과 $passed개"; fi
+else say "✓ red: 실패 ${failed}개 · 통과 ${passed}개"; fi
 if [ "$passed" -gt 0 ]; then
   say "  참고: 구현 전인데 통과하는 테스트 — 아무것도 확인하지 않는 테스트인지 본다"
   printf '%s\n' "$out" | grep -E '^test .* \.\.\. ok$' | head -20 | sed 's/^/    /'
