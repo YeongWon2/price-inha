@@ -7,11 +7,11 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::accept::{self, Checked, Draft};
-use crate::book::Book;
+use crate::book::{Book, key_alive};
 use crate::ledger::{Content, KeyRecord, MarketCode, OrderRecord};
 use crate::{
-    AccountKind, BrokerError, CloseReason, Fault, IDEMPOTENCY_WINDOW, InvalidReason, ModifyRequest,
-    OrderAck, OrderEventKind, OrderId, OrderRequest, OrderStatus, PaperConfig, UnfilledTimeout,
+    AccountKind, BrokerError, CloseReason, Fault, InvalidReason, ModifyRequest, OrderAck,
+    OrderEventKind, OrderId, OrderRequest, OrderStatus, PaperConfig, UnfilledTimeout,
 };
 
 /// 장애 흉내가 켜져 있으면 그 오류 (E13 · E30).
@@ -44,7 +44,7 @@ fn open_index(book: &Book, order_id: &OrderId) -> Result<usize, BrokerError> {
     }
 }
 
-/// 같은 키가 [`IDEMPOTENCY_WINDOW`] 안에 있었으면 앞의 결과(같은 내용) 또는 충돌(다른 내용).
+/// 같은 키가 [`crate::IDEMPOTENCY_WINDOW`] 안에 있었으면 앞의 결과(같은 내용) 또는 충돌(다른 내용).
 fn replay(
     book: &Book,
     key: Option<&String>,
@@ -53,12 +53,7 @@ fn replay(
 ) -> Option<Result<OrderAck, BrokerError>> {
     let (key, content) = (key?, content?);
     let found = book.ledger.idempotency.get(key)?;
-    // 시각이 접수 때보다 앞이면(시계가 어긋남) 아직 살아 있는 것으로 본다.
-    let alive = now
-        .signed_duration_since(found.accepted_at)
-        .to_std()
-        .map_or(true, |age| age < IDEMPOTENCY_WINDOW);
-    if !alive {
+    if !key_alive(found.accepted_at, now) {
         return None;
     }
     Some(if &found.content == content {
@@ -71,14 +66,16 @@ fn replay(
     })
 }
 
-/// 미체결 취소 시각.
+/// 미체결 취소 시각. 주문은 장 마감을 넘기지 않는다: 어느 값을 주든 접수한 세션의 끝보다
+/// 늦지 않다.
 fn deadline(timeout: UnfilledTimeout, checked: &Checked, now: DateTime<Utc>) -> DateTime<Utc> {
+    let session_end = checked.session.end;
     match timeout {
-        UnfilledTimeout::SessionClose => checked.session.end,
+        UnfilledTimeout::SessionClose => session_end,
         UnfilledTimeout::After(wait) => chrono::Duration::from_std(wait)
             .ok()
             .and_then(|wait| now.checked_add_signed(wait))
-            .unwrap_or(DateTime::<Utc>::MAX_UTC),
+            .map_or(session_end, |after| after.min(session_end)),
     }
 }
 
@@ -120,7 +117,7 @@ fn open_order(
     book.ledger.orders.len() - 1
 }
 
-/// 주문 접수. 확인 순서는 [`crate::paper`]의 모듈 문서 1~9.
+/// 주문 접수. 먼저 마감이 된 주문을 취소한다. 확인 순서는 [`crate::paper`]의 모듈 문서 1~9.
 pub(crate) fn place(
     book: &mut Book,
     config: &PaperConfig,
@@ -128,6 +125,7 @@ pub(crate) fn place(
     request: OrderRequest,
     now: DateTime<Utc>,
 ) -> Result<OrderAck, BrokerError> {
+    book.advance(now, &mut Vec::new());
     check_fault(book)?;
     if request.account_kind != AccountKind::Paper {
         return Err(BrokerError::AccountKindMismatch {
@@ -142,6 +140,7 @@ pub(crate) fn place(
         order_type: request.order_type,
         quantity: request.quantity,
         price: request.price,
+        confirm_high_value: request.confirm_high_value,
     };
     accept::check_permit(request.permit.as_ref(), seal, &draft)?;
 
@@ -183,7 +182,8 @@ pub(crate) fn place(
     })
 }
 
-/// 주문 정정. 원주문을 `Replaced`로 끝내고 새 주문이 그 자리를 잇는다.
+/// 주문 정정. 먼저 마감이 된 주문을 취소한다(마감이 지난 주문은 정정을 받지 않는다).
+/// 원주문을 `Replaced`로 끝내고 새 주문이 그 자리를 잇는다.
 pub(crate) fn modify(
     book: &mut Book,
     config: &PaperConfig,
@@ -192,6 +192,7 @@ pub(crate) fn modify(
     request: ModifyRequest,
     now: DateTime<Utc>,
 ) -> Result<OrderId, BrokerError> {
+    book.advance(now, &mut Vec::new());
     check_fault(book)?;
     let index = open_index(book, order_id)?;
     let original = book
@@ -218,6 +219,7 @@ pub(crate) fn modify(
         order_type: request.order_type,
         quantity,
         price: request.price,
+        confirm_high_value: request.confirm_high_value,
     };
     accept::check_permit(request.permit.as_ref(), seal, &draft)?;
     let checked = accept::check_draft(book, config, &draft, now, Some(&original))?;
@@ -234,12 +236,14 @@ pub(crate) fn modify(
         .ok_or(BrokerError::OrderNotFound)
 }
 
-/// 주문 취소. 묶인 것을 풀고, 취소 요청에 새로 낸 식별자를 돌려준다.
+/// 주문 취소. 먼저 마감이 된 주문을 취소한다(그렇게 끝난 주문은 `AlreadyCanceled`다).
+/// 묶인 것을 풀고, 취소 요청에 새로 낸 식별자를 돌려준다.
 pub(crate) fn cancel(
     book: &mut Book,
     order_id: &OrderId,
     now: DateTime<Utc>,
 ) -> Result<OrderId, BrokerError> {
+    book.advance(now, &mut Vec::new());
     check_fault(book)?;
     let index = open_index(book, order_id)?;
     book.close(

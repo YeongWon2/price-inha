@@ -26,6 +26,17 @@ pub(crate) fn charge(amount: Decimal, rate: Decimal, rounding: MoneyRounding) ->
     ))
 }
 
+/// 주문 단위로 누적해 떼는 수수료 · 세금의 누적값: `맞춤(누적 체결 금액 × 비율)`.
+/// 이번 체결에서 뗄 것은 여기서 이미 뗀 것을 뺀 값이다. 그래서 여러 번에 나눠 체결돼도 뗀 합이
+/// 한 번에 체결됐을 때와 같다. 누적 체결 금액을 넘지 않게 한다(아주 작은 금액을 올림할 때).
+pub(crate) fn charge_total(
+    filled_amount: Decimal,
+    rate: Decimal,
+    rounding: MoneyRounding,
+) -> Option<Decimal> {
+    Some(charge(filled_amount, rate, rounding)?.min(filled_amount))
+}
+
 /// 사는 주문에 묶는 돈: `수량 × 값 + 올림(수량 × 값 × 수수료율)`. 수수료 몫은 항상 올린다.
 pub(crate) fn buy_hold(quantity: Decimal, price: Decimal, rules: &MarketRules) -> Option<Decimal> {
     let notional = quantity.checked_mul(price)?;
@@ -35,12 +46,6 @@ pub(crate) fn buy_hold(quantity: Decimal, price: Decimal, rules: &MarketRules) -
         RoundingMode::Up,
     );
     notional.checked_add(fee)
-}
-
-/// 사는 체결의 비용: `수량 × 값 + 수수료`.
-pub(crate) fn buy_cost(quantity: Decimal, price: Decimal, rules: &MarketRules) -> Option<Decimal> {
-    let amount = quantity.checked_mul(price)?;
-    amount.checked_add(charge(amount, rules.commission_rate, rules.rounding)?)
 }
 
 /// 값이 호가 단위에 맞는가. 단위가 0이면(표가 빈 설정) 맞는 것으로 본다.
@@ -93,15 +98,16 @@ pub(crate) fn price_band(
     Some((lower, upper))
 }
 
-/// `budget`으로 살 수 있는 가장 큰 정수 수량(`most` 이하).
+/// `budget`으로 살 수 있는 가장 큰 정수 수량(`most` 이하). `cost`는 그 수량을 `price`에 살 때
+/// 드는 돈(금액 + 이번에 뗄 수수료)이다. 넘쳐서 셈할 수 없으면 `None`을 준다.
 pub(crate) fn affordable_quantity(
     budget: Decimal,
     price: Decimal,
     most: Decimal,
     rules: &MarketRules,
+    cost: impl Fn(Decimal) -> Option<Decimal>,
 ) -> Decimal {
-    let fits =
-        |quantity: Decimal| buy_cost(quantity, price, rules).is_some_and(|cost| cost <= budget);
+    let fits = |quantity: Decimal| cost(quantity).is_some_and(|cost| cost <= budget);
     // 수수료를 넣은 한 주 값으로 어림한 뒤, 반올림 때문에 어긋난 한두 주를 맞춘다.
     let unit = price
         .checked_mul(Decimal::ONE + rules.commission_rate)
@@ -121,10 +127,8 @@ pub(crate) fn affordable_quantity(
 
 #[cfg(test)]
 mod tests {
-    use super::{affordable_quantity, buy_cost, buy_hold, charge, market_price, price_band};
-    use crate::{
-        MarketRules, MaxFill, MoneyRounding, ProceedsUsable, RoundingMode, Side, UnverifiedRules,
-    };
+    use super::{affordable_quantity, buy_hold, charge, charge_total, market_price, price_band};
+    use crate::{MarketRules, MaxFill, ProceedsUsable, RoundingMode, Side, UnverifiedRules};
     use rust_decimal::Decimal;
 
     fn d(text: &str) -> Decimal {
@@ -132,17 +136,19 @@ mod tests {
     }
 
     fn rules(mode: RoundingMode) -> MarketRules {
-        let mut rules = MarketRules::kr(UnverifiedRules {
+        MarketRules::kr(UnverifiedRules {
             commission_rate: d("0.00015"),
             market_slippage_rate: d("0.001"),
             rounding_mode: mode,
             max_fill: MaxFill::Unlimited,
             proceeds_usable: ProceedsUsable::AfterSettlement,
-        });
-        rules.commission_rate = d("0.00015");
-        rules.market_slippage_rate = d("0.001");
-        rules.rounding = MoneyRounding { scale: 0, mode };
-        rules
+        })
+    }
+
+    /// 아무것도 체결되지 않은 주문이 그 수량을 살 때 드는 돈.
+    fn buy_cost(quantity: Decimal, price: Decimal, rules: &MarketRules) -> Option<Decimal> {
+        let amount = quantity.checked_mul(price)?;
+        amount.checked_add(charge_total(amount, rules.commission_rate, rules.rounding)?)
     }
 
     #[test]
@@ -206,7 +212,8 @@ mod tests {
             ] {
                 let budget = d(budget);
                 let most = d("5");
-                let quantity = affordable_quantity(budget, d("85100"), most, &rules);
+                let cost = |quantity| buy_cost(quantity, d("85100"), &rules);
+                let quantity = affordable_quantity(budget, d("85100"), most, &rules, cost);
                 assert!(quantity >= d("0") && quantity <= most);
                 if quantity > d("0") {
                     assert!(buy_cost(quantity, d("85100"), &rules).unwrap() <= budget);
@@ -217,9 +224,34 @@ mod tests {
                 }
             }
         }
+        let down = rules(RoundingMode::Down);
+        let cost = |quantity| buy_cost(quantity, d("85100"), &down);
         assert_eq!(
-            affordable_quantity(d("400000"), d("85100"), d("5"), &rules(RoundingMode::Down)),
+            affordable_quantity(d("400000"), d("85100"), d("5"), &down, cost),
             d("4")
         );
+    }
+
+    #[test]
+    fn 누적해_떼면_나눠_체결돼도_뗀_합이_한_번에_체결됐을_때와_같다() {
+        // 주당 70,300 × 0.015% = 10.545. 1주씩 열 번.
+        for mode in [RoundingMode::Down, RoundingMode::HalfUp, RoundingMode::Up] {
+            let rules = rules(mode);
+            let mut taken = d("0");
+            for filled in 1..=10 {
+                let total = d("70300") * Decimal::from(filled);
+                let now = charge_total(total, rules.commission_rate, rules.rounding).unwrap();
+                assert!(now >= taken, "{mode:?}: 누적값은 줄지 않는다");
+                taken = now;
+            }
+            let whole = charge(d("703000"), rules.commission_rate, rules.rounding).unwrap();
+            assert_eq!(taken, whole, "{mode:?}");
+            // 접수 때 묶은 수수료 몫(올림)을 넘지 않는다.
+            assert!(taken <= buy_hold(d("10"), d("70300"), &rules).unwrap() - d("703000"));
+        }
+        // 금액보다 많이 떼지 않는다.
+        let up = rules(RoundingMode::Up);
+        let tiny = charge_total(d("0.4"), up.commission_rate, up.rounding);
+        assert_eq!(tiny, Some(d("0.4")));
     }
 }

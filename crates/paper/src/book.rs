@@ -3,13 +3,27 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
+use chrono::{DateTime, NaiveDate, Utc};
 use pi_market::MarketCalendar;
 use rust_decimal::Decimal;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
-use crate::ledger::{CashCode, Ledger, Lot, MarketCode};
-use crate::{CloseReason, Fault, OrderEvent, OrderEventKind, OrderStatus};
+use crate::calendar;
+use crate::ledger::{CashCode, Ledger, Lot, MarketCode, OrderRecord};
+use crate::{
+    Archived, CloseReason, Fault, IDEMPOTENCY_WINDOW, OrderEvent, OrderEventKind, OrderStatus,
+};
+
+/// 종목 하나에 기억하는 기준가의 날짜 수. 오늘 것과 미리 넣은 다음 영업일 것이면 충분하다.
+const REFERENCE_DAYS: usize = 3;
+
+/// 멱등성 키가 아직 살아 있는가. 접수한 지 딱 [`IDEMPOTENCY_WINDOW`]가 되면 죽는다.
+/// 시각이 접수 때보다 앞이면(시계가 어긋남) 아직 살아 있는 것으로 본다.
+pub(crate) fn key_alive(accepted_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    now.signed_duration_since(accepted_at)
+        .to_std()
+        .map_or(true, |age| age < IDEMPOTENCY_WINDOW)
+}
 
 /// 계좌의 속. 잠금 안에 있다.
 #[derive(Debug)]
@@ -17,10 +31,11 @@ pub(crate) struct Book {
     pub ledger: Ledger,
     pub kr_calendar: Option<MarketCalendar>,
     pub us_calendar: Option<MarketCalendar>,
-    /// 종목 글자 → 기준가(전일 종가).
-    pub reference: BTreeMap<String, Decimal>,
+    /// 종목 글자 → 그 기준가를 쓰는 영업일과 기준가(전일 종가). 날짜 순서, 최근 몇 날만.
+    reference: BTreeMap<String, Vec<(NaiveDate, Decimal)>>,
     pub fault: Option<Fault>,
-    pub subscribers: Vec<UnboundedSender<OrderEvent>>,
+    /// 체결 알림을 받는 쪽들. 저마다 정한 개수까지만 쥔다.
+    pub subscribers: Vec<Sender<OrderEvent>>,
 }
 
 impl Book {
@@ -42,6 +57,35 @@ impl Book {
         }
     }
 
+    /// 그 시장의 달력. 넣은 적이 없거나 `now`를 덮지 않으면 `None`(달력이 낡음).
+    pub(crate) fn covering(
+        &self,
+        market: MarketCode,
+        now: DateTime<Utc>,
+    ) -> Option<&MarketCalendar> {
+        self.calendar(market)
+            .filter(|calendar| calendar::covers(calendar, now))
+    }
+
+    /// 종목의 기준가를 그 영업일의 것으로 기억한다. 같은 날짜의 것은 바꾼다.
+    pub(crate) fn set_reference(&mut self, symbol: &str, price: Decimal, date: NaiveDate) {
+        let days = self.reference.entry(symbol.to_owned()).or_default();
+        days.retain(|(day, _)| *day != date);
+        days.push((date, price));
+        days.sort_by_key(|(day, _)| *day);
+        let extra = days.len().saturating_sub(REFERENCE_DAYS);
+        days.drain(..extra);
+    }
+
+    /// 그 영업일의 기준가. 다른 날짜의 것뿐이면 모르는 것이다.
+    pub(crate) fn reference_on(&self, symbol: &str, date: NaiveDate) -> Option<Decimal> {
+        self.reference
+            .get(symbol)?
+            .iter()
+            .find(|(day, _)| *day == date)
+            .map(|(_, price)| *price)
+    }
+
     /// 그 주문의 지금 모습으로 이벤트를 하나 낸다. 구독자에게 보내고 `out`에도 담는다.
     pub(crate) fn emit(&mut self, kind: OrderEventKind, index: usize, out: &mut Vec<OrderEvent>) {
         let Some(order) = self.ledger.orders.get(index) else {
@@ -51,9 +95,10 @@ impl Book {
             kind,
             order: order.view(),
         };
-        // 받는 쪽이 사라진 구독은 뺀다.
+        // 받는 쪽이 사라졌거나 읽지 않아 쥘 수 있는 개수가 찬 구독은 끊는다(그 구독만).
+        // 이미 쥔 것은 받는 쪽이 읽을 수 있고, 그 뒤로는 닫힌 것으로 보인다.
         self.subscribers
-            .retain(|subscriber| subscriber.send(event.clone()).is_ok());
+            .retain(|subscriber| subscriber.try_send(event.clone()).is_ok());
         out.push(event);
     }
 
@@ -78,8 +123,34 @@ impl Book {
         self.ledger.cash_mut(currency).available += released;
     }
 
+    /// `now`를 받는 모든 호출이 먼저 하는 일: 지난 멱등성 키를 버리고, 마감이 된 주문을 취소한다.
+    pub(crate) fn advance(&mut self, now: DateTime<Utc>, out: &mut Vec<OrderEvent>) {
+        self.ledger
+            .idempotency
+            .retain(|_, key| key_alive(key.accepted_at, now));
+        self.expire(now, out);
+    }
+
+    /// 끝난 주문 가운데 접수 시각이 `before`보다 앞인 것과, 체결 기록 가운데 체결 시각이
+    /// `before`보다 앞인 것을 장부에서 떼어 돌려준다 (N1). 순서는 그대로다.
+    pub(crate) fn archive(&mut self, before: DateTime<Utc>) -> Archived {
+        let old = |order: &OrderRecord| !order.is_open() && order.ordered_at < before;
+        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.ledger.orders)
+            .into_iter()
+            .partition(old);
+        self.ledger.orders = kept;
+        let (done, left): (Vec<_>, Vec<_>) = std::mem::take(&mut self.ledger.fills)
+            .into_iter()
+            .partition(|fill| fill.filled_at < before);
+        self.ledger.fills = left;
+        Archived {
+            orders: gone.iter().map(OrderRecord::view).collect(),
+            fills: done.iter().map(|fill| fill.view()).collect(),
+        }
+    }
+
     /// 마감이 된(`now >= 마감`) 열린 주문을 접수한 순서대로 취소한다 (E12 · E29 · N4).
-    pub(crate) fn expire(&mut self, now: DateTime<Utc>, out: &mut Vec<OrderEvent>) {
+    fn expire(&mut self, now: DateTime<Utc>, out: &mut Vec<OrderEvent>) {
         let due: Vec<usize> = self
             .ledger
             .orders
@@ -138,35 +209,50 @@ impl Book {
     }
 }
 
-/// 체결한 영업일: 달력에서 `now`가 든 세션의 날.
-fn trade_date(calendar: &MarketCalendar, now: DateTime<Utc>) -> Option<NaiveDate> {
-    [
-        &calendar.previous_business_day,
-        &calendar.today,
-        &calendar.next_business_day,
-    ]
-    .into_iter()
-    .find(|day| {
-        day.sessions
-            .iter()
-            .any(|session| session.start <= now && now < session.end)
-    })
-    .map(|day| day.date)
-}
+#[cfg(test)]
+mod tests {
+    use super::{Book, key_alive};
+    use crate::ledger::Ledger;
+    use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+    use rust_decimal::Decimal;
 
-/// 결제 예정일 = 체결한 영업일 + `business_days` 영업일. 영업일은 평일(월~금)로만 센다.
-pub(crate) fn settlement_date(
-    calendar: &MarketCalendar,
-    now: DateTime<Utc>,
-    business_days: u32,
-) -> Option<NaiveDate> {
-    let mut date = trade_date(calendar, now)?;
-    let mut left = business_days;
-    while left > 0 {
-        date = date.succ_opt()?;
-        if !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
-            left -= 1;
-        }
+    fn date(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, day).unwrap()
     }
-    Some(date)
+
+    fn at(seconds: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
+    }
+
+    #[test]
+    fn 기준가는_넣은_날짜의_것만_주고_최근_세_날짜만_기억한다() {
+        let mut book = Book::new(Ledger::new(Decimal::ZERO, Decimal::ZERO));
+        let price = |value: i64| Decimal::from(value);
+        book.set_reference("005930", price(70_000), date(16));
+        // 다음 영업일 것을 미리 넣어도 오늘 것이 남는다.
+        book.set_reference("005930", price(71_000), date(17));
+        assert_eq!(book.reference_on("005930", date(16)), Some(price(70_000)));
+        assert_eq!(book.reference_on("005930", date(17)), Some(price(71_000)));
+        assert_eq!(book.reference_on("005930", date(18)), None);
+        assert_eq!(book.reference_on("000660", date(16)), None);
+        // 같은 날짜로 다시 넣으면 바꾼다.
+        book.set_reference("005930", price(70_500), date(16));
+        assert_eq!(book.reference_on("005930", date(16)), Some(price(70_500)));
+        // 날이 가면 오래된 날짜의 것부터 버린다.
+        book.set_reference("005930", price(72_000), date(18));
+        book.set_reference("005930", price(73_000), date(19));
+        assert_eq!(book.reference_on("005930", date(16)), None);
+        assert_eq!(book.reference_on("005930", date(17)), Some(price(71_000)));
+        assert_eq!(book.reference_on("005930", date(19)), Some(price(73_000)));
+    }
+
+    #[test]
+    fn 멱등성_키는_딱_열_분이_되면_죽는다() {
+        assert!(key_alive(at(0), at(599)));
+        assert!(!key_alive(at(0), at(600)));
+        assert!(
+            key_alive(at(0), at(-5)),
+            "시계가 뒤로 갔으면 살아 있는 것으로 본다"
+        );
+    }
 }

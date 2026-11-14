@@ -12,6 +12,7 @@
 mod accept;
 mod book;
 mod broker;
+mod calendar;
 mod config;
 mod error;
 mod fill;
@@ -21,6 +22,8 @@ mod money;
 mod orders;
 mod paper;
 mod permit;
+mod service;
+mod verify;
 
 pub use broker::Broker;
 pub use config::{

@@ -221,12 +221,17 @@ pub(crate) struct KeyRecord {
     pub content: Content,
 }
 
-/// 종목의 마지막 시세.
+/// 종목에서 마지막으로 처리한 시세. 같은 시세(거래소 시각 · 값이 같음)를 두 번 쓰지 않는 데와
+/// 시장가 사기가 묶는 돈을 셈하는 데 쓴다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct QuoteRecord {
     pub symbol: String,
     pub currency: CashCode,
     pub price: Decimal,
+    /// 거래소가 준 시각. 없는 시세도 있다.
+    pub exchange_time: Option<DateTime<Utc>>,
+    /// 우리가 받은 시각. 같은 시세를 다시 받으면 더 늦은 쪽으로 고친다.
+    pub received_at: DateTime<Utc>,
 }
 
 /// 계좌 상태 전부.
@@ -378,30 +383,26 @@ impl Ledger {
             .retain(|holding| holding.quantity > Decimal::ZERO);
     }
 
-    /// 마지막 시세를 기억한다.
-    pub(crate) fn remember_quote(&mut self, symbol: &str, currency: CashCode, price: Decimal) {
+    /// 마지막으로 처리한 시세를 기억한다(그 종목 · 통화의 앞의 것을 바꾼다).
+    pub(crate) fn remember_quote(&mut self, record: QuoteRecord) {
         let found = self
             .last_quotes
             .iter_mut()
-            .find(|quote| quote.symbol == symbol && quote.currency == currency);
+            .find(|quote| quote.symbol == record.symbol && quote.currency == record.currency);
         if let Some(quote) = found {
-            quote.price = price;
+            *quote = record;
             return;
         }
-        self.last_quotes.push(QuoteRecord {
-            symbol: symbol.to_owned(),
-            currency,
-            price,
-        });
+        self.last_quotes.push(record);
         self.last_quotes
             .sort_by(|a, b| (&a.symbol, a.currency).cmp(&(&b.symbol, b.currency)));
     }
 
-    pub(crate) fn last_quote(&self, symbol: &str, currency: CashCode) -> Option<Decimal> {
+    /// 그 종목 · 통화에서 마지막으로 처리한 시세.
+    pub(crate) fn last_quote(&self, symbol: &str, currency: CashCode) -> Option<&QuoteRecord> {
         self.last_quotes
             .iter()
             .find(|quote| quote.symbol == symbol && quote.currency == currency)
-            .map(|quote| quote.price)
     }
 
     /// 보유를 밖에 보여 주는 모습으로.

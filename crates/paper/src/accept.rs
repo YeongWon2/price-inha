@@ -7,7 +7,11 @@ use chrono::{DateTime, Utc};
 use pi_market::{Market, Session, Symbol};
 use rust_decimal::Decimal;
 
+use chrono::NaiveDate;
+
 use crate::book::Book;
+use crate::calendar;
+use crate::fill::too_old;
 use crate::ledger::{CashCode, MarketCode, OrderRecord};
 use crate::money;
 use crate::{
@@ -24,6 +28,8 @@ pub(crate) struct Draft {
     pub order_type: OrderType,
     pub quantity: Decimal,
     pub price: Option<Decimal>,
+    /// 큰 주문 확인 표시.
+    pub confirm_high_value: bool,
 }
 
 /// 확인을 통과한 주문에 대해 셈한 것.
@@ -91,20 +97,72 @@ fn check_shape(draft: &Draft, rules: &MarketRules) -> Result<(), BrokerError> {
     }
 }
 
-/// 장 시간: 달력이 있고, `now`에 열린 세션이 있고, 그 세션에서 이 호가 유형을 받는가.
+/// 시장가로 살 때 묶는 돈을 셈하는 값: 기억한 시세에 미끄러짐을 더해 호가 단위로 올린 값.
+/// 기억한 시세가 없거나 `now` 기준으로 늦었으면(N6) 시세를 모르는 것이다.
+fn market_hold_price(
+    book: &Book,
+    config: &PaperConfig,
+    draft: &Draft,
+    rules: &MarketRules,
+    currency: CashCode,
+    now: DateTime<Utc>,
+) -> Result<Decimal, BrokerError> {
+    let quote = book
+        .ledger
+        .last_quote(draft.symbol.as_str(), currency)
+        .filter(|quote| !too_old(quote.received_at, now, &config.stale))
+        .ok_or(BrokerError::QuoteUnknown)?;
+    // 셈이 넘칠 만큼 큰 값으로는 어떤 돈으로도 살 수 없다.
+    money::market_price(quote.price, Side::Buy, rules).ok_or(BrokerError::InsufficientBuyingPower)
+}
+
+/// 큰 주문: 주문 금액이 최대 주문 금액을 넘으면 확인 표시와 상관없이 받지 않고, 아니고 확인
+/// 기준 이상인데 확인 표시가 없으면 받지 않는다. `value`는 주문 금액을 셈하는 값이다(지정가,
+/// 또는 시장가 사기가 묶는 돈을 셈하는 값). 값이 없으면(시장가 팔기, 시세를 모르는 시장가 사기)
+/// 보지 않는다.
+fn check_amount(
+    draft: &Draft,
+    rules: &MarketRules,
+    value: Option<Decimal>,
+) -> Result<(), BrokerError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    // 셈이 넘칠 만큼 큰 금액은 어떤 기준보다도 크다.
+    let amount = draft.quantity.checked_mul(value);
+    if let Some(max_amount) = rules.max_order_amount
+        && amount.is_none_or(|amount| amount > max_amount)
+    {
+        return Err(BrokerError::MaxOrderAmountExceeded { max_amount });
+    }
+    if let Some(threshold) = rules.high_value_confirm_from
+        && amount.is_none_or(|amount| amount >= threshold)
+        && !draft.confirm_high_value
+    {
+        return Err(BrokerError::ConfirmHighValueRequired { threshold });
+    }
+    Ok(())
+}
+
+/// 장 시간: 달력이 `now`를 덮고, `now`에 열린 세션이 있고, 그 세션에서 이 호가 유형을 받는가.
+/// 접수하는 세션과 그 세션의 날(오늘)을 돌려준다.
 fn check_hours(
     book: &Book,
     market: MarketCode,
     rules: &MarketRules,
     order_type: OrderType,
     now: DateTime<Utc>,
-) -> Result<Session, BrokerError> {
-    let session = book
-        .calendar(market)
-        .and_then(|calendar| calendar.session_at(now))
+) -> Result<(Session, NaiveDate), BrokerError> {
+    // 달력을 넣은 적이 없거나 넣은 달력이 지금을 덮지 않으면 장이 닫힌 것과 구분한다.
+    let calendar = book
+        .covering(market, now)
+        .ok_or(BrokerError::CalendarStale)?;
+    let session = calendar
+        .session_at(now)
         .ok_or(BrokerError::OrderHoursClosed)?;
+    let today = calendar::trade_date(calendar, now).ok_or(BrokerError::OrderHoursClosed)?;
     if rules.sessions.allows(session.kind, order_type) {
-        return Ok(session);
+        return Ok((session, today));
     }
     let any = rules.sessions.allows(session.kind, OrderType::Limit)
         || rules.sessions.allows(session.kind, OrderType::Market);
@@ -116,42 +174,36 @@ fn check_hours(
 }
 
 /// 상 · 하한가: 제한폭이 있는 시장의 지정가만 본다. 상 · 하한가와 딱 같은 값은 받는다.
-fn check_price_band(book: &Book, draft: &Draft, rules: &MarketRules) -> Result<(), BrokerError> {
+/// 기준가는 오늘(`today`) 것만 쓴다. 다른 날짜의 것뿐이면 기준가를 모르는 것이다.
+fn check_price_band(
+    book: &Book,
+    draft: &Draft,
+    rules: &MarketRules,
+    today: NaiveDate,
+) -> Result<(), BrokerError> {
     let (Some(price), Some(rate)) = (draft.price, rules.price_limit_rate) else {
         return Ok(());
     };
     let reference = book
-        .reference
-        .get(draft.symbol.as_str())
+        .reference_on(draft.symbol.as_str(), today)
         .ok_or(BrokerError::ReferencePriceUnknown)?;
     let (lower, upper) =
-        money::price_band(*reference, rate, rules).ok_or(BrokerError::PriceOutOfRange)?;
+        money::price_band(reference, rate, rules).ok_or(BrokerError::PriceOutOfRange)?;
     if price < lower || price > upper {
         return Err(BrokerError::PriceOutOfRange);
     }
     Ok(())
 }
 
-/// 사는 주문이 묶을 돈과 그것을 셈한 값. 쓸 수 있는 돈(`replacing`이 묶은 것은 푼 것으로 본다)을
-/// 넘으면 받지 않는다.
+/// 사는 주문이 묶을 돈. 쓸 수 있는 돈(`replacing`이 묶은 것은 푼 것으로 본다)을 넘으면 받지 않는다.
 fn check_buying_power(
     book: &Book,
     draft: &Draft,
     rules: &MarketRules,
     currency: CashCode,
+    hold_price: Decimal,
     replacing: Option<&OrderRecord>,
-) -> Result<(Decimal, Decimal), BrokerError> {
-    let hold_price = match draft.price {
-        Some(price) => price,
-        None => {
-            let quote = book
-                .ledger
-                .last_quote(draft.symbol.as_str(), currency)
-                .ok_or(BrokerError::QuoteUnknown)?;
-            money::market_price(quote, Side::Buy, rules)
-                .ok_or(BrokerError::InsufficientBuyingPower)?
-        }
-    };
+) -> Result<Decimal, BrokerError> {
     // 셈이 넘칠 만큼 큰 주문은 어떤 돈으로도 살 수 없다.
     let hold = money::buy_hold(draft.quantity, hold_price, rules)
         .ok_or(BrokerError::InsufficientBuyingPower)?;
@@ -159,11 +211,11 @@ fn check_buying_power(
     if hold > book.ledger.cash(currency).available + freed {
         return Err(BrokerError::InsufficientBuyingPower);
     }
-    Ok((hold_price, hold))
+    Ok(hold)
 }
 
-/// 모의계좌 모듈 문서의 확인 5~9. `replacing`은 정정할 때의 원주문이다(그 주문이 묶은 돈 ·
-/// 수량은 푼 것으로 보고, 반대 방향 확인에서도 뺀다).
+/// 모의계좌 모듈 문서의 확인 5~9와 2차 규칙 9 · 13. `replacing`은 정정할 때의 원주문이다(그
+/// 주문이 묶은 돈 · 수량은 푼 것으로 보고, 반대 방향 확인에서도 뺀다).
 pub(crate) fn check_draft(
     book: &Book,
     config: &PaperConfig,
@@ -177,8 +229,18 @@ pub(crate) fn check_draft(
         .ok_or(BrokerError::UnsupportedMarket)?;
     let currency = CashCode::of(&rules.currency).ok_or(BrokerError::UnsupportedMarket)?;
     check_shape(draft, rules)?;
-    let session = check_hours(book, market, rules, draft.order_type, now)?;
-    check_price_band(book, draft, rules)?;
+    // 사는 주문이 묶는 돈을 셈하는 값. 시장가는 늦지 않은 시세가 있어야 정해진다.
+    let hold_price = match (draft.side, draft.price) {
+        (Side::Sell, _) => None,
+        (Side::Buy, Some(price)) => Some(Ok(price)),
+        (Side::Buy, None) => Some(market_hold_price(book, config, draft, rules, currency, now)),
+    };
+    let value = draft
+        .price
+        .or_else(|| hold_price.clone().and_then(Result::ok));
+    check_amount(draft, rules, value)?;
+    let (session, today) = check_hours(book, market, rules, draft.order_type, now)?;
+    check_price_band(book, draft, rules, today)?;
 
     let symbol = draft.symbol.as_str();
     let replaced_id = replacing.map(|order| &order.order_id);
@@ -193,12 +255,13 @@ pub(crate) fn check_draft(
         return Err(BrokerError::OppositePendingOrderExists);
     }
 
-    let (hold_price, hold) = match draft.side {
-        Side::Buy => {
-            let (price, hold) = check_buying_power(book, draft, rules, currency, replacing)?;
+    let (hold_price, hold) = match hold_price {
+        Some(price) => {
+            let price = price?;
+            let hold = check_buying_power(book, draft, rules, currency, price, replacing)?;
             (Some(price), hold)
         }
-        Side::Sell => {
+        None => {
             let freed = replacing
                 .filter(|order| order.side == Side::Sell)
                 .map_or(Decimal::ZERO, OrderRecord::remaining);

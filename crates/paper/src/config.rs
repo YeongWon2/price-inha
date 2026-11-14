@@ -20,7 +20,8 @@ pub enum RoundingMode {
 
 /// 돈의 반올림 규칙. 이 모듈의 반올림은 모두 여기 한 곳을 거친다.
 ///
-/// - 체결마다 떼는 수수료와 세금: `금액 × 비율`을 `scale` 자리에서 `mode`로 맞춘다.
+/// - 떼는 수수료와 세금: 주문의 `누적 체결 금액 × 비율`을 `scale` 자리에서 `mode`로 맞춘 값이
+///   그 주문에서 뗀 합이 된다(체결마다 그 값에서 이미 뗀 것을 뺀 만큼 뗀다).
 /// - 사는 주문에 묶는 돈의 수수료 몫: 같은 `scale`에서 **항상 올린다**(모자라게 묶지 않는다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoneyRounding {
@@ -179,19 +180,17 @@ impl MarketRules {
     /// | 세션 | 정규장에서만 지정가 · 시장가 | 보수적으로 잡았다. 프리 · 애프터마켓의 허용 유형은 **미확인** |
     /// | 수수료율 · 미끄러짐 · 반올림 방향 · 최대 체결 수량 · 판 돈을 쓰는 때 | **기본값 없음** | `unverified`에 준 값이 그대로 들어간다 |
     pub fn kr(unverified: UnverifiedRules) -> Self {
-        // 2차 뼈대: 인자를 받아 두기만 한다. 구현에서 `unverified`의 값을 그대로 넣는다.
-        let _ = unverified;
         let band = |below: Option<i64>, tick: i64| TickBand {
             below: below.map(Decimal::from),
             tick: Decimal::from(tick),
         };
         Self {
             currency: Currency::Krw,
-            commission_rate: Decimal::ZERO,
+            commission_rate: unverified.commission_rate,
             sell_tax_rate: Decimal::new(20, 4),
             rounding: MoneyRounding {
                 scale: 0,
-                mode: RoundingMode::Up,
+                mode: unverified.rounding_mode,
             },
             tick_table: vec![
                 band(Some(2_000), 1),
@@ -205,11 +204,11 @@ impl MarketRules {
             price_limit_rate: Some(Decimal::new(30, 2)),
             settlement: Settlement {
                 business_days: 2,
-                proceeds_usable: ProceedsUsable::AfterSettlement,
+                proceeds_usable: unverified.proceeds_usable,
             },
-            market_slippage_rate: Decimal::ZERO,
+            market_slippage_rate: unverified.market_slippage_rate,
             limit_fill_price: LimitFillPrice::Limit,
-            max_fill: MaxFill::Unlimited,
+            max_fill: unverified.max_fill,
             sessions: SessionRules::regular_only(),
             high_value_confirm_from: Some(Decimal::from(100_000_000_i64)),
             max_order_amount: Some(Decimal::from(3_000_000_000_i64)),
@@ -229,15 +228,13 @@ impl MarketRules {
     /// | 수수료율 · 미끄러짐 · 반올림 방향 · 최대 체결 수량 · 판 돈을 쓰는 때 | **기본값 없음** | `unverified`에 준 값이 그대로 들어간다 |
     /// | 그 밖 | 국내와 같다 | |
     pub fn us(unverified: UnverifiedRules, sell_cost_rate: Decimal) -> Self {
-        // 2차 뼈대: 인자를 받아 두기만 한다. 구현에서 받은 값을 그대로 넣는다.
-        let _ = (unverified, sell_cost_rate);
         Self {
             currency: Currency::Usd,
-            commission_rate: Decimal::ZERO,
-            sell_tax_rate: Decimal::ZERO,
+            commission_rate: unverified.commission_rate,
+            sell_tax_rate: sell_cost_rate,
             rounding: MoneyRounding {
                 scale: 2,
-                mode: RoundingMode::Up,
+                mode: unverified.rounding_mode,
             },
             tick_table: vec![
                 TickBand {
@@ -252,11 +249,11 @@ impl MarketRules {
             price_limit_rate: None,
             settlement: Settlement {
                 business_days: 1,
-                proceeds_usable: ProceedsUsable::AfterSettlement,
+                proceeds_usable: unverified.proceeds_usable,
             },
-            market_slippage_rate: Decimal::ZERO,
+            market_slippage_rate: unverified.market_slippage_rate,
             limit_fill_price: LimitFillPrice::Limit,
-            max_fill: MaxFill::Unlimited,
+            max_fill: unverified.max_fill,
             sessions: SessionRules::regular_only(),
             high_value_confirm_from: None,
             max_order_amount: None,
@@ -358,6 +355,10 @@ impl MarketRules {
         {
             return bad("한 번에 체결되는 최대 수량은 양의 정수여야 합니다");
         }
+        let amounts = [self.high_value_confirm_from, self.max_order_amount];
+        if amounts.iter().flatten().any(Decimal::is_sign_negative) {
+            return bad("큰 주문의 기준 금액은 음수일 수 없습니다");
+        }
         Ok(())
     }
 }
@@ -366,8 +367,14 @@ impl MarketRules {
 const MAX_MONEY_SCALE: u32 = 8;
 
 impl PaperConfig {
-    /// 설정 값이 쓸 수 있는 모양인가(비율 · 호가 단위 표 · 통화). 처음 돈은 여기서 보지 않는다.
+    /// 설정 값이 쓸 수 있는 모양인가(비율 · 호가 단위 표 · 통화 · 구독이 쥐는 개수).
+    /// 처음 돈은 여기서 보지 않는다.
     pub(crate) fn validate_rules(&self) -> Result<(), BrokerError> {
+        if self.event_buffer == 0 {
+            return Err(BrokerError::InvalidConfig(
+                "구독이 쥐는 이벤트 개수는 1 이상이어야 합니다".to_owned(),
+            ));
+        }
         self.kr.validate("국내 규칙")?;
         self.us.validate("미국 규칙")
     }

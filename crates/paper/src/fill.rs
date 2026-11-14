@@ -1,12 +1,13 @@
 //! 체결. 시세가 올 때마다 그 종목의 열린 주문을 접수한 순서대로 본다.
-//! 규칙은 [`crate::paper`]의 모듈 문서 "체결"에 적힌 그대로다.
+//! 규칙은 [`crate::paper`]의 모듈 문서 "2차 규칙"과 "체결"에 적힌 그대로다.
 
 use chrono::{DateTime, NaiveDate, Utc};
-use pi_market::{Quote, is_stale};
+use pi_market::{Quote, StalePolicy, is_stale};
 use rust_decimal::Decimal;
 
-use crate::book::{Book, settlement_date};
-use crate::ledger::{CashCode, FillRecord, OrderRecord};
+use crate::book::Book;
+use crate::calendar::settlement_date;
+use crate::ledger::{CashCode, FillRecord, OrderRecord, QuoteRecord};
 use crate::money;
 use crate::{
     CloseReason, LimitFillPrice, MarketRules, MaxFill, OrderEvent, OrderEventKind, OrderStatus,
@@ -51,6 +52,39 @@ fn fill_price(order: &OrderRecord, quote: Decimal, rules: &MarketRules) -> Optio
     (price > Decimal::ZERO).then_some(price)
 }
 
+/// 받은 지 늦은 시세 기준을 넘겼는가 (N6). 딱 기준만큼이면 아직 아니다. 받은 시각이 `now`보다
+/// 뒤면(시계가 어긋남) 나이를 잴 수 없으니 늦었다고 하지 않는다.
+pub(crate) fn too_old(
+    received_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    policy: &StalePolicy,
+) -> bool {
+    now.signed_duration_since(received_at)
+        .to_std()
+        .is_ok_and(|age| age > policy.max_age)
+}
+
+/// 이 주문이 `quantity`를 `price`에 체결할 때 떼는 수수료와 세금. 주문 단위로 누적해 뗀다:
+/// `맞춤(누적 체결 금액 × 비율) − 이미 뗀 것`. 이번 체결 금액보다 많이 떼지 않는다.
+fn charges(
+    order: &OrderRecord,
+    amount: Decimal,
+    rules: &MarketRules,
+) -> Option<(Decimal, Decimal)> {
+    let total = order.filled_amount.checked_add(amount)?;
+    let commission_total = money::charge_total(total, rules.commission_rate, rules.rounding)?;
+    let commission = (commission_total - order.commission).clamp(Decimal::ZERO, amount);
+    let tax = match order.side {
+        Side::Buy => Decimal::ZERO,
+        Side::Sell => {
+            let tax_total = money::charge_total(total, rules.sell_tax_rate, rules.rounding)?
+                .min(total - commission_total);
+            (tax_total - order.tax).clamp(Decimal::ZERO, amount - commission)
+        }
+    };
+    Some((commission, tax))
+}
+
 /// 이번에 체결할 수량과, 돈이 모자라 거부로 끝내는지.
 fn fill_quantity(
     book: &Book,
@@ -66,15 +100,30 @@ fn fill_quantity(
         return (want, false);
     }
     let budget = order.held_cash + book.ledger.cash(order.currency).available;
-    let enough = money::buy_cost(want, price, rules).is_some_and(|cost| cost <= budget);
-    if enough {
-        (want, false)
-    } else {
-        (money::affordable_quantity(budget, price, want, rules), true)
+    let cost = |quantity: Decimal| {
+        let amount = quantity.checked_mul(price)?;
+        amount.checked_add(charges(order, amount, rules)?.0)
+    };
+    if cost(want).is_some_and(|cost| cost <= budget) {
+        return (want, false);
     }
+    // 지정가 주문은 접수 때 묶은 돈으로 언제나 모자라지 않는다(누적 수수료는 묶은 수수료 몫을
+    // 넘지 않는다). 그래서 돈이 모자라 거부로 끝나는 것은 시장가뿐이다.
+    let affordable = money::affordable_quantity(budget, price, want, rules, cost);
+    (affordable, order.order_type == OrderType::Market)
 }
 
-/// 체결할 수 있으면 그 계획. 늦은 시세 · 닫힌 장 · 못 쓰는 유형 · 조건 미달이면 `None`.
+/// 이 시세가 이 주문을 접수한 **뒤에** 온 것인가: 받은 시각이, 거래소 시각이 있으면 그것도,
+/// 접수 시각보다 뒤여야 한다.
+fn after_order(order: &OrderRecord, quote: &Quote) -> bool {
+    quote.received_at > order.ordered_at
+        && quote
+            .exchange_time
+            .is_none_or(|traded_at| traded_at > order.ordered_at)
+}
+
+/// 체결할 수 있으면 그 계획. 주문 전의 시세 · 낡은 달력 · 늦은 시세 · 닫힌 장 · 못 쓰는 유형 ·
+/// 조건 미달이면 `None`.
 fn plan(
     book: &Book,
     config: &PaperConfig,
@@ -83,10 +132,10 @@ fn plan(
     now: DateTime<Utc>,
 ) -> Option<Plan> {
     let rules = config.rules(order.market.market())?;
-    if CashCode::of(&rules.currency) != Some(order.currency) {
+    if CashCode::of(&rules.currency) != Some(order.currency) || !after_order(order, quote) {
         return None;
     }
-    let calendar = book.calendar(order.market)?;
+    let calendar = book.covering(order.market, now)?;
     if is_stale(quote, calendar, now, &config.stale) {
         return None;
     }
@@ -100,14 +149,7 @@ fn plan(
         return None;
     }
     let amount = quantity.checked_mul(price)?;
-    // 떼는 돈이 체결 금액을 넘지 않게 한다(아주 작은 금액을 올림할 때).
-    let commission = money::charge(amount, rules.commission_rate, rules.rounding)?.min(amount);
-    let tax = match order.side {
-        Side::Buy => Decimal::ZERO,
-        Side::Sell => {
-            money::charge(amount, rules.sell_tax_rate, rules.rounding)?.min(amount - commission)
-        }
-    };
+    let (commission, tax) = charges(order, amount, rules)?;
     let settlement = rules.settlement;
     Some(Plan {
         quantity,
@@ -232,8 +274,30 @@ fn apply(
     }
 }
 
-/// 시세 하나를 처리한다: 마감이 된 주문을 취소하고, 시세를 기억하고, 그 종목의 열린 주문을
-/// 접수한 순서대로 체결해 본다.
+/// 이 시세를 그 종목의 마지막으로 처리한 시세로 기억한다. 이미 처리한 시세(거래소 시각 · 값이
+/// 같음. 거래소 시각이 없는 것끼리는 값이 같으면 같다)였으면 참을 돌려준다. 그때는 받은 시각만
+/// 더 늦은 쪽으로 고친다(같은 값을 방금 다시 받았다).
+fn remember(book: &mut Book, quote: &Quote, currency: CashCode) -> bool {
+    let symbol = quote.symbol.as_str();
+    let last = book.ledger.last_quote(symbol, currency);
+    let seen = last
+        .is_some_and(|last| last.exchange_time == quote.exchange_time && last.price == quote.price);
+    let received_at = match last {
+        Some(last) if seen => last.received_at.max(quote.received_at),
+        _ => quote.received_at,
+    };
+    book.ledger.remember_quote(QuoteRecord {
+        symbol: symbol.to_owned(),
+        currency,
+        price: quote.price,
+        exchange_time: quote.exchange_time,
+        received_at,
+    });
+    seen
+}
+
+/// 시세 하나를 처리한다: 마감이 된 주문을 취소하고, 쓸 수 있는 시세면 기억하고, 처음 보는
+/// 시세면 그 종목의 열린 주문을 접수한 순서대로 체결해 본다.
 pub(crate) fn on_quote(
     book: &mut Book,
     config: &PaperConfig,
@@ -241,7 +305,7 @@ pub(crate) fn on_quote(
     now: DateTime<Utc>,
 ) -> Vec<OrderEvent> {
     let mut out = Vec::new();
-    book.expire(now, &mut out);
+    book.advance(now, &mut out);
     // 현금을 두지 않는 통화의 시세나 0 이하의 값으로는 아무것도 하지 않는다.
     let Some(currency) = CashCode::of(&quote.currency) else {
         return out;
@@ -249,8 +313,14 @@ pub(crate) fn on_quote(
     if quote.price <= Decimal::ZERO {
         return out;
     }
+    // 받은 시각이 앞날인 시세와 늦은 시세(N6)는 체결도 기억도 하지 않는다.
+    if quote.received_at > now || too_old(quote.received_at, now, &config.stale) {
+        return out;
+    }
+    if remember(book, quote, currency) {
+        return out;
+    }
     let symbol = quote.symbol.as_str();
-    book.ledger.remember_quote(symbol, currency, quote.price);
     let candidates: Vec<usize> = book
         .ledger
         .orders
