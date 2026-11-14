@@ -2,8 +2,10 @@
 //!
 //! 근거: `docs/dev/modules/gate.md`의 "pi-gate가 만드는 것" 1~8.
 //! 4차(원본 대조 D17 · D21 · C9, 참고 8)는 `round4/`가 본다.
+//! 5차(4차 검토 되돌림: 옛 봉투 경계 · 지나가는 이름 · pong · 설정 0)는 `round5/`가 본다.
 
 mod round4;
+mod round5;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

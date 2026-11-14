@@ -73,6 +73,10 @@ pub enum SetupRefusal {
     /// 저장하지 못했다(파일 쓰기 실패 등). 종류만 알린다.
     #[error("저장하지 못했습니다")]
     SaveFailed,
+    /// 본문이 너무 크다: 등록 요청 본문이 크기 상한을 넘었다. 읽지 않고 거부하며 확인기를 부르지 않는다.
+    /// (5차, 원본 Hermes api_server의 `body_too_large` · 413)
+    #[error("본문이 너무 큽니다")]
+    BodyTooLarge,
 }
 
 impl SetupRefusal {
@@ -85,6 +89,7 @@ impl SetupRefusal {
             SetupRefusal::TooManyAttempts => "too_many_attempts",
             SetupRefusal::FixedByArgument => "fixed_by_argument",
             SetupRefusal::SaveFailed => "save_failed",
+            SetupRefusal::BodyTooLarge => "body_too_large",
         }
     }
 
@@ -97,6 +102,7 @@ impl SetupRefusal {
             SetupRefusal::TooManyAttempts => 429,
             SetupRefusal::FixedByArgument => 409,
             SetupRefusal::SaveFailed => 500,
+            SetupRefusal::BodyTooLarge => 413,
         }
     }
 }

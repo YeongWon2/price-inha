@@ -4,9 +4,11 @@
 //! 근거: `docs/dev/modules/gate.md`의 "price-inha(실행 파일)가 만드는 것" 1~6.
 //! 3차 작업(시작 전 필수 설정 · 시세 흐름)의 테스트는 `setup/` · `flow/`에 있고 이 파일의 도우미를 함께 쓴다.
 //! 4차 작업(보안 응답 헤더 · 이벤트 종류 이름 · 3차 검토의 참고)의 테스트는 `round4/`에 있다.
+//! 5차 작업 4번(본문이 너무 크면 413)의 테스트는 `round5/`에 있다.
 
 mod flow;
 mod round4;
+mod round5;
 mod setup;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

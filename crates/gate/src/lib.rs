@@ -49,6 +49,10 @@
 //!   온다(`pi_store::Store::read_events`). 시각 칸이 비어 있으면 `null`이다.
 //! - 버전 2 이하에서 올라온 옛 봉투 줄(`{"at": 정수, "payload": …}`)은 예전처럼 풀어서 보낸다
 //!   (다시 보내도 시각과 내용이 같다).
+//!   (5차, 2026-11-14 사용자 결정 "경계 번호로") 푸는 줄은 저장소의 옛 형식 경계 번호
+//!   (`pi_store::Store::legacy_envelope_until`) **이하**의 줄 가운데 옛 봉투 모양(정확히 두 칸 · `at` 정수 ·
+//!   시각 칸이 비었거나 내용의 `at`과 같다)인 것뿐이다. 경계 뒤의 줄은 모양이 같아도 내용 그대로 보내고,
+//!   경계가 없는 저장소에서는 아무것도 풀지 않는다. 바로 보내기와 다시 보내기가 같다.
 //! - 프레임의 `kind`는 저장소가 저장한 이름이다(저장소가 앞뒤 공백을 떼어 저장한다).
 //! - 종류 이름은 [`valid_event_kind`] 규칙을 지킨다. 지나가는 이벤트도 검사하고, 어긋나면 보내지 않는다.
 //! - 연결마다 [`GateConfig::keepalive_interval`]마다 ping을 보내고, [`GateConfig::pong_timeout`] 안에
@@ -177,9 +181,13 @@ pub struct GateConfig {
     pub max_frame_bytes: usize,
     /// 실시간 연결마다 ping을 보내는 간격. 시세가 흐르지 않을 때도 보낸다. (4차, D17)
     /// 기본은 [`DEFAULT_KEEPALIVE_INTERVAL`].
+    /// (5차) 0이면 [`Gate::serve`]가 [`GateError::InvalidConfig`]`{ field: "keepalive_interval" }`로 거부한다.
     pub keepalive_interval: Duration,
     /// ping을 보낸 뒤 이 시간 안에 pong이 없으면 그 연결을 끊는다. (4차, D17)
     /// 기본은 [`DEFAULT_PONG_TIMEOUT`].
+    /// (5차) 0이면 [`Gate::serve`]가 [`GateError::InvalidConfig`]`{ field: "pong_timeout" }`로 거부한다.
+    /// (5차) 들어온 프레임(pong)은 기한 판단보다 먼저 읽는다: 보낼 것이 밀려 있거나 프레임 쓰기가
+    /// 느려 기한이 지난 뒤에 돌아왔어도, 그사이 pong이 들어와 있었으면 끊지 않는다.
     pub pong_timeout: Duration,
 }
 
@@ -320,6 +328,8 @@ impl Gate {
     /// [`GateConfig::bind`]를 열고 요청을 받기 시작한다. tokio 런타임 안에서 부른다.
     ///
     /// 열지 못하면 [`GateError::Bind`].
+    /// (5차) [`GateConfig::keepalive_interval`] · [`GateConfig::pong_timeout`]이 0이면
+    /// 주소를 열지 않고 [`GateError::InvalidConfig`]다.
     pub async fn serve(self) -> Result<GateServer, GateError> {
         let bind_error = |error: std::io::Error| GateError::Bind { kind: error.kind() };
         let listener = tokio::net::TcpListener::bind(self.config.bind)
@@ -464,6 +474,10 @@ impl Publisher {
     /// 종류마다 가장 최근 것 하나를 기억해 두었다가, 새로 연결한 화면에 먼저 보낸다.
     /// 기다리지 않는다(느린 연결은 끊긴다).
     /// 내용이 [`GateConfig::max_frame_bytes`]를 넘으면 보내지 않고 버린다.
+    ///
+    /// (5차) 종류 이름은 저장소와 같게 앞뒤 공백(Python `str.isspace`와 같은 공백)을 떼고 검사하고,
+    /// 뗀 이름으로 보내고 기억한다(원본 Hermes `gateway/hosted_rooms_common.py`처럼).
+    /// 떼고도 규칙에 어긋나면 보내지도 기억하지도 않는다.
     pub fn publish_transient(&self, kind: &str, payload: serde_json::Value) {
         self.hub.publish_transient(kind, payload);
     }

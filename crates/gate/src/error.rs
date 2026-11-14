@@ -23,6 +23,13 @@ pub enum GateError {
         /// 상한(바이트).
         limit: usize,
     },
+    /// 설정 값을 받을 수 없다(5차: [`crate::GateConfig::keepalive_interval`] ·
+    /// [`crate::GateConfig::pong_timeout`]이 0). 주소를 열지 않았다.
+    #[error("설정 값을 받을 수 없습니다: {field}")]
+    InvalidConfig {
+        /// 받을 수 없는 설정 칸의 이름(`GateConfig`의 칸 이름 그대로).
+        field: &'static str,
+    },
     /// 안에서 돌던 작업이 끝나지 못했다.
     #[error("서버 작업이 비정상으로 끝났습니다")]
     Task,
