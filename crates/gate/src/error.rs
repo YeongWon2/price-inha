@@ -16,6 +16,13 @@ pub enum GateError {
     /// 관문이 이미 닫혔다. 이벤트를 저장하지 않았다.
     #[error("접속 관문이 닫혔습니다")]
     Closed,
+    /// 내용이 크기 상한(`GateConfig::max_frame_bytes`)을 넘는다. 저장하지도 보내지도 않았다.
+    /// 내용은 싣지 않는다.
+    #[error("내용이 너무 큽니다 (상한 {limit}바이트)")]
+    FrameTooLarge {
+        /// 상한(바이트).
+        limit: usize,
+    },
     /// 안에서 돌던 작업이 끝나지 못했다.
     #[error("서버 작업이 비정상으로 끝났습니다")]
     Task,

@@ -5,7 +5,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,9 +16,11 @@ use pi_ai::{AnthropicConfig, Credential, Secret};
 use pi_market::{Market, Symbol, TossConfig};
 use pi_secrets::{Credentials, KeyKind, SecretStore, SecretsError, VerifyFailure};
 use price_inha::{
-    AiKeys, App, BrokerKeys, DEFAULT_QUOTE_INTERVAL, ENV_BIND, ENV_HOME, ENV_MARKET, ENV_PORT,
-    ENV_QUOTE_INTERVAL_MS, ENV_SYMBOLS, FEED_DEMO, FEED_LIVE, FEED_NO_BROKER_KEY, KIND_FEED_STATUS,
-    KIND_QUOTES, KIND_QUOTES_STALE, KeyVerifier, Settings, SettingsError, Upstreams, Wiring,
+    AiKeys, App, BrokerKeys, DEFAULT_QUOTE_INTERVAL, DEFAULT_RETRY_INITIAL, DEFAULT_RETRY_MAX,
+    ENV_BIND, ENV_HOME, ENV_MARKET, ENV_PORT, ENV_QUOTE_INTERVAL_MS, ENV_RETRY_INITIAL_MS,
+    ENV_RETRY_MAX_MS, ENV_SYMBOLS, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING,
+    FEED_DEMO, FEED_LIVE, FEED_NO_BROKER_KEY, KIND_FEED_STATUS, KIND_QUOTES, KIND_QUOTES_STALE,
+    KeyVerifier, Settings, SettingsError, Upstreams, Wiring,
 };
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
@@ -114,6 +116,13 @@ struct FakeToss {
     server: MockServer,
     price: Arc<Mutex<String>>,
     failing: Arc<AtomicBool>,
+    /// 토큰 발급이 돌려줄 HTTP 상태. 0이면 토큰을 준다.
+    /// 401은 `invalid_client`, 403은 `access_denied`(공식 명세의 OAuth 오류 모양), 그 밖은 본문 없는 장애.
+    token_status: Arc<AtomicU16>,
+    /// 참이면 달력을 주지 않는다(404).
+    calendar_broken: Arc<AtomicBool>,
+    /// 현재가 응답을 이만큼 늦춘다(밀리초).
+    price_delay_ms: Arc<AtomicU64>,
 }
 
 impl FakeToss {
@@ -122,17 +131,32 @@ impl FakeToss {
         let server = MockServer::start().await;
         let price = Arc::new(Mutex::new("72000".to_string()));
         let failing = Arc::new(AtomicBool::new(false));
+        let token_status = Arc::new(AtomicU16::new(0));
+        let calendar_broken = Arc::new(AtomicBool::new(false));
+        let price_delay_ms = Arc::new(AtomicU64::new(0));
+        let status = Arc::clone(&token_status);
         Mock::given(method("POST"))
             .and(path(TOKEN_PATH))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "access_token": TOSS_TOKEN, "token_type": "Bearer", "expires_in": 86_400
-            })))
+            .respond_with(move |_: &Request| match status.load(Ordering::SeqCst) {
+                0 => ResponseTemplate::new(200).set_body_json(json!({
+                    "access_token": TOSS_TOKEN, "token_type": "Bearer", "expires_in": 86_400
+                })),
+                401 => ResponseTemplate::new(401).set_body_json(json!({
+                    "error": "invalid_client", "error_description": "자격이 맞지 않습니다"
+                })),
+                403 => ResponseTemplate::new(403).set_body_json(json!({
+                    "error": "access_denied", "error_description": "허용되지 않은 IP입니다"
+                })),
+                other => ResponseTemplate::new(other),
+            })
             .mount(&server)
             .await;
         let (p, f) = (Arc::clone(&price), Arc::clone(&failing));
+        let delay = Arc::clone(&price_delay_ms);
         Mock::given(method("GET"))
             .and(path(PRICES_PATH))
             .respond_with(move |req: &Request| {
+                let delay = Duration::from_millis(delay.load(Ordering::SeqCst));
                 if f.load(Ordering::SeqCst) {
                     return ResponseTemplate::new(503).set_body_json(json!({
                         "error": { "requestId": "r-1", "code": "maintenance", "message": "점검" }
@@ -157,23 +181,36 @@ impl FakeToss {
                         })
                     })
                     .collect();
-                ResponseTemplate::new(200).set_body_json(json!({ "result": items }))
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "result": items }))
+                    .set_delay(delay)
             })
             .mount(&server)
             .await;
+        let broken = Arc::clone(&calendar_broken);
         Mock::given(method("GET"))
             .and(path(CALENDAR_KR_PATH))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "result": {
-                "today": kr_open_day("2026-03-25"),
-                "previousBusinessDay": kr_open_day("2026-03-24"),
-                "nextBusinessDay": kr_open_day("2026-03-26"),
-            }})))
+            .respond_with(move |_: &Request| {
+                if broken.load(Ordering::SeqCst) {
+                    return ResponseTemplate::new(404).set_body_json(json!({
+                        "error": { "requestId": "r-2", "code": "not-found", "message": "없음" }
+                    }));
+                }
+                ResponseTemplate::new(200).set_body_json(json!({ "result": {
+                    "today": kr_open_day("2026-03-25"),
+                    "previousBusinessDay": kr_open_day("2026-03-24"),
+                    "nextBusinessDay": kr_open_day("2026-03-26"),
+                }}))
+            })
             .mount(&server)
             .await;
         Self {
             server,
             price,
             failing,
+            token_status,
+            calendar_broken,
+            price_delay_ms,
         }
     }
 
@@ -385,6 +422,35 @@ async fn wait_feed_status(ws: &mut Ws) -> Value {
     find_frame(ws, STEP, |frame| transient(frame, KIND_FEED_STATUS))
         .await
         .expect("시세 상태를 알려야 한다")
+}
+
+/// 시세 상태가 `state`가 될 때까지 기다린다.
+async fn wait_feed_state(ws: &mut Ws, state: &str) {
+    let mut seen = Vec::new();
+    let found = find_frame(ws, STEP, |frame| {
+        let status = transient(frame, KIND_FEED_STATUS)?;
+        seen.push(status["state"].clone());
+        (status["state"] == json!(state)).then_some(())
+    })
+    .await;
+    assert!(
+        found.is_some(),
+        "시세 상태가 {state}가 돼야 한다. 본 상태: {seen:?}"
+    );
+}
+
+/// `wait` 동안 온 시세 상태들을 온 순서대로 모은다.
+async fn feed_states_for(ws: &mut Ws, wait: Duration) -> Vec<String> {
+    let mut states = Vec::new();
+    let none: Option<()> = find_frame(ws, wait, |frame| {
+        if let Some(status) = transient(frame, KIND_FEED_STATUS) {
+            states.push(status["state"].as_str().unwrap_or("?").to_string());
+        }
+        None
+    })
+    .await;
+    assert!(none.is_none());
+    states
 }
 
 async fn stop(app: App) {
@@ -852,7 +918,8 @@ async fn 키를_넣은_뒤에는_증권사_시세가_실시간_연결로_오고_
     .await;
     let mut ws = connect(app.local_addr(), 0).await;
 
-    assert_eq!(wait_feed_status(&mut ws).await["state"], json!(FEED_LIVE));
+    // 시세를 실제로 받은 뒤에 "증권사 시세"라고 알린다(그 전에는 연결 중일 수 있다).
+    wait_feed_state(&mut ws, FEED_LIVE).await;
     let quotes = wait_price(&mut ws, "005930", "72000").await;
     assert_eq!(quotes["demo"], json!(false), "실제 시세는 시연용이 아니다");
     assert_eq!(price_of(&quotes, "000660").as_deref(), Some("72000"));
@@ -1141,4 +1208,394 @@ async fn 끄면_연결이_정리되고_다시_켜면_이벤트_번호가_이어�
     );
     stop(app).await;
     assert!(dir.path().join(price_inha::DB_FILE).exists());
+}
+
+// ───────────── 2차: 물러서기 · 시세 상태 · 장 시간 모름 · 안내 주소 ─────────────
+
+/// 테스트에서 쓰는 물러서기 설정: 처음 0.1초, 상한 0.4초.
+const RETRY_INITIAL: Duration = Duration::from_millis(100);
+const RETRY_MAX: Duration = Duration::from_millis(400);
+/// 물러서기를 지켜보는 시간(앞 구간 · 뒤 구간).
+const RETRY_WATCH_FIRST: Duration = Duration::from_millis(1000);
+const RETRY_WATCH_LATER: Duration = Duration::from_millis(1200);
+
+/// 짧은 물러서기 설정을 끼운다.
+fn fast_retry(mut settings: Settings) -> Settings {
+    settings.retry_initial = RETRY_INITIAL;
+    settings.retry_max = RETRY_MAX;
+    settings
+}
+
+/// 2026-03-`day` 한국 시각.
+fn kst_on(day: u32, hour: u32, minute: u32, second: u32) -> DateTime<Utc> {
+    let offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+    offset
+        .with_ymd_and_hms(2026, 3, day, hour, minute, second)
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+/// 같은 상태를 잇달아 다시 알리지 않았는지 본다.
+fn assert_no_repeats(states: &[String]) {
+    assert!(
+        states.windows(2).all(|pair| pair[0] != pair[1]),
+        "같은 상태를 되풀이해 알리면 안 된다: {states:?}"
+    );
+}
+
+/// 늦은 종목이 하나라도 든 "시세 늦음" 알림을 기다린다.
+async fn wait_stale(ws: &mut Ws, wait: Duration) -> Option<Value> {
+    find_frame(ws, wait, |frame| {
+        transient(frame, KIND_QUOTES_STALE)
+            .filter(|stale| stale["symbols"].as_array().is_some_and(|s| !s.is_empty()))
+    })
+    .await
+}
+
+/// 등록된 키로 토큰 발급이 `token_status`로 실패할 때: `expected` 상태를 알리고,
+/// "증권사 시세"라고 하지 않고, 간격을 늘려 가며(상한까지) 다시 시도한다.
+async fn assert_backs_off(token_status: u16, expected: &str) {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    toss.token_status.store(token_status, Ordering::SeqCst);
+    let registered = toss.requests(TOKEN_PATH).await.len();
+    let app = start_app(
+        fast_retry(settings(dir.path(), &[])),
+        wiring(Some(&toss), TestClock::at(kst(10, 0, 0))),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+
+    // 앞 구간: 시세 간격(20ms)대로라면 50번쯤 두드린다. 물러서면 0 · 0.1 · 0.3 · 0.7초쯤에 네댓 번이다.
+    let states = feed_states_for(&mut ws, RETRY_WATCH_FIRST).await;
+    assert!(
+        !states.iter().any(|state| state == FEED_LIVE),
+        "시세를 받지 못했는데 증권사 시세라고 알렸다: {states:?}"
+    );
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some(expected),
+        "실패한 까닭을 알려야 한다: {states:?}"
+    );
+    assert_no_repeats(&states);
+    let first = toss.requests(TOKEN_PATH).await.len() - registered;
+    assert!(
+        (2..=12).contains(&first),
+        "다시 시도는 하되 간격을 늘려야 한다. 앞 구간의 토큰 발급 요청: {first}번"
+    );
+    assert_eq!(
+        toss.requests(PRICES_PATH).await.len(),
+        0,
+        "토큰이 없으면 시세 요청은 나가지 않는다"
+    );
+
+    // 뒤 구간: 상한(0.4초)이 있으므로 멈추지 않고 0.4초쯤마다 다시 시도한다.
+    let later_states = feed_states_for(&mut ws, RETRY_WATCH_LATER).await;
+    assert!(
+        later_states.is_empty(),
+        "같은 실패가 이어지는 동안 상태를 다시 알리지 않는다: {later_states:?}"
+    );
+    let later = toss.requests(TOKEN_PATH).await.len() - registered - first;
+    assert!(
+        (2..=10).contains(&later),
+        "간격은 상한에서 멈추고 그 간격으로 다시 시도한다. 뒤 구간의 토큰 발급 요청: {later}번"
+    );
+    stop(app).await;
+}
+
+// 검증: V31
+#[tokio::test]
+async fn 증권사가_키를_받지_않으면_물러서며_다시_시도하고_받지_않는다고_알린다() {
+    assert_backs_off(401, FEED_BROKER_REJECTED).await;
+}
+
+// 검증: V31
+#[tokio::test]
+async fn 허용_주소가_아니어도_물러서며_키를_받지_않는다고_알린다() {
+    assert_backs_off(403, FEED_BROKER_REJECTED).await;
+}
+
+// 검증: V31
+#[tokio::test]
+async fn 증권사가_장애여도_물러서며_닿지_않는다고_알린다() {
+    assert_backs_off(503, FEED_BROKER_UNREACHABLE).await;
+}
+
+// 검증: V31
+#[tokio::test]
+async fn 증권사에_연결되지_않으면_닿지_않는다고_알린다() {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    let registered = toss.total_requests().await;
+    // 증권사 주소는 아무도 듣지 않는 로컬 주소다.
+    let app = start_app(
+        fast_retry(settings(dir.path(), &[])),
+        wiring(None, TestClock::at(kst(10, 0, 0))),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+
+    let states = feed_states_for(&mut ws, RETRY_WATCH_FIRST).await;
+    assert!(
+        !states.iter().any(|state| state == FEED_LIVE),
+        "닿지 않는데 증권사 시세라고 알렸다: {states:?}"
+    );
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some(FEED_BROKER_UNREACHABLE),
+        "{states:?}"
+    );
+    assert_no_repeats(&states);
+    let quotes = find_frame(&mut ws, QUIET, |frame| transient(frame, KIND_QUOTES)).await;
+    assert!(
+        quotes.is_none(),
+        "받지 못한 시세를 보내지 않는다: {quotes:?}"
+    );
+    assert_eq!(toss.total_requests().await, registered);
+    stop(app).await;
+}
+
+// 검증: V31, V32
+#[tokio::test]
+async fn 거절이_풀리면_증권사_시세가_되고_원래_간격으로_돌아온다() {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    toss.token_status.store(401, Ordering::SeqCst);
+    let app = start_app(
+        fast_retry(settings(dir.path(), &[])),
+        wiring(Some(&toss), TestClock::at(kst(10, 0, 0))),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+    wait_feed_state(&mut ws, FEED_BROKER_REJECTED).await;
+    assert_eq!(toss.requests(PRICES_PATH).await.len(), 0);
+
+    // 증권사가 다시 키를 받는다.
+    toss.token_status.store(0, Ordering::SeqCst);
+    wait_feed_state(&mut ws, FEED_LIVE).await;
+    wait_price(&mut ws, "005930", "72000").await;
+
+    // 원래 간격(20ms)으로 돌아왔다: 0.5초면 25번쯤 받는다. 물러선 채라면 한두 번이다.
+    let before = toss.requests(PRICES_PATH).await.len();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let during = toss.requests(PRICES_PATH).await.len() - before;
+    assert!(
+        during >= 8,
+        "성공하면 원래 시세 간격으로 돌아와야 한다: 0.5초에 {during}번"
+    );
+    toss.set_price("72300");
+    wait_price(&mut ws, "005930", "72300").await;
+    stop(app).await;
+}
+
+// 검증: V31, V32
+#[tokio::test]
+async fn 시세를_받기_전에는_연결_중이고_받은_뒤에만_증권사_시세다() {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    // 첫 시세가 늦게 온다.
+    toss.price_delay_ms.store(700, Ordering::SeqCst);
+    let app = start_app(
+        settings(dir.path(), &[]),
+        wiring(Some(&toss), TestClock::at(kst(10, 0, 0))),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+
+    assert_eq!(
+        wait_feed_status(&mut ws).await["state"],
+        json!(FEED_CONNECTING),
+        "시세를 받기 전에는 연결 중이다"
+    );
+    // 연결 중인 동안 나중에 연결한 화면도 같은 상태를 본다.
+    let mut late = connect(app.local_addr(), 0).await;
+    assert_eq!(
+        wait_feed_status(&mut late).await["state"],
+        json!(FEED_CONNECTING)
+    );
+
+    wait_feed_state(&mut ws, FEED_LIVE).await;
+    assert!(
+        !toss.requests(PRICES_PATH).await.is_empty(),
+        "증권사 시세라고 알린 때에는 시세를 받은 뒤다"
+    );
+    toss.price_delay_ms.store(0, Ordering::SeqCst);
+    wait_price(&mut ws, "005930", "72000").await;
+    stop(app).await;
+}
+
+// 검증: N6
+#[tokio::test]
+async fn 달력을_한_번도_못_받으면_늦은_시세를_늦었다고_알리고_장_시간을_모른다고_한다() {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    toss.calendar_broken.store(true, Ordering::SeqCst);
+    let clock = TestClock::at(kst(10, 0, 0));
+    let app = start_app(
+        settings(dir.path(), &[]),
+        wiring(Some(&toss), Arc::clone(&clock)),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+    wait_price(&mut ws, "005930", "72000").await;
+
+    // 이제부터 받지 못한다. 가진 시세는 10:00:00에 받은 것이다.
+    toss.failing.store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    clock.set(kst(10, 0, 30));
+    let stale = wait_stale(&mut ws, QUIET).await;
+    assert!(
+        stale.is_none(),
+        "딱 30초는 아직 늦은 것이 아니다: {stale:?}"
+    );
+
+    clock.set(kst(10, 0, 31));
+    let stale = wait_stale(&mut ws, STEP)
+        .await
+        .expect("장 시간을 몰라도 30초 넘게 오지 않으면 조용히 넘어가지 않는다");
+    let symbols = stale["symbols"].as_array().expect("늦은 종목들");
+    assert!(symbols.contains(&json!("005930")) && symbols.contains(&json!("000660")));
+    assert_eq!(
+        stale["hours_unknown"],
+        json!(true),
+        "장 시간을 모른 채 판단했다고 함께 알린다"
+    );
+    stop(app).await;
+}
+
+// 검증: N6
+#[tokio::test]
+async fn 가진_달력이_지금을_덮지_않으면_장이_닫혔다고_보지_않는다() {
+    let toss = FakeToss::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    register_broker(dir.path(), &toss).await;
+    let clock = TestClock::at(kst(10, 0, 0));
+    let app = start_app(
+        settings(dir.path(), &[]),
+        wiring(Some(&toss), Arc::clone(&clock)),
+    )
+    .await;
+    let mut ws = connect(app.local_addr(), 0).await;
+    wait_price(&mut ws, "005930", "72000").await;
+    // 달력을 아는 동안에는 장 시간을 모른다고 하지 않는다.
+    let early = wait_stale(&mut ws, QUIET).await;
+    assert!(early.is_none(), "{early:?}");
+
+    // 달력도 시세도 더 받지 못한다. 가진 달력은 3월 24~26일뿐인데 지금은 30일(월)이다.
+    toss.calendar_broken.store(true, Ordering::SeqCst);
+    toss.failing.store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    clock.set(kst_on(30, 10, 0, 0));
+    let stale = wait_stale(&mut ws, STEP)
+        .await
+        .expect("가진 달력이 지금을 덮지 않으면 장 닫힘으로 보고 조용히 넘어가지 않는다");
+    let symbols = stale["symbols"].as_array().expect("늦은 종목들");
+    assert!(symbols.contains(&json!("005930")) && symbols.contains(&json!("000660")));
+    assert_eq!(stale["hours_unknown"], json!(true));
+    stop(app).await;
+}
+
+// 검증: V31
+#[test]
+fn 화면은_새_시세_상태를_글자로_보여_줄_줄_안다() {
+    let page_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("web/index.html");
+    let page = std::fs::read_to_string(&page_path).expect("web/index.html이 있어야 한다");
+    for state in [
+        FEED_CONNECTING,
+        FEED_BROKER_REJECTED,
+        FEED_BROKER_UNREACHABLE,
+    ] {
+        assert!(
+            page.contains(&format!("\"{state}\"")),
+            "화면이 시세 상태 {state}를 알아야 한다"
+        );
+    }
+    assert!(
+        page.contains("hours_unknown"),
+        "화면이 장 시간을 모른다는 표시를 알아야 한다"
+    );
+}
+
+// 검증: D2
+#[test]
+fn 모든_주소로_열면_안내하는_주소는_루프백이다() {
+    let announce = |text: &str| price_inha::announce_addr(text.parse::<SocketAddr>().unwrap());
+    let addr = |text: &str| text.parse::<SocketAddr>().unwrap();
+    assert_eq!(announce("0.0.0.0:7878"), addr("127.0.0.1:7878"));
+    assert_eq!(announce("[::]:7878"), addr("[::1]:7878"));
+    assert_eq!(
+        announce("127.0.0.1:4321"),
+        addr("127.0.0.1:4321"),
+        "루프백은 그대로다"
+    );
+    assert_eq!(announce("[::1]:4321"), addr("[::1]:4321"));
+    assert_eq!(
+        announce("192.168.0.10:9100"),
+        addr("192.168.0.10:9100"),
+        "분명히 준 주소는 그대로 알린다"
+    );
+}
+
+// 검증: V31
+#[test]
+fn 다시_시도하는_간격은_설정으로_준다() {
+    let home = ["--home", "/tmp/pi-home"];
+    let parse = |extra: &[&str]| {
+        let mut list = home.to_vec();
+        list.extend_from_slice(extra);
+        Settings::parse(&args(&list), &no_env, None)
+    };
+    let defaults = parse(&[]).unwrap();
+    assert_eq!(defaults.retry_initial, DEFAULT_RETRY_INITIAL);
+    assert_eq!(defaults.retry_max, DEFAULT_RETRY_MAX);
+    assert!(
+        DEFAULT_RETRY_INITIAL < DEFAULT_RETRY_MAX,
+        "기본값에서도 간격이 늘어날 자리가 있다"
+    );
+
+    let given = parse(&["--retry-initial-ms", "250", "--retry-max-ms", "4000"])
+        .expect("물러서기 값은 인자로 준다");
+    assert_eq!(given.retry_initial, Duration::from_millis(250));
+    assert_eq!(given.retry_max, Duration::from_millis(4000));
+
+    let env = |name: &str| -> Option<String> {
+        let value = match name {
+            n if n == ENV_HOME => "/srv/pi",
+            n if n == ENV_RETRY_INITIAL_MS => "300",
+            n if n == ENV_RETRY_MAX_MS => "9000",
+            _ => return None,
+        };
+        Some(value.to_string())
+    };
+    let from_env = Settings::parse(&[], &env, None).unwrap();
+    assert_eq!(from_env.retry_initial, Duration::from_millis(300));
+    assert_eq!(from_env.retry_max, Duration::from_millis(9000));
+    let mixed = Settings::parse(&args(&["--retry-max-ms", "700"]), &env, None)
+        .expect("인자가 환경 변수를 이긴다");
+    assert_eq!(mixed.retry_max, Duration::from_millis(700));
+    assert_eq!(mixed.retry_initial, Duration::from_millis(300));
+
+    assert_eq!(
+        parse(&["--retry-initial-ms", "0"]),
+        Err(SettingsError::InvalidValue {
+            name: "--retry-initial-ms"
+        })
+    );
+    assert_eq!(
+        parse(&["--retry-max-ms", "0"]),
+        Err(SettingsError::InvalidValue {
+            name: "--retry-max-ms"
+        })
+    );
+    assert_eq!(
+        parse(&["--retry-max-ms", "오래"]),
+        Err(SettingsError::InvalidValue {
+            name: "--retry-max-ms"
+        })
+    );
 }

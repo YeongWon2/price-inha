@@ -1270,3 +1270,336 @@ async fn 끄면_열린_연결이_닫히고_주소가_닫힌다() {
         "저장소는 그대로다"
     );
 }
+
+// ───────────── 2차: 가린 뒤에도 JSON · 저장 전 가리기 · 크기 상한 ─────────────
+
+/// 숫자뿐인 시험용 값(8자). 진짜 키나 계좌가 아니다.
+const DIGITS: &str = "12345678";
+/// [`DIGITS`]와 같은 값의 JSON 숫자.
+const DIGITS_NUMBER: u64 = 12_345_678;
+/// 시각을 적은 숫자 안에 [`DIGITS`]가 들어 있는 시각.
+const DIGITS_CLOCK: i64 = 1_812_345_678_000;
+/// 가려진 자리에 들어가는 글자.
+const MASKED: &str = "[가려짐]";
+
+/// 가릴 글자가 나중에 늘어나는 가짜 가리기 함수.
+#[derive(Default)]
+struct GrowingMask(std::sync::Mutex<Vec<String>>);
+
+impl GrowingMask {
+    fn of(words: &[&str]) -> Arc<Self> {
+        let mask = Arc::new(Self::default());
+        for word in words {
+            mask.add(word);
+        }
+        mask
+    }
+
+    fn add(&self, word: &str) {
+        self.0.lock().unwrap().push(word.to_string());
+    }
+}
+
+impl Redactor for GrowingMask {
+    fn redact(&self, text: &str) -> String {
+        let words = self.0.lock().unwrap();
+        words
+            .iter()
+            .fold(text.to_string(), |acc, word| acc.replace(word, MASKED))
+    }
+}
+
+/// 저장소에 쌓인 이벤트 전부를 글자로 적은 것(종류와 내용).
+fn stored_text(store: &Store) -> String {
+    store
+        .read_after(0, 100)
+        .unwrap()
+        .into_iter()
+        .map(|event| format!("{} {}\n", event.kind, event.payload))
+        .collect()
+}
+
+/// 글자 프레임을 JSON으로 읽는다. 읽히지 않으면 테스트가 실패한다.
+fn parse_frame(text: &str) -> Value {
+    serde_json::from_str(text)
+        .unwrap_or_else(|error| panic!("가린 뒤에도 프레임은 JSON이어야 한다({error}): {text}"))
+}
+
+// 검증: N8, E38
+#[tokio::test]
+async fn 숫자뿐인_값이_json_숫자와_겹쳐도_가린_프레임은_json이다() {
+    let h = start_with(
+        |c| c,
+        |b| b.redactor(GrowingMask::of(&[DIGITS]) as Arc<dyn Redactor>),
+    )
+    .await;
+    let cookie = login(h.addr).await;
+    let publisher = h.server.publisher();
+    let leaky = json!({
+        "account": DIGITS_NUMBER,
+        "inside": 9_912_345_678_u64,
+        "list": [DIGITS_NUMBER, { "deep": DIGITS_NUMBER }],
+        "text": format!("id={DIGITS}"),
+        "other": 42,
+    });
+
+    let mut live = ws_open(h.addr, &cookie, 0).await;
+    let seq = publisher.publish("error", leaky.clone()).await.unwrap();
+    publisher.publish_transient("status", leaky.clone());
+    let mut texts = vec![
+        next_text(&mut live, STEP).await.unwrap().unwrap(),
+        next_text(&mut live, STEP).await.unwrap().unwrap(),
+    ];
+    // 다시 보내기(저장된 것)와 연결할 때 먼저 오는 지나가는 이벤트도 같다.
+    let mut replay = ws_open(h.addr, &cookie, 0).await;
+    texts.push(next_text(&mut replay, STEP).await.unwrap().unwrap());
+    texts.push(next_text(&mut replay, STEP).await.unwrap().unwrap());
+
+    let mut stored_frames = 0;
+    for text in &texts {
+        assert!(!text.contains(DIGITS), "가려야 할 숫자가 나갔다: {text}");
+        let frame = parse_frame(text);
+        assert!(text.contains(MASKED), "가린 자리가 보여야 한다: {text}");
+        let payload = &frame["payload"];
+        assert_ne!(payload["account"], json!(DIGITS_NUMBER));
+        assert_eq!(payload["other"], json!(42), "겹치지 않는 숫자는 그대로다");
+        assert_eq!(payload["text"], json!(format!("id={MASKED}")));
+        assert_eq!(payload["list"].as_array().map(Vec::len), Some(2));
+        assert_eq!(frame["at"], json!(T0), "프레임의 뼈대는 그대로다");
+        if let Some(got) = seq_of(&frame) {
+            assert_eq!(got, seq);
+            assert_eq!(frame["kind"], json!("error"));
+            stored_frames += 1;
+        } else {
+            assert_eq!(frame["kind"], json!("status"));
+        }
+    }
+    assert_eq!(
+        stored_frames, 2,
+        "저장된 이벤트는 바로 한 번, 다시 보내기로 한 번 온다"
+    );
+}
+
+// 검증: N8, E38
+#[tokio::test]
+async fn 가릴_숫자가_시각과_겹쳐도_프레임의_뼈대는_깨지지_않는다() {
+    let h = start_with(
+        |c| c,
+        |b| b.redactor(GrowingMask::of(&[DIGITS]) as Arc<dyn Redactor>),
+    )
+    .await;
+    // 시각을 적은 숫자 안에 가릴 숫자가 들어 있다.
+    h.clock.set(DIGITS_CLOCK);
+    let cookie = login(h.addr).await;
+    let publisher = h.server.publisher();
+    let mut live = ws_open(h.addr, &cookie, 0).await;
+    let seq = publisher
+        .publish("note", json!({ "account": DIGITS_NUMBER }))
+        .await
+        .unwrap();
+    publisher.publish_transient("status", json!({ "account": DIGITS_NUMBER }));
+
+    let stored = parse_frame(&next_text(&mut live, STEP).await.unwrap().unwrap());
+    assert_eq!(seq_of(&stored), Some(seq), "번호 자리는 숫자로 남는다");
+    assert_eq!(stored["kind"], json!("note"));
+    assert!(!stored["payload"].to_string().contains(DIGITS));
+    let passing = parse_frame(&next_text(&mut live, STEP).await.unwrap().unwrap());
+    assert_eq!(passing["kind"], json!("status"));
+    assert!(passing.get("seq").is_none());
+    assert!(!passing["payload"].to_string().contains(DIGITS));
+
+    // 다시 보내도 같다.
+    let mut replay = ws_open(h.addr, &cookie, 0).await;
+    let first = parse_frame(&next_text(&mut replay, STEP).await.unwrap().unwrap());
+    let second = parse_frame(&next_text(&mut replay, STEP).await.unwrap().unwrap());
+    for frame in [first, second] {
+        assert!(!frame["payload"].to_string().contains(DIGITS));
+    }
+}
+
+// 검증: N8, E38
+#[tokio::test]
+async fn 발행한_내용은_저장소에_쓰기_전에_가린다() {
+    const WORD: &str = "sesame-opens-nothing-0001";
+    let h = start_with(
+        |c| c,
+        |b| b.redactor(GrowingMask::of(&[WORD, DIGITS]) as Arc<dyn Redactor>),
+    )
+    .await;
+    let publisher = h.server.publisher();
+    let mut leaky = json!({
+        "text": format!("오류: key={WORD} 로 실패"),
+        "deep": [{ "v": WORD }],
+        "account": DIGITS_NUMBER,
+    });
+    leaky[WORD] = json!("이름 자리에 든 값");
+    let seq = publisher.publish("error", leaky).await.unwrap();
+    publisher
+        .publish("note", json!({ "text": "가릴 것이 없는 글" }))
+        .await
+        .unwrap();
+
+    let stored = stored_text(&h.store);
+    assert!(!stored.contains(WORD), "저장소에 값이 그대로 쓰였다");
+    assert!(!stored.contains(DIGITS), "저장소에 숫자 값이 그대로 쓰였다");
+    assert!(stored.contains(MASKED), "가린 자리가 저장돼 있어야 한다");
+    assert!(
+        stored.contains("가릴 것이 없는 글"),
+        "가릴 것이 없는 내용은 그대로 저장된다"
+    );
+
+    // 저장된 것을 다시 보내도 가려져 있고 번호 · 시각은 그대로다.
+    let cookie = login(h.addr).await;
+    let mut replay = ws_open(h.addr, &cookie, 0).await;
+    let text = next_text(&mut replay, STEP).await.unwrap().unwrap();
+    assert!(!text.contains(WORD) && !text.contains(DIGITS));
+    let frame = parse_frame(&text);
+    assert_eq!(seq_of(&frame), Some(seq));
+    assert_eq!(frame["at"], json!(T0));
+    assert_eq!(
+        frame["payload"]["text"],
+        json!(format!("오류: key={MASKED} 로 실패"))
+    );
+}
+
+// 검증: N8, E38
+#[tokio::test]
+async fn 가리기_대상이_늘면_저장된_것을_다시_보낼_때도_가린다() {
+    const EARLY: &str = "sesame-opens-nothing-0002";
+    const LATE: &str = "sesame-registered-later-0003";
+    let mask = GrowingMask::of(&[EARLY]);
+    let h = start_with(
+        |c| c,
+        |b| b.redactor(Arc::clone(&mask) as Arc<dyn Redactor>),
+    )
+    .await;
+    let cookie = login(h.addr).await;
+    let publisher = h.server.publisher();
+    // 발행할 때는 LATE가 아직 가리기 대상이 아니다.
+    let seq = publisher
+        .publish("note", json!({ "text": format!("{EARLY} / {LATE}") }))
+        .await
+        .unwrap();
+    publisher.publish_transient("status", json!({ "text": LATE }));
+
+    mask.add(LATE);
+    let mut replay = ws_open(h.addr, &cookie, 0).await;
+    let mut seen_stored = false;
+    for _ in 0..2 {
+        let text = next_text(&mut replay, STEP).await.unwrap().unwrap();
+        let frame = parse_frame(&text);
+        if seq_of(&frame) == Some(seq) {
+            seen_stored = true;
+            assert!(!text.contains(EARLY), "처음부터 가리던 값이 나갔다");
+            assert!(
+                !text.contains(LATE),
+                "나중에 등록된 값도 다시 보낼 때 가려야 한다: {text}"
+            );
+            assert_eq!(
+                frame["payload"]["text"],
+                json!(format!("{MASKED} / {MASKED}"))
+            );
+        }
+    }
+    assert!(seen_stored, "저장된 이벤트가 다시 와야 한다");
+}
+
+// 검증: N8, E38
+#[tokio::test]
+async fn 나중에_등록된_숫자_값도_다시_보낼_때_가려지고_json이다() {
+    let mask = GrowingMask::of(&[]);
+    let h = start_with(
+        |c| c,
+        |b| b.redactor(Arc::clone(&mask) as Arc<dyn Redactor>),
+    )
+    .await;
+    let cookie = login(h.addr).await;
+    let seq = h
+        .server
+        .publisher()
+        .publish("note", json!({ "account": DIGITS_NUMBER, "other": 7 }))
+        .await
+        .unwrap();
+
+    mask.add(DIGITS);
+    let mut replay = ws_open(h.addr, &cookie, 0).await;
+    let text = next_text(&mut replay, STEP).await.unwrap().unwrap();
+    assert!(!text.contains(DIGITS), "숫자 값이 나갔다: {text}");
+    let frame = parse_frame(&text);
+    assert_eq!(seq_of(&frame), Some(seq));
+    assert_eq!(frame["payload"]["other"], json!(7));
+    assert_eq!(frame["at"], json!(T0));
+}
+
+// 검증: C2
+#[tokio::test]
+async fn 상한을_넘는_내용은_발행을_거부하고_번호를_쓰지_않는다() {
+    const LIMIT: usize = 1024;
+    let h = start_with(
+        |c| GateConfig {
+            max_frame_bytes: LIMIT,
+            ..c
+        },
+        |b| b,
+    )
+    .await;
+    let cookie = login(h.addr).await;
+    let publisher = h.server.publisher();
+    let mut live = ws_open(h.addr, &cookie, 0).await;
+
+    let first = publisher.publish("note", json!({ "n": 1 })).await.unwrap();
+    let huge = json!({ "text": "가".repeat(LIMIT * 4) });
+    let result = publisher.publish("note", huge).await;
+    match &result {
+        Err(GateError::FrameTooLarge { limit }) => assert_eq!(*limit, LIMIT),
+        other => panic!("상한을 넘으면 FrameTooLarge여야 한다: {other:?}"),
+    }
+    let shown = result.map(|_| ()).unwrap_err().to_string();
+    assert!(!shown.contains("가가가"), "오류에 내용을 싣지 않는다");
+
+    let second = publisher.publish("note", json!({ "n": 2 })).await.unwrap();
+    assert_eq!((first, second), (1, 2), "거부된 발행은 번호를 쓰지 않는다");
+    let stored = h.store.read_after(0, 10).unwrap();
+    assert_eq!(
+        stored.iter().map(|event| event.seq).collect::<Vec<_>>(),
+        [1, 2],
+        "거부된 내용은 저장되지 않는다"
+    );
+    assert_eq!(read_seqs(&mut live, 2).await, [1, 2]);
+    assert_quiet(&mut live).await;
+}
+
+// 검증: C2
+#[tokio::test]
+async fn 상한을_넘는_지나가는_이벤트는_보내지_않는다() {
+    const LIMIT: usize = 1024;
+    let h = start_with(
+        |c| GateConfig {
+            max_frame_bytes: LIMIT,
+            ..c
+        },
+        |b| b,
+    )
+    .await;
+    let cookie = login(h.addr).await;
+    let publisher = h.server.publisher();
+    let mut live = ws_open(h.addr, &cookie, 0).await;
+
+    publisher.publish_transient("quotes", json!({ "text": "가".repeat(LIMIT * 4) }));
+    publisher.publish_transient("quotes", json!({ "n": 1 }));
+    let frame = next_frame(&mut live).await;
+    assert_eq!(
+        frame["payload"],
+        json!({ "n": 1 }),
+        "상한을 넘는 것은 건너뛰고 다음 것이 온다"
+    );
+    assert_quiet(&mut live).await;
+
+    // 넘는 것은 "가장 최근 것"으로 기억하지도 않는다.
+    publisher.publish_transient("status", json!({ "text": "나".repeat(LIMIT * 4) }));
+    let mut late = ws_open(h.addr, &cookie, 0).await;
+    let first = next_frame(&mut late).await;
+    assert_eq!(first["kind"], json!("quotes"));
+    assert_eq!(first["payload"], json!({ "n": 1 }));
+    assert_quiet(&mut late).await;
+}

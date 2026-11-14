@@ -24,6 +24,15 @@ pub const ENV_QUOTE_INTERVAL_MS: &str = "PRICE_INHA_QUOTE_INTERVAL_MS";
 /// 시세 간격의 기본값.
 pub const DEFAULT_QUOTE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// 다시 시도하는 첫 간격 환경 변수(밀리초).
+pub const ENV_RETRY_INITIAL_MS: &str = "PRICE_INHA_RETRY_INITIAL_MS";
+/// 다시 시도하는 간격의 상한 환경 변수(밀리초).
+pub const ENV_RETRY_MAX_MS: &str = "PRICE_INHA_RETRY_MAX_MS";
+/// 다시 시도하는 첫 간격의 기본값.
+pub const DEFAULT_RETRY_INITIAL: Duration = Duration::from_secs(1);
+/// 다시 시도하는 간격 상한의 기본값.
+pub const DEFAULT_RETRY_MAX: Duration = Duration::from_secs(60);
+
 /// 실행 설정.
 ///
 /// | 값 | 인자 | 환경 변수 | 기본값 |
@@ -34,6 +43,8 @@ pub const DEFAULT_QUOTE_INTERVAL: Duration = Duration::from_secs(1);
 /// | 지켜볼 종목 | `--symbols <a,b,c>` | [`ENV_SYMBOLS`] | 없음 |
 /// | 시장 | `--market <kr\|us>` | [`ENV_MARKET`] | `kr` |
 /// | 시세 간격 | `--interval-ms <수>` | [`ENV_QUOTE_INTERVAL_MS`] | [`DEFAULT_QUOTE_INTERVAL`] |
+/// | 다시 시도 첫 간격 | `--retry-initial-ms <수>` | [`ENV_RETRY_INITIAL_MS`] | [`DEFAULT_RETRY_INITIAL`] |
+/// | 다시 시도 간격 상한 | `--retry-max-ms <수>` | [`ENV_RETRY_MAX_MS`] | [`DEFAULT_RETRY_MAX`] |
 /// | 시연 | `--demo` | 없음 | 끔 |
 ///
 /// 인자가 환경 변수를 이긴다. 비밀 값(키 · 토큰)을 받는 인자와 환경 변수는 없다.
@@ -51,6 +62,12 @@ pub struct Settings {
     pub market: Market,
     /// 시세를 받는 간격. 0은 받지 않는다([`SettingsError::InvalidValue`]).
     pub quote_interval: Duration,
+    /// 증권사 요청이 실패한 뒤 다시 시도하기까지의 첫 간격. 실패가 이어지면 두 배씩 늘린다.
+    /// 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    pub retry_initial: Duration,
+    /// 다시 시도하는 간격의 상한. 이보다 길게 기다리지 않는다.
+    /// 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    pub retry_max: Duration,
     /// 시연 모드: 가짜 어댑터로 시세를 흘린다.
     pub demo: bool,
 }
@@ -113,6 +130,8 @@ impl Settings {
             symbols,
             market,
             quote_interval,
+            retry_initial: DEFAULT_RETRY_INITIAL,
+            retry_max: DEFAULT_RETRY_MAX,
             demo: given.demo,
         })
     }

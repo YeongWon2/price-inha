@@ -57,6 +57,17 @@
 //!
 //! 화면으로 나가는 모든 프레임 글자는 [`Redactor::redact`]를 거친다. `pi-gate`는 `pi-secrets`를
 //! 직접 쓰지 않고, 조립하는 쪽이 `SecretStore::redact`를 끼운다.
+//!
+//! - **가린 뒤에도 프레임은 JSON이다.** 가릴 값이 숫자뿐이라 내용 속 JSON 숫자와 겹쳐도
+//!   가려진 글자는 언제나 문자열 자리에 들어간다. `seq` · `at` 같은 프레임의 뼈대는 깨지지 않는다.
+//! - **저장하기 전에도 가린다(N8 · E38).** [`Publisher::publish`]는 내용을 가린 뒤에 저장소에 쓴다.
+//!   저장된 것을 다시 보낼 때도 그때의 가리기를 한 번 더 거친다(나중에 등록된 값도 가려진다).
+//!
+//! # 크기 상한
+//!
+//! 내용을 JSON으로 적은 글이 [`GateConfig::max_frame_bytes`]바이트를 넘으면
+//! [`Publisher::publish`]는 [`GateError::FrameTooLarge`]로 거부한다. 저장하지 않고 번호도 쓰지 않는다.
+//! [`Publisher::publish_transient`]는 돌려줄 오류가 없으므로 보내지 않고 버린다(기억하지도 않는다).
 
 mod error;
 mod frame;
@@ -88,6 +99,8 @@ pub const DEFAULT_PORT: u16 = 7878;
 pub const DEFAULT_ALLOWED_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 /// 연결 하나에 쌓아 두는 프레임 수의 기본값.
 pub const DEFAULT_SEND_BUFFER: usize = 256;
+/// 발행하는 내용 하나의 크기 상한 기본값(바이트).
+pub const DEFAULT_MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// 세션 쿠키 이름.
 pub const SESSION_COOKIE: &str = "pi_session";
 /// 세션을 만드는 경로(`POST`).
@@ -151,10 +164,14 @@ pub struct GateConfig {
     pub allowed_hosts: Vec<String>,
     /// 연결 하나에 쌓아 두는 프레임 수. 넘치면 그 연결만 끊는다. 기본은 [`DEFAULT_SEND_BUFFER`].
     pub send_buffer: usize,
+    /// 발행하는 내용 하나(JSON으로 적은 글)의 크기 상한(바이트). 넘으면 발행을 거부한다.
+    /// 기본은 [`DEFAULT_MAX_FRAME_BYTES`].
+    pub max_frame_bytes: usize,
 }
 
 impl Default for GateConfig {
-    /// `127.0.0.1:`[`DEFAULT_PORT`], [`DEFAULT_ALLOWED_HOSTS`], [`DEFAULT_SEND_BUFFER`].
+    /// `127.0.0.1:`[`DEFAULT_PORT`], [`DEFAULT_ALLOWED_HOSTS`], [`DEFAULT_SEND_BUFFER`],
+    /// [`DEFAULT_MAX_FRAME_BYTES`].
     fn default() -> Self {
         Self::local(DEFAULT_PORT)
     }
@@ -170,6 +187,7 @@ impl GateConfig {
                 .map(|name| (*name).to_owned())
                 .collect(),
             send_buffer: DEFAULT_SEND_BUFFER,
+            max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
         }
     }
 }
@@ -396,6 +414,9 @@ impl Publisher {
     /// - 저장이 끝난 뒤에 보낸다. 저장에 실패하면 보내지 않는다.
     /// - 여러 곳에서 함께 불러도 화면에는 번호 순서로 간다.
     /// - 느린 연결을 기다리지 않는다.
+    /// - 내용은 가린 뒤에 저장한다(N8).
+    /// - 내용이 [`GateConfig::max_frame_bytes`]를 넘으면 [`GateError::FrameTooLarge`]이고
+    ///   저장하지 않는다(번호를 쓰지 않는다).
     pub async fn publish(&self, kind: &str, payload: serde_json::Value) -> Result<u64, GateError> {
         // 따로 띄운 작업에서 한다: 부른 쪽이 기다리다 그만둬도 "저장은 됐는데 화면에는 안 간"
         // 이벤트(번호가 빠져 보인다)가 생기지 않는다.
@@ -410,6 +431,7 @@ impl Publisher {
     ///
     /// 종류마다 가장 최근 것 하나를 기억해 두었다가, 새로 연결한 화면에 먼저 보낸다.
     /// 기다리지 않는다(느린 연결은 끊긴다).
+    /// 내용이 [`GateConfig::max_frame_bytes`]를 넘으면 보내지 않고 버린다.
     pub fn publish_transient(&self, kind: &str, payload: serde_json::Value) {
         self.hub.publish_transient(kind, payload);
     }

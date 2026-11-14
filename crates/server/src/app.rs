@@ -23,12 +23,22 @@ pub const KIND_FEED_STATUS: &str = "feed_status";
 pub const FEED_NO_BROKER_KEY: &str = "no_broker_key";
 /// 시세 상태: 시연용 가짜 시세다.
 pub const FEED_DEMO: &str = "demo";
-/// 시세 상태: 증권사에서 받는 실제 시세다.
+/// 시세 상태: 증권사에서 받는 실제 시세다. **시세를 실제로 한 번 받은 뒤에만** 알린다.
 pub const FEED_LIVE: &str = "live";
+/// 시세 상태: 증권사 키는 있고 아직 시세를 한 번도 받지 못했다(연결 중).
+pub const FEED_CONNECTING: &str = "connecting";
+/// 시세 상태: 증권사가 키를 받지 않는다(인증 실패 · 허용 IP 아님).
+pub const FEED_BROKER_REJECTED: &str = "broker_rejected";
+/// 시세 상태: 증권사에 닿지 않는다(연결 실패 · 점검 · 장애).
+pub const FEED_BROKER_UNREACHABLE: &str = "broker_unreachable";
 /// 지나가는 이벤트 종류: 시세 묶음.
 /// 내용은 `{"demo": bool, "quotes": [{"symbol", "price"(십진수 글자), "currency", "received_at"(유닉스 밀리초)}]}`.
 pub const KIND_QUOTES: &str = "quotes";
-/// 지나가는 이벤트 종류: 시세 늦음(N6). 내용은 `{"symbols": [늦은 종목들]}`.
+/// 지나가는 이벤트 종류: 시세 늦음(N6). 내용은 `{"symbols": [늦은 종목들], "hours_unknown": bool}`.
+///
+/// `hours_unknown`이 참이면 장 시간을 모르는 채로 판단한 것이다: 달력을 한 번도 받지 못했거나
+/// 가진 달력이 지금 시각을 덮지 않는다. 이때는 "장 닫힘"으로 보지 않고, 30초 넘게 오지 않은
+/// 시세를 늦은 것으로 본다. 달력을 아는 동안에는 거짓이다.
 pub const KIND_QUOTES_STALE: &str = "quotes_stale";
 
 /// 바깥과 닿는 자리. 테스트가 가짜 서버와 시계를 넣는다.
@@ -59,6 +69,14 @@ impl pi_gate::Clock for GateClock {
     }
 }
 
+/// 띄울 때 사람에게 알려 주는 주소. `local`은 실제로 연 주소([`App::local_addr`])다.
+///
+/// 모든 주소로 열었으면(`0.0.0.0` · `::`) 그 주소로는 들어올 수 없으므로 같은 계열의
+/// 루프백(`127.0.0.1` · `::1`)과 같은 포트를 돌려준다. 그 밖에는 그대로 돌려준다.
+pub fn announce_addr(local: SocketAddr) -> SocketAddr {
+    todo!("2차 5번: {local}")
+}
+
 /// 떠 있는 서버.
 ///
 /// 띄울 때 하는 일:
@@ -69,7 +87,13 @@ impl pi_gate::Clock for GateClock {
 /// 3. 시세:
 ///    - `--demo`면 가짜 어댑터로 시세를 흘린다. 바깥으로 요청을 보내지 않는다.
 ///      [`KIND_FEED_STATUS`]는 [`FEED_DEMO`]이고 시세 묶음의 `demo`는 참이다. 값은 받을 때마다 바뀐다.
-///    - 아니고 증권사 키가 등록돼 있으면 토스 어댑터로 `quote_interval`마다 받는다([`FEED_LIVE`]).
+///    - 아니고 증권사 키가 등록돼 있으면 토스 어댑터로 `quote_interval`마다 받는다.
+///      받기 전에는 [`FEED_CONNECTING`], 한 번 받은 뒤에 [`FEED_LIVE`]를 알린다.
+///      실패하면 [`FEED_BROKER_REJECTED`](인증 실패 · 허용 IP 아님)나
+///      [`FEED_BROKER_UNREACHABLE`](연결 실패 · 장애)를 알리고, 다시 시도하는 간격을
+///      `retry_initial`부터 실패할 때마다 두 배로 늘려 `retry_max`에서 멈춘다(물러서기).
+///      성공하면 `quote_interval`로 돌아온다. 같은 실패가 이어지는 동안 같은 상태를 다시 알리지 않고,
+///      기록도 상태가 바뀔 때와 정한 간격마다만 남긴다.
 ///    - 아니면 받지 않는다. 바깥으로 요청을 보내지 않고 [`FEED_NO_BROKER_KEY`]를 알린다(V31).
 /// 4. 받은 시세는 [`KIND_QUOTES`] 지나가는 이벤트로 보낸다. 가진 시세가 `pi_market::is_stale`
 ///    (기본 30초)이면 [`KIND_QUOTES_STALE`]을 보낸다(N6). 받기에 실패해도 흐름은 이어진다.
