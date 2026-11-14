@@ -31,6 +31,7 @@
 ## 정한 것
 
 - [기본 원칙 16개](docs/product/principles.md): 규칙 엔진에 박는 바꿀 수 없는 원칙과 멈춤 · 재개 규칙
+- [stock-team 기획](docs/product/stock-team/prd.md): 주식 투자 에이전트 팀 PRD · [상세 스펙](docs/product/stock-team/spec.md) · 유저 플로우
 - 개발 방식: 명세 먼저 작성 후 구현
 - 실전은 검증된 템플릿 안에서만 운용
 
