@@ -43,7 +43,8 @@ pub enum SecretsError {
         /// 문제의 칸.
         field: &'static str,
     },
-    /// 홈 폴더를 알 수 없고 [`HOME_ENV`](crate::HOME_ENV)도 없다.
+    /// 보관 폴더를 정할 수 없다: 홈 폴더를 알 수 없고 [`HOME_ENV`](crate::HOME_ENV)도 없거나,
+    /// 받은 경로가 빈 글자 · 상대 경로다(보관 폴더는 절대 경로여야 한다).
     #[error("보관 폴더를 정할 수 없습니다")]
     HomeNotFound,
     /// 키 파일 내용을 읽을 수 없다. 파일 내용은 싣지 않는다.

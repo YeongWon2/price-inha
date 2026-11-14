@@ -11,19 +11,37 @@ use crate::{DEFAULT_DIR_NAME, SecretsError};
 
 /// 보관 폴더 경로를 정한다. 환경을 직접 읽지 않고 받은 값으로만 정한다(테스트가 환경을 바꾸지 않게).
 ///
-/// - `env_override`: [`HOME_ENV`](crate::HOME_ENV)의 값. 있고 비어 있지 않으면 그 경로가 보관 폴더다.
-/// - `home_dir`: 사용자 홈 폴더. `env_override`가 없거나 비었으면 `home_dir/`[`DEFAULT_DIR_NAME`].
+/// - `env_override`: [`HOME_ENV`](crate::HOME_ENV)의 값. 있으면 그 경로가 보관 폴더다. 절대 경로여야
+///   한다. 빈 글자이거나 상대 경로면 홈 폴더가 멀쩡해도 [`SecretsError::HomeNotFound`]로 거부한다
+///   (잘못 넣은 설정을 말없이 기본 폴더로 바꾸지 않는다).
+/// - `home_dir`: 사용자 홈 폴더. `env_override`가 없을 때(`None`)만 쓴다: `home_dir/`[`DEFAULT_DIR_NAME`].
+///   빈 글자이거나 상대 경로면 [`SecretsError::HomeNotFound`].
 /// - 둘 다 없으면 [`SecretsError::HomeNotFound`].
+///
+/// 상대 경로를 받지 않는 까닭: 프로그램을 띄운 현재 폴더 아래에 키 파일을 쓰지 않기 위해서다.
 pub fn resolve_dir(
     env_override: Option<&OsStr>,
     home_dir: Option<&Path>,
 ) -> Result<PathBuf, SecretsError> {
-    if let Some(dir) = env_override.filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(dir));
+    let dir = match env_override {
+        Some(dir) => PathBuf::from(dir),
+        None => {
+            let home = home_dir.ok_or(SecretsError::HomeNotFound)?;
+            require_absolute(home)?;
+            home.join(DEFAULT_DIR_NAME)
+        }
+    };
+    require_absolute(&dir)?;
+    Ok(dir)
+}
+
+/// 보관 폴더로 쓸 수 있는 경로인가: 절대 경로만 받는다(빈 글자 · 상대 경로는 [`SecretsError::HomeNotFound`]).
+pub(crate) fn require_absolute(dir: &Path) -> Result<(), SecretsError> {
+    if dir.is_absolute() {
+        Ok(())
+    } else {
+        Err(SecretsError::HomeNotFound)
     }
-    home_dir
-        .map(|home| home.join(DEFAULT_DIR_NAME))
-        .ok_or(SecretsError::HomeNotFound)
 }
 
 /// 보관 폴더를 준비한다. 없으면 0700으로 만들고, 있는데 남이 볼 수 있으면 0700으로 좁힌다(Unix).

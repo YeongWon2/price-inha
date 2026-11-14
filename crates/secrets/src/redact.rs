@@ -22,16 +22,10 @@ struct B64Core {
     trail: bool,
 }
 
-/// 가릴 값 하나.
-struct Pattern {
+/// 가릴 값 하나. 버려질 때 값을 지운다.
+pub(crate) struct Pattern {
     raw: Zeroizing<Vec<u8>>,
     b64: Vec<B64Core>,
-}
-
-/// 가릴 값들. 버려질 때 값을 지운다.
-#[derive(Default)]
-pub(crate) struct Patterns {
-    items: Vec<Pattern>,
 }
 
 /// 값이 흐름의 `offset`(0 · 1 · 2)번째 바이트 자리에서 시작할 때의 [`B64Core`]들(표준 · URL 안전).
@@ -118,10 +112,20 @@ fn match_at(text: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
 }
 
 impl Pattern {
-    fn new(value: &str) -> Self {
+    /// 값 하나를 가릴 모양으로 만든다. [`MIN_SECRET_CHARS`]보다 짧은 값은 `None`이다
+    /// (짧은 값은 흔한 글자와 겹쳐 글을 망가뜨린다. 등록도 읽기도 그런 값을 받지 않는다).
+    pub(crate) fn new(value: &str) -> Option<Self> {
+        if value.chars().count() < MIN_SECRET_CHARS {
+            return None;
+        }
         let raw = Zeroizing::new(value.as_bytes().to_vec());
         let b64 = (0..3).flat_map(|offset| b64_cores(&raw, offset)).collect();
-        Self { raw, b64 }
+        Some(Self { raw, b64 })
+    }
+
+    /// 이 모양이 `value`를 가리는 것인가.
+    pub(crate) fn is(&self, value: &str) -> bool {
+        self.raw.as_slice() == value.as_bytes()
     }
 
     /// 이 값이 든 자리들을 `spans`에 더한다.
@@ -157,48 +161,30 @@ impl Pattern {
     }
 }
 
-impl Patterns {
-    /// 가릴 값을 더한다. 이미 있는 값과 [`MIN_SECRET_CHARS`]보다 짧은 값은 더하지 않는다
-    /// (짧은 값은 흔한 글자와 겹쳐 글을 망가뜨린다. 등록은 그런 값을 받지 않는다).
-    pub(crate) fn add(&mut self, value: &str) {
-        if value.chars().count() < MIN_SECRET_CHARS {
-            return;
-        }
-        if self
-            .items
-            .iter()
-            .any(|item| item.raw.as_slice() == value.as_bytes())
-        {
-            return;
-        }
-        self.items.push(Pattern::new(value));
+/// 글에서 `items`의 값이 든 자리를 모두 [`REDACTED`]로 바꾼다. 없으면 글을 그대로 돌려준다.
+pub(crate) fn redact_all<'a>(items: impl IntoIterator<Item = &'a Pattern>, text: &str) -> String {
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for item in items {
+        item.find_in(text, &mut spans);
     }
-
-    /// 글에서 값이 든 자리를 모두 [`REDACTED`]로 바꾼다. 없으면 글을 그대로 돌려준다.
-    pub(crate) fn redact(&self, text: &str) -> String {
-        let mut spans: Vec<(usize, usize)> = Vec::new();
-        for item in &self.items {
-            item.find_in(text, &mut spans);
-        }
-        spans.retain(|&(from, to)| text.is_char_boundary(from) && text.is_char_boundary(to));
-        if spans.is_empty() {
-            return text.to_owned();
-        }
-        spans.sort_unstable();
-        let mut out = String::with_capacity(text.len());
-        let mut done = 0;
-        let mut covered_to = 0;
-        for (from, to) in spans {
-            if from >= covered_to {
-                out.push_str(&text[done..from]);
-                out.push_str(REDACTED);
-            }
-            covered_to = covered_to.max(to);
-            done = covered_to;
-        }
-        out.push_str(&text[done..]);
-        out
+    spans.retain(|&(from, to)| text.is_char_boundary(from) && text.is_char_boundary(to));
+    if spans.is_empty() {
+        return text.to_owned();
     }
+    spans.sort_unstable();
+    let mut out = String::with_capacity(text.len());
+    let mut done = 0;
+    let mut covered_to = 0;
+    for (from, to) in spans {
+        if from >= covered_to {
+            out.push_str(&text[done..from]);
+            out.push_str(REDACTED);
+        }
+        covered_to = covered_to.max(to);
+        done = covered_to;
+    }
+    out.push_str(&text[done..]);
+    out
 }
 
 #[cfg(test)]
@@ -208,6 +194,22 @@ mod tests {
     use super::*;
 
     const SECRET: &str = "시험용>>비밀??값~~0001";
+
+    /// 시험용 값 묶음.
+    #[derive(Default)]
+    struct Patterns {
+        items: Vec<Pattern>,
+    }
+
+    impl Patterns {
+        fn add(&mut self, value: &str) {
+            self.items.extend(Pattern::new(value));
+        }
+
+        fn redact(&self, text: &str) -> String {
+            redact_all(&self.items, text)
+        }
+    }
 
     fn patterns(values: &[&str]) -> Patterns {
         let mut patterns = Patterns::default();
