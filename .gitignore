@@ -4,3 +4,8 @@
 __pycache__/
 node_modules/
 .venv/
+target/
+.pipeline/
+*.sqlite
+*.sqlite-*
+auth.json
