@@ -2,9 +2,11 @@
 //!
 //! 요청 본문을 기록하지 않는다. 응답은 "등록됨"이나 까닭뿐이다.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::body::HttpBody;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::http::header::CACHE_CONTROL;
@@ -16,7 +18,8 @@ use zeroize::Zeroize;
 use crate::desk::Desk;
 use crate::{SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal};
 
-/// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 읽지 않고 거부한다.
+/// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 더 읽지 않고
+/// 413 `body_too_large`로 거부한다(5차, 원본 Hermes api_server).
 const MAX_BODY_BYTES: usize = 16 * 1024;
 
 /// 세션이 있어야 열리는 경로: 설정 상태. `GateBuilder::protected_routes`에 끼운다.
@@ -52,11 +55,33 @@ fn registered(outcome: Result<(), SetupRefusal>) -> Response {
     }
 }
 
-/// 본문을 상한까지만 읽는다. 넘거나 읽지 못하면 `None`(잘못된 입력으로 거부한다).
-async fn body_of(request: Request) -> Option<axum::body::Bytes> {
-    axum::body::to_bytes(request.into_body(), MAX_BODY_BYTES)
-        .await
-        .ok()
+/// 본문을 상한까지만 읽는다. 넘으면 [`SetupRefusal::BodyTooLarge`](확인기를 부르지 않고 저장하지 않는다),
+/// 읽지 못하면 [`SetupRefusal::InvalidInput`].
+///
+/// 상한만큼 미리 잡아 두고 옮겨 담는다: 늘리며 옮기다 옛 자리에 본문 조각이 남지 않게 한다.
+/// 거부할 때는 담은 것을 0으로 덮는다. 웹 서버 라이브러리가 쥔 조각은 지우지 못한다(한계).
+async fn body_of(request: Request) -> Result<Vec<u8>, SetupRefusal> {
+    let mut body = request.into_body();
+    // 길이를 미리 알리면(Content-Length) 읽기 전에 거부한다.
+    if body.size_hint().lower() > MAX_BODY_BYTES as u64 {
+        return Err(SetupRefusal::BodyTooLarge);
+    }
+    let mut out = Vec::with_capacity(MAX_BODY_BYTES);
+    while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await {
+        let Ok(frame) = frame else {
+            out.zeroize();
+            return Err(SetupRefusal::InvalidInput);
+        };
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        if data.len() > MAX_BODY_BYTES - out.len() {
+            out.zeroize();
+            return Err(SetupRefusal::BodyTooLarge);
+        }
+        out.extend_from_slice(&data);
+    }
+    Ok(out)
 }
 
 async fn status(State(desk): State<Arc<Desk>>) -> Response {
@@ -65,27 +90,26 @@ async fn status(State(desk): State<Arc<Desk>>) -> Response {
 
 async fn register_key(State(desk): State<Arc<Desk>>, request: Request) -> Response {
     let outcome = match body_of(request).await {
-        Some(body) => {
-            // 고칠 수 있는 바이트로 옮긴다(혼자 쥔 본문이면 복사하지 않는다). 읽은 뒤 0으로 덮인다.
-            let mut body = Vec::<u8>::from(body);
+        Ok(mut body) => {
+            // 읽은 뒤 0으로 덮인다.
             let outcome = desk.register_key(&mut body).await;
             body.zeroize();
             outcome
         }
-        None => Err(SetupRefusal::InvalidInput),
+        Err(why) => Err(why),
     };
     registered(outcome)
 }
 
 async fn register_symbols(State(desk): State<Arc<Desk>>, request: Request) -> Response {
     let outcome = match body_of(request).await {
-        Some(body) => {
+        Ok(body) => {
             // 파일을 쓰는 동안 다른 요청을 막지 않게 따로 돌린다.
             tokio::task::spawn_blocking(move || desk.register_symbols(&body))
                 .await
                 .unwrap_or(Err(SetupRefusal::SaveFailed))
         }
-        None => Err(SetupRefusal::InvalidInput),
+        Err(why) => Err(why),
     };
     registered(outcome)
 }

@@ -331,6 +331,16 @@ impl Gate {
     /// (5차) [`GateConfig::keepalive_interval`] · [`GateConfig::pong_timeout`]이 0이면
     /// 주소를 열지 않고 [`GateError::InvalidConfig`]다.
     pub async fn serve(self) -> Result<GateServer, GateError> {
+        if self.config.keepalive_interval.is_zero() {
+            return Err(GateError::InvalidConfig {
+                field: "keepalive_interval",
+            });
+        }
+        if self.config.pong_timeout.is_zero() {
+            return Err(GateError::InvalidConfig {
+                field: "pong_timeout",
+            });
+        }
         let bind_error = |error: std::io::Error| GateError::Bind { kind: error.kind() };
         let listener = tokio::net::TcpListener::bind(self.config.bind)
             .await

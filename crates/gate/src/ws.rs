@@ -178,6 +178,14 @@ async fn stream(
             biased;
             () = stopped(stop) => return Err(End::Shutdown),
             () = kill.notified() => return Err(End::Lagged),
+            // 들어온 프레임(pong)을 기한 판단보다, 보낼 것보다 먼저 읽는다(5차 3번):
+            // 쓰기가 밀려 기한이 지났어도 그사이 들어온 pong이 있으면 끊지 않는다.
+            incoming = socket.recv() => match incoming {
+                None | Some(Err(_) | Ok(Message::Close(_))) => return Err(End::Gone),
+                Some(Ok(Message::Pong(_))) => pong_due = None,
+                // 화면이 보내는 다른 것은 쓰지 않는다(핑에는 라이브러리가 답한다).
+                Some(Ok(_)) => {}
+            },
             () = until(pong_due) => return Err(End::Silent),
             frame = subscription.rx.recv() => match frame {
                 Some(frame) => push(socket, frame, stop, Some(&kill)).await?,
@@ -188,12 +196,6 @@ async fn stream(
                 let now = Instant::now();
                 next_ping = now + keepalive.interval;
                 pong_due.get_or_insert(now + keepalive.pong_timeout);
-            },
-            incoming = socket.recv() => match incoming {
-                None | Some(Err(_) | Ok(Message::Close(_))) => return Err(End::Gone),
-                Some(Ok(Message::Pong(_))) => pong_due = None,
-                // 화면이 보내는 다른 것은 쓰지 않는다(핑에는 라이브러리가 답한다).
-                Some(Ok(_)) => {}
             },
         }
     }

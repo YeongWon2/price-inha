@@ -6,7 +6,7 @@
 //! 줄로 간다.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use pi_store::{EventRange, Store, TimedEvent};
 use serde_json::Value;
@@ -46,6 +46,20 @@ pub(crate) struct Hub {
     /// 저장 · 나눠 보내기 · 연결 올리기의 순서를 하나로 세운다.
     order: tokio::sync::Mutex<()>,
     inner: Mutex<Inner>,
+    /// 저장소의 옛 형식 경계 번호(5차). 처음 저장소를 다녀올 때 한 번 읽어 쥔다(바뀌지 않는다).
+    legacy_until: Arc<OnceLock<Option<u64>>>,
+}
+
+/// 쥔 경계 번호를 주고, 아직 없으면 저장소에서 한 번 읽는다. 막히는 일이라 `spawn_blocking` 안에서 부른다.
+fn legacy_until(
+    cell: &OnceLock<Option<u64>>,
+    store: &Store,
+) -> Result<Option<u64>, pi_store::StoreError> {
+    if let Some(until) = cell.get() {
+        return Ok(*until);
+    }
+    let until = store.legacy_envelope_until()?;
+    Ok(*cell.get_or_init(|| until))
 }
 
 /// 받는 쪽에 올리려 했을 때의 결과.
@@ -95,6 +109,7 @@ impl Hub {
             max_frame_bytes,
             order: tokio::sync::Mutex::new(()),
             inner: Mutex::new(Inner::default()),
+            legacy_until: Arc::new(OnceLock::new()),
         }
     }
 
@@ -145,25 +160,28 @@ impl Hub {
         // 바로 보내는 프레임과 다시 보내는 프레임이 같다(종류는 저장된 이름).
         let at = self.clock.now();
         let store = self.store.clone();
-        let event = tokio::task::spawn_blocking(move || {
+        let cell = Arc::clone(&self.legacy_until);
+        let (event, until) = tokio::task::spawn_blocking(move || {
+            let until = legacy_until(&cell, &store)?;
             let seq = store.append_at(&kind, &payload, at)?;
             let range = EventRange {
                 after_seq: seq.saturating_sub(1),
                 ..EventRange::default()
             };
             let saved = store.read_events(range, 1)?.into_iter().next();
-            Ok::<_, pi_store::StoreError>(saved.unwrap_or(TimedEvent {
+            let event = saved.unwrap_or(TimedEvent {
                 seq,
                 kind,
                 at: Some(at),
                 payload,
-            }))
+            });
+            Ok::<_, pi_store::StoreError>((event, until))
         })
         .await
         .map_err(|_| GateError::Task)??;
         let seq = event.seq;
         // 프레임을 만들 때 한 번 더 가린다(다시 보낼 때와 같은 길).
-        let frame = frame::stored(&*self.redactor, event);
+        let frame = frame::stored(&*self.redactor, event, until);
         self.broadcast(&mut self.lock(), &frame);
         Ok(seq)
     }
@@ -171,10 +189,11 @@ impl Hub {
     /// 지나가는 이벤트를 보낸다. 종류마다 가장 최근 것 하나를 기억한다.
     /// 종류 이름이 규칙에 어긋나거나 크기 상한을 넘으면 보내지도 기억하지도 않는다.
     pub(crate) fn publish_transient(&self, kind: &str, payload: Value) {
-        if !frame::kind_follows_rule(kind) {
+        // 저장소처럼 앞뒤 공백을 떼고 본다. 뗀 이름으로 보내고 기억한다(5차 2번).
+        let Some(kind) = frame::trimmed_kind(kind) else {
             tracing::warn!("이름 규칙에 어긋나는 종류의 지나가는 이벤트를 버립니다");
             return;
-        }
+        };
         let Some(payload) = self.redact_within_limit(payload) else {
             tracing::warn!(
                 limit = self.max_frame_bytes,
@@ -218,12 +237,16 @@ impl Hub {
             after_seq: after,
             ..EventRange::default()
         };
-        let events = tokio::task::spawn_blocking(move || store.read_events(range, REPLAY_PAGE))
-            .await
-            .map_err(|_| GateError::Task)??;
+        let cell = Arc::clone(&self.legacy_until);
+        let (events, until) = tokio::task::spawn_blocking(move || {
+            let until = legacy_until(&cell, &store)?;
+            Ok::<_, pi_store::StoreError>((store.read_events(range, REPLAY_PAGE)?, until))
+        })
+        .await
+        .map_err(|_| GateError::Task)??;
         Ok(events
             .into_iter()
-            .map(|event| (event.seq, frame::stored(&*self.redactor, event)))
+            .map(|event| (event.seq, frame::stored(&*self.redactor, event, until)))
             .collect())
     }
 

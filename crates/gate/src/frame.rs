@@ -13,6 +13,20 @@ pub(crate) type Frame = Utf8Bytes;
 const ENVELOPE_AT: &str = "at";
 const ENVELOPE_PAYLOAD: &str = "payload";
 
+/// 지나가는 이벤트의 이름을 저장소처럼 다듬는다(5차 2번, 원본 Hermes
+/// `gateway/hosted_rooms_common.py:23-32`): 앞뒤 공백을 떼고 [`kind_follows_rule`]로 본다.
+/// 맞으면 뗀 이름, 아니면 `None`.
+pub(crate) fn trimmed_kind(kind: &str) -> Option<&str> {
+    let trimmed = kind.trim_matches(is_strip_space);
+    kind_follows_rule(trimmed).then_some(trimmed)
+}
+
+/// 저장소(`pi-store`)가 떼는 공백과 같다: Python `str.isspace`처럼 유니코드 공백에
+/// 정보 구분 문자(U+001C ~ U+001F)를 더한 것.
+fn is_strip_space(c: char) -> bool {
+    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
+}
+
 /// 이벤트 종류 이름 규칙(C9, 저장소와 같다): `^[a-z][a-z0-9_.-]*$`이고
 /// [`pi_store::EVENT_KIND_MAX_CHARS`]자 이하. 받은 글자 그대로 본다.
 pub(crate) fn kind_follows_rule(kind: &str) -> bool {
@@ -27,11 +41,19 @@ pub(crate) fn kind_follows_rule(kind: &str) -> bool {
 /// - 4차부터 발행한 줄: 시각은 시각 칸, 내용은 저장된 그대로다.
 /// - 3차까지 싼 봉투 줄(`{"at": 정수, "payload": …}` 두 칸): 시각 칸이 비었거나(봉투 그대로 쌓인 줄)
 ///   봉투의 시각과 같으면(버전 3으로 올라오며 시각 칸이 채워진 줄) 한 겹 풀어 예전과 같게 보낸다.
-fn time_and_payload(column: Option<UnixMillis>, stored: Value) -> (Value, Value) {
+///   (5차) 번호가 저장소의 옛 형식 경계(`legacy_until`) 이하인 줄만 푼다. 경계가 없으면 풀지 않는다.
+fn time_and_payload(
+    seq: u64,
+    legacy_until: Option<u64>,
+    column: Option<UnixMillis>,
+    stored: Value,
+) -> (Value, Value) {
     let column_at = column.map(|at| Value::from(at.0));
+    let legacy = legacy_until.is_some_and(|until| seq <= until);
     match stored {
         Value::Object(mut map)
-            if map.len() == 2
+            if legacy
+                && map.len() == 2
                 && map.contains_key(ENVELOPE_PAYLOAD)
                 && map.get(ENVELOPE_AT).is_some_and(Value::is_i64)
                 && column_at
@@ -47,8 +69,13 @@ fn time_and_payload(column: Option<UnixMillis>, stored: Value) -> (Value, Value)
 }
 
 /// 저장된 이벤트의 프레임: `{"seq", "kind", "payload", "at"}`. 종류는 저장소가 저장한 이름이다.
-pub(crate) fn stored(redactor: &dyn Redactor, event: TimedEvent) -> Frame {
-    let (at, payload) = time_and_payload(event.at, event.payload);
+/// `legacy_until`은 저장소의 옛 형식 경계 번호다(`pi_store::Store::legacy_envelope_until`).
+pub(crate) fn stored(
+    redactor: &dyn Redactor,
+    event: TimedEvent,
+    legacy_until: Option<u64>,
+) -> Frame {
+    let (at, payload) = time_and_payload(event.seq, legacy_until, event.at, event.payload);
     build(redactor, Some(event.seq), event.kind, payload, at)
 }
 
@@ -164,12 +191,20 @@ mod tests {
 
     #[test]
     fn 시각_칸의_시각과_저장된_내용_그대로_보낸다() {
-        let frame = parse(&stored(&NoRedaction, timed(7, Some(42), json!({ "n": 1 }))));
+        let frame = parse(&stored(
+            &NoRedaction,
+            timed(7, Some(42), json!({ "n": 1 })),
+            Some(100),
+        ));
         assert_eq!(
             frame,
             json!({ "seq": 7, "kind": "chat", "payload": { "n": 1 }, "at": 42 })
         );
-        let frame = parse(&stored(&NoRedaction, timed(3, None, json!({ "x": true }))));
+        let frame = parse(&stored(
+            &NoRedaction,
+            timed(3, None, json!({ "x": true })),
+            Some(100),
+        ));
         assert_eq!(frame["payload"], json!({ "x": true }));
         assert_eq!(frame["at"], Value::Null);
     }
@@ -179,16 +214,48 @@ mod tests {
         let inner = json!({ "at": 1, "payload": "속" });
         let old = json!({ "at": 9, "payload": inner.clone() });
         for column in [None, Some(9)] {
-            let frame = parse(&stored(&NoRedaction, timed(1, column, old.clone())));
+            let frame = parse(&stored(
+                &NoRedaction,
+                timed(1, column, old.clone()),
+                Some(1),
+            ));
             assert_eq!(frame["payload"], inner);
             assert_eq!(frame["at"], json!(9));
         }
     }
 
     #[test]
+    fn 경계_뒤나_경계가_없으면_봉투_모양이어도_풀지_않는다() {
+        let old = json!({ "at": 9, "payload": "속" });
+        for (seq, until) in [(2, Some(1)), (1, None), (1, Some(0))] {
+            for column in [None, Some(9)] {
+                let frame = parse(&stored(
+                    &NoRedaction,
+                    timed(seq, column, old.clone()),
+                    until,
+                ));
+                assert_eq!(frame["payload"], old, "{seq}번, 경계 {until:?}");
+                assert_eq!(frame["at"], column.map_or(Value::Null, |at| json!(at)));
+            }
+        }
+    }
+
+    #[test]
+    fn 지나가는_이름은_저장소처럼_앞뒤_공백을_뗀다() {
+        assert_eq!(trimmed_kind("\u{1c} quotes\t\u{3000}"), Some("quotes"));
+        assert_eq!(trimmed_kind("   "), None);
+        assert_eq!(trimmed_kind(" Chat "), None);
+        assert_eq!(trimmed_kind("\u{200b}chat"), None);
+    }
+
+    #[test]
     fn 시각_칸과_다른_봉투_모양의_내용은_내용_그대로다() {
         let payload = json!({ "at": 5, "payload": 1 });
-        let frame = parse(&stored(&NoRedaction, timed(2, Some(42), payload.clone())));
+        let frame = parse(&stored(
+            &NoRedaction,
+            timed(2, Some(42), payload.clone()),
+            Some(100),
+        ));
         assert_eq!(frame["payload"], payload);
         assert_eq!(frame["at"], json!(42));
     }
