@@ -6,11 +6,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tokio::sync::{Notify, watch};
+use tokio::time::Instant;
 
 use crate::LAST_SEQ_PARAM;
 use crate::frame::Frame;
@@ -25,6 +27,14 @@ pub(crate) const MAX_CONNECTIONS: usize = 64;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// 닫는다는 인사를 기다리는 시간.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// 실시간 연결의 살아 있음 신호(D17): `interval`마다 ping을 보내고, 보낸 뒤 `pong_timeout` 안에
+/// pong이 없으면 그 연결을 끊는다.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Keepalive {
+    pub(crate) interval: Duration,
+    pub(crate) pong_timeout: Duration,
+}
 
 /// `last_seq`를 읽는다. 없으면 `None`(지금부터 받는다). 숫자가 아니거나 두 번 주면 오류.
 pub(crate) fn parse_last_seq(query: Option<&str>) -> Result<Option<u64>, ()> {
@@ -94,16 +104,18 @@ enum End {
     Gone,
     /// 저장소를 읽지 못했거나 관문이 닫혔다.
     Failed,
+    /// ping에 정한 시간 안에 pong이 없었다(죽은 연결).
+    Silent,
 }
 
 async fn run(mut socket: WebSocket, shared: Arc<Shared>, last_seq: Option<u64>, _slot: Slot) {
     let mut stop = shared.stop.clone();
-    let end = match stream(&mut socket, &shared.hub, last_seq, &mut stop).await {
+    let end = match stream(&mut socket, &shared, last_seq, &mut stop).await {
         Ok(never) => match never {},
         Err(end) => end,
     };
     // 밀린 연결은 쓰기가 막혀 있으니 인사 없이 닫는다.
-    if matches!(end, End::Shutdown | End::Failed) {
+    if matches!(end, End::Shutdown | End::Failed | End::Silent) {
         let goodbye = socket.send(Message::Close(None));
         let _ = tokio::time::timeout(CLOSE_TIMEOUT, goodbye).await;
     }
@@ -141,10 +153,11 @@ async fn push(
 
 async fn stream(
     socket: &mut WebSocket,
-    hub: &Arc<Hub>,
+    shared: &Shared,
     last_seq: Option<u64>,
     stop: &mut watch::Receiver<bool>,
 ) -> Result<Infallible, End> {
+    let hub = &shared.hub;
     // 1. 종류마다 가장 최근의 지나가는 이벤트.
     let seen = hub.latest();
     for frame in seen.values() {
@@ -156,21 +169,58 @@ async fn stream(
     for frame in std::mem::take(&mut subscription.fresh) {
         push(socket, frame, stop, Some(&kill)).await?;
     }
+    let keepalive = shared.keepalive;
+    let mut next_ping = Instant::now() + keepalive.interval;
+    // 답을 기다리는 ping이 있으면 그 기한.
+    let mut pong_due: Option<Instant> = None;
     loop {
         tokio::select! {
             biased;
             () = stopped(stop) => return Err(End::Shutdown),
             () = kill.notified() => return Err(End::Lagged),
+            () = until(pong_due) => return Err(End::Silent),
             frame = subscription.rx.recv() => match frame {
                 Some(frame) => push(socket, frame, stop, Some(&kill)).await?,
                 None => return Err(End::Lagged),
             },
+            () = tokio::time::sleep_until(next_ping) => {
+                ping(socket, stop, &kill).await?;
+                let now = Instant::now();
+                next_ping = now + keepalive.interval;
+                pong_due.get_or_insert(now + keepalive.pong_timeout);
+            },
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => return Err(End::Gone),
-                // 화면이 보내는 것은 쓰지 않는다(핑에는 라이브러리가 답한다).
+                Some(Ok(Message::Pong(_))) => pong_due = None,
+                // 화면이 보내는 다른 것은 쓰지 않는다(핑에는 라이브러리가 답한다).
                 Some(Ok(_)) => {}
             },
         }
+    }
+}
+
+/// 기한이 있으면 그때까지 기다린다. 없으면 끝나지 않는다.
+async fn until(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// 살아 있음 신호(ping)를 보낸다. 쓰지 못하면 그 연결을 끝낸다.
+async fn ping(
+    socket: &mut WebSocket,
+    stop: &mut watch::Receiver<bool>,
+    kill: &Notify,
+) -> Result<(), End> {
+    tokio::select! {
+        biased;
+        () = stopped(stop) => Err(End::Shutdown),
+        () = kill.notified() => Err(End::Lagged),
+        sent = tokio::time::timeout(SEND_TIMEOUT, socket.send(Message::Ping(Bytes::new()))) => match sent {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) | Err(_) => Err(End::Gone),
+        },
     }
 }
 

@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicUsize;
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, SET_COOKIE};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use pi_store::NewAccess;
@@ -31,6 +31,8 @@ pub(crate) struct Shared {
     pub(crate) _done: mpsc::Sender<()>,
     /// 열려 있는 실시간 연결 수.
     pub(crate) live: Arc<AtomicUsize>,
+    /// 실시간 연결의 살아 있음 신호(ping) 간격과 pong 기다림.
+    pub(crate) keepalive: crate::ws::Keepalive,
 }
 
 /// 확인을 지난 상대 주소(포트 없이). 접속 관문이 요청의 확장(extension)에 넣는다.
@@ -68,6 +70,21 @@ async fn loopback_peer(request: Request, next: Next) -> Response {
         let status = StatusCode::from_u16(LOCAL_ONLY_STATUS).unwrap_or(StatusCode::FORBIDDEN);
         reject(status, "이 컴퓨터에서만 할 수 있습니다")
     }
+}
+
+/// 가장 바깥 층: 모든 응답(오류 · 거부 · 없는 경로 포함)에 [`crate::SECURITY_HEADERS`]를 붙인다.
+/// 처리기가 이미 붙인 같은 이름의 헤더는 그대로 둔다(원본의 `setdefault`).
+pub(crate) async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    for (name, value) in crate::SECURITY_HEADERS {
+        if let Ok(name) = HeaderName::try_from(name)
+            && !headers.contains_key(&name)
+        {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+    }
+    response
 }
 
 fn reject(status: StatusCode, why: &'static str) -> Response {

@@ -169,19 +169,7 @@ impl Settings {
             ),
             DEFAULT_CALENDAR_RETRY,
         )?;
-        let register_window = millis(
-            pick(
-                &given.register_window_ms,
-                ARG_REGISTER_WINDOW_MS,
-                ENV_REGISTER_WINDOW_MS,
-            ),
-            DEFAULT_REGISTER_WINDOW,
-        )?;
-        let register_attempts = attempts(pick(
-            &given.register_attempts,
-            ARG_REGISTER_ATTEMPTS,
-            ENV_REGISTER_ATTEMPTS,
-        ))?;
+        let limits = attempt_limits(&given, &pick)?;
         Ok(Settings {
             home,
             bind,
@@ -192,11 +180,10 @@ impl Settings {
             retry_initial,
             retry_max,
             calendar_retry,
-            register_attempts,
-            register_window,
-            // 4차 뼈대: 인자 · 환경 변수(`--symbols-attempts` · `--symbols-window-ms`)는 아직 읽지 않는다.
-            symbols_attempts: DEFAULT_SYMBOLS_ATTEMPTS,
-            symbols_window: DEFAULT_SYMBOLS_WINDOW,
+            register_attempts: limits.register_attempts,
+            register_window: limits.register_window,
+            symbols_attempts: limits.symbols_attempts,
+            symbols_window: limits.symbols_window,
             demo: given.demo,
         })
     }
@@ -261,15 +248,63 @@ fn millis(picked: Picked, default: Duration) -> Result<Duration, SettingsError> 
     }
 }
 
-/// 키 등록 시도 횟수: 0은 받지 않는다. 주지 않았으면 기본값이다.
-fn attempts(picked: Picked) -> Result<u32, SettingsError> {
+/// 시도 횟수: 0은 받지 않는다. 주지 않았으면 기본값이다.
+fn attempts(picked: Picked, default: u32) -> Result<u32, SettingsError> {
     match picked {
         Some((value, name)) => match parsed::<u32>(&value, name)? {
             0 => Err(SettingsError::InvalidValue { name }),
             attempts => Ok(attempts),
         },
-        None => Ok(DEFAULT_REGISTER_ATTEMPTS),
+        None => Ok(default),
     }
+}
+
+/// 등록 시도 제한들(키 등록과 종목 등록은 따로 센다).
+struct Limits {
+    register_attempts: u32,
+    register_window: Duration,
+    symbols_attempts: u32,
+    symbols_window: Duration,
+}
+
+/// 인자 · 환경 변수에서 고르는 함수: (인자로 준 값, 인자 이름, 환경 변수 이름).
+type Pick<'a> = dyn Fn(&Option<String>, &'static str, &'static str) -> Picked + 'a;
+
+fn attempt_limits(given: &Given, pick: &Pick<'_>) -> Result<Limits, SettingsError> {
+    Ok(Limits {
+        register_window: millis(
+            pick(
+                &given.register_window_ms,
+                ARG_REGISTER_WINDOW_MS,
+                ENV_REGISTER_WINDOW_MS,
+            ),
+            DEFAULT_REGISTER_WINDOW,
+        )?,
+        register_attempts: attempts(
+            pick(
+                &given.register_attempts,
+                ARG_REGISTER_ATTEMPTS,
+                ENV_REGISTER_ATTEMPTS,
+            ),
+            DEFAULT_REGISTER_ATTEMPTS,
+        )?,
+        symbols_window: millis(
+            pick(
+                &given.symbols_window_ms,
+                ARG_SYMBOLS_WINDOW_MS,
+                ENV_SYMBOLS_WINDOW_MS,
+            ),
+            DEFAULT_SYMBOLS_WINDOW,
+        )?,
+        symbols_attempts: attempts(
+            pick(
+                &given.symbols_attempts,
+                ARG_SYMBOLS_ATTEMPTS,
+                ENV_SYMBOLS_ATTEMPTS,
+            ),
+            DEFAULT_SYMBOLS_ATTEMPTS,
+        )?,
+    })
 }
 
 const ARG_HOME: &str = "--home";
@@ -283,10 +318,12 @@ const ARG_RETRY_MAX_MS: &str = "--retry-max-ms";
 const ARG_CALENDAR_RETRY_MS: &str = "--calendar-retry-ms";
 const ARG_REGISTER_ATTEMPTS: &str = "--register-attempts";
 const ARG_REGISTER_WINDOW_MS: &str = "--register-window-ms";
+const ARG_SYMBOLS_ATTEMPTS: &str = "--symbols-attempts";
+const ARG_SYMBOLS_WINDOW_MS: &str = "--symbols-window-ms";
 const ARG_DEMO: &str = "--demo";
 
 /// 읽는 환경 변수 전부.
-const ENV_NAMES: [&str; 11] = [
+const ENV_NAMES: [&str; 13] = [
     ENV_HOME,
     ENV_BIND,
     ENV_PORT,
@@ -298,6 +335,8 @@ const ENV_NAMES: [&str; 11] = [
     ENV_CALENDAR_RETRY_MS,
     ENV_REGISTER_ATTEMPTS,
     ENV_REGISTER_WINDOW_MS,
+    ENV_SYMBOLS_ATTEMPTS,
+    ENV_SYMBOLS_WINDOW_MS,
 ];
 
 /// 종목 코드 하나의 가장 긴 길이.
@@ -317,6 +356,8 @@ struct Given {
     calendar_retry_ms: Option<String>,
     register_attempts: Option<String>,
     register_window_ms: Option<String>,
+    symbols_attempts: Option<String>,
+    symbols_window_ms: Option<String>,
     demo: bool,
 }
 
@@ -341,6 +382,8 @@ impl Given {
                 ARG_CALENDAR_RETRY_MS => (&mut given.calendar_retry_ms, ARG_CALENDAR_RETRY_MS),
                 ARG_REGISTER_ATTEMPTS => (&mut given.register_attempts, ARG_REGISTER_ATTEMPTS),
                 ARG_REGISTER_WINDOW_MS => (&mut given.register_window_ms, ARG_REGISTER_WINDOW_MS),
+                ARG_SYMBOLS_ATTEMPTS => (&mut given.symbols_attempts, ARG_SYMBOLS_ATTEMPTS),
+                ARG_SYMBOLS_WINDOW_MS => (&mut given.symbols_window_ms, ARG_SYMBOLS_WINDOW_MS),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };
@@ -371,14 +414,16 @@ fn symbols(value: &str, name: &'static str) -> Result<Vec<Symbol>, SettingsError
         .collect()
 }
 
-/// 종목 코드 하나. 비었거나, 너무 길거나, 종목 코드로 볼 수 없는 글자가 있으면 `None`.
+/// 종목 코드 하나. 비었거나, 너무 길거나, 종목 코드로 볼 수 없는 글자가 있거나,
+/// 점이 둘 이어지면(`..`, 경로처럼 읽힐 수 있다) `None`. 점 하나(`BRK.B`)는 받는다.
 /// 인자(`--symbols`) · 화면의 종목 등록 · 저장된 종목 파일이 모두 이 검사를 쓴다.
 pub(crate) fn symbol(code: &str) -> Option<Symbol> {
     let plain = !code.is_empty()
         && code.len() <= MAX_SYMBOL_LEN
         && code
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        && !code.contains("..");
     plain.then(|| Symbol::new(code))
 }
 

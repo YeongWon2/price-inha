@@ -1,7 +1,7 @@
 //! 화면으로 나가는 프레임 글자를 만든다. 모든 프레임은 가리기 자리를 거친다.
 
 use axum::extract::ws::Utf8Bytes;
-use pi_store::{Event, UnixMillis};
+use pi_store::{TimedEvent, UnixMillis};
 use serde_json::{Map, Value};
 
 use crate::Redactor;
@@ -9,40 +9,46 @@ use crate::Redactor;
 /// 보낼 프레임 하나. 복제해도 글자를 다시 만들지 않는다(연결마다 같은 것을 나눠 쓴다).
 pub(crate) type Frame = Utf8Bytes;
 
-/// 저장소에 넣는 모양: 시각과 내용을 함께 싼다(다시 보내도 같은 시각이 나오게).
-const STORED_AT: &str = "at";
-const STORED_PAYLOAD: &str = "payload";
+/// 3차까지 저장소에 넣던 시각 봉투의 칸 이름. 4차부터는 싸지 않고, 옛 줄을 풀 때만 쓴다.
+const ENVELOPE_AT: &str = "at";
+const ENVELOPE_PAYLOAD: &str = "payload";
 
-/// 발행한 내용을 저장할 모양으로 싼다.
-pub(crate) fn envelope(at: UnixMillis, payload: Value) -> Value {
-    let mut map = Map::new();
-    map.insert(STORED_AT.to_owned(), Value::from(at.0));
-    map.insert(STORED_PAYLOAD.to_owned(), payload);
-    Value::Object(map)
+/// 이벤트 종류 이름 규칙(C9, 저장소와 같다): `^[a-z][a-z0-9_.-]*$`이고
+/// [`pi_store::EVENT_KIND_MAX_CHARS`]자 이하. 받은 글자 그대로 본다.
+pub(crate) fn kind_follows_rule(kind: &str) -> bool {
+    let mut chars = kind.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | '.' | '-'))
+        && kind.chars().count() <= pi_store::EVENT_KIND_MAX_CHARS
 }
 
-/// 저장된 모양을 (시각, 내용)으로 푼다.
+/// 저장된 줄을 (시각, 내용)으로 본다.
 ///
-/// 이 모듈이 싼 모양이 아니면(다른 곳이 저장소에 바로 쌓은 이벤트) 통째로 내용으로 보고
-/// 시각은 모른다고(`null`) 한다.
-fn open_envelope(stored: Value) -> (Value, Value) {
+/// - 4차부터 발행한 줄: 시각은 시각 칸, 내용은 저장된 그대로다.
+/// - 3차까지 싼 봉투 줄(`{"at": 정수, "payload": …}` 두 칸): 시각 칸이 비었거나(봉투 그대로 쌓인 줄)
+///   봉투의 시각과 같으면(버전 3으로 올라오며 시각 칸이 채워진 줄) 한 겹 풀어 예전과 같게 보낸다.
+fn time_and_payload(column: Option<UnixMillis>, stored: Value) -> (Value, Value) {
+    let column_at = column.map(|at| Value::from(at.0));
     match stored {
         Value::Object(mut map)
             if map.len() == 2
-                && map.get(STORED_AT).is_some_and(Value::is_i64)
-                && map.contains_key(STORED_PAYLOAD) =>
+                && map.contains_key(ENVELOPE_PAYLOAD)
+                && map.get(ENVELOPE_AT).is_some_and(Value::is_i64)
+                && column_at
+                    .as_ref()
+                    .is_none_or(|at| map.get(ENVELOPE_AT) == Some(at)) =>
         {
-            let at = map.remove(STORED_AT).unwrap_or(Value::Null);
-            let payload = map.remove(STORED_PAYLOAD).unwrap_or(Value::Null);
+            let at = map.remove(ENVELOPE_AT).unwrap_or(Value::Null);
+            let payload = map.remove(ENVELOPE_PAYLOAD).unwrap_or(Value::Null);
             (at, payload)
         }
-        other => (Value::Null, other),
+        other => (column_at.unwrap_or(Value::Null), other),
     }
 }
 
-/// 저장된 이벤트의 프레임: `{"seq", "kind", "payload", "at"}`.
-pub(crate) fn stored(redactor: &dyn Redactor, event: Event) -> Frame {
-    let (at, payload) = open_envelope(event.payload);
+/// 저장된 이벤트의 프레임: `{"seq", "kind", "payload", "at"}`. 종류는 저장소가 저장한 이름이다.
+pub(crate) fn stored(redactor: &dyn Redactor, event: TimedEvent) -> Frame {
+    let (at, payload) = time_and_payload(event.at, event.payload);
     build(redactor, Some(event.seq), event.kind, payload, at)
 }
 
@@ -147,44 +153,53 @@ mod tests {
         serde_json::from_str(frame.as_str()).unwrap_or(Value::Null)
     }
 
-    #[test]
-    fn 저장한_모양을_풀면_시각과_내용이_그대로다() {
-        let stored_payload = envelope(UnixMillis(42), json!({ "n": 1 }));
-        let event = Event {
-            seq: 7,
+    fn timed(seq: u64, at: Option<i64>, payload: Value) -> TimedEvent {
+        TimedEvent {
+            seq,
             kind: "chat".to_owned(),
-            payload: stored_payload,
-        };
-        let frame = parse(&stored(&NoRedaction, event));
+            at: at.map(UnixMillis),
+            payload,
+        }
+    }
+
+    #[test]
+    fn 시각_칸의_시각과_저장된_내용_그대로_보낸다() {
+        let frame = parse(&stored(&NoRedaction, timed(7, Some(42), json!({ "n": 1 }))));
         assert_eq!(
             frame,
             json!({ "seq": 7, "kind": "chat", "payload": { "n": 1 }, "at": 42 })
         );
-    }
-
-    #[test]
-    fn 내용이_at과_payload를_가진_모양이어도_한_겹만_푼다() {
-        let inner = json!({ "at": 1, "payload": "속" });
-        let event = Event {
-            seq: 1,
-            kind: "k".to_owned(),
-            payload: envelope(UnixMillis(9), inner.clone()),
-        };
-        let frame = parse(&stored(&NoRedaction, event));
-        assert_eq!(frame["payload"], inner);
-        assert_eq!(frame["at"], json!(9));
-    }
-
-    #[test]
-    fn 싸지_않은_이벤트는_통째로_내용이고_시각은_모른다() {
-        let event = Event {
-            seq: 3,
-            kind: "raw".to_owned(),
-            payload: json!({ "x": true }),
-        };
-        let frame = parse(&stored(&NoRedaction, event));
+        let frame = parse(&stored(&NoRedaction, timed(3, None, json!({ "x": true }))));
         assert_eq!(frame["payload"], json!({ "x": true }));
         assert_eq!(frame["at"], Value::Null);
+    }
+
+    #[test]
+    fn 옛_봉투_줄은_한_겹만_푼다() {
+        let inner = json!({ "at": 1, "payload": "속" });
+        let old = json!({ "at": 9, "payload": inner.clone() });
+        for column in [None, Some(9)] {
+            let frame = parse(&stored(&NoRedaction, timed(1, column, old.clone())));
+            assert_eq!(frame["payload"], inner);
+            assert_eq!(frame["at"], json!(9));
+        }
+    }
+
+    #[test]
+    fn 시각_칸과_다른_봉투_모양의_내용은_내용_그대로다() {
+        let payload = json!({ "at": 5, "payload": 1 });
+        let frame = parse(&stored(&NoRedaction, timed(2, Some(42), payload.clone())));
+        assert_eq!(frame["payload"], payload);
+        assert_eq!(frame["at"], json!(42));
+    }
+
+    #[test]
+    fn 종류_이름_규칙() {
+        assert!(kind_follows_rule("run.started"));
+        assert!(!kind_follows_rule(" chat"));
+        assert!(!kind_follows_rule(
+            &"a".repeat(pi_store::EVENT_KIND_MAX_CHARS + 1)
+        ));
     }
 
     #[test]

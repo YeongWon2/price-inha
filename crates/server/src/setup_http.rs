@@ -11,6 +11,7 @@ use axum::http::header::CACHE_CONTROL;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde_json::{Value, json};
+use zeroize::Zeroize;
 
 use crate::desk::Desk;
 use crate::{SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal};
@@ -64,7 +65,13 @@ async fn status(State(desk): State<Arc<Desk>>) -> Response {
 
 async fn register_key(State(desk): State<Arc<Desk>>, request: Request) -> Response {
     let outcome = match body_of(request).await {
-        Some(body) => desk.register_key(&body).await,
+        Some(body) => {
+            // 고칠 수 있는 바이트로 옮긴다(혼자 쥔 본문이면 복사하지 않는다). 읽은 뒤 0으로 덮인다.
+            let mut body = Vec::<u8>::from(body);
+            let outcome = desk.register_key(&mut body).await;
+            body.zeroize();
+            outcome
+        }
         None => Err(SetupRefusal::InvalidInput),
     };
     registered(outcome)

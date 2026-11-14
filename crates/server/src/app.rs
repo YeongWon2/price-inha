@@ -178,6 +178,7 @@ impl App {
             symbols,
             source,
             limit: AttemptLimit::new(settings.register_attempts, settings.register_window),
+            symbols_limit: AttemptLimit::new(settings.symbols_attempts, settings.symbols_window),
         }));
         let mut builder = Gate::builder(store.clone(), config)
             .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))

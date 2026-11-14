@@ -87,18 +87,19 @@ mod error;
 mod frame;
 mod guard;
 mod hub;
+mod port;
 mod session;
 mod ws;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::Router;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{get, post};
-use pi_store::{Store, UnixMillis};
+use pi_store::Store;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -107,6 +108,7 @@ use crate::hub::Hub;
 
 pub use error::GateError;
 pub use guard::{LOCAL_ONLY_STATUS, Peer, local_only};
+pub use port::{Clock, NoRedaction, Redactor, SystemClock};
 
 /// 기본 포트.
 pub const DEFAULT_PORT: u16 = 7878;
@@ -153,46 +155,7 @@ pub const SECURITY_HEADERS: [(&str, &str); 3] = [
 /// 받은 글자 그대로 본다(앞뒤 공백을 떼지 않는다). 지나가는 이벤트도 이 검사를 거치고,
 /// 맞지 않으면 보내지도 기억하지도 않는다.
 pub fn valid_event_kind(kind: &str) -> bool {
-    let _ = kind;
-    todo!()
-}
-
-/// 시계. 접속 기록과 이벤트의 시각에 쓴다. 테스트가 시각을 정한다.
-pub trait Clock: Send + Sync {
-    /// 지금 시각.
-    fn now(&self) -> UnixMillis;
-}
-
-/// 실제 시계(시스템 시각).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> UnixMillis {
-        // 시계가 1970년보다 앞이면 0으로, i64를 넘으면 가장 큰 값으로 둔다.
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| {
-                i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-            });
-        UnixMillis(millis)
-    }
-}
-
-/// 가리기 자리. 화면으로 나가는 글이 모두 이것을 거친다.
-pub trait Redactor: Send + Sync {
-    /// 글에서 비밀 값을 가린 글을 돌려준다. 가릴 것이 없으면 그대로 돌려준다.
-    fn redact(&self, text: &str) -> String;
-}
-
-/// 아무것도 가리지 않는다(기본값).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoRedaction;
-
-impl Redactor for NoRedaction {
-    fn redact(&self, text: &str) -> String {
-        text.to_owned()
-    }
+    frame::kind_follows_rule(kind)
 }
 
 /// 연결의 실제 상대 주소를 받아 "상대 주소로 볼 값"을 돌려주는 함수.
@@ -374,6 +337,10 @@ impl Gate {
             stop: stop_rx.clone(),
             _done: done_tx,
             live: Arc::new(AtomicUsize::new(0)),
+            keepalive: ws::Keepalive {
+                interval: self.config.keepalive_interval,
+                pong_timeout: self.config.pong_timeout,
+            },
         });
         let app = routes(shared, self.public, self.protected);
         let task = tokio::spawn(async move {
@@ -395,7 +362,7 @@ impl Gate {
     }
 }
 
-/// 경로를 잇는다. 바깥 층부터: Host · 상대 주소 → Origin → 세션 → 핸들러.
+/// 경로를 잇는다. 바깥 층부터: 보안 헤더 → Host · 상대 주소 → Origin → 세션 → 핸들러.
 fn routes(shared: Arc<Shared>, public: Router, protected: Router) -> Router {
     let session = || from_fn_with_state(Arc::clone(&shared), guard::session);
     let enter = Router::new()
@@ -415,6 +382,7 @@ fn routes(shared: Arc<Shared>, public: Router, protected: Router) -> Router {
         .merge(public)
         .merge(protected)
         .layer(from_fn_with_state(shared, guard::host_and_peer))
+        .layer(from_fn(guard::security_headers))
 }
 
 /// 열려 있는 접속 관문.

@@ -61,6 +61,8 @@ pub(crate) struct Feed {
     /// 다음 받기에서는 거절된 종목도 빼지 않고 다시 물어본다.
     recheck_rejected: bool,
     calendar_retry_at: Option<Instant>,
+    /// 증권사가 준 기다림(`Retry-After`)이 끝나는 때. 흐름이 멈췄다 다시 시작해도 지킨다(4차).
+    asked_until: Option<Instant>,
     /// 필수 설정을 마지막으로 다시 본 때.
     ready_checked: Instant,
     /// 마지막으로 알린 시세 상태. 같은 상태는 다시 알리지 않는다.
@@ -93,6 +95,7 @@ impl Feed {
             rejected_since: None,
             recheck_rejected: false,
             calendar_retry_at: None,
+            asked_until: None,
             ready_checked: Instant::now(),
             status: None,
             setup: None,
@@ -202,6 +205,14 @@ impl Feed {
             if !demo && self.no_longer_ready() {
                 return;
             }
+            match self.honor_asked_wait(demo).await {
+                Rested::Done => {}
+                Rested::NotReady => return,
+                Rested::Woken => {
+                    backoff.reset();
+                    self.recheck_rejected = true;
+                }
+            }
             self.adopt_symbols();
             let plan = self.plan();
             self.board.asked(&plan.asking(), self.clock.now());
@@ -218,6 +229,17 @@ impl Feed {
                     self.recheck_rejected = true;
                 }
             }
+        }
+    }
+
+    /// 증권사가 준 기다림이 아직 남았으면(흐름이 다시 시작한 뒤라도) 끝날 때까지 쉰다.
+    async fn honor_asked_wait(&mut self, demo: bool) -> Rested {
+        match self.asked_until {
+            Some(until) if Instant::now() < until => {
+                let left = until - Instant::now();
+                self.rest(left, Some(until), demo).await
+            }
+            _ => Rested::Done,
         }
     }
 
@@ -341,8 +363,8 @@ impl Feed {
             // 시연에서 종목이 없으면 보낼 것이 없을 뿐이다.
             return Step::wait(self.pace.interval.max(MIN_INTERVAL));
         }
-        let all_rejected = !self.symbols.is_empty() && self.rejected.len() == self.symbols.len();
-        let state = if all_rejected {
+        // 거절을 봤고 시세가 하나도 없으면, 다 가려내기 전이라도 요청 거절이다(4차).
+        let state = if !self.rejected.is_empty() {
             FEED_REQUEST_REJECTED
         } else {
             FEED_CONNECTING
@@ -371,6 +393,9 @@ impl Feed {
             _ => None,
         };
         let wait = backoff.next_delay().max(asked.unwrap_or_default());
+        if let Some(asked) = asked {
+            self.asked_until = Some(Instant::now() + asked);
+        }
         if self.quotes_log.should_log(state, std::time::Instant::now()) {
             tracing::warn!(
                 %error,

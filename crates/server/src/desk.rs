@@ -38,6 +38,7 @@ pub(crate) struct DeskParts {
     pub(crate) symbols: Vec<Symbol>,
     pub(crate) source: SymbolsSource,
     pub(crate) limit: AttemptLimit,
+    pub(crate) symbols_limit: AttemptLimit,
 }
 
 /// 설정 책상.
@@ -50,6 +51,8 @@ pub(crate) struct Desk {
     watching: Mutex<Watching>,
     /// 키 등록 시도의 횟수 제한(모든 종류가 함께 쓴다).
     limit: Mutex<AttemptLimit>,
+    /// 종목 등록 시도의 횟수 제한(키 등록과 따로 센다).
+    symbols_limit: Mutex<AttemptLimit>,
     /// 시세 받기를 시작했는가(시세 흐름이 적는다).
     started: AtomicBool,
     /// 등록이 시세 흐름을 깨우는 알림.
@@ -69,6 +72,7 @@ impl Desk {
                 source: parts.source,
             }),
             limit: Mutex::new(parts.limit),
+            symbols_limit: Mutex::new(parts.symbols_limit),
             started: AtomicBool::new(false),
             wake: Notify::new(),
         };
@@ -154,14 +158,10 @@ impl Desk {
     /// 키를 등록한다: 입력 검사 → 시도 횟수 → 확인 → 저장. 성공하면 시세 흐름을 깨운다.
     ///
     /// 받은 값은 `pi-secrets`로만 넘긴다. 돌려주는 것은 까닭뿐이다.
-    pub(crate) async fn register_key(&self, body: &[u8]) -> Result<(), SetupRefusal> {
-        let request = KeyRequest::parse(body)?;
-        let allowed = self
-            .limit
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .allow(Instant::now());
-        if !allowed {
+    /// 받은 본문은 읽은 뒤 바로 0으로 덮는다([`KeyRequest::parse_wiping`]).
+    pub(crate) async fn register_key(&self, body: &mut [u8]) -> Result<(), SetupRefusal> {
+        let request = KeyRequest::parse_wiping(body)?;
+        if !allow(&self.limit) {
             tracing::warn!("키 등록 시도가 너무 많아 확인하지 않고 거부합니다");
             return Err(SetupRefusal::TooManyAttempts);
         }
@@ -183,7 +183,8 @@ impl Desk {
         outcome
     }
 
-    /// 지켜볼 종목을 등록한다: 보관 폴더에 저장하고, 쓰는 종목을 바꾸고, 시세 흐름을 깨운다.
+    /// 지켜볼 종목을 등록한다: 입력 검사 → 시도 횟수 → 저장하고, 쓰는 종목을 바꾸고,
+    /// 목록이 실제로 바뀌었을 때만 시세 흐름을 깨운다(4차).
     ///
     /// 파일을 쓰므로 막히는 작업 자리(`spawn_blocking`)에서 부른다.
     pub(crate) fn register_symbols(&self, body: &[u8]) -> Result<(), SetupRefusal> {
@@ -193,6 +194,11 @@ impl Desk {
         if watching.source == SymbolsSource::Argument {
             return Err(SetupRefusal::FixedByArgument);
         }
+        if !allow(&self.symbols_limit) {
+            tracing::warn!("종목 등록 시도가 너무 많아 저장하지 않고 거부합니다");
+            return Err(SetupRefusal::TooManyAttempts);
+        }
+        let changed = watching.symbols != symbols;
         save_watchlist(&self.home, &symbols).map_err(|error| {
             tracing::warn!(%error, "지켜볼 종목을 저장하지 못했습니다");
             SetupRefusal::SaveFailed
@@ -200,9 +206,19 @@ impl Desk {
         watching.symbols = symbols;
         watching.source = SymbolsSource::Saved;
         drop(watching);
-        self.wake.notify_one();
+        if changed {
+            self.wake.notify_one();
+        }
         Ok(())
     }
+}
+
+/// 시도 하나를 센다. 정한 횟수를 넘었으면 `false`.
+fn allow(limit: &Mutex<AttemptLimit>) -> bool {
+    limit
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .allow(Instant::now())
 }
 
 /// 등록 실패를 화면에 알릴 까닭으로 옮긴다.

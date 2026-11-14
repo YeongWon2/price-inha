@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use pi_store::Store;
+use pi_store::{EventRange, Store, TimedEvent};
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
 
@@ -141,14 +141,23 @@ impl Hub {
         if self.lock().closed {
             return Err(GateError::Closed);
         }
-        let stored = frame::envelope(self.clock.now(), payload);
+        // 시각은 시각 칸에 둔다(4차). 저장소가 다듬어 저장한 줄을 돌려받아 그 줄로 보낸다:
+        // 바로 보내는 프레임과 다시 보내는 프레임이 같다(종류는 저장된 이름).
+        let at = self.clock.now();
         let store = self.store.clone();
         let event = tokio::task::spawn_blocking(move || {
-            store.append(&kind, &stored).map(|seq| pi_store::Event {
+            let seq = store.append_at(&kind, &payload, at)?;
+            let range = EventRange {
+                after_seq: seq.saturating_sub(1),
+                ..EventRange::default()
+            };
+            let saved = store.read_events(range, 1)?.into_iter().next();
+            Ok::<_, pi_store::StoreError>(saved.unwrap_or(TimedEvent {
                 seq,
                 kind,
-                payload: stored,
-            })
+                at: Some(at),
+                payload,
+            }))
         })
         .await
         .map_err(|_| GateError::Task)??;
@@ -160,8 +169,12 @@ impl Hub {
     }
 
     /// 지나가는 이벤트를 보낸다. 종류마다 가장 최근 것 하나를 기억한다.
-    /// 크기 상한을 넘으면 보내지도 기억하지도 않는다.
+    /// 종류 이름이 규칙에 어긋나거나 크기 상한을 넘으면 보내지도 기억하지도 않는다.
     pub(crate) fn publish_transient(&self, kind: &str, payload: Value) {
+        if !frame::kind_follows_rule(kind) {
+            tracing::warn!("이름 규칙에 어긋나는 종류의 지나가는 이벤트를 버립니다");
+            return;
+        }
         let Some(payload) = self.redact_within_limit(payload) else {
             tracing::warn!(
                 limit = self.max_frame_bytes,
@@ -201,7 +214,11 @@ impl Hub {
     /// 번호가 `after`보다 큰 저장된 이벤트를 번호 순서로 한 쪽 읽는다.
     pub(crate) async fn read_page(&self, after: u64) -> Result<Vec<(u64, Frame)>, GateError> {
         let store = self.store.clone();
-        let events = tokio::task::spawn_blocking(move || store.read_after(after, REPLAY_PAGE))
+        let range = EventRange {
+            after_seq: after,
+            ..EventRange::default()
+        };
+        let events = tokio::task::spawn_blocking(move || store.read_events(range, REPLAY_PAGE))
             .await
             .map_err(|_| GateError::Task)??;
         Ok(events

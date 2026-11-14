@@ -58,6 +58,7 @@
     <li id="st-conn" class="warn">연결하는 중</li>
     <li id="st-demo" class="warn" hidden>시연 모드 (가짜 시세)</li>
     <li id="st-feed" hidden></li>
+    <li id="fix-broker-item" hidden><button id="fix-broker" type="button">증권사 키 고치기</button></li>
     <li id="st-late" class="warn" hidden>시세 늦음</li>
   </ul>
 
@@ -65,13 +66,14 @@
     <h2>시작 전 필수 설정</h2>
     <p class="hint">필수 항목이 모두 등록되면 바로 시작합니다. 키는 이 컴퓨터에만 저장되고 다시 보여 주지 않습니다.</p>
     <p id="setup-missing" class="warn"></p>
+    <button id="close-setup" type="button" hidden>본 화면으로 돌아가기</button>
 
     <div class="item">
       <h3>증권사 키 (필수) <span id="reg-broker" class="badge"></span></h3>
       <label for="f-client-id">client_id</label>
-      <input id="f-client-id" type="password" autocomplete="off" spellcheck="false">
+      <input id="f-client-id" type="password" autocomplete="new-password" spellcheck="false">
       <label for="f-client-secret">client_secret</label>
-      <input id="f-client-secret" type="password" autocomplete="off" spellcheck="false">
+      <input id="f-client-secret" type="password" autocomplete="new-password" spellcheck="false">
       <button id="b-broker" type="button">증권사 키 등록</button>
       <span id="m-broker" class="msg" aria-live="polite"></span>
     </div>
@@ -79,13 +81,13 @@
     <div class="item">
       <h3>AI 키 (필수, 둘 가운데 하나) <span id="reg-ai" class="badge"></span></h3>
       <label for="f-api-key">API 키 (api_key)</label>
-      <input id="f-api-key" type="password" autocomplete="off" spellcheck="false">
+      <input id="f-api-key" type="password" autocomplete="new-password" spellcheck="false">
       <button id="b-ai-key" type="button">API 키 등록</button>
       <span id="m-ai-key" class="msg" aria-live="polite"></span>
       <label for="f-access-token">구독 OAuth 토큰 (access_token)</label>
-      <input id="f-access-token" type="password" autocomplete="off" spellcheck="false">
+      <input id="f-access-token" type="password" autocomplete="new-password" spellcheck="false">
       <label for="f-refresh-token">refresh_token</label>
-      <input id="f-refresh-token" type="password" autocomplete="off" spellcheck="false">
+      <input id="f-refresh-token" type="password" autocomplete="new-password" spellcheck="false">
       <button id="b-ai-oauth" type="button">구독 토큰 등록</button>
       <span id="m-ai-oauth" class="msg" aria-live="polite"></span>
     </div>
@@ -102,15 +104,17 @@
     <div class="item">
       <h3>자료 키 (선택) <span id="reg-data" class="badge"></span></h3>
       <label for="f-data-key">api_key</label>
-      <input id="f-data-key" type="password" autocomplete="off" spellcheck="false">
-      <button id="b-data" type="button">자료 키 등록</button>
+      <input id="f-data-key" type="password" autocomplete="new-password" spellcheck="false" disabled>
+      <button id="b-data" type="button" disabled>자료 키 등록</button>
       <span id="m-data" class="msg" aria-live="polite"></span>
-      <p class="hint">확인할 곳이 아직 없어 지금은 등록되지 않습니다. 없어도 시작합니다.</p>
+      <p class="hint">아직 등록할 수 없음: 확인할 곳이 아직 없어 지금은 등록되지 않습니다. 없어도 시작합니다.</p>
     </div>
   </section>
 
   <section id="main-view">
-  <p id="rejected" class="bad" hidden></p>
+  <p><button id="open-setup" type="button">설정 열기 (종목 · 키 다시 등록)</button></p>
+  <p id="rejected" class="bad" hidden><span id="rejected-text"></span>
+    <button id="fix-symbols" type="button">종목 고치기</button></p>
   <div class="wrap">
     <table>
       <thead>
@@ -152,6 +156,9 @@
   var $mainView = document.getElementById("main-view");
   var $missing = document.getElementById("setup-missing");
   var $rejected = document.getElementById("rejected");
+  var $rejectedText = document.getElementById("rejected-text");
+  var $fixBrokerItem = document.getElementById("fix-broker-item");
+  var $closeSetup = document.getElementById("close-setup");
   var $symbolsNow = document.getElementById("symbols-now");
 
   // 설정 항목 이름 → 화면에 적는 말.
@@ -170,6 +177,9 @@
   var retryMs = RETRY_MIN_MS;
   var rows = {};           // 종목 → { tr, price, currency, at, last }
   var lateSymbols = {};
+  var started = false;     // 시세 받기를 시작했는가(서버가 알려 준 것).
+  var demoMode = false;
+  var manualSetup = false; // 시작한 뒤 사용자가 설정 화면을 열었는가.
 
   // 서버가 준 글자는 언제나 textContent로만 넣는다.
   function setText(node, text) { node.textContent = String(text); }
@@ -240,6 +250,8 @@
     setText($feed, text);
     $feed.className = kind;
     $feed.hidden = false;
+    // 키를 받지 않으면 옆에 고치러 가는 길을 둔다.
+    $fixBrokerItem.hidden = state !== "broker_rejected";
   }
 
   function showLate(payload) {
@@ -256,11 +268,34 @@
     $late.hidden = list.length === 0;
   }
 
-  // 설정 화면과 본 화면 가운데 하나만 보여 준다.
-  function showView(started, demo) {
-    $setupView.hidden = started;
-    $mainView.hidden = !started;
-    $demo.hidden = !demo;
+  // 설정 화면과 본 화면 가운데 하나만 보여 준다. 시작한 뒤에는 사용자가 설정 화면을 열 수 있다.
+  function render() {
+    if (!started) { manualSetup = false; }
+    var setup = !started || manualSetup;
+    $setupView.hidden = !setup;
+    $mainView.hidden = setup;
+    $closeSetup.hidden = !started;
+    $demo.hidden = !demoMode;
+  }
+
+  function showView(isStarted, demo) {
+    started = isStarted;
+    demoMode = demo;
+    render();
+  }
+
+  // 설정 화면을 연다. 고칠 칸이 있으면 그 칸으로 간다.
+  function openSetup(focusId) {
+    manualSetup = true;
+    render();
+    loadSetup();
+    var field = focusId ? document.getElementById(focusId) : null;
+    if (field) { field.focus(); }
+  }
+
+  function closeSetup() {
+    manualSetup = false;
+    render();
   }
 
   function missingText(names) {
@@ -312,7 +347,7 @@
 
   function showRejected(payload) {
     var list = payload && Array.isArray(payload.symbols) ? payload.symbols : [];
-    setText($rejected, list.length === 0 ? "" :
+    setText($rejectedText, list.length === 0 ? "" :
       "증권사가 거절한 종목 (빼고 받는 중 · 종목을 확인하세요): " + list.join(", "));
     $rejected.hidden = list.length === 0;
   }
@@ -382,6 +417,10 @@
     wireKey("b-ai-oauth", "m-ai-oauth", "ai_oauth",
       { access_token: "f-access-token", refresh_token: "f-refresh-token" });
     wireKey("b-data", "m-data", "data", { api_key: "f-data-key" });
+    document.getElementById("open-setup").addEventListener("click", function () { openSetup(null); });
+    document.getElementById("close-setup").addEventListener("click", closeSetup);
+    document.getElementById("fix-symbols").addEventListener("click", function () { openSetup("f-symbols"); });
+    document.getElementById("fix-broker").addEventListener("click", function () { openSetup("f-client-id"); });
     var $button = document.getElementById("b-symbols");
     var $message = document.getElementById("m-symbols");
     var $input = document.getElementById("f-symbols");

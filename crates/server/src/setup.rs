@@ -81,6 +81,7 @@ use std::time::{Duration, Instant};
 use pi_market::Symbol;
 use pi_secrets::{Credentials, KeyKind, MIN_SECRET_CHARS};
 use serde_json::{Value, json};
+use zeroize::Zeroize;
 
 use crate::{AppError, SetupRefusal};
 
@@ -249,7 +250,26 @@ impl KeyRequest {
     /// `pi_secrets::MIN_SECRET_CHARS`보다 짧은 값 · 줄바꿈이 든 값.
     /// 모두 [`SetupRefusal::InvalidInput`]이고, 오류에 받은 값을 싣지 않는다.
     pub fn parse(body: &[u8]) -> Result<KeyRequest, SetupRefusal> {
-        let (kind, fields) = key_request_parts(body).ok_or(SetupRefusal::InvalidInput)?;
+        let mut parsed =
+            serde_json::from_slice::<Value>(body).map_err(|_| SetupRefusal::InvalidInput)?;
+        let request = KeyRequest::from_value(&parsed);
+        wipe_value(&mut parsed);
+        request
+    }
+
+    /// [`KeyRequest::parse`]와 같이 읽고, 다 읽은 뒤 받은 본문을 0으로 덮는다. (4차, 참고 6)
+    ///
+    /// 성공해도 실패해도 돌아올 때 `body`의 모든 바이트는 0이다. 읽는 동안 만든 중간 값(JSON 글자 등)도
+    /// 다 쓰면 바로 0으로 덮는다. 키 등록 경로는 받은 본문을 이것으로 읽는다.
+    pub fn parse_wiping(body: &mut [u8]) -> Result<KeyRequest, SetupRefusal> {
+        let request = KeyRequest::parse(body);
+        body.zeroize();
+        request
+    }
+
+    /// 읽은 JSON에서 요청을 꺼낸다. 값은 [`Credentials`]로 옮기고 JSON 쪽은 부른 쪽이 지운다.
+    fn from_value(request: &Value) -> Result<KeyRequest, SetupRefusal> {
+        let (kind, fields) = key_request_parts(request).ok_or(SetupRefusal::InvalidInput)?;
         let names = kind.fields();
         if fields.len() != names.len() {
             return Err(SetupRefusal::InvalidInput);
@@ -265,22 +285,21 @@ impl KeyRequest {
         }
         Ok(KeyRequest { kind, values })
     }
+}
 
-    /// [`KeyRequest::parse`]와 같이 읽고, 다 읽은 뒤 받은 본문을 0으로 덮는다. (4차, 참고 6)
-    ///
-    /// 성공해도 실패해도 돌아올 때 `body`의 모든 바이트는 0이다. 읽는 동안 만든 중간 값(JSON 글자 등)도
-    /// 다 쓰면 바로 0으로 덮는다. 키 등록 경로는 받은 본문을 이것으로 읽는다.
-    pub fn parse_wiping(body: &mut [u8]) -> Result<KeyRequest, SetupRefusal> {
-        let _ = body;
-        todo!()
+/// JSON 값 안의 모든 글자를 0으로 덮고 비운다(받은 키 값이 든 중간 값을 남기지 않는다).
+fn wipe_value(value: &mut Value) {
+    match value {
+        Value::String(text) => text.zeroize(),
+        Value::Array(items) => items.iter_mut().for_each(wipe_value),
+        Value::Object(map) => map.values_mut().for_each(wipe_value),
+        Value::Number(_) | Value::Bool(_) | Value::Null => {}
     }
 }
 
 /// 본문에서 종류와 칸 묶음을 꺼낸다. 본문은 `item`과 `fields` 두 칸뿐인 JSON 객체여야 한다.
-fn key_request_parts(body: &[u8]) -> Option<(KeyKind, serde_json::Map<String, Value>)> {
-    let Value::Object(mut request) = serde_json::from_slice::<Value>(body).ok()? else {
-        return None;
-    };
+fn key_request_parts(request: &Value) -> Option<(KeyKind, &serde_json::Map<String, Value>)> {
+    let request = request.as_object()?;
     let kind = match request.get("item")?.as_str()? {
         KEY_BROKER => KeyKind::Broker,
         KEY_AI_API_KEY => KeyKind::AiApiKey,
@@ -288,10 +307,10 @@ fn key_request_parts(body: &[u8]) -> Option<(KeyKind, serde_json::Map<String, Va
         KEY_DATA => KeyKind::Data,
         _ => return None,
     };
-    let Some(Value::Object(fields)) = request.remove("fields") else {
+    let Some(Value::Object(fields)) = request.get("fields") else {
         return None;
     };
-    (request.len() == 1).then_some((kind, fields))
+    (request.len() == 2).then_some((kind, fields))
 }
 
 /// 등록할 수 있는 값이면 앞뒤 공백을 뗀 글자를 준다(붙여 넣다 딸려 온 공백은 값이 아니다).
