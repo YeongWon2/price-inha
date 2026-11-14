@@ -14,11 +14,15 @@ run() { # run <이름> <명령...>
 }
 
 if [ "$#" -gt 0 ]; then
-  mods="$*"; pkgs=""
-  for m in $mods; do pkgs="$pkgs $(module_pkgs "$m")" || exit 2; done
+  mods="$*"; pkgs=""; only=""; srcdirs=""
+  for m in $mods; do
+    pkgs="$pkgs $(module_pkgs "$m")" || exit 2
+    for d in $(module_dirs "$m"); do only="$only,$d"; srcdirs="$srcdirs $d"; done
+  done
+  fmtpkgs="$pkgs"
   echo "범위: $mods"
 else
-  mods="$MODULES"; pkgs="--workspace"
+  mods="$MODULES"; pkgs="--workspace"; only=""; srcdirs="crates"; fmtpkgs="--all"
   echo "범위: 전체"
 fi
 
@@ -30,7 +34,7 @@ if [ "${PI_SELFTEST:-0}" != "1" ]; then
 fi
 
 # shellcheck disable=SC2086
-run "1 모양 (cargo fmt)" cargo fmt --all --check
+run "1 모양 (cargo fmt)" cargo fmt $fmtpkgs --check
 # shellcheck disable=SC2086
 run "2a clippy (실행 코드, 엄격)" cargo clippy $pkgs --lib --bins -- -D warnings
 # shellcheck disable=SC2086
@@ -68,7 +72,7 @@ done
 # 6 아키텍처 · 컨벤션
 PY=$(find_python)
 if [ -z "$PY" ]; then bad "6 아키텍처 · 컨벤션: Python 3.11 이상이 없다"
-elif out=$("$PY" scripts/check_arch.py 2>&1); then ok "6 아키텍처 · 컨벤션"
+elif out=$("$PY" scripts/check_arch.py --only "$only" 2>&1); then ok "6 아키텍처 · 컨벤션"
 else bad "6 아키텍처 · 컨벤션"; printf '%s\n' "$out"; fi
 
 # 7 비밀 글자
@@ -89,7 +93,7 @@ done
 [ "$oh_any" -eq 0 ] && ok "8 테스트에 바깥 주소 없음"
 
 # 9 검사 끄기
-off=$(grep -rnE '#!?\[(cfg_attr\([^]]*)?(ignore|allow)\b' crates --include='*.rs' 2>/dev/null)
+off=$(grep -rnE '#!?\[(cfg_attr\([^]]*)?(ignore|allow)\b' $srcdirs --include='*.rs' 2>/dev/null)
 if [ -n "$off" ]; then bad "9 검사를 끈 곳 — 고치기: #[ignore] · #[allow]를 지우고 원인을 고친다"; printf '%s\n' "$off"
 else ok "9 검사를 끈 곳 없음"; fi
 

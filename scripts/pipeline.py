@@ -10,6 +10,7 @@
     pipeline.py review <모듈> <통과|되돌림> [메모]   AI 검토 판정 기록
     pipeline.py scope                  진행 중인 노드가 맡지 않은 곳을 고쳤는지
     pipeline.py resume <모듈>          사람에게 넘어간 모듈을 사람이 다시 연다
+    pipeline.py reopen <모듈> <이유>   테스트가 틀렸을 때 조정자가 N1 로 되돌린다
 
 상태는 .pipeline/state.json 에 둔다.
 """
@@ -222,10 +223,25 @@ def cmd_resume(st, a):
     print(f"{a[0]}: {LABEL[back]}")
 
 
+def cmd_reopen(st, a):
+    """테스트가 틀렸을 때 조정자가 N1 로 되돌린다. 잠금 태그를 지운다."""
+    d = mod(st, a[0])
+    run(["git", "tag", "-d", f"red/{a[0]}"])
+    d.update(stage="todo", fails=0, last_fail="")
+    d["log"].append("테스트 결함으로 N1 로 되돌림: " + " ".join(a[1:]))
+    save(st)
+    print(f"{a[0]}: {LABEL['todo']} (N1 부터 다시)")
+
+
 def main():
     cmds = {k[4:]: v for k, v in globals().items() if k.startswith("cmd_")}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         sys.exit(__doc__)
+    # 병렬 에이전트가 동시에 불러도 상태가 어긋나지 않게 한 번에 하나만 돈다.
+    import fcntl
+    STATE_FILE.parent.mkdir(exist_ok=True)
+    guard = open(STATE_FILE.parent / "lock", "w")
+    fcntl.flock(guard, fcntl.LOCK_EX)
     st = load()
     for m in GRAPH["modules"]:
         mod(st, m)

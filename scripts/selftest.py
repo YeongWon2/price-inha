@@ -139,6 +139,10 @@ def main():
         case(fx, "깨끗한 저장소: 아키텍처 검사 통과", None, arch, "", should_fail=False)
         case(fx, "깨끗한 저장소: 전체 검사(G2) 통과", None, verify, "G2 통과", should_fail=False)
         case(fx, "깨끗한 저장소: 모듈 하나만 검사해도 통과", None, verify + ["store"], "G2 통과", should_fail=False)
+        case(fx, "모듈 하나만 검사할 때 다른 모듈의 문제는 넘어간다",
+             lambda: (fx / "crates/ai/src/error.rs").unlink(), verify + ["store"], "G2 통과", should_fail=False)
+        case(fx, "모듈 하나만 검사할 때 그 모듈의 문제는 잡는다",
+             lambda: (fx / "crates/store/src/error.rs").unlink(), verify + ["store"], "[CONV-ERROR-FILE]")
 
         # --- 아키텍처: 의존
         case(fx, "의존 방향을 어기면 잡는다 (ai → store)",

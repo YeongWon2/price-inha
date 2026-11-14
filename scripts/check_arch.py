@@ -155,6 +155,14 @@ for name, rule in crates.items():
                        "단계별로 작은 함수로 나눈다")
             i = j + 1
 
+# --only 폴더,폴더 : 그 폴더의 문제만 남긴다 (모듈 하나만 검사할 때). 전체에 걸친 문제는 늘 남긴다.
+if "--only" in sys.argv:
+    only = [d for d in sys.argv[sys.argv.index("--only") + 1].split(",") if d]
+    if only:
+        def mine(p):
+            where = p.split("] ", 1)[1].split("\n", 1)[0]
+            return where.startswith(("Cargo.", "docs/")) or any(where.startswith(d + "/") for d in only)
+        problems = [p for p in problems if mine(p)]
 for p in problems:
     print(p)
 if problems:
