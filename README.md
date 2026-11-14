@@ -20,8 +20,8 @@
 | 단계 | 시기 | 상태 |
 |---|---|---|
 | 조사 · 구상 | 10월 | 완료 |
-| 기능 명세 | 11월 초 | 진행 예정 |
-| 개발 스펙 명세 | 11월 중순 | 예정 |
+| 기능 명세 | 11월 초 | 완료 (기획 PRD · 상세 스펙) |
+| 개발 스펙 명세 | 11월 중순 | 완료 |
 | 구현 ① AI 에이전트 연결 | 11월 중순 ~ | 예정 |
 | 구현 ② 모의투자 · 템플릿 · 복기 | 11월 말 ~ | 예정 |
 | 구현 ③ 실전 운용 · 시각화 | 12월 초 ~ | 예정 |
@@ -31,7 +31,7 @@
 ## 정한 것
 
 - [기본 원칙 16개](docs/product/principles.md): 규칙 엔진에 박는 바꿀 수 없는 원칙과 멈춤 · 재개 규칙
-- [stock-team 기획](docs/product/stock-team/prd.md): 주식 투자 에이전트 팀 PRD · [상세 스펙](docs/product/stock-team/spec.md) · 유저 플로우
+- [stock-team 기획](docs/product/stock-team/prd.md): 주식 투자 에이전트 팀 PRD · [상세 스펙](docs/product/stock-team/spec.md) · [유저 플로우](docs/product/stock-team/flow.md) · [개발 스펙](docs/product/stock-team/dev.md)
 - 개발 방식: 명세 먼저 작성 후 구현
 - 실전은 검증된 템플릿 안에서만 운용
 
