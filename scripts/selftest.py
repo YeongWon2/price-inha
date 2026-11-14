@@ -303,6 +303,11 @@ def main():
                 sh(pl + ["gate", "G2", "store"], fx)
             case(fx, "그래프: G2 를 통과한 구현은 바로 커밋되어 작업 폴더가 깨끗하다", green_commit,
                  ["bash", "-c", "test -z \"$(git status --porcelain)\" && git log -1 --format=%s"], "feat(store)", should_fail=False)
+            case(fx, "권한: 그래프 밖의 조사 문서는 노드의 범위 검사에 걸리지 않는다",
+                 lambda: (sh(pl + ["start", "N1", "store"], fx),
+                          (fx / "docs/research").mkdir(exist_ok=True),
+                          (fx / "docs/research/x.md").write_text("조사\n")),
+                 pl + ["scope"], "모두 맡은 범위 안", should_fail=False)
             case(fx, "권한: 맡지 않은 곳을 고치면 잡는다",
                  lambda: (sh(pl + ["start", "N1", "store"], fx), append(fx, "crates/ai/src/lib.rs", "// 남의 모듈")),
                  pl + ["scope"], "맡지 않은 곳")

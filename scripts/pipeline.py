@@ -136,7 +136,7 @@ def changed_files():
 
 def scope_problems(st):
     active = [(d["stage"].upper(), m) for m, d in st.items() if d["stage"] in ("n1", "n2")]
-    globs = [g for n, m in active for g in allowed(n, m)]
+    globs = [g for n, m in active for g in allowed(n, m)] + GRAPH.get("outside_graph", [])
     return [f for f in changed_files() if not any(fnmatch.fnmatch(f, g) for g in globs)]
 
 
