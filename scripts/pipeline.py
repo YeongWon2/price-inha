@@ -26,6 +26,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GRAPH = tomllib.loads((ROOT / "docs/dev/graph.toml").read_text(encoding="utf-8"))
 STATE_FILE = ROOT / ".pipeline/state.json"
+# 실행기가 만드는 커밋 끝에 붙는 줄. 바꿀 때는 이 한 곳만 고친다.
+COAUTHOR = "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 DIRS = {"gate": ["crates/gate", "crates/server"]}
 # 단계 순서: 할 일 → N1 중 → red 확인됨 → 잠김 → N2 중 → green → N3 중 → 검토 통과
 ORDER = ["todo", "n1", "red_ok", "locked", "n2", "green", "n3", "reviewed"]
@@ -174,7 +176,7 @@ def cmd_gate(st, a):
         if gate == "G2":
             # 통과한 구현은 바로 커밋한다. 남겨 두면 다른 모듈의 범위 검사가 "맡지 않은 곳"으로 본다.
             run(["git", "add", "--", *dirs(m), "Cargo.lock"])
-            c, o = run(["git", "commit", "-q", "-m", f"feat({m}): 구현 (green)\n\nG2 기계 검사 통과.", "--", *dirs(m), "Cargo.lock"])
+            c, o = run(["git", "commit", "-q", "-m", f"feat({m}): 구현 (green)\n\nG2 기계 검사 통과." + COAUTHOR, "--", *dirs(m), "Cargo.lock"])
             print("커밋했다: feat(%s)" % m if c == 0 else "커밋할 변경 없음")
         save(st)
         return
@@ -201,7 +203,7 @@ def cmd_lock(st, a):
         save(st)
         sys.exit(out + "\n잠그지 않았다: G1 을 다시 통과해야 한다 (N1 로 되돌림)")
     run(["git", "add", "--", *dirs(m), "Cargo.lock"])
-    code, out = run(["git", "commit", "-q", "-m", f"test({m}): 테스트와 뼈대 (red)\n\nG1 통과. 이 뒤로 tests/ 는 잠긴다.", "--", *dirs(m), "Cargo.lock"])
+    code, out = run(["git", "commit", "-q", "-m", f"test({m}): 테스트와 뼈대 (red)\n\nG1 통과. 이 뒤로 tests/ 는 잠긴다." + COAUTHOR, "--", *dirs(m), "Cargo.lock"])
     if code != 0:
         sys.exit("커밋 실패:\n" + out)
     run(["git", "tag", "-f", f"red/{m}"])
@@ -265,7 +267,7 @@ def cmd_amend(st, a):
         for f in run(["git", "ls-tree", "-r", "--name-only", ref, "--", *tdirs])[1].split())
     before = count(f"red/{m}")
     run(["git", "add", "--", *tdirs])
-    code, out = run(["git", "commit", "-q", "-m", f"test({m}): 잠긴 테스트 바로잡기\n\n{' '.join(a[1:])}", "--", *tdirs])
+    code, out = run(["git", "commit", "-q", "-m", f"test({m}): 잠긴 테스트 바로잡기\n\n{' '.join(a[1:])}" + COAUTHOR, "--", *tdirs])
     if code != 0:
         sys.exit("커밋 실패:\n" + out)
     after = count("HEAD")
