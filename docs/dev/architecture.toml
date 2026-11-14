@@ -30,6 +30,12 @@ component = "A9 시장 어댑터"
 internal = ["pi-secrets"]
 external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait", "zeroize", "tracing", "url", "rust_decimal", "chrono", "futures", "tokio-stream"]
 
+[crates.pi-paper]
+dir = "crates/paper"
+component = "A8 주문 실행기 (모의계좌와 체결)"
+internal = ["pi-market"]
+external = ["serde", "serde_json", "thiserror", "rust_decimal", "chrono", "async-trait", "tokio", "tracing"]
+
 [crates.pi-gate]
 dir = "crates/gate"
 component = "A2 접속 관문"
@@ -39,7 +45,7 @@ external = ["axum", "tokio", "tower", "tower-http", "serde", "serde_json", "this
 [crates.price-inha]
 dir = "crates/server"
 component = "실행 파일, 조립"
-internal = ["pi-store", "pi-secrets", "pi-ai", "pi-market", "pi-gate"]
+internal = ["pi-store", "pi-secrets", "pi-ai", "pi-market", "pi-paper", "pi-gate"]
 external = ["*"]
 
 # 어디에도 들어오면 안 되는 의존 (전체 의존 나무 기준)
@@ -57,7 +63,7 @@ fix = "reqwest는 default-features = false 와 rustls 기능으로 쓴다"
 [[patterns]]
 id = "ARCH-MONEY-FLOAT"
 regex = '\b(f32|f64)\b'
-scope = ["crates/store/src", "crates/market/src"]
+scope = ["crates/store/src", "crates/market/src", "crates/paper/src"]
 why = "돈과 가격을 부동소수점으로 다루면 값이 어긋난다"
 fix = "rust_decimal::Decimal 이나 정수 최소 단위를 쓴다"
 
@@ -79,7 +85,7 @@ fix = "pi-secrets의 공개 API나 CredentialSource trait을 거친다"
 [[patterns]]
 id = "ARCH-ENV-READ"
 regex = '\benv::(var|vars|var_os)\b'
-scope = ["crates/store/src", "crates/ai/src", "crates/market/src", "crates/gate/src"]
+scope = ["crates/store/src", "crates/ai/src", "crates/market/src", "crates/paper/src", "crates/gate/src"]
 why = "환경 변수는 조립하는 곳(price-inha)과 pi-secrets만 읽는다. 라이브러리는 인자로 받는다"
 fix = "설정 값을 생성자 인자로 받게 바꾼다"
 
@@ -89,6 +95,13 @@ regex = '\b(SystemTime|Instant|OffsetDateTime|Utc|Local)::now\b|now_utc\(\)'
 scope = ["crates/store/src"]
 why = "저장소는 시각을 인자로 받는다(테스트가 시계를 정한다)"
 fix = "시각을 호출하는 쪽에서 넘긴다"
+
+[[patterns]]
+id = "ARCH-PAPER-PURE"
+regex = '\b(reqwest|TcpStream|UdpSocket|hyper|rusqlite|std::fs|tokio::fs)\b|\b(SystemTime|Instant|Utc|Local)::now\b'
+scope = ["crates/paper/src"]
+why = "모의계좌는 바깥으로 나가지 않고 파일 · DB · 시계를 직접 쓰지 않는다. 실제 주문이 나갈 길이 없어야 하고, 같은 입력은 같은 결과여야 한다"
+fix = "시세 · 시각은 인자로 받고, 저장은 상태를 값으로 내보내 조립하는 쪽에 맡긴다"
 
 [[patterns]]
 id = "ARCH-NET-IN-STORE"

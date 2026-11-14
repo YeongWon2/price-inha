@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # 파이프라인 스크립트가 함께 쓰는 표. docs/dev/pipeline.md 6장과 같아야 한다.
-MODULES="store secrets ai market gate"
+MODULES="store secrets ai market paper gate"
 
 module_dirs() { # 모듈 → 폴더들
   case "$1" in
     gate) echo "crates/gate crates/server" ;;
-    store|secrets|ai|market) echo "crates/$1" ;;
+    store|secrets|ai|market|paper) echo "crates/$1" ;;
     *) echo "모르는 모듈: $1" >&2; return 1 ;;
   esac
 }

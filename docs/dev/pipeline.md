@@ -74,6 +74,7 @@ AI 검토에서 기계로 잡을 수 있는 종류의 문제가 나오면, 고�
 | secrets | `pi-secrets` | A13 비밀 보관 | 없음 |
 | ai | `pi-ai` | A11 AI 공급자 어댑터 | `pi-secrets` |
 | market | `pi-market` | A9 시장 어댑터 | `pi-secrets` |
+| paper | `pi-paper` | A8 주문 실행기 가운데 모의계좌와 체결 | `pi-market` |
 | gate | `pi-gate` | A2 접속 관문, 실시간 연결 | `pi-store` |
 | server | `price-inha` | 실행 파일, 조립 | 모두 |
 

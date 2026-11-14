@@ -13,6 +13,8 @@ needs = []
 needs = []
 [modules.market]
 needs = []
+[modules.paper]
+needs = ["market"]
 [modules.gate]
 needs = ["store", "secrets", "ai", "market"]
 

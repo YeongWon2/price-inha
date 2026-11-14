@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RULES = tomllib.loads((ROOT / "docs/dev/architecture.toml").read_text(encoding="utf-8"))
-MODULES = ["store", "secrets", "ai", "market", "gate"]
+MODULES = ["store", "secrets", "ai", "market", "paper", "gate"]
 
 # 금지 모양마다 "어긴 코드 한 줄"과 넣을 파일. architecture.toml 에 모양을 더하면 여기에도 더해야 한다.
 PATTERN_SAMPLES = {
@@ -26,6 +26,7 @@ PATTERN_SAMPLES = {
     "ARCH-SECRET-FILES": ("crates/ai/src/lib.rs", '/// 값.\npub const F: &str = ".env";'),
     "ARCH-ENV-READ": ("crates/gate/src/lib.rs", '/// 값.\npub fn e() -> bool { std::env::var("X").is_ok() }'),
     "ARCH-CLOCK": ("crates/store/src/lib.rs", "/// 값.\npub fn t() -> std::time::SystemTime { std::time::SystemTime::now() }"),
+    "ARCH-PAPER-PURE": ("crates/paper/src/lib.rs", "/// 값.\npub fn p() { let _ = std::fs::read(\"x\"); }"),
     "ARCH-NET-IN-STORE": ("crates/store/src/lib.rs", "/// 값.\npub fn n() { let _ = std::net::TcpStream::connect(\"127.0.0.1:1\"); }"),
     "CONV-BOX-ERROR": ("crates/ai/src/lib.rs", "/// 값.\npub fn b() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }"),
     "CONV-SECRET-LOG": ("crates/ai/src/lib.rs", "/// 값.\npub fn l(api_key: &str) { tracing::info!(\"{}\", api_key); }"),
