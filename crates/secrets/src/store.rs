@@ -10,9 +10,6 @@ use crate::{
     Credentials, HOME_ENV, KeyKind, MIN_SECRET_CHARS, SecretsError, Verifier, envfile, fsio,
 };
 
-/// 예전(1 · 2차)에 구독 토큰을 두던 파일 이름. 3차부터 이 보관소는 이 파일을 읽지도 고치지도 않는다.
-const LEGACY_AUTH_FILE: &str = "auth.json";
-
 /// 등록 성공 표시. 값은 없다 (C3: "키 값은 돌려주지 않는다").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Registered {
@@ -110,11 +107,8 @@ impl SecretStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, SecretsError> {
         let dir = dir.into();
         fsio::require_absolute(&dir)?;
-        if dir.join(LEGACY_AUTH_FILE).exists() {
-            // 3차 2번: 옛 auth.json이 있어도 읽지 않고 · 등록된 것으로 보지 않고 · 고치지 않으며,
-            // 깨져 있어도 다른 키를 읽는 데 지장이 없어야 한다. 아직 구현 안 됨.
-            todo!("3차 2번: 옛 auth.json을 건드리지 않는다")
-        }
+        // 3차 2번: 예전 구독 토큰 파일(auth.json)은 보지 않는다. 키 파일만 읽으므로
+        // 그 파일은 읽히지도 · 등록된 것으로 보이지도 · 고쳐지지도 않고, 깨져 있어도 상관없다.
         fsio::prepare_dir(&dir)?;
         let mut targets = Targets::default();
         for kind in KeyKind::ALL {
