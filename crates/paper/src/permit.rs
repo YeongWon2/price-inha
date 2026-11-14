@@ -46,7 +46,10 @@ impl CheckAuthority {
 
     /// 승인한 내용으로 표시 하나를 낸다. 표시 하나는 주문 하나에만 쓸 수 있다(값이 옮겨 간다).
     pub fn approve(&self, approved: ApprovedOrder) -> CheckPermit {
-        todo!()
+        CheckPermit {
+            seal: Arc::clone(&self.seal),
+            approved,
+        }
     }
 }
 
@@ -62,6 +65,11 @@ pub struct CheckPermit {
 impl CheckPermit {
     /// 승인한 내용.
     pub fn approved(&self) -> &ApprovedOrder {
-        todo!()
+        &self.approved
+    }
+
+    /// 이 표시를 낸 권한이 그 표식(계좌)의 짝인가.
+    pub(crate) fn sealed_by(&self, seal: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.seal, seal)
     }
 }

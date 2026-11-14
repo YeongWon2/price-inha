@@ -4,7 +4,7 @@
 use pi_market::{Currency, Market, SessionKind, StalePolicy};
 use rust_decimal::Decimal;
 
-use crate::OrderType;
+use crate::{BrokerError, OrderType};
 
 /// 반올림 방향.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,9 +88,20 @@ pub struct SessionRules {
 }
 
 impl SessionRules {
+    /// 정규장에서만 지정가 · 시장가를 받는다(기본).
+    fn regular_only() -> Self {
+        Self {
+            limit: vec![SessionKind::Regular],
+            market: vec![SessionKind::Regular],
+        }
+    }
+
     /// 그 세션에서 그 호가 유형을 받는가.
     pub fn allows(&self, session: SessionKind, order_type: OrderType) -> bool {
-        todo!()
+        match order_type {
+            OrderType::Limit => self.limit.contains(&session),
+            OrderType::Market => self.market.contains(&session),
+        }
     }
 }
 
@@ -134,12 +145,44 @@ impl MarketRules {
     /// | 증권거래세 | 0.0020 (코스피 · 코스닥 같음, 2026년) | 같은 문서 5.1. 코넥스(0.10%)는 나누지 않았다 |
     /// | 결제일 | 2영업일 (T+2) | 같은 문서 5.1 |
     /// | 판 돈 | 결제일 뒤에 쓴다(보수적) | **미확인**. 실제 증권사의 재매수 가능 여부는 확인하지 못했다 |
-    /// | 수수료율 · 반올림 방향 · 미끄러짐 | 구현이 정한다 | **미확인**. 토스증권 수수료 안내를 확인하지 못했다 |
+    /// | 수수료율 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다.** 토스증권 수수료 안내를 확인하지 못해 지어내지 않고 0으로 뒀다 |
+    /// | 반올림 방향 | [`RoundingMode::Up`] | **확인되지 않은 값이며 사용자가 설정해야 한다.** 가장 보수적인 쪽(수수료 · 세금을 더 뗀다)으로 뒀다 |
+    /// | 미끄러짐 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다.** 근거 있는 값이 없어 0으로 뒀다 |
     /// | 지정가 체결 값 | [`LimitFillPrice::Limit`] | 지시서(보수적인 쪽) |
     /// | 최대 체결 수량 | [`MaxFill::Unlimited`] | 지시서(설정) |
     /// | 세션 | 정규장에서만 지정가 · 시장가 | 보수적으로 잡았다. 프리 · 애프터마켓의 허용 유형은 **미확인** |
     pub fn kr() -> Self {
-        todo!()
+        let band = |below: Option<i64>, tick: i64| TickBand {
+            below: below.map(Decimal::from),
+            tick: Decimal::from(tick),
+        };
+        Self {
+            currency: Currency::Krw,
+            commission_rate: Decimal::ZERO,
+            sell_tax_rate: Decimal::new(20, 4),
+            rounding: MoneyRounding {
+                scale: 0,
+                mode: RoundingMode::Up,
+            },
+            tick_table: vec![
+                band(Some(2_000), 1),
+                band(Some(5_000), 5),
+                band(Some(20_000), 10),
+                band(Some(50_000), 50),
+                band(Some(200_000), 100),
+                band(Some(500_000), 500),
+                band(None, 1_000),
+            ],
+            price_limit_rate: Some(Decimal::new(30, 2)),
+            settlement: Settlement {
+                business_days: 2,
+                proceeds_usable: ProceedsUsable::AfterSettlement,
+            },
+            market_slippage_rate: Decimal::ZERO,
+            limit_fill_price: LimitFillPrice::Limit,
+            max_fill: MaxFill::Unlimited,
+            sessions: SessionRules::regular_only(),
+        }
     }
 
     /// 미국 주식의 기본 규칙.
@@ -150,15 +193,50 @@ impl MarketRules {
     /// | 호가 단위 | 1달러 미만 0.0001 · 그 이상 0.01 | 토스 명세의 주문 생성 요청 `price` 설명 |
     /// | 가격제한폭 | 없음 | 토스 명세의 상/하한가 응답(미국은 null), 조사 문서 5.2 |
     /// | 결제일 | 1영업일 (T+1) | 조사 문서 5.2 |
-    /// | 팔 때 세금(SEC Fee 등) · 수수료율 · 반올림 방향 · 미끄러짐 | 구현이 정한다 | **미확인** |
+    /// | 팔 때 세금(SEC Fee 등) | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
+    /// | 수수료율 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
+    /// | 반올림 방향 | [`RoundingMode::Up`] | **확인되지 않은 값이며 사용자가 설정해야 한다.** 가장 보수적인 쪽으로 뒀다 |
+    /// | 미끄러짐 | 0 | **확인되지 않은 값이며 사용자가 설정해야 한다** |
     /// | 그 밖 | 국내와 같다 | |
     pub fn us() -> Self {
-        todo!()
+        Self {
+            currency: Currency::Usd,
+            commission_rate: Decimal::ZERO,
+            sell_tax_rate: Decimal::ZERO,
+            rounding: MoneyRounding {
+                scale: 2,
+                mode: RoundingMode::Up,
+            },
+            tick_table: vec![
+                TickBand {
+                    below: Some(Decimal::ONE),
+                    tick: Decimal::new(1, 4),
+                },
+                TickBand {
+                    below: None,
+                    tick: Decimal::new(1, 2),
+                },
+            ],
+            price_limit_rate: None,
+            settlement: Settlement {
+                business_days: 1,
+                proceeds_usable: ProceedsUsable::AfterSettlement,
+            },
+            market_slippage_rate: Decimal::ZERO,
+            limit_fill_price: LimitFillPrice::Limit,
+            max_fill: MaxFill::Unlimited,
+            sessions: SessionRules::regular_only(),
+        }
     }
 
-    /// 그 값 구간의 호가 단위.
+    /// 그 값 구간의 호가 단위. 맞는 줄이 없으면 표의 마지막 줄을 쓰고, 표가 비어 있으면 0이다
+    /// (0은 "호가 단위 없음"으로 다룬다. 계좌를 열 때 빈 표는 받지 않는다).
     pub fn tick_for(&self, price: Decimal) -> Decimal {
-        todo!()
+        self.tick_table
+            .iter()
+            .find(|band| band.below.is_none_or(|below| price < below))
+            .or(self.tick_table.last())
+            .map_or(Decimal::ZERO, |band| band.tick)
     }
 }
 
@@ -187,11 +265,77 @@ pub struct PaperConfig {
 impl PaperConfig {
     /// 기본 규칙([`MarketRules::kr`] · [`MarketRules::us`] · [`StalePolicy::default`])에 처음 돈만 정한 설정.
     pub fn new(initial_cash: InitialCash) -> Self {
-        todo!()
+        Self {
+            initial_cash,
+            kr: MarketRules::kr(),
+            us: MarketRules::us(),
+            stale: StalePolicy::default(),
+        }
     }
 
     /// 그 시장의 규칙. 다루지 않는 시장이면 `None`.
     pub fn rules(&self, market: Market) -> Option<&MarketRules> {
-        todo!()
+        match market {
+            Market::Kr => Some(&self.kr),
+            Market::Us => Some(&self.us),
+            _ => None,
+        }
+    }
+}
+
+impl MarketRules {
+    /// 규칙 값이 쓸 수 있는 모양인가. 틀린 곳이 있으면 무엇이 틀렸는지 돌려준다.
+    fn validate(&self, name: &str) -> Result<(), BrokerError> {
+        let bad = |what: &str| Err(BrokerError::InvalidConfig(format!("{name}: {what}")));
+        if !matches!(self.currency, Currency::Krw | Currency::Usd) {
+            return bad("통화는 KRW나 USD여야 합니다");
+        }
+        let rates = [
+            self.commission_rate,
+            self.sell_tax_rate,
+            self.market_slippage_rate,
+            self.price_limit_rate.unwrap_or(Decimal::ZERO),
+        ];
+        if rates.iter().any(Decimal::is_sign_negative) {
+            return bad("비율은 음수일 수 없습니다");
+        }
+        if self.rounding.scale > MAX_MONEY_SCALE {
+            return bad("돈의 소수 자릿수가 너무 큽니다");
+        }
+        if self.tick_table.is_empty()
+            || self
+                .tick_table
+                .iter()
+                .any(|band| band.tick <= Decimal::ZERO)
+        {
+            return bad("호가 단위 표가 비었거나 0 이하의 단위가 있습니다");
+        }
+        if let MaxFill::PerQuote(quantity) = &self.max_fill
+            && (*quantity <= Decimal::ZERO || !quantity.fract().is_zero())
+        {
+            return bad("한 번에 체결되는 최대 수량은 양의 정수여야 합니다");
+        }
+        Ok(())
+    }
+}
+
+/// 돈의 소수 자릿수 한도. 이보다 크면 십진수 계산이 넘칠 수 있다.
+const MAX_MONEY_SCALE: u32 = 8;
+
+impl PaperConfig {
+    /// 설정 값이 쓸 수 있는 모양인가(비율 · 호가 단위 표 · 통화). 처음 돈은 여기서 보지 않는다.
+    pub(crate) fn validate_rules(&self) -> Result<(), BrokerError> {
+        self.kr.validate("국내 규칙")?;
+        self.us.validate("미국 규칙")
+    }
+
+    /// 처음 돈이 음수가 아닌가.
+    pub(crate) fn validate_initial_cash(&self) -> Result<(), BrokerError> {
+        if self.initial_cash.krw.is_sign_negative() || self.initial_cash.usd.is_sign_negative() {
+            return Err(BrokerError::InvalidConfig(
+                "처음 돈은 음수일 수 없습니다".to_owned(),
+            ));
+        }
+        Ok(())
     }
 }

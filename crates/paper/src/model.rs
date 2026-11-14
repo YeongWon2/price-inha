@@ -10,11 +10,12 @@ use std::time::Duration;
 use chrono::{DateTime, NaiveDate, Utc};
 use pi_market::{Currency, Market, Symbol};
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 use crate::CheckPermit;
 
 /// 계좌 종류 (E25 · V29).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccountKind {
     /// 모의계좌. 이번에 만드는 것은 이것뿐이다.
     Paper,
@@ -23,7 +24,7 @@ pub enum AccountKind {
 }
 
 /// 주문 식별자 (`orderId`). 증권사가 낸 글자 그대로다.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OrderId(String);
 
 impl OrderId {
@@ -39,7 +40,7 @@ impl OrderId {
 }
 
 /// 주문 방향 (`side`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Side {
     /// 사기 (`BUY`).
     Buy,
@@ -48,7 +49,7 @@ pub enum Side {
 }
 
 /// 호가 유형 (`orderType`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OrderType {
     /// 지정가 (`LIMIT`).
     Limit,
@@ -61,7 +62,7 @@ pub enum OrderType {
 /// 모의계좌가 실제로 만드는 상태는 `Pending` → (`PartialFilled`) → `Filled` / `Canceled` /
 /// `Rejected` / `Replaced`다. 나머지(`PendingCancel` · `PendingReplace` · `CancelRejected` ·
 /// `ReplaceRejected`)는 실제 증권사 구현을 위해 이름만 둔다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum OrderStatus {
     /// 체결 대기 (`PENDING`).
@@ -90,7 +91,10 @@ impl OrderStatus {
     /// 진행 중인가. 명세의 주문 목록 필터 `OPEN` 묶음과 같다:
     /// `Pending` · `PartialFilled` · `PendingCancel` · `PendingReplace`.
     pub fn is_open(self) -> bool {
-        todo!()
+        matches!(
+            self,
+            Self::Pending | Self::PartialFilled | Self::PendingCancel | Self::PendingReplace
+        )
     }
 }
 
@@ -106,7 +110,7 @@ pub enum OrderGroup {
 /// 체결되지 않은 주문을 언제 취소하는가 (N4 · E12 · E29).
 ///
 /// 접수한 시각부터 잰다. 그 시각이 **되면**(`지금 >= 마감`) 남은 부분을 취소한다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum UnfilledTimeout {
     /// 접수하고 이만큼 지나면 취소한다.
     After(Duration),
@@ -124,7 +128,7 @@ impl UnfilledTimeout {
 }
 
 /// 주문이 다 체결되지 않고 끝난 이유.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CloseReason {
     /// 취소를 요청받았다.
@@ -309,7 +313,7 @@ pub struct CashBalance {
 impl CashBalance {
     /// 세 칸의 합.
     pub fn total(&self) -> Decimal {
-        todo!()
+        self.available + self.held + self.unsettled
     }
 }
 

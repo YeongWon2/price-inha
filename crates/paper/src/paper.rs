@@ -50,6 +50,7 @@
 //! [`PaperBroker::on_time`]과 [`PaperBroker::on_quote`]는 먼저 마감이 된(`now >= 마감`) 열린
 //! 주문을 취소하고 이유([`crate::CloseReason::UnfilledTimeout`])를 남긴다. 체결된 만큼은 남는다.
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -57,16 +58,22 @@ use chrono::{DateTime, Utc};
 use pi_market::{Currency, MarketCalendar, Quote, Symbol};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
+use crate::book::Book;
+use crate::ledger::{CashCode, Ledger, MarketCode};
 use crate::{
     AccountKind, Broker, BrokerError, CashBalance, CheckAuthority, Commission, Fill, Holding,
     ModifyRequest, Order, OrderAck, OrderEvent, OrderGroup, OrderId, OrderRequest, PaperConfig,
 };
+use crate::{fill, orders};
 
 /// 멱등성 키가 살아 있는 시간: 10분 (토스 명세의 `clientOrderId` 설명).
 /// 접수한 지 딱 이 시간이 되면 같은 키도 새 주문으로 본다.
 pub const IDEMPOTENCY_WINDOW: Duration = Duration::from_secs(600);
+
+/// 지금 내보내는 [`Snapshot`]의 모양 번호.
+const SNAPSHOT_VERSION: u32 = 1;
 
 /// 장애 흉내 (E13 · E30). 테스트와 시연에서 증권사 장애를 일으킨다.
 ///
@@ -89,22 +96,82 @@ pub enum Fault {
 /// 들어 있지 않은 것: 달력 · 기준가(되살린 뒤 다시 넣는다), 장애 흉내, 구독자.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
-    /// 값의 모양 번호. 구현이 나머지 칸을 채운다.
+    /// 값의 모양 번호.
     version: u32,
+    /// 장부 전체.
+    ledger: Ledger,
 }
 
 /// 모의계좌.
 #[derive(Debug)]
 pub struct PaperBroker {
-    /// 구현이 상태(잠금 안)를 채운다.
+    /// 설정. 열거나 되살릴 때 정해지고 바뀌지 않는다.
     config: PaperConfig,
+    /// 이 계좌의 표식. 짝인 [`CheckAuthority`]가 낸 표시만 이것과 같은 것을 가리킨다.
+    seal: Arc<()>,
+    /// 상태. 모든 동작이 이 잠금 안에서 한 번에 끝난다(잠근 채로 기다리지 않는다).
+    book: Mutex<Book>,
+}
+
+/// 되살릴 장부가 말이 되는가(음수인 돈 · 수량, 겹치는 식별자가 없는가).
+fn check_ledger(ledger: &Ledger) -> Result<(), BrokerError> {
+    let bad = |what: &str| Err(BrokerError::InvalidSnapshot(what.to_owned()));
+    let negative = |value: &Decimal| value.is_sign_negative() && !value.is_zero();
+    for cash in [&ledger.krw, &ledger.usd] {
+        if negative(&cash.available) || cash.unsettled.iter().any(|lot| negative(&lot.amount)) {
+            return bad("현금이 음수입니다");
+        }
+    }
+    if ledger
+        .holdings
+        .iter()
+        .any(|holding| holding.quantity <= Decimal::ZERO)
+    {
+        return bad("보유 수량이 0 이하입니다");
+    }
+    for (index, order) in ledger.orders.iter().enumerate() {
+        if negative(&order.held_cash)
+            || negative(&order.filled_quantity)
+            || order.filled_quantity > order.quantity
+        {
+            return bad("주문의 체결 수량이나 묶인 돈이 올바르지 않습니다");
+        }
+        let duplicated = ledger
+            .orders
+            .iter()
+            .skip(index + 1)
+            .any(|other| other.order_id == order.order_id);
+        if duplicated {
+            return bad("주문 식별자가 겹칩니다");
+        }
+    }
+    Ok(())
 }
 
 impl PaperBroker {
+    fn assemble(config: PaperConfig, ledger: Ledger) -> (Self, CheckAuthority) {
+        let seal = Arc::new(());
+        let authority = CheckAuthority::new(Arc::clone(&seal));
+        let broker = Self {
+            config,
+            seal,
+            book: Mutex::new(Book::new(ledger)),
+        };
+        (broker, authority)
+    }
+
+    /// 상태를 잠근다. 잠근 채로 죽은 호출이 있었어도 상태는 그대로 쓴다.
+    fn book(&self) -> MutexGuard<'_, Book> {
+        self.book.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// 처음 돈으로 새 계좌를 연다. 함께 나오는 [`CheckAuthority`]만이 이 계좌가 받는 점검 통과
     /// 표시를 낼 수 있다. 처음 돈이나 비율이 음수면 [`BrokerError::InvalidConfig`].
     pub fn open(config: PaperConfig) -> Result<(Self, CheckAuthority), BrokerError> {
-        todo!()
+        config.validate_initial_cash()?;
+        config.validate_rules()?;
+        let ledger = Ledger::new(config.initial_cash.krw, config.initial_cash.usd);
+        Ok(Self::assemble(config, ledger))
     }
 
     /// 내보낸 값에서 계좌를 되살린다. `config.initial_cash`는 쓰지 않는다. 권한은 새로 나온다
@@ -114,12 +181,23 @@ impl PaperBroker {
         config: PaperConfig,
         snapshot: Snapshot,
     ) -> Result<(Self, CheckAuthority), BrokerError> {
-        todo!()
+        config.validate_rules()?;
+        if snapshot.version != SNAPSHOT_VERSION {
+            return Err(BrokerError::InvalidSnapshot(format!(
+                "모르는 모양 번호입니다: {}",
+                snapshot.version
+            )));
+        }
+        check_ledger(&snapshot.ledger)?;
+        Ok(Self::assemble(config, snapshot.ledger))
     }
 
     /// 계좌 전체를 값 하나로 내보낸다. 같은 상태는 같은 값(`==`)이다.
     pub fn snapshot(&self) -> Snapshot {
-        todo!()
+        Snapshot {
+            version: SNAPSHOT_VERSION,
+            ledger: self.book().ledger.clone(),
+        }
     }
 
     /// 그 시장(`calendar.market`)의 달력을 넣는다. 다시 넣으면 바꾼다.
@@ -127,39 +205,64 @@ impl PaperBroker {
     /// 결제도 여기서 본다: 결제 전인 돈 가운데 결제 예정일이 이 달력의 기준일
     /// (`calendar.today.date`) **이하**인 것은 쓸 수 있는 돈으로 옮긴다.
     pub fn set_calendar(&self, calendar: MarketCalendar) {
-        todo!()
+        let Some(market) = MarketCode::of(calendar.market) else {
+            return;
+        };
+        let mut book = self.book();
+        book.settle(market, calendar.today.date);
+        match market {
+            MarketCode::Kr => book.kr_calendar = Some(calendar),
+            MarketCode::Us => book.us_calendar = Some(calendar),
+        }
     }
 
     /// 종목의 기준가(전일 종가)를 넣는다. 상 · 하한가를 셈하는 데 쓴다.
     pub fn set_reference_price(&self, symbol: Symbol, price: Decimal) {
-        todo!()
+        self.book()
+            .reference
+            .insert(symbol.as_str().to_owned(), price);
     }
 
     /// 시세 하나를 준다. 먼저 마감이 된 주문을 취소하고, 그 종목의 열린 주문을 체결해 본다.
     /// 이 호출로 생긴 이벤트를 일어난 순서대로 돌려준다(구독자에게도 같은 것이 간다).
-    /// 체결하지 않더라도 이 시세를 그 종목의 마지막 시세로 기억한다.
+    /// 체결하지 않더라도 이 시세를 그 종목의 마지막 시세로 기억한다(현금을 두지 않는 통화의
+    /// 시세와 0 이하의 값은 기억하지 않는다).
     pub fn on_quote(&self, quote: &Quote, now: DateTime<Utc>) -> Vec<OrderEvent> {
-        todo!()
+        fill::on_quote(&mut self.book(), &self.config, quote, now)
     }
 
     /// 시각만 알려 준다. 마감이 된 열린 주문을 취소한다. 생긴 이벤트를 돌려준다.
     pub fn on_time(&self, now: DateTime<Utc>) -> Vec<OrderEvent> {
-        todo!()
+        let mut events = Vec::new();
+        self.book().expire(now, &mut events);
+        events
     }
 
     /// 장애 흉내를 켜거나(`Some`) 끈다(`None`).
     pub fn set_fault(&self, fault: Option<Fault>) {
-        todo!()
+        self.book().fault = fault;
     }
 
     /// 그 통화의 현금. 다루지 않는 통화는 모두 0이다.
     pub fn cash(&self, currency: &Currency) -> CashBalance {
-        todo!()
+        match CashCode::of(currency) {
+            Some(code) => self.book().ledger.balance(code),
+            None => CashBalance {
+                available: Decimal::ZERO,
+                held: Decimal::ZERO,
+                unsettled: Decimal::ZERO,
+            },
+        }
     }
 
     /// 체결 기록 전부(일어난 순서대로).
     pub fn fills(&self) -> Vec<Fill> {
-        todo!()
+        self.book()
+            .ledger
+            .fills
+            .iter()
+            .map(|fill| fill.view())
+            .collect()
     }
 }
 
@@ -167,7 +270,7 @@ impl PaperBroker {
 impl Broker for PaperBroker {
     /// 언제나 [`AccountKind::Paper`].
     fn account_kind(&self) -> AccountKind {
-        todo!()
+        AccountKind::Paper
     }
 
     async fn place_order(
@@ -175,7 +278,7 @@ impl Broker for PaperBroker {
         request: OrderRequest,
         now: DateTime<Utc>,
     ) -> Result<OrderAck, BrokerError> {
-        todo!()
+        orders::place(&mut self.book(), &self.config, &self.seal, request, now)
     }
 
     /// 확인하는 순서: 장애 흉내 → 원주문(없으면 `OrderNotFound`, 끝났으면 `AlreadyFilled` ·
@@ -193,7 +296,8 @@ impl Broker for PaperBroker {
         request: ModifyRequest,
         now: DateTime<Utc>,
     ) -> Result<OrderId, BrokerError> {
-        todo!()
+        let mut book = self.book();
+        orders::modify(&mut book, &self.config, &self.seal, order_id, request, now)
     }
 
     /// 묶인 돈 · 수량을 풀고 이유([`crate::CloseReason::CancelRequested`])를 남긴다.
@@ -203,7 +307,7 @@ impl Broker for PaperBroker {
         order_id: &OrderId,
         now: DateTime<Utc>,
     ) -> Result<OrderId, BrokerError> {
-        todo!()
+        orders::cancel(&mut self.book(), order_id, now)
     }
 
     async fn orders(
@@ -211,31 +315,60 @@ impl Broker for PaperBroker {
         group: OrderGroup,
         symbol: Option<&Symbol>,
     ) -> Result<Vec<Order>, BrokerError> {
-        todo!()
+        let open = group == OrderGroup::Open;
+        Ok(self
+            .book()
+            .ledger
+            .orders
+            .iter()
+            .filter(|order| order.is_open() == open)
+            .filter(|order| symbol.is_none_or(|symbol| symbol.as_str() == order.symbol))
+            .map(|order| order.view())
+            .collect())
     }
 
     async fn order(&self, order_id: &OrderId) -> Result<Order, BrokerError> {
-        todo!()
+        let book = self.book();
+        book.ledger
+            .order_index(order_id)
+            .and_then(|index| book.ledger.orders.get(index))
+            .map(|order| order.view())
+            .ok_or(BrokerError::OrderNotFound)
     }
 
     async fn buying_power(&self, currency: Currency) -> Result<Decimal, BrokerError> {
-        todo!()
+        Ok(self.cash(&currency).available)
     }
 
     async fn sellable_quantity(&self, symbol: &Symbol) -> Result<Decimal, BrokerError> {
-        todo!()
+        let book = self.book();
+        Ok([MarketCode::Kr, MarketCode::Us]
+            .into_iter()
+            .map(|market| book.ledger.sellable(symbol.as_str(), market))
+            .sum())
     }
 
     /// 설정의 국내 · 미국 수수료율을 그 순서로 돌려준다.
     async fn commissions(&self) -> Result<Vec<Commission>, BrokerError> {
-        todo!()
+        Ok([MarketCode::Kr, MarketCode::Us]
+            .into_iter()
+            .filter_map(|code| {
+                let market = code.market();
+                self.config.rules(market).map(|rules| Commission {
+                    market,
+                    commission_rate: rules.commission_rate,
+                })
+            })
+            .collect())
     }
 
     async fn holdings(&self, symbol: Option<&Symbol>) -> Result<Vec<Holding>, BrokerError> {
-        todo!()
+        Ok(self.book().ledger.holding_views(symbol))
     }
 
     fn subscribe(&self) -> UnboundedReceiver<OrderEvent> {
-        todo!()
+        let (sender, receiver) = unbounded_channel();
+        self.book().subscribers.push(sender);
+        receiver
     }
 }
