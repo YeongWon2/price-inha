@@ -274,10 +274,11 @@ fn 환경_변수가_없으면_홈_폴더_아래_기본_폴더다() {
 }
 
 // 검증: D3
+// 2차 3번: 빈 글자인 환경 변수는 "없는 것"이 아니라 거부다(홈 폴더가 멀쩡해도).
 #[test]
-fn 환경_변수가_비어_있으면_없는_것으로_본다() {
-    let dir = resolve_dir(Some(OsStr::new("")), Some(Path::new("/시험/홈"))).unwrap();
-    assert_eq!(dir, Path::new("/시험/홈").join(".price-inha"));
+fn 환경_변수가_비어_있으면_거부한다() {
+    let result = resolve_dir(Some(OsStr::new("")), Some(Path::new("/시험/홈")));
+    assert!(matches!(result, Err(SecretsError::HomeNotFound)));
 }
 
 // 검증: D3
