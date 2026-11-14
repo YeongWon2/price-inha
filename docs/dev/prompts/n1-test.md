@@ -15,7 +15,7 @@
 4. 의존은 자기 `Cargo.toml`에만 더한다. 써도 되는 의존은 `docs/dev/architecture.toml`에 있다.
 
 ## 끝나는 조건
-`bash scripts/red.sh {module}`이 "G1 통과"로 끝난다: 컴파일되고, 테스트가 실패하고(red), 필수 번호가 다 있고, 테스트에 바깥 주소가 없다.
+`python3.14 scripts/pipeline.py gate G1 {module}`이 "G1 통과"로 끝난다(안에서 `scripts/red.sh {module}`을 돌리고 결과를 기록한다): 컴파일되고, 테스트가 실패하고(red), 필수 번호가 다 있고, 테스트에 바깥 주소가 없다.
 구현 전인데 통과하는 테스트가 있으면 아무것도 확인하지 않는 테스트인지 보고 고친다.
 
 ## 규칙
