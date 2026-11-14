@@ -1,0 +1,127 @@
+# 아키텍처 · 컨벤션 규칙. scripts/check_arch.py가 읽어 기계로 검사한다.
+# 규칙을 바꾸려면 이 파일을 고친다(사용자 확인 뒤). 검사 스크립트는 고치지 않는다.
+
+[limits]
+max_src_lines = 500          # src 파일 하나의 최대 줄 수 (tests 제외)
+max_fn_lines = 80            # 함수 하나의 최대 줄 수 (tests 제외)
+
+# 크레이트마다: 맡은 구성 요소, 써도 되는 내부 모듈, 써도 되는 바깥 의존(실행 코드 기준)
+[crates.pi-store]
+dir = "crates/store"
+component = "A12 저장소"
+internal = []
+external = ["rusqlite", "serde", "serde_json", "thiserror", "time", "rust_decimal", "tracing"]
+
+[crates.pi-secrets]
+dir = "crates/secrets"
+component = "A13 비밀 보관"
+internal = []
+external = ["serde", "serde_json", "thiserror", "zeroize", "base64", "percent-encoding", "async-trait", "tempfile", "tracing", "dirs", "subtle"]
+
+[crates.pi-ai]
+dir = "crates/ai"
+component = "A11 AI 공급자 어댑터"
+internal = ["pi-secrets"]
+external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait", "zeroize", "tracing", "url"]
+
+[crates.pi-market]
+dir = "crates/market"
+component = "A9 시장 어댑터"
+internal = ["pi-secrets"]
+external = ["reqwest", "serde", "serde_json", "thiserror", "tokio", "async-trait", "zeroize", "tracing", "url", "rust_decimal", "time", "futures", "tokio-stream"]
+
+[crates.pi-gate]
+dir = "crates/gate"
+component = "A2 접속 관문"
+internal = ["pi-store"]
+external = ["axum", "tokio", "tower", "tower-http", "serde", "serde_json", "thiserror", "tracing", "rand", "sha2", "hex", "base64", "time", "futures", "tokio-stream", "http", "subtle"]
+
+[crates.price-inha]
+dir = "crates/server"
+component = "실행 파일, 조립"
+internal = ["pi-store", "pi-secrets", "pi-ai", "pi-market", "pi-gate"]
+external = ["*"]
+
+# 어디에도 들어오면 안 되는 의존 (전체 의존 나무 기준)
+[[banned_deps]]
+name = "openssl-sys"
+why = "모든 운영체제에서 같은 빌드가 되어야 한다(D1)"
+fix = "reqwest는 default-features = false 와 rustls 기능으로 쓴다"
+
+[[banned_deps]]
+name = "native-tls"
+why = "모든 운영체제에서 같은 빌드가 되어야 한다(D1)"
+fix = "reqwest는 default-features = false 와 rustls 기능으로 쓴다"
+
+# 코드에 있으면 안 되는 모양. scope: 검사할 폴더(glob), except: 빼는 폴더.
+[[patterns]]
+id = "ARCH-MONEY-FLOAT"
+regex = '\b(f32|f64)\b'
+scope = ["crates/store/src", "crates/market/src"]
+why = "돈과 가격을 부동소수점으로 다루면 값이 어긋난다"
+fix = "rust_decimal::Decimal 이나 정수 최소 단위를 쓴다"
+
+[[patterns]]
+id = "ARCH-ORDER-API"
+regex = '/api/v1/(orders|conditional-orders|buying-power|sellable-quantity|holdings|accounts|transactions)'
+scope = ["crates"]
+why = "토스증권에는 모의투자가 없어 주문 · 계좌 API는 실제 돈을 움직인다. 이번 범위가 아니다"
+fix = "그 호출을 지운다. 주문은 T7에서 자체 모의계좌로 만든다"
+
+[[patterns]]
+id = "ARCH-SECRET-FILES"
+regex = '"(\.env|auth\.json)"'
+scope = ["crates"]
+except = ["crates/secrets"]
+why = "키 파일은 pi-secrets만 읽고 쓴다(A13)"
+fix = "pi-secrets의 공개 API나 CredentialSource trait을 거친다"
+
+[[patterns]]
+id = "ARCH-ENV-READ"
+regex = '\benv::(var|vars|var_os)\b'
+scope = ["crates/store/src", "crates/ai/src", "crates/market/src", "crates/gate/src"]
+why = "환경 변수는 조립하는 곳(price-inha)과 pi-secrets만 읽는다. 라이브러리는 인자로 받는다"
+fix = "설정 값을 생성자 인자로 받게 바꾼다"
+
+[[patterns]]
+id = "ARCH-CLOCK"
+regex = '\b(SystemTime|Instant|OffsetDateTime|Utc|Local)::now\b|now_utc\(\)'
+scope = ["crates/store/src"]
+why = "저장소는 시각을 인자로 받는다(테스트가 시계를 정한다)"
+fix = "시각을 호출하는 쪽에서 넘긴다"
+
+[[patterns]]
+id = "ARCH-NET-IN-STORE"
+regex = '\b(reqwest|TcpStream|UdpSocket|hyper)\b'
+scope = ["crates/store/src", "crates/secrets/src"]
+why = "저장소와 비밀 보관은 바깥으로 나가지 않는다(V23, N8)"
+fix = "바깥 호출은 어댑터 모듈(pi-ai, pi-market)에 둔다"
+
+[[patterns]]
+id = "CONV-BOX-ERROR"
+regex = 'Box<dyn (std::error::)?Error'
+scope = ["crates/store/src", "crates/secrets/src", "crates/ai/src", "crates/market/src", "crates/gate/src"]
+why = "라이브러리는 종류가 구분되는 오류 타입을 낸다"
+fix = "thiserror로 만든 그 모듈의 오류 enum을 쓴다"
+
+[[patterns]]
+id = "CONV-SECRET-LOG"
+regex = '(tracing::)?(trace|debug|info|warn|error)!\([^)]*\b(expose|client_secret|access_token|api_key)\b'
+scope = ["crates"]
+except_tests = true
+why = "비밀 값이 기록으로 나갈 수 있다(E38)"
+fix = "비밀 값을 기록에 넣지 않는다. 필요하면 등록 여부만 남긴다"
+
+[[patterns]]
+id = "CONV-BIND-ALL"
+regex = '0\.0\.0\.0|\[::\]'
+scope = ["crates"]
+except_tests = true
+why = "기본은 그 컴퓨터에서만 연다(D2)"
+fix = "기본 주소는 127.0.0.1로 두고, 다른 주소는 사용자가 설정으로 준 값만 쓴다"
+
+# 구조 규칙
+[structure]
+lib_crates_have_no_main = true     # 실행 파일은 price-inha 하나
+lib_crates_have_error_rs = true    # 라이브러리마다 src/error.rs에 오류 타입
+tests_only_in_tests_dir = false    # src 안의 단위 테스트는 허용

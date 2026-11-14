@@ -12,7 +12,9 @@ run() { # run <이름> <명령...>
 }
 
 run "1 모양 (cargo fmt)" cargo fmt --all --check
-run "2 clippy" cargo clippy --workspace --all-targets -- -D warnings
+run "2a clippy (실행 코드, 엄격)" cargo clippy --workspace --lib --bins -- -D warnings
+run "2b clippy (테스트)" cargo clippy --workspace --tests -- -D warnings \
+  -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic -A missing_docs
 run "3 테스트" cargo test --workspace
 
 # 4 잠긴 테스트
@@ -37,7 +39,13 @@ for m in $MODULES; do
 done
 
 # 6 의존 방향
-run "6 의존 방향" python3 scripts/check_deps.py
+PY=""
+for c in python3.14 python3.13 python3.12 python3.11 python3; do
+  if command -v "$c" >/dev/null && "$c" -c 'import tomllib' 2>/dev/null; then PY="$c"; break; fi
+done
+if [ -z "$PY" ]; then bad "6 아키텍처 · 컨벤션: Python 3.11 이상이 없다"
+elif out=$("$PY" scripts/check_arch.py 2>&1); then ok "6 아키텍처 · 컨벤션"
+else bad "6 아키텍처 · 컨벤션"; printf '%s\n' "$out"; fi
 
 # 7 비밀 글자
 sec=$(git ls-files -co --exclude-standard | grep -vE '^scripts/verify\.sh$' | tr '\n' '\0' \
