@@ -1,5 +1,7 @@
 # 가격인하 원격 접속 보안: 본인만 접속하게 하기
 
+> 2026-11-14에 더 깊게 다시 뜯었다. 같은 주제는 `triggers-approval-memory-deep.md`이 우선이다. 이 문서에서 바로잡은 곳은 "(바로잡음 …)"으로 표시했다.
+
 > 2026-11-14 이후 결정: Tailscale은 스펙에서 빼고(사용자가 알아서), OTP는 쓰지 않으며, 키는 Hermes 방식 파일(.env · auth.json, 0600)에 둔다. 아래 Tailscale · TOTP · 키체인 내용은 참고용이다.
 
 | 항목 | 내용 |
@@ -426,11 +428,11 @@ VPS일 때와 집 PC일 때:
 | 공개 시 안전장치 | 대시보드는 인증 공급자 없으면 비-loopback 바인딩 거부(`hermes_cli/web_server.py:940-966`) | 없음(앱 로그인만) | 소유자 키는 서버 쪽에만 두라고 README 안내 | 비-loopback은 인증 없으면 시작 거부, Funnel은 비밀번호 모드 아니면 거부(`docs/gateway/tailscale.md:132`) |
 | 인증 | Bearer `API_SERVER_KEY`, 16자 미만이면 시작 거부, `hmac.compare_digest` | ID/비밀번호(bcrypt) → HS256 JWT 쿠키 7일, 갱신 없음 | 소유자 키(전 권한) + 프로필 키 | 토큰(기본) · 비밀번호 · trusted-proxy · Tailscale 신원 헤더 + 기기 신원(Ed25519) · 페어링 |
 | 쿠키 | — | `httpOnly`, `sameSite=lax`, `Secure`는 production일 때만(`src/lib/jwt.ts:4-8`) | — | — |
-| 시도 제한 | 확인 못 함 | 로그인 경로에서 못 찾음(소켓 채팅 속도 제한만) | 확인 못 함 | 60초 10회 → IP 5분 잠금, 자격 종류별, loopback 예외 |
+| 시도 제한 | 대시보드 비밀번호 로그인: IP당 60초 10번, 429, 잠금 없음 (`H:hermes_cli/dashboard_auth/routes.py:403-447, 474-476`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) | 로그인 경로에서 못 찾음(소켓 채팅 속도 제한만) | 확인 못 함 | 60초 10회 → IP 5분 잠금, 자격 종류별, loopback 예외 |
 | 원격 접속 | 밖으로 안 연다 | VPS + Traefik. 터널 안내 없음 | — | Serve(tailnet만) / Funnel(공개 + 비밀번호) / off(기본) 모드 |
 | 기기 등록 | — | 1계정 1세션 | — | 기기 페어링, 부트스트랩 토큰 10분 1회용(`docs/gateway/pairing.md:83-93`) |
-| 비밀 저장 | `.env` · `auth.json` 0600 원자 쓰기, macOS Keychain 읽기 | 게이트웨이 키를 DB에 AES-256-GCM, 키 재료 `JWT_SECRET` | 0600 원자 쓰기, 다시 읽기 경로 없음, 로그에 값 없음 | SQLite · `secrets.json` · SecretRef, 600/700, 작업 폴더 `.env` 차단, 로그 마스킹 |
-| 승인 실패 | 재시작하면 타임아웃 거부 | 재연결 때 승인 카드 다시 보냄 | — | 모르는 결정 = 거절, hook 실패 = 차단, 승인 화면 없으면 즉시 거부, 실행 직전 재확인 |
+| 비밀 저장 | `auth.json` 0600 원자 쓰기, `.env`는 새 파일일 때만 0600이고 있던 파일은 좁히지 않는다 (`H:hermes_cli/config.py:2435-2459`) (바로잡음 2026-11-14: conformance.md 조사 문서에서 바로잡을 곳), macOS Keychain 읽기 | 게이트웨이 키를 DB에 AES-256-GCM, 키 재료 `JWT_SECRET` | 0600 원자 쓰기, 다시 읽기 경로 없음, 로그에 값 없음 | SQLite · `secrets.json` · SecretRef, 600/700, 작업 폴더 `.env` 차단, 로그 마스킹 |
+| 승인 실패 | 재시작하면 대기 줄 자체가 메모리에서 사라진다(시간 초과로 거부되는 것은 기다리던 프로세스가 살아 있을 때다 `H:tools/approval.py:150-184`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) | 재연결 때 승인 카드 다시 보냄 | — | 모르는 결정 = 거절, hook 실패 = 차단, 승인 화면 없으면 즉시 거부, 실행 직전 재확인 |
 
 근거: 표 안 경로와 [Hermes 분석 5.2](hermes-agent.md), [DeskRPG 분석 3 · 7-1 · 8](deskrpg.md), [플러그인 분석 2-1 · 5](deskrpg-hermes-plugin.md), [OpenClaw 분석 2.2](openclaw.md) [관찰].
 

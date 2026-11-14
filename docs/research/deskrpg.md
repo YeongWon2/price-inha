@@ -1,5 +1,7 @@
 # DeskRPG 리버스 엔지니어링: 기능 목록과 구조 (가격인하 Rust 재구축용)
 
+> 2026-11-14에 더 깊게 다시 뜯었다. 같은 주제는 `office-deep.md`이 우선이다. 이 문서에서 바로잡은 곳은 "(바로잡음 …)"으로 표시했다.
+
 결론: 가격인하에 필요한 핵심(사무실 채팅 · 멘션 · NPC끼리 이어 말하기 · 응답 수명주기 · 승인/알림 · 칸반/cron 이벤트 · NPC 이동 상태)은 서버 쪽이 Socket.IO 이벤트 약 60개, Hermes HTTP 호출 두 갈래(대화 SSE · 플러그인 REST), SQLite 테이블 약 15개로 정리된다. Rust로 옮길 수 있는 크기다. 3D 화면(three.js)은 서버와 "스냅샷 + 이벤트"로만 이어져 있어서 웹에 그대로 남길 수 있다.
 
 | 항목 | 값 |
@@ -105,7 +107,7 @@ flowchart LR
 | 도구 실행 승인(실시간) | 위험 명령 · MCP 쓰기를 사람에게 묻기 (once/session/deny) | `src/server/tool-approvals.ts`, `src/lib/tool-approval-types.ts` | 가져옴. "승인 요청" 알림 |
 | NPC 질문(선택지) | `deskrpg_ask_user` 도구로 NPC가 선택지 질문 | `src/server/ask-user.ts`, `src/components/npc-question/*` | 가져옴 |
 | 카드 실행 전 승인 게이트 | 카드를 blocked로 만들고 approvals 테이블에 기록 | `src/lib/approvals.ts`, `src/app/api/channels/[id]/approvals/**` | 가져옴. 주문 실행 전 승인에 맞다 |
-| 주의 수신함(Attention) | 사람이 답해야 할 것만 모은 목록 | `src/lib/attention-inbox.ts`, `src/app/api/channels/[id]/attention/**` | 가져옴. 모바일 알림 목록 |
+| 주의 수신함(Attention) | 사람이 답해야 할 것만 모은 목록(저장하지 않는 조립 결과이고 읽음 개념이 없으며 머리줄 단추에 숫자 배지가 없다 `src/lib/attention-inbox.ts:1-9` (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)) | `src/lib/attention-inbox.ts`, `src/app/api/channels/[id]/attention/**` | 가져옴. 모바일 알림 목록 |
 | 방 알림 카드(notice) | 카드 완료 · 막힘 · 검토, 승인 요청, cron 결과, 실행 차단 등 8종 | `src/lib/chat-rooms-policy.ts:34-128`, `src/server/automation-events.ts` | 가져옴. 체결 · 이상 상황 알림 틀 |
 | 칸반 보기 · 조작 | Hermes 소유 카드 보기 · 만들기 · 승인 · 재배정 등 | `src/app/api/channels/[id]/kanban/**`, `src/components/kanban/*` | 가져옴(보기 · 상태 알림 우선, 세부 조작은 나중에) |
 | cron 관리 | 작업 목록 · 생성 · 일시정지 · 즉시 실행 · 기록 · 블루프린트 | `src/app/api/channels/[id]/cron/**`, `src/components/cron/*` | 가져옴 |
@@ -184,7 +186,7 @@ README의 "What You Can Do" 9개 항목은 모두 코드에서 찾았다. 차이
 
 ### 3-2. 실시간 이벤트 (Socket.IO, path `/socket.io`)
 
-연결: 핸드셰이크 쿠키의 `token`을 `jose.jwtVerify`로 검사, 실패면 끊음 (`socket-handlers.ts:1027-1069`, `:1305-1310`). 연결되면 모든 소켓이 `user:<userId>` 방에 들어가고, 대기 중인 도구 승인 카드를 다시 받는다 (`:1313-1316`). 클라이언트는 `transports: ["websocket"]`, 무한 재연결, 지연 0.5~3초 (`GamePageClient.tsx:689-696`). 버퍼 상한 20MB (`server.js:96`).
+연결: 핸드셰이크 쿠키의 `token`을 `jose.jwtVerify`로 검사, 실패면 끊음 (`socket-handlers.ts:1027-1069`, `:1305-1310`). 연결되면 모든 소켓이 `user:<userId>` 방에 들어가고, 대기 중인 도구 승인 카드를 다시 받는다 (`:1313-1316`). 클라이언트는 `transports: ["websocket"]`, 무한 재연결, 지연 0.5~3초 (`GamePageClient.tsx:689-696`). 버퍼 상한 20MB (`server.js:96`). 소켓은 웹과 다른 포트(`PORT+1`)의 HTTP 서버이고 (`server.js:90-97`), 화면 설정에 `upgrade:false`, `timeout:10000`이 더 있다 (`src/app/game/GamePageClient.tsx:689-698`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)
 
 Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅방), `user:<userId>`(개인), `meeting-<channelId>`(회의), `dm-response:<userId>:<characterId>:<npcId>`(DM 응답) (`src/server/room-broadcast.ts`, `socket-handlers.ts:235-236`).
 
@@ -201,7 +203,7 @@ Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅
 | S→C | `join-error`, `session:kicked`, `map:refresh{channelId,protocolVersion:1,phase:"begin"|"ready"}` | | `:1425`, `:1247` |
 | S→C | `npc:working`, `gateway:health` (입장 직후 1회 + 변화 시) | `{ npcId, working, sources:{runningCards,cronRuns} }` | `:1567-1572`, `automation-events.ts:65` |
 
-입장 순서 [관찰]: 형식 검사 → 채널 접근 검사 → 서버가 "내 캐릭터"를 정함(클라이언트가 보낸 이름 · 외형은 믿지 않음) → 같은 계정의 이전 세션 끊기 → 위치 복원(메모리 → `channel_members.last_x/y` → 맵 spawn) → 빈 칸 찾기 → `player:spawn` → NPC 이동 상태 → `npc:working` 스냅샷 → `players:state` → 다른 사람에게 `player:joined`. 방 목록은 서버가 먼저 보내지 않고 클라이언트가 `room:list`를 부른다 (`:1581-1583`).
+입장 순서 [관찰]: 형식 검사 → 채널 접근 검사 → 서버가 "내 캐릭터"를 정함(클라이언트가 보낸 이름 · 외형은 믿지 않음) → 같은 계정의 이전 세션 끊기(**입장한** 소켓만 끊는다. 입장하지 않은 같은 사용자의 소켓은 남아 승인 카드를 받는다 `src/server/socket-handlers.ts:359-365, 1421`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) → 위치 복원(메모리 → `channel_members.last_x/y` → 맵 spawn) → 빈 칸 찾기 → `player:spawn` → NPC 이동 상태 → `npc:working` 스냅샷 → `players:state` → 다른 사람에게 `player:joined`. 방 목록은 서버가 먼저 보내지 않고 클라이언트가 `room:list`를 부른다 (`:1581-1583`).
 
 **1:1 대화(DM)** (가져옴)
 
@@ -215,13 +217,15 @@ Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅
 | C→S / S→C | `npc:history` | `{ npcId }` / `{ npcId, messages }` + `npc:response-snapshot{ npcId, responses }` | `:1971-2001` |
 | C→S | `npc:cancel-response`, `npc:reset-chat`, `npc:dm-threads`, `conversation:read` | | `:2003-2093` |
 
+위 표에서 화면의 표시 경로는 `npc:response`가 아니다. 화면은 요청 id가 있는 `npc:response`를 **무시**하고 `npc:response-state`만 쓴다. `npc:response-complete`는 화면에서 빈 핸들러다. `npc:response`에는 `attachmentRequest`, `errorCode` 칸도 있다 (`src/app/game/GamePageClient.tsx:1173, 1197-1198`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)
+
 **사무실 · 그룹 방 채팅** (가져옴, 그룹 조작은 나중에)
 
 | 방향 | 이벤트 | 페이로드 | 근거 |
 |---|---|---|---|
 | C→S | `room:list` | `{ channelId }` → 사무실 방을 없으면 만들고 구독 | `room-socket.ts:237-269` |
 | S→C | `room:list-response` | `{ channelId, viewerUserId, rooms: RoomSummary[] }` | `:255` |
-| S→C | `room:history` | `{ roomId, messages: RoomMessage[] }` (최근 60줄) | `:265`, `:49` |
+| S→C | `room:history` | `{ roomId, messages: RoomMessage[] }` (최근 60줄. 개인 대화 기록 `npc:history`는 **개수 제한 없이 전체**를 보내고, 어느 쪽도 쪽 나누기가 없다 `src/lib/npc-chat-history.ts:153-169` (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)) | `:265`, `:49` |
 | C→S | `room:open` / `room:close` | `{ roomId }` | `:271-294` |
 | S→C | `room:response-snapshot` | `{ roomId, responses }` | `:283` |
 | C→S | `room:send` | `{ roomId, message(≤500자), skills?, attachment* }` | `:296-479` |
@@ -249,7 +253,7 @@ Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅
 
 **자동화(칸반 · cron)** (가져옴): S→채널 `kanban:event`, `cron:event`, `artifact:event`, `npc:working` (`automation-events.ts:52-57`).
 
-**NPC 이동** (가져옴): S→C `npc:motion-state`(채널 스냅샷), `npc:come-to-player`, `npc:returning{npcId}`, `npc:position-sync`, `npc:stop-moving{npcId}`, `npc:added/removed/updated`; C→S `npc:motion-state`, `npc:come-to-player`, `npc:set-active`, `npc:broadcast-add/update/remove` (`src/server/npc-coordination.ts:452-837`, `socket-handlers.ts:2095-2160`).
+**NPC 이동** (가져옴): S→C `npc:motion-state`(채널 스냅샷), `npc:come-to-player`, `npc:returning{npcId}`, `npc:position-sync`, `npc:stop-moving{npcId}`, `npc:added/removed/updated`; C→S `npc:call`, `npc:return-home`, `npc:position-update`, `npc:continuation-update`, `npc:arrived`, `npc:spatial-failed`, `seat:claim`, `seat:release`(모두 응답 있음), `npc:set-active` (`npc:motion-state`와 `npc:come-to-player`는 서버 → 화면 전용이다 `src/server/npc-coordination.ts:635-928`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳), `npc:broadcast-add/update/remove` (`src/server/npc-coordination.ts:452-837`, `socket-handlers.ts:2095-2160`).
 
 **회의** (가져옴): C→S `meeting:availability · join · leave · chat · start-discussion · user-speak · stop · cancel-preparation · set-mode · next-turn · direct-speak · abort-turn`; S→C `meeting:state · participant-joined/left · message · npc-stream · npc-turn-start · poll-status · waiting-input · mode-changed · turn-aborted · mention-skipped · spatial-state · end · error` (`src/server/meeting-socket.ts`, `meeting-discussion.ts:581-1180`).
 
@@ -278,7 +282,7 @@ Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅
 
 ### 4-2. 등록 · 발견
 
-1. **URL 등록** (`/api/gateways` POST): 표시 이름 · URL · 소유자 키 저장 → 테스트에서 `/v1/models`의 content-type이 JSON인지로 API 서버(8642/8643)와 대시보드(9119)를 구분 (`gateway-probe.ts:14-17`, `:55`) → `GET /deskrpg/info`로 플러그인 상태(`plugin_ready | plugin_unauthorized | plugin_absent | unknown`) 판정, 결과를 `gateway_resources.plugin_status/version/info_json`에 캐시 (`plugin-capability.ts:27`, `:506-520`, `src/db/schema-sqlite.ts:102-110`).
+1. **URL 등록** (`/api/gateways` POST): 등록은 확인 없이 저장하고 실패한 키도 남는다 (`D:src/app/api/gateways/route.ts:28-48`) (바로잡음 2026-11-14: conformance.md 조사 문서에서 바로잡을 곳) 표시 이름 · URL · 소유자 키 저장 → 테스트에서 `/v1/models`의 content-type이 JSON인지로 API 서버(8642/8643)와 대시보드(9119)를 구분 (`gateway-probe.ts:14-17`, `:55`) → `GET /deskrpg/info`로 플러그인 상태(`plugin_ready | plugin_unauthorized | plugin_absent | unknown`) 판정, 결과를 `gateway_resources.plugin_status/version/info_json`에 캐시 (`plugin-capability.ts:27`, `:506-520`, `src/db/schema-sqlite.ts:102-110`).
 2. **프로필 등록**: 기존 프로필은 이름 + 프로필 키 직접 입력(`/api/gateways/[id]/profiles`), 또는 플러그인으로 새로 생성(아래 4-4).
 3. **채널에 연결** (`/api/channels/[id]/gateway` PUT): `channel_gateway_bindings` 1행(채널당 1개) → 이전 게이트웨이 NPC 재우기(`sleepChannelNpcs`) → 새 게이트웨이의 모든 프로필 고용(`hireGatewayProfilesIntoChannel`) (`route.ts:185-191`).
 4. **로컬 발견** (`DESKRPG_LOCAL_DISCOVERY_ENABLED`, 루프백 URL일 때만): 호스트의 `~/.hermes/profiles`를 읽어 프로필 · 키를 가져옴 (`src/lib/hermes/local-discovery*.ts`, `ENVIRONMENT.md`).
@@ -327,7 +331,7 @@ Socket.IO 방 이름 [관찰]: `<channelId>`(맵 전체), `room-<roomId>`(채팅
 
 - 최종 본문: completed 이벤트의 `content` > `run.completed.output` > 누적 delta 순. `run.failed`/`error`는 HTTP 200이어도 `HermesError("run_failed")` (`hermes-client.ts:181-280`).
 - 종료 이벤트를 받으면 reader를 기다리지 않고 cancel한다. 회의 경로는 서버가 연결을 안 닫아서 기다리면 영원히 멈춘다 (`hermes-client.ts:258-268`).
-- 세션 키 [관찰]: DM `{prefix}-dm-{userId}`, 방 `room-{roomId}` 범위, 작업 `{prefix}-task-{taskId}`, 회의 `meeting-*`. prefix 기본값은 npcId. 세션 ID는 `npc_sessions(npc_id, user_id, context_key)`에 저장해 재시작 뒤에도 이어간다 (`hermes-dispatch.ts:30-107`). 어댑터 인스턴스는 대화마다 새로 만든다(공유 금지) (`:109-126`).
+- 세션 키 [관찰]: DM `{prefix}-dm-{userId}`, 방 `room-{roomId}` 범위, 작업 `{prefix}-task-{taskId}`, 회의 `<접두 또는 npcId>-meeting-meet-<ms>`(손들기는 뒤에 `-poll`, 요약은 따로 `src/server/meeting-discussion.ts:295-350, 692-698`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳). prefix 기본값은 npcId. 세션 ID는 `npc_sessions(npc_id, user_id, context_key)`에 저장해 재시작 뒤에도 이어간다 (`hermes-dispatch.ts:30-107`). 어댑터 인스턴스는 대화마다 새로 만든다(공유 금지) (`:109-126`).
 
 **수명주기 상태 기계** [관찰] (`src/lib/chat-response.ts`, `src/server/chat-response-tracker.ts`, `dm-response-runtime.ts`):
 
@@ -352,7 +356,7 @@ stateDiagram-v2
 
 - `ChatResponse = { requestId, sourceMessageId, npcId, npcName, status, content(누적, 추론 제외), updatedAt(단조 증가), messageId?, error? }`. 상태가 바뀔 때마다 전체 객체를 보낸다(DM: `npc:response-state`, 방: `room:response-state`). 종료 상태가 되면 더 바뀌지 않는다.
 - 트래커는 종료된 응답을 최근 100개만 남긴다. DM 트래커는 범위(사용자 × 캐릭터 × NPC)마다 하나, 최대 256개, 넘치면 쉬고 있는 것만 지운다 (`socket-handlers.ts:237-258`).
-- 큐: NPC × 사용자마다 FIFO, 대기 최대 8 (`SessionQueue(8)`, `src/lib/conversation/request-queue.ts`). 넘치면 `wait_before_sending`. 같은 소켓 연속 전송 간격 2초 (`CHAT_COOLDOWN_MS`, `socket-handlers.ts:303`).
+- 큐: 개인 대화만 NPC × 사용자마다 FIFO이고 방은 방 안의 NPC별 큐다 (`src/lib/conversation/open-chat-runtime.ts:102, 286`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) 대기 최대 8 (`SessionQueue(8)`, `src/lib/conversation/request-queue.ts`). 넘치면 `wait_before_sending`. 같은 소켓 연속 전송 간격 2초 (`CHAT_COOLDOWN_MS`, `socket-handlers.ts:303`).
 - 타임아웃: 무응답 180초, 전체 600초. 승인 대기 중에는 무응답 타이머를 멈춘다 (`dm-response-runtime.ts:102-170`, `room-runtime.ts:285`).
 - 순서 규칙: DB에 저장한 메시지 ID를 `complete` 상태에 먼저 실어 보낸 다음 `room:message`를 보낸다. 화면이 초안을 저장본으로 바꾸게 하려는 것 (`room-runtime.ts:366-372`).
 - 도구 활동: `tool.started/progress`의 도구 이름만 `npc:activity{activityKey}`로, 끝나면 `null`. delta 본문은 활동 경로로 보내지 않는다(답이 두 번 나오던 버그 때문) (`socket-handlers.ts:676-685`, `:707-710`).
@@ -363,13 +367,13 @@ stateDiagram-v2
 - **실시간 도구 승인** [관찰] (`src/server/tool-approvals.ts`, `src/lib/tool-approval-types.ts`): Hermes 스트림의 `approval.request` → 승인자(일을 시킨 사람, 방이면 그 턴을 부른 사람, 없으면 방 만든 사람)의 모든 탭에 `tool-approval:request`. 카드 키 `${runId}:${requestId ?? "0"}`. 선택지 `once | session | deny` (`always`는 제공 · 수락 안 함). 만료 시각 = Hermes `approvals.timeout`(플러그인으로 읽음, 기본 300초). 같은 대화 · 같은 명령은 1시간 안에서 한 카드로 묶고 반복 횟수를 보인다. 결정은 `POST /v1/runs/{id}/approval`. 대기 목록은 메모리에만 있고, 재시작되면 Hermes가 자기 타임아웃으로 거부한다. 승인자의 언어로 한 줄 요약을 NPC로 만들어 붙인다 (`tool-approval-summary.ts`).
 - **NPC 질문** [관찰] (`src/server/ask-user.ts`): run 시작 시 세션을 플러그인에 등록(`POST /p/{p}/deskrpg/ask-user/sessions`) → `deskrpg_ask_user` 도구가 시작되면 질문을 최대 20회 × 300ms 폴링(`GET questions?session_id`) → `npc:question`을 그 사용자에게만 → 답은 `POST questions/{id}/answer`로 플러그인에 바로 → run이 끝나면 열린 질문 닫기(`npc:questions-closed`).
 - **실행 차단(approval.blocked)** [관찰]: 사람이 없는 cron · 칸반 실행이 승인 정책에 걸리면 플러그인 이벤트 `approval.blocked` → 시킨 사람만 보는 비공개 방 알림(`audience`) → 알림에서 "허용 목록에 추가" (`POST /p/{p}/deskrpg/approval-policy/allowlist`) (`chat-rooms-policy.ts:94-117`, `plugin-client.ts:678-687`).
-- **카드 실행 전 승인** [관찰] (`src/lib/approvals.ts`): 회의 · 수동 · 채팅 제안에서 만든 카드는 `initial_status="blocked"`로 만들고 `approvals`(status `pending`) + `approval_targets`(카드별 결정)를 기록 → 방 알림 `approval_requested` → 결정 시 `unblock`. cron · swarm · 워커가 만든 카드는 이 길을 안 거친다.
+- **카드 실행 전 승인** [관찰] (`src/lib/approvals.ts`): 실제로 부르는 곳은 **회의 후속 작업 등록 하나**다. 판에서 직접 만든 카드와 받아들인 제안은 승인을 타지 않는다 (`src/lib/approvals.ts:29`, `src/app/api/meetings/[id]/register/route.ts:69`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) 회의 후속 작업 등록에서 만든 카드는 `initial_status="blocked"`로 만들고 `approvals`(status `pending`) + `approval_targets`(카드별 결정)를 기록 → 방 알림 `approval_requested` → 결정 시 `unblock`. cron · swarm · 워커가 만든 카드는 이 길을 안 거친다.
 
 ### 4-8. 칸반 · cron 연동
 
-- **이벤트 폴러** [관찰] (`src/server/automation-poller.ts`): 채널마다 `GET /deskrpg/events?board=&cursor=&limit=`. 접속 소켓이 있으면 5초, 없으면 60초(`AUTOMATION_POLL_ACTIVE_MS/IDLE_MS`). 한 번에 최대 200개 × 10페이지. 커서는 `channel_kanban_boards.event_cursor`. 커서가 없거나 `unknown_cursor`(400)면 과거를 재생하지 않고 "지금" 커서만 받는다. 실패는 `last_error`에 남기고 던지지 않는다. 화면 조작 직후 `pollNow`. 모든 타이머 `unref()`.
+- **이벤트 폴러** [관찰] (`src/server/automation-poller.ts`): 채널의 **모든 보드**를 보드별 커서로 읽는다: `GET /deskrpg/events?board=&cursor=&limit=`. 예약 일 이벤트는 수신 보드에서만 받는다 (`src/server/automation-poller.ts:329-410`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) 접속 소켓이 있으면 5초, 없으면 60초(`AUTOMATION_POLL_ACTIVE_MS/IDLE_MS`). 한 번에 최대 200개 × 10페이지. 커서는 `channel_kanban_boards.event_cursor`. 커서가 없거나 `unknown_cursor`(400)면 과거를 재생하지 않고 "지금" 커서만 받는다. 실패는 `last_error`에 남기고 던지지 않는다. 화면 조작 직후 `pollNow`. 모든 타이머 `unref()`.
 - **이벤트 종류**: `task.created · status · comment · run.started · run.finished · deleted · link · updated`, `cron.run.started · run.finished`, `artifact.created · versioned · deleted`, `card_proposal.created`, `approval.blocked` (`deskrpg-plugin-types.ts:490-506`). 이벤트 = `{ id, ts(epoch초), kind, board?, task_id?, profile?, job_id?, run_id?, payload }`.
-- **처리 3가지** [관찰] (`src/server/automation-events.ts:1-25`): (a) `task.*`→`kanban:event`, `cron.*`→`cron:event`, `artifact.*`→`artifact:event` 채널 방송(이 채널 NPC의 프로필 · 이 채널 보드만), (b) NPC에 진행 중 카드 run 또는 cron run이 하나라도 있으면 "일하는 중"(`npc:working`, 값이 바뀔 때만), (c) 방 알림: 카드 blocked 진입(전부), 최상위 카드 done, 이 채널에서 만든 cron 결과(본문 최대 2000자), 카드 제안, 실행 차단(비공개). 같은 이벤트 ID는 채널당 최근 1000개로 중복 제거.
+- **처리 3가지** [관찰] (`src/server/automation-events.ts:1-25`): (a) `task.*`→`kanban:event`, `cron.*`→`cron:event`, `artifact.*`→`artifact:event` 채널 방송(이 채널 NPC의 프로필 · 이 채널 보드만), (b) NPC에 진행 중 카드 run 또는 cron run이 하나라도 있으면 "일하는 중"(`npc:working`, 값이 바뀔 때만. 빼는 조건에 "카드 상태가 `running`이 아니게 됨"과 카드 삭제가 있고, 다시 시작한 뒤 판에서 복원한다 `src/server/automation-events.ts:396-418` (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)), (c) 방 알림: 카드 blocked 진입(대기 중 승인의 대상인 카드의 막힘은 알리지 않는다), 검토로 감(`card_review`), 최상위 카드 done(승인 묶음에 들었던 카드의 끝남은 부모가 있어도 알린다) (`src/server/automation-events.ts:493-525`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳), 이 채널에서 만든 cron 결과(본문 최대 2000자), 카드 제안, 실행 차단(비공개). 같은 이벤트 ID는 채널당 최근 1000개로 중복 제거.
 - **칸반 카드 상태**: `triage, todo, scheduled, ready, running, blocked, review, done, archived` (`deskrpg-plugin-types.ts:125-135`). 채널당 보드 여러 개, 이벤트 운반 보드는 하나(`is_event_carrier` 부분 유니크 인덱스).
 - **cron** [관찰] (`plugin-client.ts:536-557`, `deskrpg-plugin-types.ts:620-717`): 프로필 키로 `/p/{p}/deskrpg/cron/jobs`. 작업 = `{ id, name, prompt, schedule, schedule_display, repeat, enabled, state, next_run_at, last_run_at, last_status, last_error, deliver, skills[], model, provider, created_at }`. 생성 본문 `{ schedule, prompt? | script?, name, deliver?, model?, provider?, skills?, paused?, repeat? }`. 기록 `{ id, started_at, ended_at, status, summary, result_text }`. DeskRPG DB에는 "이 채널에서 만든 작업"만 `cron_job_origins(gateway, profile, job_id, channel)`로 남긴다. 결과 알림은 만든 채널의 사무실 방으로 간다.
 - **cron 블루프린트(템플릿)** [관찰]: `GET /p/{p}/deskrpg/cron/blueprints` → `AutomationBlueprint = { key, title, description, category, tags[], fields: BlueprintField[], command, appUrl }`, `BlueprintField = { name, type: "enum"|"text"|"time"|"weekdays", label, default?, options?, optional?, strict?, help? }`. 만들기 `POST blueprints/instantiate { blueprint: key, values: {필드: 값} }`. 블루프린트 정의는 **플러그인(Hermes 쪽)** 에 있고 DeskRPG에는 없다.
@@ -447,10 +451,10 @@ stateDiagram-v2
 - **턴 시작 = 걸어오기** [관찰]: 방 턴이 시작되면 그 NPC가 부른 사람에게 걸어온다(`npc:come-to-player`). 걷기와 말하기는 동시에 시작한다 (`room-runtime.ts:321-336`).
 - **회의** [관찰] (`meeting-discussion.ts`, `channel-runtime.ts`, `floor-controller.ts`, `meeting-spatial-coordinator.ts`):
   - 시작 `meeting:start-discussion { channelId, topic, settings{maxTotalTurns?, initialMode?}, selectedNpcIds? }`. 채널당 한 회의.
-  - 공간: 참가 NPC를 맵의 회의 공간 자리로 모으고(`meeting:spatial-state`), 모두 도착해야 시작. 사람도 회의 공간 안에 있어야 참가(`not_in_meeting_space`).
-  - 모드 `auto | manual | directed`. 발언권: 사람이 준 턴은 예산을 안 쓰고, 멘션으로 넘긴 턴은 예산을 지킨다. 다음 발언자는 "손들기 폴링"으로 정한다: 각 NPC에게 `SPEAK:` / `PASS` 형식으로 묻고(병렬), 연결 실패는 PASS와 따로 센다. 전원 PASS가 이어지면 종료.
-  - 진행 제어: `next-turn`, `direct-speak(npcId)`, `abort-turn`, `set-mode`, `stop`, 사람 발언 `user-speak`.
-  - 끝나면 첫 NPC(별도 요약 세션)로 회의록 요약(60초 타임아웃) → `meeting_minutes` 저장 → 후속 작업이 있으면 방 알림 `meeting_outcome`.
+  - 공간: 참가 NPC를 맵의 회의 공간 자리로 모으고(`meeting:spatial-state`), 모두 도착해야 시작(120초 한도, 자리가 없으면 서서 참가, **후보 한 명이라도 어댑터를 못 만들면 열지 않는다** `src/server/meeting-discussion.ts:974-981`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳). 사람도 회의 공간 안에 있어야 참가(`not_in_meeting_space`).
+  - 모드 `auto | manual | directed`. 발언권: 사람이 준 턴은 예산을 안 쓰고, 멘션으로 넘긴 턴은 예산을 지킨다. 다음 발언자는 "손들기 폴링"으로 정한다: 각 NPC에게 `SPEAK:` / `PASS` 형식으로 묻고(병렬), 연결 실패는 PASS와 따로 센다. 끝 이유는 5가지이고 전원 PASS는 **연속 2바퀴**, 아무에게도 닿지 못한 것은 따로 세어 연속 3바퀴다 (`src/lib/conversation/channel-runtime.ts:436-487`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)
+  - 진행 제어: `next-turn`, `direct-speak(npcId)`, `abort-turn`, `set-mode`, `stop`, 사람 발언 `user-speak`. `abort-turn`은 서버는 받지만 화면에 보내는 곳이 없고, 모드 `directed`는 화면에서 고를 수 없으며, `meeting:turn-aborted`는 서버가 보내지 않는다 (`src/components/MeetingRoom.tsx:280, 859-860`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)
+  - 끝나면 첫 NPC(별도 요약 세션)로 회의록 요약(60초 타임아웃) → `meeting_minutes` 저장 → 후속 작업이 있으면 방 알림 `meeting_outcome`. 마지막 사람이 나감 · 예외 · 지도 새로 고침으로 끝난 회의는 요약도 회의록도 없고, 알림은 요약 성공 + 후속 작업이 있을 때만 간다 (`src/server/socket-handlers.ts:2353-2361`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)
 - **NPC 이동 권한** [관찰] (`npc-coordination.ts`): NPC 위치는 서버가 계산하지 않고, 채널의 한 브라우저 소켓이 "주인"(`ownerSocketId`)이 되어 시뮬레이션하고 `npc:position-sync`로 알린다. 주인이 나가면 다음 사람(leader)에게 넘긴다. 상태 `idle | called | waiting | returning | ambient`, 리비전 번호. 멈춘 이동은 주기적으로 정리(stall sweep). 경로 찾기는 공용 `src/game/navigation.ts`(A*).
 - **멀티플레이어 · 권한** (안 가져옴): 1계정 1세션(새로 들어오면 이전 소켓에 `session:kicked`), 채널 접근은 공개 · 비밀번호 · 그룹 규칙, 맵 편집은 채널 소유자만, 게이트웨이 공유 role `use`, 시스템 역할 `system_admin`.
 
@@ -458,7 +462,7 @@ stateDiagram-v2
 
 ## 7. 3D 화면
 
-- **구조** [관찰]: React(`src/components/ThreeGame.tsx`) → `OfficeSimulation`(`src/game/simulation/office-simulation.ts`, 고정 틱 `tick-loop.ts`의 setInterval) → `OfficeBridge` 인터페이스 → `OfficeRenderer`(`src/game/three/office-renderer.ts`, requestAnimationFrame). 렌더러는 브리지에서 스냅샷만 읽는다 (`src/game/three/bridge.ts`).
+- **구조** [관찰]: React(`src/components/ThreeGame.tsx`) → `OfficeSimulation`(`src/game/simulation/office-simulation.ts`, `tick-loop.ts`는 `requestAnimationFrame`이고 실제 경과 시간(상한 200ms)을 쓴다. 탭이 숨었을 때만 250ms 타이머다 `src/game/simulation/tick-loop.ts:14-114` (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳)) → `OfficeBridge` 인터페이스 → `OfficeRenderer`(`src/game/three/office-renderer.ts`, requestAnimationFrame). 렌더러는 브리지에서 스냅샷만 읽는다 (`src/game/three/bridge.ts`).
   - `ActorSnapshot = { id, userId?, name, kind:"player"|"npc"|"remote", x, y(픽셀, 타일 32px), direction, walking, appearance?, bubble?, active?, phase?: "idle"|"queued"|"thinking"|"streaming"|"done"|"attention", working?, workingCount?, states?, stateLabel? }`.
   - `MapSnapshot = { meetingSpace?, cols, rows, floor[][], walls[][], blocked[], objects[], tiled, environment?, environmentVersion? }`.
   - 이름표 옆 표시 하나: 대화 응답 상태(queued/thinking/streaming)가 우선, 없으면 "일하는 중" (`bridge.ts` `actorIndicator`).
@@ -476,8 +480,8 @@ stateDiagram-v2
 
 | 항목 | 있음/없음 | 근거 |
 |---|---|---|
-| 반응형 CSS | 일부 있음. `max-width: 760px`, `767px`, `700px` 등 미디어쿼리 몇 개 | `src/**/*.css` |
-| 터치로 3D 조작 | 있음. 한 손가락 이동(pan), 두 손가락 확대 · 회전. pointer 이벤트 사용 | `office-renderer.ts:280`, `:307-313` |
+| 반응형 CSS | 일부 있음. 사무실 화면의 분기는 1199 · 1000 · 767 · 700px이고 **좌우 서랍 화면이 있다**. 760px는 로그인 화면 것이다 (`src/game/three/office.css:66-157`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) | `src/**/*.css` |
+| 터치로 3D 조작 | 있음. 한 손가락 끌기는 **카메라** 이동이고 캐릭터는 짧게 눌러 이동한다 (`src/game/three/pointer-gesture.ts:3-26`) (바로잡음 2026-11-14: office-deep.md 기존 문서에서 바로잡을 곳) 두 손가락 확대 · 회전. pointer 이벤트 사용 | `office-renderer.ts:280`, `:307-313` |
 | 3D 끄기 · 저사양 모드 | 없음. 자동 해상도 낮춤(최저 0.75배)만 있음. 3D 없이 채팅만 쓰는 화면은 찾지 못함 | `render-scale.ts` |
 | manifest | 파일은 있음(`display: standalone`, 아이콘 192/512). 하지만 `src/app/layout.tsx` metadata에 manifest 연결을 찾지 못함 | `public/manifest.json`, `src/app/layout.tsx:23-40` |
 | service worker | 없음 | `serviceWorker` 검색 결과 없음 |

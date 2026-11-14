@@ -724,6 +724,8 @@ REA로 본 것: 이전에 `rea-triggers/oc-backup-migrate/`에 파일을 복사�
 | `remote-access-security.md` 7.1 "승인 실패" Hermes 칸 | "재시작하면 타임아웃 거부" | 재시작하면 대기 줄 자체가 메모리에서 사라진다(시간 초과로 거부되는 것은 기다리던 프로세스가 살아 있을 때다) (`H:tools/approval.py:150-184`의 줄이 메모리 구조) |
 | `conformance.md` "더 뜯어야 할 것" T22 | 웹 푸시는 원본에 없다 | OpenClaw에 승인용 웹 푸시가 있다(조용한 시간 · 종류별 설정 포함) (`O:src/gateway/approval-web-push.ts:1-20`) |
 
+2026-11-14 앞 문서에 반영함 (10건 모두. 못 한 것: 없음. 해당 절이 없는 "6.1 연속 실패 처리 언급 없음"은 `hermes-agent.md` 6.1 tick 목록에 10번 항목을 더해 반영했다).
+
 ---
 
 ## REA를 쓴 범위와 직접 읽은 범위

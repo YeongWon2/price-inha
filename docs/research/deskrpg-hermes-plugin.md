@@ -1,5 +1,7 @@
 # deskrpg-hermes-plugin 리버스 엔지니어링: DeskRPG ↔ Hermes 연결 프로토콜 (가격인하 Rust 재구축용)
 
+> 2026-11-14에 더 깊게 다시 뜯었다. 같은 주제는 `office-deep.md`이 우선이다. 이 문서에서 바로잡은 곳은 없다.
+
 결론: DeskRPG는 Hermes **대시보드 REST(9119)를 부르지 않는다.** 대화는 Hermes api_server 본체(`/api/sessions/*`, `/v1/runs/*`)로, 나머지(프로필 · SOUL.md · 설정 · cron · 이벤트 · 질문 · 승인 정책 · 칸반 · 산출물)는 전부 이 플러그인이 api_server 안에 붙인 `/deskrpg/*`(소유자 키)와 `/p/{profile}/deskrpg/*`(프로필 키) REST 약 150개로 간다. 플러그인은 그 밖에 Hermes 프로세스 안에서 도구 4개 · hook 2종 · 시스템 프롬프트 절 4개 · 스킬 1개를 등록한다. 가격인하는 Rust 서버가 "REST 프록시 + 이벤트 폴러" 쪽은 그대로 흡수할 수 있지만, "Hermes 프로세스 안에서 도는 것"(도구 · hook · 프로필 파일 쓰기)은 흡수가 안 되므로 작은 플러그인으로 남기거나 MCP 도구로 바꿔야 한다 [추정].
 
 | 항목 | 값 |

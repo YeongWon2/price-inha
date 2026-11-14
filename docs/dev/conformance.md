@@ -239,7 +239,7 @@
 | T19 | Hermes 백업(`hermes_cli/backup*.py`) | 조사 문서에 "나중에" 한 줄뿐 |
 | T20 | `GamePageClient.tsx` · `office-simulation.ts`의 화면 상태 관리 | deskrpg 부록 B |
 | T21 | 다시 이었을 때 60줄 넘게 놓친 방 메시지를 메우는 길 | 원본에서 찾지 못함. 우리는 번호로 메운다 |
-| T22 | 웹 푸시 | 원본에 없다(deskrpg 7-1). 뜯을 원본이 없으니 표준 문서로 만든다 |
+| T22 | 웹 푸시 | DeskRPG에는 없다(deskrpg 7-1). OpenClaw에는 승인용 웹 푸시가 있다(조용한 시간 · 종류별 설정 포함 `O:src/gateway/approval-web-push.ts:1-20`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) ~~뜯을 원본이 없으니 표준 문서로 만든다~~ |
 
 ### 조사 문서에서 바로잡을 곳 (이번에 소스로 확인)
 
@@ -251,6 +251,8 @@
 | `hermes-agent.md` 3.8 | `.env`는 0600 | 새 파일일 때만. 있던 파일은 좁히지 않는다 (`H:hermes_cli/config.py:2435-2459`) |
 | `deskrpg.md` 4-2 | 게이트웨이 등록 → 테스트 | 등록은 확인 없이 저장하고, 실패한 키도 남는다 (`D:src/app/api/gateways/route.ts:28-48`) |
 | `openclaw.md` 2.4 | 자격 저장 | 파일이 아니라 에이전트별 SQLite다 (`O:src/agents/auth-profiles/paths.ts:52, 69`) |
+
+2026-11-14 앞 문서에 반영함 (못 한 것: `openclaw.md` 2.4 자격 저장. 그 절은 이미 "공유 DB + 에이전트 DB"로 적혀 있어 "파일"이라고 적은 문장이 없고, 표의 "에이전트별 SQLite"와 어떻게 다른지 판단을 더하지 않아 고치지 않았다. `hermes-agent.md` 3.8 `.env` 0600은 그 문서에 해당 문장이 없어, 같은 내용이 있는 `remote-access-security.md` 7.1 "비밀 저장" 칸에 반영했다). 아래 "더 뜯어야 할 것"의 T22 줄은 트리거 조사(`triggers-approval-memory-deep.md`)에 따라 판정을 바로잡았다.
 
 ---
 

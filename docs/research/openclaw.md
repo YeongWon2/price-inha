@@ -1,5 +1,7 @@
 # OpenClaw 비교 분석: Hermes로 부족한 영역 보완 (가격인하 Rust 재구축용)
 
+> 2026-11-14에 더 깊게 다시 뜯었다. 같은 주제는 `triggers-approval-memory-deep.md` · `agent-runtime-deep.md`이 우선이다. 이 문서에서 바로잡은 곳은 "(바로잡음 …)"으로 표시했다.
+
 결론: Hermes 분석(`hermes-agent.md`)으로 부족한 영역은 넷이다. **트리거 체계**, **도구 승인 · 권한 · 한도**, **장기 기억 검색**, **구독 OAuth(Codex · 헤드리스)**. 넷 다 OpenClaw에 가져올 만한 동작이 있다. 에이전트 라우팅 · 협업, 메모리 사용량, 설정 · 스킬 템플릿은 Hermes로 충분해서 OpenClaw를 보지 않았다.
 
 | 항목 | 값 |
@@ -39,7 +41,7 @@ rea analyze-javascript-application . --artifact-format directory \
 
 | 영역 | Hermes 상태 (근거 절) | 판정 | OpenClaw를 본 이유 |
 |---|---|---|---|
-| (a) 트리거 체계 (외부 이벤트 · 웹훅 · 주기 heartbeat) | cron 3종 일정 + 스크립트 wake gate(`{"wakeAgent": false}`) + `context_from` 체인 (6.1). 외부 HTTP 입구는 메신저 어댑터용 `POST /api/platforms/{platform}/events`와 `/api/cron/fire`뿐 (5.2) | **부족함** | 범용 웹훅 → 에이전트 라우팅이 없다. 상시 실행 시세 피드 같은 스트림 트리거가 없다. wake gate는 상태가 없어 "이미 알린 공시" 중복 제거를 스크립트가 따로 해야 한다. 장 시간 창 · 적응형 주기도 없다 |
+| (a) 트리거 체계 (외부 이벤트 · 웹훅 · 주기 heartbeat) | cron 3종 일정 + 스크립트 wake gate(`{"wakeAgent": false}`) + `context_from` 체인 (6.1). 외부 HTTP 입구는 메신저 어댑터용 `POST /api/platforms/{platform}/events`와 `/api/cron/fire` 말고도 범용 webhook 어댑터가 있다(경로별 서명 · 속도 제한 · 중복 표 · 묶어 보내기 · cron 작업 발사 `H:gateway/platforms/webhook.py:1-10, 693-771`) (5.2) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) | **부족함** | 범용 웹훅 → 에이전트 라우팅이 없다는 것은 틀렸다(위 webhook 어댑터 참고). 상시 실행 시세 피드 같은 스트림 트리거가 없다. wake gate는 상태가 없어 "이미 알린 공시" 중복 제거를 스크립트가 따로 해야 한다. 장 시간 창 · 적응형 주기도 없다 |
 | (b) 여러 에이전트 라우팅 · 세션 격리 · 에이전트 간 메시지 | 프로필 = 에이전트 (3.8), hosted rooms 라우팅 everyone/lead/auto + 논의 상한 (6.5), `message_agent` + hop 가드 (6.4), 칸반 (6.2), delegate (6.3) | 충분함 | 보지 않음. `message_agent` 스키마를 못 본 것은 Hermes 쪽 재확인 과제 (Hermes "못 본 부분" 6) |
 | (c) 도구 실행 승인 · 권한 정책 · 한도 | 승인 기능은 "가져옴"으로만 적혀 있고 (2장), 세부 규칙과 `approvals.timeout` 기본값은 못 봤다 (Hermes "못 본 부분" 4). DeskRPG 쪽에서 선택지 `once / session / deny`, 기본 300초만 확인 (`deskrpg.md` 4-7). 도구셋 켜고 끄기만 있다 (3.7) | **부족함** | 금액 한도 · 주문 범위 표시 · 무인 실행(cron) 승인 · 정책 계층(허용/거부 우선순위)이 없다 |
 | (d) 장기 기억 · 컨텍스트 관리 | 압축은 깊게 확인 (3.4). 기억은 `MEMORY.md` 2,200자 · `USER.md` 1,375자를 프롬프트에 넣는 방식뿐 (3.6). 대화 검색은 `session_search` FTS (3.5) | **부족함 (기억만)** | 압축은 충분하다. 매매 일지 · 과거 판단 · 공시 요약처럼 쌓이는 기억을 찾는 검색과 출처(신뢰) 구분이 없다 |
@@ -127,8 +129,8 @@ heartbeat는 따로 없다. 예전 heartbeat 감시는 `openclaw doctor --fix`�
 | 점 | Hermes | OpenClaw |
 |---|---|---|
 | 게이트 결과 | stdout 마지막 줄 `{"wakeAgent": false}`, 상태 없음 | `{fire, message, state}`, 상태 16KB 저장, 실패 시 상태 롤백 |
-| 외부 HTTP 입구 | 메신저 어댑터 콜백 · cron fire | 범용 `/hooks/*` + 매핑 + 팬아웃 + 멱등 + 수락/완료 분리 |
-| 상시 이벤트 소스 | 없음 | stream 일정(배치 · 합치기 · 재시작) |
+| 외부 HTTP 입구 | 메신저 어댑터 콜백 · cron fire · 범용 webhook 어댑터(`H:gateway/platforms/webhook.py:1-10, 693-771`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) | 범용 `/hooks/*` + 매핑 + 팬아웃 + 멱등 + 수락/완료 분리 |
+| 상시 이벤트 소스 | 없음(webhook 경로의 `coalesce`: 조용한 30초, 최대 300초 `H:gateway/platforms/webhook_coalesce.py:22-23`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) | stream 일정(배치 · 합치기 · 재시작) |
 | 시간 창 · 주기 | `timezone`, catch-up 창 | `activeHours`, `idleOnly`, pacing `next_check` |
 | 결과 기록 | 실행 기록 · 전달 대기열 | 스크래치 + `record_result` 5종 + 다음 프롬프트에 직전 결과 |
 | 이중 발사 방지 | `next_run_at` 선이동 + `pending_slot` + `executions.scheduled_instant` (강함) | 이 문서 범위에서 세부 미확인 |
@@ -161,7 +163,7 @@ heartbeat는 따로 없다. 예전 heartbeat 감시는 `openclaw doctor --fix`�
 
 - `tools.exec.mode`: `deny / allowlist / ask / auto / full`. `auto`는 허용 목록 밖 명령을 `allow(once) / deny(이유를 에이전트에 돌려줌) / ask(사람)`로 검토 (`docs/tools/exec-approvals.md:238-248`).
 - 하위 키: `security`(`deny / allowlist / full`), `ask`(`off / on-miss / always`), `askFallback`(UI가 없거나 시간 초과일 때, 기본 `deny`). 설정과 승인 문서 중 **더 엄격한 쪽**이 이긴다. 승인 문서는 조이기만 하고 풀지 못한다 (`같은 곳:23-35, 265-301`).
-- 저장: 공유 상태 DB의 단일 행(JSON 문서). 저장할 때 마지막으로 본 해시가 필요(오래된 저장은 실패). 문서 모양 `{version, defaults{security, ask, askFallback, autoAllowSkills}, agents{<id>{..., allowlist[{id, pattern, argPattern, source, lastUsedAt, lastResolvedPath}], mcpTools[{server, tool, source, addedAt}]}}}` (`같은 곳:115-234`).
+- 저장: 공유 상태 DB의 단일 행(JSON 문서)은 허용 목록 문서다. 대기 중인 승인은 표 `operator_approvals`에 한 줄씩 있다 (`O:src/state/openclaw-state-schema.sql:370-475`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳) 저장할 때 마지막으로 본 해시가 필요(오래된 저장은 실패). 문서 모양 `{version, defaults{security, ask, askFallback, autoAllowSkills}, agents{<id>{..., allowlist[{id, pattern, argPattern, source, lastUsedAt, lastResolvedPath}], mcpTools[{server, tool, source, addedAt}]}}}` (`같은 곳:115-234`).
 - 흐름: 게이트웨이가 `exec.approval.requested`를 운영 클라이언트에 방송 → `exec.approval.resolve` → 실행 직전 현재 정책으로 **다시 확인**하고 결정과 allow-always 기록을 한 트랜잭션으로 커밋 → 실행. 승인 요청 뒤 바뀐 명령 · 폴더 · 세션은 버리고 저장된 계획을 쓴다 (`같은 곳:739-785`).
 - exec 승인 기본 대기 30분 (`src/infra/exec-approvals-core.ts:266`). 승인 뒤 10초가 지나면 "실행 중" 알림 (`tools.exec.approvalRunningNoticeMs`, `exec-approvals.md:815-819`).
 
@@ -219,7 +221,7 @@ heartbeat는 따로 없다. 예전 heartbeat 감시는 `openclaw doctor --fix`�
 - 메모리 파일 하나 기본 상한 10,000자 (`extensions/memory-core/src/memory-budget.ts:17`).
 - 색인: `MEMORY.md`, `USER.md`, `memory/*.md`를 400토큰 · 80토큰 겹침 청크로 에이전트별 DB에 저장 (`docs/concepts/memory-builtin.md` "How indexing works").
 - 테이블 (`src/state/openclaw-agent-schema.sql:689-767`): `memory_index_sources(path, source, hash, mtime, size)`, `memory_index_chunks(id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)`, `memory_index_chunk_recall_metadata(chunk_id, importance 1~10, triggers, project_key)`, `memory_index_chunk_provenance(chunk_id, origin_class: owner/agent/untrusted/system, session_kind: interactive/cron/heartbeat/subagent/..., observed_at, supersedes_key)`, `memory_embedding_cache`.
-- 검색 순서: 벡터 검색 ∥ 키워드(BM25, 모든 단어 → 없으면 아무 단어로 한 번 재시도) ∥ 파일명 → 가중 합(키워드 점수는 그 질의의 최고 의미 점수를 넘지 않게 축척) → `관련도 × 최신성 감쇠 × 중요도` → MMR로 중복 줄이기. 일일 메모는 반감기 30일, `MEMORY.md` · `USER.md`는 감쇠 없음. `minScore`는 감쇠 전 점수로 판단 (`docs/concepts/memory-search.md:139-199`).
+- 검색 순서: 벡터 검색 ∥ 키워드(BM25, 모든 단어 → 없으면 아무 단어로 한 번 재시도) ∥ 파일명 → 가중 합(키워드 점수는 그 질의의 최고 의미 점수를 넘지 않게 축척. 식은 triggers-approval-memory-deep.md 4.1의 4번, 기본 가중치 0.7 / 0.3 `O:src/agents/memory-search.ts:163-169`, `O:extensions/memory-core/src/memory/hybrid.ts:47-64` (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)) → `관련도 × 최신성 감쇠 × 중요도` → MMR로 중복 줄이기. 일일 메모는 반감기 30일, `MEMORY.md` · `USER.md`는 감쇠 없음. `minScore`는 감쇠 전 점수로 판단 (`docs/concepts/memory-search.md:139-199`).
 - 임베딩이 없으면 키워드만(`provider: "none"`). 이름을 지정한 공급자가 죽으면 조용히 키워드로 떨어지지 않고 "unavailable"을 알린다. 한중일은 trigram 토크나이저 (`memory-search.md:200-240`, `memory-builtin.md:2-9`).
 - 자동 회상: 들어온 메시지를 청크의 짧은 trigger 문구와 비교해 최대 3개를 숨은 맥락으로 넣는다. 대상은 신뢰된 항목(`MEMORY.md`, `USER.md`)만, 일일 메모 · 외부 내용은 자동으로 넣지 않는다. 준비 예산 1초, 넘으면 건너뜀 (`memory-search.md:218-240`, `memory.md:208-215`).
 - 도구 스키마 (`extensions/memory-core/src/memory-tool-contract.ts:27-49`):
@@ -352,8 +354,8 @@ heartbeat는 따로 없다. 예전 heartbeat 감시는 `openclaw doctor --fix`�
 2. 스트림 일정의 "빠른 실패 5회" 규칙의 정확한 조건(문서 문장 일부만 확인)과 재시작 backoff 값.
 3. 조건 스크립트 런타임(QuickJS 기반 code mode, `extensions/code-mode-quickjs/`)의 격리 방식. 가격인하가 사용자 스크립트를 돌릴지 정하기 전에 봐야 한다.
 4. HTTP hooks 매핑의 템플릿 렌더러 세부와 Gmail 프리셋.
-5. 승인 요청이 재시작 뒤 어떻게 복구되는지(`src/infra/agent-run-approval-leases.ts`, `approval-native-*`).
-6. 기억 검색의 가중치 기본값(`vectorWeight` 등)과 MMR λ, `minScore` 기본값.
+5. 승인 요청이 재시작 뒤 어떻게 복구되는지(`src/infra/agent-run-approval-leases.ts`, `approval-native-*`). 복구하지 않는다. 다른 `runtime_epoch`의 대기를 `cancelled / gateway-restart`로 닫는다 (`O:src/gateway/operator-approval-store.transitions.worker.ts:245-276`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)
+6. 기억 검색의 가중치 기본값(`vectorWeight` 등)과 MMR λ, `minScore` 기본값. 가중치 기본값은 0.7 / 0.3이다 (`O:src/agents/memory-search.ts:163-169`, `O:extensions/memory-core/src/memory/hybrid.ts:47-64`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)
 7. Anthropic OAuth 갱신의 실패 분류 세부(`src/agents/auth-profiles/oauth-refresh-failure.ts`).
 8. OpenClaw의 에이전트 간 메시지(`sessions_send`, `agent-send`, A2A)와 라우팅 바인딩(`docs/concepts/multi-agent.md`, `agent-bindings.md`). (b)를 충분함으로 판정해서 보지 않았다. Hermes `message_agent` 스키마를 확인하지 못하면 이쪽을 대안으로 본다.
 9. OpenClaw 장기 실행 안정성(재시작 복구 `docs/gateway/restart-recovery.md`, gateway lock, 힙 플래그). (f)를 충분함으로 판정해서 보지 않았다.

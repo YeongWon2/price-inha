@@ -1,5 +1,7 @@
 # Hermes Agent 리버스 엔지니어링: 가격인하 Rust 재구축용 기능 목록과 구조
 
+> 2026-11-14에 더 깊게 다시 뜯었다. 같은 주제는 `agent-runtime-deep.md` · `triggers-approval-memory-deep.md`이 우선이다. 이 문서에서 바로잡은 곳은 "(바로잡음 …)"으로 표시했다.
+
 - 분석 날짜: 2026-11-13
 - 출처: https://github.com/NousResearch/hermes-agent
 - commit: `5c1abd25` (2026-11-13, "Merge pull request #153698 ...")
@@ -259,19 +261,19 @@ sequenceDiagram
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 앱 수준 API 재시도 | `agent.api_max_retries` 기본 3, 최소 1 | `agent/agent_init.py:1292`, `cli-config.yaml.example:1315-1321` |
-| 기본 backoff | `min(5 × 2^(n-1), 120)` + 균등 jitter `[0, 0.5 × delay]` | `agent/retry_utils.py:121-133` |
+| 앱 수준 API 재시도 | `agent.api_max_retries` 기본 3, 최소 1. 다시 시도 횟수가 아니라 **시도 총 횟수**다 (`H:agent/conversation_loop.py:1583`) (바로잡음 2026-11-14: conformance.md 조사 문서에서 바로잡을 곳) | `agent/agent_init.py:1292`, `cli-config.yaml.example:1315-1321` |
+| 기본 backoff | 실제 호출 값은 첫 간격 2초, 상한 60초(`retry_utils`의 기본식은 `min(5 × 2^(n-1), 120)`) + 균등 jitter `[0, 0.5 × delay]` (`H:agent/turn_recovery.py:1489`) (바로잡음 2026-11-14: conformance.md 조사 문서에서 바로잡을 곳) | `agent/retry_utils.py:121-133` |
 | Retry-After | 모든 재시도 가능 오류에서 우선, 상한 600초. 라이브 공지 상한 60초 | `agent/turn_recovery.py:1465-1487`, `agent/retry_utils.py:179-182` |
 | 자동 복구 주기 | 재시도와 폴백을 다 쓰고 아무것도 전달하지 않았을 때 5주기 더(15/30/60/60/60초, Retry-After는 120초까지). 인증 · 형식 · 과금 · 정책 오류는 제외 | `cli-config.yaml.example:1323-1330`, `agent/turn_recovery_autorecover.py:26` |
 | 폴백 | `fallback_providers` 체인. 위임 자식도 따로 지정 | `cli-config.yaml.example:1907, 1933` |
 | 바깥 루프 오류 한도 | 8 | `agent/conversation_loop.py:239` |
-| 턴 무활동 타임아웃 | 600초 | `agent/turn_liveness.py:23` |
+| 턴 무활동 타임아웃 | 600초(덧붙임: 감시 주기 15초, 설정 키 `agent.turn_liveness.timeout_s`, 세션 턴 lease는 300초 수명 · 60초 갱신 · 1800초 대기 `H:agent/turn_liveness.py:23-28`, `H:agent/turn_facade_lease.py:26-27, 52`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳) | `agent/turn_liveness.py:23` |
 | 게이트웨이 무활동 타임아웃 | `agent.gateway_timeout` 1800, 경고 900 | `cli-config.yaml.example` agent 구간 |
 | 세션 정지 감시 | 300초 | 같은 곳 `session_stall_timeout` |
 
 ### 3.3 시스템 프롬프트와 SOUL.md (가져옴)
 
-`agent/system_prompt.py:751-826`의 `build_system_prompt_parts`가 세 층으로 만든다. 한 번 만들면 `agent._cached_system_prompt`에 두고, 압축 뒤에만 다시 만든다 [관찰].
+`agent/system_prompt.py:751-826`의 `build_system_prompt_parts`가 세 층으로 만든다. 한 번 만들면 `agent._cached_system_prompt`에 두고, 세션 행에 원문을 저장해 턴 사이에도 그대로 쓴다. 다시 만드는 경우는 압축 말고도 넷 더 있다(저장값 없음, 모델 · 공급자 바뀜, Bot Chat 능력 변경, 운영자 갱신 명령) (`H:agent/conversation_loop.py:802-954`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳) [관찰].
 
 | 층 | 순서대로 들어가는 것 |
 |---|---|
@@ -286,12 +288,12 @@ sequenceDiagram
 
 ### 3.4 컨텍스트 압축 (가져옴)
 
-- 두 겹이다: 게이트웨이 세션 위생(85%)과 에이전트 `ContextCompressor`(50%, 설정 가능) (`agent/AGENTS.md:83-84`) [관찰].
+- 두 겹이다: 게이트웨이 세션 위생(85%)과 에이전트 `ContextCompressor`(50%, 설정 가능. 다만 창이 512K 미만인 모델은 **75% 이상으로 올린다**. 기준도 창 전체가 아니라 `창 − 출력 예약`이고, 바닥 64K · 덮개 85%가 있다 `H:agent/context_compressor.py:1150-1151, 2751-2797`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳) (`agent/AGENTS.md:83-84`) [관찰].
 - 순서 [관찰] (`agent/AGENTS.md:84-91`):
   1. 오래된 도구 결과를 먼저 잘라 낸다(LLM 호출 없음).
-  2. 경계를 고른다(앞 `protect_first_n` 3개, 뒤 `protect_last_n` 20개, 최소 user 1개 보호).
+  2. 경계를 고른다(앞 `protect_first_n` 3개는 **첫 압축 뒤 0으로** 줄어든다. 뒤는 `protect_last_n` 20개라는 메시지 수가 아니라 **토큰 예산**(창의 2.5%, 1만~2만5천)이 정한다 `H:agent/context_compressor_window.py:33-48`, `H:agent/context_compressor_tail.py:26-40`. 최소 user 1개 보호) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳)
   3. `auxiliary` 압축 모델로 구조화된 요약을 만든다.
-  4. 요약 스트림이 멈추면 `auxiliary.compression.fallback_chain`으로 한 번 재시도, 또 멈추면 결정론적 대체 요약.
+  4. 요약이 멈췄을 때의 처리는 실패 종류에 따라 다르다. 인증 · 네트워크 · 잘림 · 빈 요약 · 과부하는 **압축을 그만두고 메시지를 그대로 둔다**. 과부하만 연속 3번째에 대체 요약으로 간다 (`H:agent/context_compressor.py:758-812`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳)
   5. 공급자가 컨텍스트 초과를 증명하면 실패 쿨다운을 건다(세션 컬럼 `compression_failure_cooldown_until` 등).
 - 기본값(`cli-config.yaml.example:683-872`) [관찰]: `enabled: true, threshold: 0.50, target_ratio: 0.20, protect_last_n: 20, protect_first_n: 3, min_tail_user_messages: 1, max_attempts: 3, proactive_prune_min_result_chars: 8000, proactive_prune_min_reclaim_tokens: 4096`.
 - 제자리 압축은 세션 id를 그대로 둔다. 이전 방식은 `parent_session_id` 사슬로 세션을 쪼갰다(`hermes_state.py:1-6`) [관찰].
@@ -560,7 +562,7 @@ sequenceDiagram
 SSE 이벤트 형식 [관찰]:
 
 - 페이로드: `{"event": <이름>, "run_id": ..., "timestamp": <float>, ...필드, "seq": <n>}`. 키 순서도 wire 형식이다(`api_server_runs.py:224-226, 1294-1297`).
-- 연결하자마자 `: open\n\n` 주석 프레임을 먼저 보낸다(헤더 지연 방지). 재접속 시 `last_seq` 이후를 재생하고, 버퍼가 잘렸으면 잘림 이벤트를 보낸다(`:1300-1310`).
+- 연결하자마자 `: open\n\n` 주석 프레임을 먼저 보낸다(헤더 지연 방지). 재접속 시 `last_seq` 이후를 재생하고, 버퍼가 잘렸으면 잘림 이벤트를 보낸다(`:1300-1310`). 번호는 0부터, 기본 `last_seq`는 -1이다. 버퍼는 1000개이고 만든 지 300초가 지나고 듣는 쪽이 없으면 지운다 (`H:gateway/platforms/api_server_runs.py:167, 175, 1279, 1563-1570`) (바로잡음 2026-11-14: conformance.md 조사 문서에서 바로잡을 곳)
 - 이벤트 이름: `run.queued, run.started, run.steered, run.interrupted, run.stopping, run.completed, run.failed, run.cancelled, message.started, message.delta, message.interim, reasoning.available, tool.started, tool.progress, tool.completed, tool.failed, approval.request, approval.responded` (grep 집계).
 
 ### 5.3 스트리밍 전달 계약 (가져옴, DeskRPG 채팅 표시용)
@@ -621,6 +623,7 @@ SSE 이벤트 형식 [관찰]:
   7. 프로필별 병렬 풀 `cron.max_parallel_jobs`. 실행 중 작업 키 = `(home, job_id)`.
   8. headless(`hermes cron tick`)는 게이트웨이가 없으면 에이전트 작업을 실행하지 않고 `last_fire_error`만 남긴다.
   9. cron은 자기 세션을 쓰고 `skip_memory=True`.
+  10. 연속 실패로 자동으로 끄지 않고 3번째부터 알림에 덧붙인다. 작업 파일은 매 tick 잠금 안에서 다시 읽는다 (`H:cron/jobs.py:3269-3271`, `H:cron/scheduler.py:137-163`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)
 - 실행 기록: `executions`(`cron/executions.py:66`), 전달 대기열 `deliveries`(상태 `pending/delivering/delivered/failed/unknown/suppressed`, `cron/delivery_queue.py:110`), `cron_incidents`, `cron_notepad`.
 - 에이전트가 쓰는 도구: `cronjob_manage`. 사용자 명령: `hermes cron list|add|edit|pause|resume|run|remove`.
 
@@ -643,7 +646,7 @@ SSE 이벤트 형식 [관찰]:
 
 `tools/AGENTS.md:146-182`, `tools/delegate_tool*.py` [관찰]
 
-- 입력: 단일(`goal` + 선택 `context`, `toolsets`) 또는 배치(`tasks: [...]`). 그 밖에 `role(leaf|orchestrator)`, `group`, `output_schema`, `model`, `provider`, `max_iterations`, `background`, `heartbeat`.
+- 입력: 단일(`goal` + 선택 `context`, `toolsets`) 또는 배치(`tasks: [...]`). 그 밖에 `role(leaf|orchestrator)`(인자는 받기만 하고 **무시한다**. 역할은 깊이로 정한다 `H:tools/delegate_tool.py:247-251`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳), `group`, `output_schema`, `model`, `provider`, `max_iterations`, `background`, `heartbeat`.
 - 출력 항목: `task_index, goal, role, status, summary, duration_seconds, error`(+ `schema_valid/schema_errors`, `orphaned_processes`, `unread_completions`).
 - 동시 실행 상한 `delegation.max_concurrent_children` > env `DELEGATION_MAX_CONCURRENT_CHILDREN` > 기본 10, 최소 1 (`tools/delegate_tool_config.py:104-112`. `tools/AGENTS.md`의 "default 3"은 낡은 서술), 깊이 `max_spawn_depth`(기본 1~2), 자식 반복 `delegation.max_iterations: 250`.
 - `leaf` 자식은 `delegate_task, clarify, memory, send_message, cronjob`을 못 쓴다.
@@ -666,18 +669,18 @@ SSE 이벤트 형식 [관찰]:
 `gateway/hosted_room*.py`(20개 파일), `tui_gateway/hosted_room_router_call.py` [관찰]
 
 - 원천은 방별 **append-only 이벤트 로그**(`hosted_room_events(room_id, seq, event_id, kind, actor_json, authority_epoch, payload_json, created_at)`, `gateway/hosted_rooms.py:102-114`). 계획기는 이 로그의 순수 함수라서 재시작해도 같은 계획이 나온다.
-- 이벤트 종류: `room.created, room.renamed, room.members_changed, room.context_set, room.routed, room.assignment, room.activity, room.continued, room.stop_requested, room.disbanded, message.user, message.member, turn.settled, turn.deferred, turn.failed`.
+- 이벤트 종류: `room.created, room.renamed, room.members_changed, room.context_set, room.routed, room.assignment, room.activity, room.continued, room.stop_requested, room.disbanded, message.user, message.member, turn.settled, turn.deferred, turn.failed`, `turn.cancelled`(새 메시지에 밀린 턴에 쓰이는 핵심 종류), `turn.started, turn.reassigned, member.unavailable, authority.claimed, authority.lost` (`H:gateway/hosted_rooms.py:49-58`, `H:gateway/hosted_room_discussion.py:74-77`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳).
 - 라우팅(방 설정 `routing`) (`gateway/hosted_room_context.py`, `hosted_room_lead.py`, `hosted_room_router.py`):
   - 결정적 규칙이 먼저다: @멘션 또는 @all/@everyone, 예약 게시(cron), 기존 스레드 안 답글.
   - `everyone`(기본): 주소 없는 메시지면 모든 멤버가 차례를 받는다.
   - `lead`: 리드가 라우팅 턴 하나를 돌려 받을 멤버 핸들을 답한다 → `room.assignment` 기록 → 고른 멤버만 라운드를 돈다. 명단에 없는 답이면 리드만 깨운다(절대 전체 방송 안 함).
   - `auto`: 도구 없는 싼 보조 모델(`auxiliary.group_router`) 호출 한 번으로 대상을 고른다. 결과를 `room.routed`로 **먼저** 기록한 뒤 계획한다. 실패하거나 이상한 답이면 everyone으로 대체. 호출 동안 Stop이나 새 메시지가 오면 그 답은 버린다.
-- 논의(Discussion) 상한: `max_rounds: 3`, `max_messages: 10`(봇 답 총합) (`gateway/hosted_room_discussion.py:31-32`). 상한에 닿으면 `room.activity`가 `bounded`, 사용자의 Continue(`room.continued`)마다 같은 예산을 한 번 더 준다(`:824`).
+- 논의(Discussion) 상한: `max_rounds: 3`, `max_messages: 10`(봇 답 총합) (`gateway/hosted_room_discussion.py:31-32`). 상한에 닿으면 `room.activity`가 `bounded`, 사용자의 Continue(`room.continued`)마다 같은 예산을 한 번 더 준다(`:824`). 덧붙임: Continue는 논의 하나에 **최대 5번**, 멤버는 **2~6명** (`H:gateway/hosted_room_router.py:29`, `hosted_room_discussion.py:29-30`) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳)
 - 방 목적 · 공유 노트 · 예약 게시는 로그에 같이 들어간다. 논의를 연 메시지 시점의 값으로 읽어서 논의 도중 바꿔도 이미 시작한 턴은 다시 계획하지 않는다(`hosted_room_context.py`).
 - 예약 게시는 `message.user` 이벤트이고 actor id는 서버가 cron 작업 이름으로 만든다(클라이언트가 흉내 못 냄).
 - 실행: 드라이버 lease와 작업 상태 기계(`hosted_room_driver.py`, 모델 호출 없음), 정책 체크포인트(`hosted_room_policy_checkpoint.py`, 바쁜 방에서 매번 전체 로그를 다시 읽지 않도록 투영).
 - JSON-RPC 메서드: `groups.create, list, state, log, send, stop, continue, retry, approve, rename, context, promote, demote, disband, discard, attachment.upload/download, peer.invite/register/revoke, replicate, replica_state, capabilities` (grep 집계).
-- [추정] 가격인하 매핑: 시세 cron(wake gate) → 투자 방에 예약 게시 → `routing: lead`(리드 = 포트폴리오 매니저) 또는 `auto` → 애널리스트 · 리스크 담당이 3라운드 안에서 논의 → 리드가 판단. DeskRPG 사무실 채팅은 이 방 로그를 그대로 보여 주면 된다.
+- [추정] 가격인하 매핑: 시세 cron(wake gate) → 투자 방에 예약 게시 → `routing: lead`(리드 = 포트폴리오 매니저) 또는 `auto` → 애널리스트 · 리스크 담당이 3라운드 안에서 논의 → 리드가 판단. DeskRPG는 Hermes 방을 쓰지 않고 회의 순서를 스스로 짜므로(agent-runtime-deep.md 7.9) 사무실 채팅이 이 방 로그를 그대로 보여 주는 것이 아니다. 원본 사이에 이 연결은 없으므로 우리가 새로 잇는 부분이다 (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳)
 
 ---
 
@@ -774,7 +777,7 @@ DB는 전부 **SQLite**다(WAL, FTS5). 설정 · 작업 일부는 YAML/JSON 파�
 4. **프로필 = 폴더** [관찰 기반]: `config.yaml / .env / SOUL.md / profile.yaml / auth.json / state.db / memories / skills / cron`. 프로필 사이 설정 상속 없음, 복제는 복사. distribution(`distribution.yaml` + 소유 파일 목록 + `env_requires`)을 **역할 템플릿** 형식으로 쓴다.
 5. **설정 우선순위와 로더 구분** [관찰 기반]: overlay > 요청 · 작업 덮어쓰기 > 프로필 YAML > 기본값, `.env`는 비밀값만. "기본값 병합 로더"와 "키 존재 확인 로더"를 나눠야 하는 이유(cron 모델 고정 등)도 같이 가져온다. 파일 서명 캐시 + 캐시 무효화 키 목록.
 6. **cron 보장** [관찰 기반]: 발사 전에 `next_run_at` 전진 + `pending_slot`, 실행 기록으로 이중 발사 방지, catch-up 창 공식, 시간대 고정, 유휴 기준 타임아웃, wake gate `{"wakeAgent": false}`, `context_from` 체인, 프로필별 tick 락.
-7. **hosted room 이벤트 로그 + 순수 계획기** [관찰 기반]: append-only 로그를 원천으로, 라우팅(everyone/lead/auto)과 논의 상한(3라운드/10메시지, Continue) 결정은 로그의 순수 함수. 라우터 답은 계획 전에 기록. DeskRPG 채팅 = 이 로그의 뷰.
+7. **hosted room 이벤트 로그 + 순수 계획기** [관찰 기반]: append-only 로그를 원천으로, 라우팅(everyone/lead/auto)과 논의 상한(3라운드/10메시지, Continue) 결정은 로그의 순수 함수. 라우터 답은 계획 전에 기록. DeskRPG는 Hermes 방을 쓰지 않으므로 DeskRPG 채팅이 이 로그의 뷰인 것은 아니다(우리가 새로 잇는 부분) (바로잡음 2026-11-14: agent-runtime-deep.md 바로잡을 곳)
 8. **봇 사슬 가드** [관찰 기반]: 런타임만 쓰는 hop 수, `max_hops`, 같은 사슬 중복 거부. 에이전트끼리 무한 대화를 막는 핵심.
 9. **칸반 claim 모델** [관찰 기반]: 원자적 claim + 만료, 워커 생존 = (pid, 시작 시각), 연속 실패 2회 자동 block, 종료 코드 78 즉시 block, 보드 단일 writer 락.
 10. **Anthropic 인증 순서와 갱신 규칙** [관찰 기반]: env 토큰 > API 키 > 자체 OAuth 풀 > Claude Code 빌려 쓰기. 1회용 refresh 토큰은 파일 락 안에서 읽기 · POST · 쓰기, 영구 실패 지문 기억, POST 성공 후 쓰기 실패는 "소비됨" 표시, 0600 원자적 쓰기.
@@ -825,8 +828,8 @@ DB는 전부 **SQLite**다(WAL, FTS5). 설정 · 작업 일부는 YAML/JSON 파�
 1. **DeskRPG 플러그인 코드**(`dandacompany/deskrpg-hermes-plugin`)는 이 저장소에 없다. DeskRPG가 실제로 부르는 경로(api_server인지 대시보드 REST인지 JSON-RPC인지)와 `post_llm_call` · `post_tool_call`에서 무엇을 보내는지는 확인하지 못했다. DeskRPG 분석 쪽 결과와 맞춰 봐야 한다.
 2. `website/docs/developer-guide/*`(긴 형식 문서: `provider-runtime.md`, `context-compression-and-caching.md`, `gateway-internals.md`, `cron-internals.md`, `subagent-lifecycle-api.md`)는 읽지 않았다. 공급자 선택 우선순위 전체 사슬과 압축 요약 프롬프트 원문이 거기에 있다.
 3. 컨텍스트 압축 요약 프롬프트의 정확한 구조(`agent/context_compressor_summary.py`, `_prompt_rules.py`)와 경계 선택 세부.
-4. 승인(approval) 흐름의 세부(위험 명령 판정 규칙, `approvals.timeout` 기본값).
+4. 승인(approval) 흐름의 세부(위험 명령 판정 규칙, `approvals.timeout` 기본값). `approvals.timeout` 기본값은 300초다 (`H:tools/approval_context.py:318-328`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)
 5. `tui_gateway` 정식 메서드 목록 `CANONICAL_METHODS`(`tui_gateway/contracts/canonical*.py`)와 hosted room JSON-RPC 각 메서드의 params/result 모양.
 6. `message_agent` 도구 스키마와 bot relay 파일 봉투 형식(`<root>/bot_relay/outbox/`).
-7. cron tick이 `jobs.json`을 매번 다시 읽는지(9.1 6번과 3.8의 [추정]).
+7. cron tick이 `jobs.json`을 매번 다시 읽는지(9.1 6번과 3.8의 [추정]). 매 tick 잠금 안에서 다시 읽는다. 연속 실패로 자동으로 끄지 않고 3번째부터 알림에 덧붙인다 (`H:cron/jobs.py:3269-3271`, `H:cron/scheduler.py:137-163`) (바로잡음 2026-11-14: triggers-approval-memory-deep.md 바로잡을 곳)
 8. 메모리 사용량은 코드 주석 · 상수로만 봤다. 실제로 실행해서 재지는 않았다(실행 금지).
