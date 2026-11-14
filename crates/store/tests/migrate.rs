@@ -1,5 +1,6 @@
 #![cfg(test)]
-//! 2차 규칙 6: 스키마 버전 2. 버전 1 파일을 열면 2로 올라가고 자료가 그대로다.
+//! 2차 규칙 6 · 3차 규칙 3: 스키마 버전. 버전 1 파일을 열면 최신(3차부터 3)으로 올라가고 자료가 그대로다.
+//! 버전 2 파일과 3차에서 더한 것(이벤트 시각 칸)은 `migrate_v3.rs`에서 본다.
 //!
 //! `tests/fixtures/v1.db`는 2차를 시작하기 전의 코드(스키마 버전 1)로 만든 저장소 파일이다.
 //! WAL을 체크포인트해 파일 하나로 두었다. 테스트는 그 파일을 임시 폴더에 복사해서 연다.
@@ -299,42 +300,42 @@ fn assert_v1_data(store: &Store) {
 
 // 검증: D6
 #[test]
-fn 스키마_버전은_2이고_새_저장소는_2로_만들어진다() {
-    assert_eq!(SCHEMA_VERSION, 2);
+fn 스키마_버전은_3이고_새_저장소는_3으로_만들어진다() {
+    assert_eq!(SCHEMA_VERSION, 3);
     let (_dir, path, store) = temp_store();
-    assert_eq!(store.info().unwrap().schema_version, 2);
+    assert_eq!(store.info().unwrap().schema_version, 3);
     drop(store);
-    assert_eq!(raw_user_version(&path), 2);
+    assert_eq!(raw_user_version(&path), 3);
 }
 
 // 검증: D6, V6, M1, M2, C2, E3, M6
 #[test]
-fn 버전_1_파일을_열면_2로_올라가고_자료가_그대로다() {
+fn 버전_1_파일을_열면_3으로_올라가고_자료가_그대로다() {
     let (_dir, path) = v1_copy();
     // 복사한 파일은 정말 버전 1이다.
     assert_eq!(raw_user_version(&path), 1);
 
     let store = Store::open(&path).unwrap();
     let info = store.info().unwrap();
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert_eq!(info.journal_mode, "wal");
     assert!(info.foreign_keys);
     assert_v1_data(&store);
     drop(store);
-    assert_eq!(raw_user_version(&path), 2);
+    assert_eq!(raw_user_version(&path), 3);
 }
 
 // 검증: D6, V6
 #[test]
-fn 올린_파일을_다시_열어도_버전_2이고_이전을_되풀이하지_않는다() {
+fn 올린_파일을_다시_열어도_버전_3이고_이전을_되풀이하지_않는다() {
     let (_dir, path) = v1_copy();
     drop(Store::open(&path).unwrap());
     for _ in 0..3 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 2);
+        assert_eq!(store.info().unwrap().schema_version, 3);
         assert_v1_data(&store);
         drop(store);
-        assert_eq!(raw_user_version(&path), 2);
+        assert_eq!(raw_user_version(&path), 3);
     }
 }
 
@@ -343,11 +344,11 @@ fn 올린_파일을_다시_열어도_버전_2이고_이전을_되풀이하지_�
 fn 버전_1_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는다() {
     let (_dir, path) = v1_copy();
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 2);
+    assert_eq!(store.info().unwrap().schema_version, 3);
     std::mem::forget(store);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 2);
+    assert_eq!(store.info().unwrap().schema_version, 3);
     assert_v1_data(&store);
 }
 
@@ -356,7 +357,7 @@ fn 버전_1_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는�
 fn 올린_뒤에도_이벤트와_접속_기록과_팀_기록과_매매_번호가_이어진다() {
     let (_dir, path) = v1_copy();
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 2);
+    assert_eq!(store.info().unwrap().schema_version, 3);
 
     assert_eq!(
         store.append("chat", &json!({ "text": "올린 뒤" })).unwrap(),

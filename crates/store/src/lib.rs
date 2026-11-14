@@ -23,13 +23,19 @@ use rusqlite::{Connection, TransactionBehavior};
 
 pub use error::{DenyReason, StoreError, Transition};
 pub use model::{
-    AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, Judgment,
-    NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo, TeamCause,
-    TeamChange, TeamState, TeamStateRecord, Trade, TradeId, TradeState, UnixMillis,
+    AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
+    Judgment, NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo,
+    TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState,
+    UnixMillis,
 };
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
 pub const SCHEMA_VERSION: u32 = 2;
+
+/// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
+///
+/// 이름은 `^[a-z][a-z0-9_.-]*$`이고 이 길이 이하여야 한다. 원본(Hermes 팀 논의 방 로그)의 규칙과 같다.
+pub const EVENT_KIND_MAX_CHARS: usize = 64;
 
 /// 저장소 손잡이. 복제하면 같은 파일을 함께 쓴다. 스레드 사이에 넘겨도 된다.
 #[derive(Clone)]
@@ -46,6 +52,10 @@ impl Store {
     /// - WAL(`journal_mode=wal`)과 외래 키(`foreign_keys=on`)를 켠다.
     /// - 다시 열면 자료가 그대로다. 앞선 손잡이가 닫히지 않고 사라졌어도(갑자기 꺼짐) 그대로다.
     /// - SQLite 파일이 아니면 패닉하지 않고 오류를 준다.
+    /// - (3차) Unix에서는 DB 파일과 딸린 파일(`-wal` · `-shm`)의 권한을 0600으로 만든다.
+    ///   이미 있는 파일의 권한이 더 넓으면 좁힌다. Unix가 아닌 곳에서는 건너뛴다.
+    /// - (3차) 버전 2 이하의 파일을 버전 3으로 올릴 때, 이미 있는 이벤트 가운데 내용이
+    ///   `{"at": 숫자, "payload": …}` 모양인 줄은 그 `at`이 이벤트의 시각이 된다. 내용은 그대로다.
     pub fn open(path: impl AsRef<Path>) -> Result<Store, StoreError> {
         let conn = schema::open(path.as_ref())?;
         Ok(Store {
@@ -188,14 +198,52 @@ impl Store {
 
     /// 이벤트를 쌓고 번호를 준다. 번호는 1부터 빠짐없이 커진다.
     /// 여러 스레드가 함께 불러도 번호가 겹치거나 비지 않는다. 다시 열어도 이어진다.
+    ///
+    /// 3차:
+    /// - 시각 없는 이벤트로 쌓는다(내용이 `{"at": …, "payload": …}` 모양이어도 시각 칸은 비어 있다).
+    ///   시각을 함께 남기려면 [`Store::append_at`]을 쓴다.
+    /// - 종류 이름이 규칙(`^[a-z][a-z0-9_.-]*$`, [`EVENT_KIND_MAX_CHARS`]자 이하)에 어긋나면
+    ///   [`StoreError::InvalidEventKind`]이고 아무것도 쌓지 않는다(번호를 쓰지 않는다).
     pub fn append(&self, kind: &str, payload: &serde_json::Value) -> Result<u64, StoreError> {
         self.write(|conn| log::append(conn, kind, payload))
+    }
+
+    /// 이벤트를 시각과 함께 쌓고 번호를 준다. (3차)
+    ///
+    /// - 번호는 [`Store::append`]와 함께 센다(1부터 빠짐없이).
+    /// - 내용은 넣은 그대로 저장한다(시각을 내용에 싸 넣지 않는다). 시각은 칸에 따로 둔다.
+    /// - 종류 이름 규칙은 [`Store::append`]와 같다. 어긋나면 [`StoreError::InvalidEventKind`]이고
+    ///   번호를 쓰지 않는다.
+    /// - 시각은 호출하는 쪽이 넘긴다. 앞선 이벤트보다 이른 시각이어도 받는다(번호가 순서다).
+    pub fn append_at(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        at: UnixMillis,
+    ) -> Result<u64, StoreError> {
+        let _ = (kind, payload, at);
+        todo!("3차: 시각과 함께 쌓기")
     }
 
     /// 번호가 `after`보다 큰 이벤트를 번호 순서로 `max`개까지 준다.
     /// `after`가 0이면 처음부터다. 없으면 빈 목록이다.
     pub fn read_after(&self, after: u64, max: usize) -> Result<Vec<Event>, StoreError> {
         self.read(|conn| log::read_after(conn, after, max))
+    }
+
+    /// 범위에 드는 이벤트를 시각과 함께, 번호 순서로 `max`개까지 준다. (3차)
+    ///
+    /// - 범위는 [`EventRange`]다. 기본값(`EventRange::default()`)은 모든 이벤트다.
+    /// - 시각 조건(`after_at` · `before_at`)을 주면 시각 없는 이벤트는 나오지 않는다.
+    /// - 순서는 언제나 번호 순서다(시각 순서가 아니다).
+    /// - 규칙이 생기기 전에 저장된 옛 이름의 이벤트도 그대로 나온다.
+    pub fn read_events(
+        &self,
+        range: EventRange,
+        max: usize,
+    ) -> Result<Vec<TimedEvent>, StoreError> {
+        let _ = (range, max);
+        todo!("3차: 번호와 시각 범위로 읽기")
     }
 
     // ───────────── 접속 기록 (M6) ─────────────

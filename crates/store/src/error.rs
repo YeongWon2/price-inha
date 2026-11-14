@@ -100,6 +100,13 @@ pub enum StoreError {
         /// 다시 쓰려던 승인 번호.
         number: i64,
     },
+    /// 이벤트 종류 이름이 규칙(`^[a-z][a-z0-9_.-]*$`, [`crate::EVENT_KIND_MAX_CHARS`]자 이하)에
+    /// 어긋난다. 이벤트는 쌓이지 않고 번호도 쓰지 않는다. (3차)
+    #[error("이벤트 종류 이름이 규칙에 어긋난다: {kind:?}")]
+    InvalidEventKind {
+        /// 거부된 이름.
+        kind: String,
+    },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

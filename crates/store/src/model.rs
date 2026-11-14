@@ -350,6 +350,36 @@ pub struct Event {
     pub payload: serde_json::Value,
 }
 
+/// 시각이 함께 나오는 이벤트 한 건. [`crate::Store::read_events`]가 준다. (3차)
+///
+/// [`Event`]는 다른 모듈이 값으로 만들기 때문에 칸을 더하지 않고 이 타입을 따로 둔다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedEvent {
+    /// 번호. [`Event::seq`]와 같다.
+    pub seq: u64,
+    /// 종류.
+    pub kind: String,
+    /// 이벤트의 시각. [`crate::Store::append_at`]으로 쌓았으면 그 시각이다.
+    /// [`crate::Store::append`]로 쌓았거나 버전 3 이전의 줄이면 없다
+    /// (이전할 때 내용이 `{"at": 숫자, "payload": …}` 모양이던 줄은 그 `at`이다).
+    pub at: Option<UnixMillis>,
+    /// 내용. 넣은 JSON과 같다.
+    pub payload: serde_json::Value,
+}
+
+/// 이벤트를 읽을 범위. 준 조건을 모두 만족하는 이벤트만 나온다. (3차)
+///
+/// 기본값은 조건이 없는 것(모든 이벤트)이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EventRange {
+    /// 번호가 이보다 큰 것만. 0이면 처음부터다.
+    pub after_seq: u64,
+    /// 시각이 이보다 늦은 것만(같은 시각은 빠진다). 시각 없는 이벤트는 빠진다.
+    pub after_at: Option<UnixMillis>,
+    /// 시각이 이보다 이른 것만(같은 시각은 빠진다). 시각 없는 이벤트는 빠진다.
+    pub before_at: Option<UnixMillis>,
+}
+
 // ───────────── 접속 기록 (M6) ─────────────
 
 /// 새 접속 기록.
