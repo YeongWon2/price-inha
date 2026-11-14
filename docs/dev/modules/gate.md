@@ -95,4 +95,4 @@ store · secrets · ai · market 모듈이 끝난 뒤에 한다. 그 모듈들�
 
 ## 필수 번호
 
-D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38
+D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
