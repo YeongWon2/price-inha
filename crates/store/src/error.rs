@@ -21,8 +21,9 @@ pub enum Transition {
     },
 }
 
-/// 전이가 거부된 이유.
+/// 전이가 거부된 이유. 종류가 늘어날 수 있다.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DenyReason {
     /// 허용 표에 없는 전이다(같은 상태로 가는 것도 여기에 든다).
     NotAllowed,
@@ -35,13 +36,23 @@ pub enum DenyReason {
         /// 빈 칸들. [`RationaleField`]를 적은 순서(가설 · 계기 · 들어간 값 · 손절값 · 목표값 · 기대값)다.
         missing: Vec<RationaleField>,
     },
+    /// 막힘은 이유를 받는 [`crate::Store::block_trade`]로만 간다.
+    /// 이유를 안 받는 [`crate::Store::transition_trade`]로 막힘을 주면 이것으로 거부된다.
+    BlockReasonRequired,
+    /// 막힌 이유 종류와 출발 상태의 짝이 맞지 않는다
+    /// (판단됨 ↔ 원칙 · 근거 부족, 승인대기 ↔ 승인 거절, 주문됨 ↔ 미체결 취소).
+    BlockReasonMismatch,
+    /// 전체 정지로 가는 사유는 최대 손실([`crate::TeamCause::MaxLoss`])뿐이다.
+    MaxLossOnly,
 }
 
 /// 저장소의 모든 오류.
 ///
 /// 상태 전이 거부는 [`StoreError::TransitionDenied`]로만 나온다.
 /// 거부된 호출은 아무것도 바꾸지 않는다(상태 · 기록 · 근거 모두 그대로).
+/// 종류가 늘어날 수 있다.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum StoreError {
     /// 상태 전이가 거부됐다.
     #[error("허용되지 않은 상태 전이: {transition:?} ({reason:?})")]
@@ -76,6 +87,18 @@ pub enum StoreError {
     StopNotAdjustable {
         /// 그 매매의 지금 상태.
         state: TradeState,
+    },
+    /// 주문됨 이후(주문됨 · 보유중 · 팔림 · 복기됨)의 매매에 승인을 붙이거나 바꾸려 했다.
+    #[error("주문된 뒤에는 승인을 붙이거나 바꿀 수 없다: {state:?}")]
+    ApprovalLocked {
+        /// 그 매매의 지금 상태.
+        state: TradeState,
+    },
+    /// 다른 매매에 이미 붙은 승인 번호를 붙이려 했다(승인 번호는 다시 쓰지 않는다).
+    #[error("승인 번호 {number}는 이미 다른 매매에 붙어 있다")]
+    ApprovalNumberReused {
+        /// 다시 쓰려던 승인 번호.
+        number: i64,
     },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]

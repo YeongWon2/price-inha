@@ -23,9 +23,9 @@ use rusqlite::{Connection, TransactionBehavior};
 
 pub use error::{DenyReason, StoreError, Transition};
 pub use model::{
-    AccessRecord, AccountKind, Amount, Approval, Event, Judgment, NewAccess, NewTrade, Rationale,
-    RationaleField, RoleScore, SourceRef, StoreInfo, TeamCause, TeamChange, TeamState,
-    TeamStateRecord, Trade, TradeId, TradeState, UnixMillis,
+    AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, Judgment,
+    NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo, TeamCause,
+    TeamChange, TeamState, TeamStateRecord, Trade, TradeId, TradeState, UnixMillis,
 };
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
@@ -72,7 +72,9 @@ impl Store {
     ///
     /// - 표에 없는 전이: [`DenyReason::NotAllowed`]
     /// - 전체 정지에서 나가는데 `owner_approved`가 거짓: [`DenyReason::OwnerApprovalRequired`]
-    /// - 하루 한도 멈춤에서 나가는데 사유가 `NextTradingDayStart`가 아님: [`DenyReason::NextTradingDayOnly`]
+    /// - 하루 한도 멈춤에서 쉬는 중으로 나가는데 사유가 `NextTradingDayStart`가 아님: [`DenyReason::NextTradingDayOnly`]
+    /// - 운용 중 · 하루 한도 멈춤 · 이상 감지 멈춤에서 전체 정지로 가는데 사유가 `MaxLoss`가 아님:
+    ///   [`DenyReason::MaxLossOnly`] (2차)
     pub fn change_team_state(&self, change: TeamChange) -> Result<TeamStateRecord, StoreError> {
         self.write(|conn| team::change(conn, change))
     }
@@ -114,6 +116,8 @@ impl Store {
     ///
     /// - 표에 없는 전이: [`StoreError::TransitionDenied`]([`DenyReason::NotAllowed`]).
     ///   `to`가 판단됨이면 언제나 거부다(판단됨은 [`Store::judge_trade`]로만 간다).
+    /// - `to`가 막힘이면 언제나 거부다(막힘은 [`Store::block_trade`]로만 간다). 판단됨 · 승인대기 ·
+    ///   주문됨에서는 [`DenyReason::BlockReasonRequired`]다. (2차)
     /// - 주문됨으로 가는데 근거가 하나라도 비었으면
     ///   [`StoreError::TransitionDenied`]([`DenyReason::RationaleIncomplete`]).
     /// - 거부되면 매매는 그대로다.
@@ -126,7 +130,35 @@ impl Store {
         self.write(|conn| trade::transition(conn, id, to, at))
     }
 
+    /// 매매를 막힘으로 보내고 막힌 이유를 남긴다. 막힘으로 가는 길은 이것 하나다. (2차)
+    ///
+    /// 이유 종류와 출발 상태의 짝이 맞아야 한다:
+    /// 판단됨 ↔ [`BlockKind::PrincipleOrRationale`], 승인대기 ↔ [`BlockKind::ApprovalRejected`],
+    /// 주문됨 ↔ [`BlockKind::UnfilledCancelled`].
+    ///
+    /// - 짝이 맞지 않으면 [`StoreError::TransitionDenied`]([`DenyReason::BlockReasonMismatch`]).
+    /// - 판단됨 · 승인대기 · 주문됨이 아닌 상태에서는
+    ///   [`StoreError::TransitionDenied`]([`DenyReason::NotAllowed`]).
+    /// - 거부되면 매매는 그대로다. 되면 `updated_at`은 `at`이고, 읽은 매매의 `blocked`에 이유가 나온다.
+    /// - "하나도 체결되지 않았는가"는 저장소가 알 수 없다. [`BlockKind::UnfilledCancelled`]를 주기 전에
+    ///   체결이 하나도 없음을 확인하는 것은 호출하는 쪽 책임이다.
+    pub fn block_trade(
+        &self,
+        id: TradeId,
+        reason: BlockReason,
+        at: UnixMillis,
+    ) -> Result<Trade, StoreError> {
+        let _ = (id, reason, at);
+        todo!("2차: 막힘 전이와 막힌 이유 저장")
+    }
+
     /// 승인 번호와 내용 지문을 매매에 붙인다. 이미 있으면 바꿔 넣는다.
+    ///
+    /// 2차:
+    /// - 주문됨 이후(주문됨 · 보유중 · 팔림 · 복기됨)의 매매에는 붙이거나 바꿀 수 없다:
+    ///   [`StoreError::ApprovalLocked`].
+    /// - 다른 매매에 이미 붙은 승인 번호는 붙일 수 없다: [`StoreError::ApprovalNumberReused`].
+    /// - 거부되면 두 매매 모두 그대로다.
     pub fn set_trade_approval(
         &self,
         id: TradeId,

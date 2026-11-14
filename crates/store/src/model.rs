@@ -26,9 +26,11 @@ pub struct TradeId(pub i64);
 /// | 운용 중 | 쉬는 중 | |
 /// | 운용 중 | 하루 한도 멈춤 | |
 /// | 운용 중 | 이상 감지 멈춤 | |
-/// | 운용 중 | 전체 정지 | |
+/// | 운용 중 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
 /// | 하루 한도 멈춤 | 쉬는 중 | 사유가 [`TeamCause::NextTradingDayStart`]일 때만 |
+/// | 하루 한도 멈춤 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
 /// | 이상 감지 멈춤 | 쉬는 중 | |
+/// | 이상 감지 멈춤 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
 /// | 전체 정지 | 쉬는 중 | `owner_approved`가 참일 때만 |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TeamState {
@@ -134,10 +136,12 @@ pub struct TeamStateRecord {
 /// |---|---|---|
 /// | 논의중 | 판단됨 | `Store::judge_trade`로만 |
 /// | 판단됨 | 승인대기 | |
-/// | 판단됨 | 막힘 | |
+/// | 판단됨 | 막힘 | `Store::block_trade`로만, 이유는 [`BlockKind::PrincipleOrRationale`] |
 /// | 판단됨 | 주문됨 | 근거 6칸이 모두 차 있을 때만 |
 /// | 승인대기 | 주문됨 | 근거 6칸이 모두 차 있을 때만 |
+/// | 승인대기 | 막힘 | `Store::block_trade`로만, 이유는 [`BlockKind::ApprovalRejected`] |
 /// | 주문됨 | 보유중 | |
+/// | 주문됨 | 막힘 | `Store::block_trade`로만, 이유는 [`BlockKind::UnfilledCancelled`] |
 /// | 보유중 | 팔림 | |
 /// | 팔림 | 복기됨 | |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,6 +176,35 @@ impl TradeState {
         TradeState::Sold,
         TradeState::Reviewed,
     ];
+}
+
+/// 매매가 막힌 이유의 종류. 종류마다 출발 상태가 하나로 정해져 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BlockKind {
+    /// 원칙 · 근거 부족. 판단됨에서만.
+    PrincipleOrRationale,
+    /// 내가 승인을 거절했다. 승인대기에서만.
+    ApprovalRejected,
+    /// 정한 시간 안에 하나도 체결되지 않아 주문을 취소했다. 주문됨에서만.
+    UnfilledCancelled,
+}
+
+impl BlockKind {
+    /// 모든 종류.
+    pub const ALL: [BlockKind; 3] = [
+        BlockKind::PrincipleOrRationale,
+        BlockKind::ApprovalRejected,
+        BlockKind::UnfilledCancelled,
+    ];
+}
+
+/// 매매가 막힌 이유. 막힌 매매를 읽으면 함께 나온다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockReason {
+    /// 이유 종류.
+    pub kind: BlockKind,
+    /// 사람이 읽는 설명. 준 글자 그대로 남는다.
+    pub detail: String,
 }
 
 /// 계좌 종류.
@@ -300,6 +333,8 @@ pub struct Trade {
     pub consensus_score: Option<i32>,
     /// 승인. 붙이기 전에는 `None`.
     pub approval: Option<Approval>,
+    /// 막힌 이유. [`crate::Store::block_trade`]로 막힌 매매에만 있다.
+    pub blocked: Option<BlockReason>,
 }
 
 // ───────────── 이벤트 (C2 · E3) ─────────────

@@ -256,6 +256,7 @@ fn trade_from(row: &Row<'_>) -> Result<Trade, StoreError> {
         scores: Vec::new(),
         consensus_score: row.get(13)?,
         approval,
+        blocked: None,
     })
 }
 
