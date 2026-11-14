@@ -18,7 +18,7 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 /// 진짜 키처럼 보이지 않는 시험용 글자.
 const TEST_API_KEY: &str = "SIHEOM-AI-KEY-0001";
-const TEST_OAUTH_TOKEN: &str = "SIHEOM-OAUTH-TOKEN-0001";
+const TEST_API_KEY_B: &str = "SIHEOM-AI-KEY-0002";
 const TEST_MODEL: &str = "siheom-model-a";
 
 // ---------- 도우미 ----------
@@ -37,8 +37,8 @@ fn api_key() -> Credential {
     Credential::ApiKey(Secret::new(TEST_API_KEY))
 }
 
-fn oauth_token() -> Credential {
-    Credential::OAuthToken(Secret::new(TEST_OAUTH_TOKEN))
+fn api_key_b() -> Credential {
+    Credential::ApiKey(Secret::new(TEST_API_KEY_B))
 }
 
 /// 가짜 서버를 보는 설정. 다시 시도 간격은 1ms.
@@ -169,8 +169,8 @@ fn assert_no_secret(label: &str, text: &str) {
         "{label}에 시험용 API 키가 있다"
     );
     assert!(
-        !text.contains(TEST_OAUTH_TOKEN),
-        "{label}에 시험용 OAuth 토큰이 있다"
+        !text.contains(TEST_API_KEY_B),
+        "{label}에 두 번째 시험용 API 키가 있다"
     );
 }
 
@@ -435,24 +435,6 @@ async fn api_키는_x_api_key_헤더로_나간다() {
     assert_eq!(header(&requests[0], "authorization"), None);
 }
 
-// 검증: D4
-#[tokio::test]
-async fn oauth_토큰은_authorization_bearer_헤더로_나간다() {
-    let server = MockServer::start().await;
-    mount_messages(&server, ok_response()).await;
-    let provider = provider_with(config_for(&server.uri()), Some(oauth_token()));
-
-    provider.complete(request_for(TEST_MODEL)).await.unwrap();
-
-    let requests = received(&server).await;
-    let expected = format!("Bearer {TEST_OAUTH_TOKEN}");
-    assert_eq!(
-        header(&requests[0], "authorization"),
-        Some(expected.as_str())
-    );
-    assert_eq!(header(&requests[0], "x-api-key"), None);
-}
-
 /// 부를 때마다 차례로 다른 자격을 주는 자리.
 struct SwitchingSource {
     calls: std::sync::atomic::AtomicUsize,
@@ -465,7 +447,7 @@ impl CredentialSource for SwitchingSource {
         if n == 0 {
             Some(api_key())
         } else {
-            Some(oauth_token())
+            Some(api_key_b())
         }
     }
 }
@@ -486,12 +468,8 @@ async fn 자격은_호출마다_자격_자리에서_새로_읽는다() {
     let requests = received(&server).await;
     assert_eq!(requests.len(), 2);
     assert_eq!(header(&requests[0], "x-api-key"), Some(TEST_API_KEY));
-    assert_eq!(header(&requests[1], "x-api-key"), None);
-    let expected = format!("Bearer {TEST_OAUTH_TOKEN}");
-    assert_eq!(
-        header(&requests[1], "authorization"),
-        Some(expected.as_str())
-    );
+    assert_eq!(header(&requests[1], "x-api-key"), Some(TEST_API_KEY_B));
+    assert_eq!(header(&requests[1], "authorization"), None);
 }
 
 // 검증: D4
@@ -499,10 +477,8 @@ async fn 자격은_호출마다_자격_자리에서_새로_읽는다() {
 async fn 공급자는_trait_객체로_쓸_수_있다() {
     let server = MockServer::start().await;
     mount_messages(&server, ok_response()).await;
-    let provider: Arc<dyn AiProvider> = Arc::new(provider_with(
-        config_for(&server.uri()),
-        Some(oauth_token()),
-    ));
+    let provider: Arc<dyn AiProvider> =
+        Arc::new(provider_with(config_for(&server.uri()), Some(api_key())));
 
     let response = provider.complete(request_for(TEST_MODEL)).await.unwrap();
 
@@ -866,7 +842,7 @@ fn 자격의_debug_출력에_값이_없다() {
     assert_no_secret("Secret Debug", &format!("{secret:?}"));
     assert_no_secret("Secret Debug(#)", &format!("{secret:#?}"));
     assert_no_secret("Credential Debug", &format!("{:?}", api_key()));
-    assert_no_secret("Credential Debug", &format!("{:?}", oauth_token()));
+    assert_no_secret("Credential Debug", &format!("{:?}", api_key_b()));
     // 값은 꺼내 달라고 할 때만 나온다.
     assert_eq!(secret.expose(), TEST_API_KEY);
 }
@@ -874,7 +850,7 @@ fn 자격의_debug_출력에_값이_없다() {
 // 검증: E38
 #[tokio::test]
 async fn 요청_본문과_주소에_자격_글자가_없다() {
-    for credential in [api_key(), oauth_token()] {
+    for credential in [api_key(), api_key_b()] {
         let server = MockServer::start().await;
         mount_messages(&server, ok_response()).await;
         let provider = provider_with(config_for(&server.uri()), Some(credential));
@@ -918,7 +894,7 @@ async fn 공급자가_오류_설명에_키를_되돌려_보내도_오류에_담�
         (500, "api_error"),
         (529, "overloaded_error"),
     ];
-    for (credential, secret) in [(api_key(), TEST_API_KEY), (oauth_token(), TEST_OAUTH_TOKEN)] {
+    for (credential, secret) in [(api_key(), TEST_API_KEY), (api_key_b(), TEST_API_KEY_B)] {
         for (status, error_type) in cases {
             let echoed = format!("bad credential {secret} in request");
             let (err, _) = fail_with(
@@ -973,7 +949,7 @@ async fn 시간_초과와_연결_실패와_설정_안_됨_오류에도_자격_�
     // 연결 실패
     let mut config = config_for(&dead_base_url());
     config.max_retries = 0;
-    let err = provider_with(config, Some(oauth_token()))
+    let err = provider_with(config, Some(api_key_b()))
         .complete(request_for(TEST_MODEL))
         .await
         .unwrap_err();
@@ -1012,25 +988,6 @@ async fn verify는_돈이_들지_않는_요청_한_번으로_키가_닿는지_�
     assert_eq!(header(request, "anthropic-version"), Some("2026-10-21"));
     assert_no_secret("확인 요청 주소", request.url.as_str());
     assert_no_secret("확인 요청 본문", &String::from_utf8_lossy(&request.body));
-}
-
-// 검증: D4
-#[tokio::test]
-async fn verify는_oauth_토큰도_같은_자리에서_확인한다() {
-    let server = MockServer::start().await;
-    mount_models(&server, models_ok_response()).await;
-    let provider = provider_with(config_for(&server.uri()), None);
-
-    provider.verify(&oauth_token()).await.unwrap();
-
-    let requests = received(&server).await;
-    assert_eq!(requests.len(), 1);
-    let expected = format!("Bearer {TEST_OAUTH_TOKEN}");
-    assert_eq!(
-        header(&requests[0], "authorization"),
-        Some(expected.as_str())
-    );
-    assert_eq!(header(&requests[0], "x-api-key"), None);
 }
 
 // 검증: E38

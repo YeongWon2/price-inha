@@ -1,4 +1,4 @@
-//! 자격 한 자리(D4). API 키와 OAuth 토큰이 같은 자리에 끼워진다.
+//! 자격 한 자리(D4). 자격은 API 키 하나다. 구독은 자격이 아니라 CLI 공급자로 고른다.
 
 use std::fmt;
 
@@ -30,20 +30,18 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// AI 공급자에 내는 자격. API 키와 구독 OAuth 토큰이 같은 자리에 끼워진다(D4).
+/// AI 공급자에 내는 자격(D4). API 키 하나뿐이다. 구독은 [`crate::ClaudeCliProvider`]로 쓴다.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Credential {
     /// API 키. `x-api-key` 헤더로 나간다.
     ApiKey(Secret),
-    /// 이미 발급된 OAuth 접근 토큰. `Authorization: Bearer` 헤더로 나간다.
-    OAuthToken(Secret),
 }
 
 impl Credential {
     /// 종류와 상관없이 안에 든 비밀 값.
     pub(crate) fn secret(&self) -> &Secret {
         match self {
-            Self::ApiKey(secret) | Self::OAuthToken(secret) => secret,
+            Self::ApiKey(secret) => secret,
         }
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use reqwest::header::{AUTHORIZATION, HeaderName, HeaderValue, RETRY_AFTER};
+use reqwest::header::{HeaderName, HeaderValue, RETRY_AFTER};
 use reqwest::{Method, RequestBuilder};
 
 use crate::credential::{Credential, CredentialSource};
@@ -151,7 +151,7 @@ impl AiProvider for AnthropicProvider {
     }
 }
 
-/// 자격 종류에 맞는 인증 헤더. API 키는 `x-api-key`, OAuth 토큰은 `Authorization: Bearer`.
+/// 자격의 인증 헤더. API 키는 `x-api-key`로 나간다.
 ///
 /// 비어 있거나 헤더로 보낼 수 없는 글자가 든 자격은 쓸 수 있는 자격이 아니므로
 /// 요청을 보내지 않고 [`AiError::NotConfigured`]를 낸다.
@@ -160,13 +160,7 @@ fn auth_header(credential: &Credential) -> Result<(HeaderName, HeaderValue), AiE
     if secret.is_empty() {
         return Err(AiError::NotConfigured);
     }
-    let (name, value) = match credential {
-        Credential::ApiKey(_) => (API_KEY_HEADER, HeaderValue::from_str(secret)),
-        Credential::OAuthToken(_) => (
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {secret}")),
-        ),
-    };
+    let (name, value) = (API_KEY_HEADER, HeaderValue::from_str(secret));
     let mut value = value.map_err(|_| AiError::NotConfigured)?;
     value.set_sensitive(true);
     Ok((name, value))
@@ -197,12 +191,8 @@ mod tests {
     #[test]
     fn 쓸_수_없는_자격은_설정_안_됨이다() {
         for bad in ["", "줄\n바꿈"] {
-            for credential in [
-                Credential::ApiKey(Secret::new(bad)),
-                Credential::OAuthToken(Secret::new(bad)),
-            ] {
-                assert_eq!(auth_header(&credential), Err(AiError::NotConfigured));
-            }
+            let credential = Credential::ApiKey(Secret::new(bad));
+            assert_eq!(auth_header(&credential), Err(AiError::NotConfigured));
         }
     }
 }

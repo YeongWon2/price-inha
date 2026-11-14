@@ -1,13 +1,15 @@
 //! pi-ai: docs/dev/modules/ai.md 를 따른다.
 //!
 //! AI 공급자 어댑터(A11). 에이전트 실행기는 [`AiProvider`]만 안다.
-//! 자격(API 키 · OAuth 토큰)은 [`CredentialSource`]에서 호출마다 읽고,
+//! 구독은 자격이 아니라 공급자로 고른다: [`ClaudeCliProvider`]가 공식 Claude Code CLI를 부른다.
+//! 자격(API 키)은 [`CredentialSource`]에서 호출마다 읽고,
 //! 요청 본문 · 응답 · 오류 · `Debug` 어디에도 담지 않는다(D4 · E38).
 //!
 //! 이번 단계에서는 `pi-secrets`에 직접 기대지 않는다. `pi-secrets` 저장소를
 //! [`CredentialSource`]로 잇는 일과 키 확인기 연결은 조립 단계에서 한다.
 
 mod anthropic;
+mod cli;
 mod credential;
 mod error;
 mod retry;
@@ -15,6 +17,11 @@ mod types;
 mod wire;
 
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
+pub use cli::{
+    CLI_AUTH_TIMEOUT, CLI_DEFAULT_KILL_GRACE, CLI_DEFAULT_MAX_CONCURRENCY,
+    CLI_DEFAULT_MAX_OUTPUT_BYTES, CLI_MAX_STDIN_BYTES, CLI_MIN_VERSION, CLI_RESTRICTED_SETTINGS,
+    CLI_VERSION_TIMEOUT, ClaudeCliConfig, ClaudeCliProvider, CliStatus, CliVersion,
+};
 pub use credential::{Credential, CredentialSource, Secret};
 pub use error::AiError;
 pub use types::{

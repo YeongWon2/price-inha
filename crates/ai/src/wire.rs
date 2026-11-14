@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn 빈_자격이면_설명을_그대로_둔다() {
-        let empty = Credential::OAuthToken(Secret::new(""));
+        let empty = Credential::ApiKey(Secret::new(""));
         assert_eq!(redact("그대로", &empty), "그대로");
     }
 
