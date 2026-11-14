@@ -6,29 +6,80 @@
 ## 원본 동작 근거
 
 - 대조표: `docs/dev/conformance.md` 1장 "AI 공급자 어댑터".
-- 따르는 원본: Hermes의 공급자 구조와 Anthropic 인증 — `docs/research/hermes-agent.md` 4.1 · 4.2 · 4.3. OpenClaw의 구독 OAuth — `docs/research/openclaw.md` 2.4.
-- 의도해서 다른 것: CLI를 띄우지 않고 직접 부른다(D4).
+- 따르는 원본: Hermes의 공급자 구조와 Anthropic API 키 인증 — `docs/research/hermes-agent.md` 4.1 · 4.3. 구독은 OpenClaw의 `claude-cli` 백엔드 — `docs/research/cli-backend.md` 2장 · 4장 · 5장.
+- 의도해서 다른 것: 구독 OAuth 토큰을 API에 직접 보내지 않는다(Anthropic 금지, `docs/dev/decisions.md` 2026-11-14). CLI는 오래 사는 프로세스 · 세션 이어 가기 · MCP 도구 없이 "도구 없는 한 번 호출"만 쓴다(`cli-backend.md` 5.1, 결정 2026-11-15).
 - 모르고 달랐던 것(다음 차례에 고친다): `Retry-After` 읽는 법과 상한, 시간 초과 · 연결 실패의 다시 시도, 다시 시도 간격과 jitter, 연결 시간 제한. 구독 OAuth의 헤더 · 본문 · 자격 순서는 사용자 결정이 필요하다.
 
 ## 만드는 것
 
 1. **공급자 trait**: 비동기 `complete(요청) → 응답`. 요청은 모델 이름, 시스템 글, 대화(역할 · 글), 최대 토큰. 응답은 글, 멈춘 이유, 쓴 토큰 수(입력 · 출력). 에이전트 실행기(나중 작업)는 이 trait만 안다.
-2. **자격 한 자리 (D4)**: API 키와 구독 OAuth 토큰이 같은 자리에 끼워진다(`Credential` 같은 enum). 공급자는 `pi-secrets`에서 자격을 읽는다. 자격을 요청 · 응답 · 오류 · 기록에 담지 않는다.
+2. **자격 한 자리 (D4)**: API 키가 끼워지는 자리(`Credential`). 구독은 자격이 아니라 공급자(2차의 CLI 공급자)로 고른다. 공급자는 `pi-secrets`에서 자격을 읽는다. 자격을 요청 · 응답 · 오류 · 기록에 담지 않는다.
 3. **Anthropic 공급자**: Messages API를 `reqwest`로 직접 부른다(호출마다 프로세스를 띄우지 않는다). 기본 주소는 설정으로 바꿀 수 있다(테스트는 로컬 가짜 서버). 헤더와 본문 모양은 **공식 문서를 확인하고** 맞춘다. 기억으로 짓지 않는다.
-   - API 키일 때와 OAuth 토큰일 때 보내는 인증 헤더가 다르다. 둘 다 테스트한다.
+   - API 키는 `x-api-key`로 보낸다.
    - 모델 이름은 설정에서 받는다. 라이브러리 안에 기본 모델을 박지 않는다.
 4. **자격 없음 (V31)**: 키가 등록되지 않았으면 바깥으로 요청을 보내지 않고 "설정 안 됨" 오류를 낸다.
 5. **오류 구분**: 인증 실패(401 · 403), 한도 초과(429, `retry-after`가 있으면 그 값), 공급자 장애(5xx · 529), 잘못된 요청(400), 시간 초과, 연결 실패. 시간 제한은 설정값이다.
 6. **다시 시도**: 한도 초과와 장애는 정해진 횟수(기본 2번)까지 간격을 늘려 다시 시도한다. 인증 실패와 잘못된 요청은 다시 시도하지 않는다. 테스트에서 간격을 0에 가깝게 줄일 수 있다.
 7. **키 확인기**: `pi-secrets`의 확인기 trait을 구현해 AI 키가 실제로 닿는지 확인한다(가장 싼 요청 한 번).
 
-## 2차 작업 (1차 AI 검토의 참고 — 아직 시작하지 않음)
+## 3차 작업 후보 (1차 AI 검토의 참고 — 아직 시작하지 않음)
 
 1. **평문 주소를 막는다**: 기본 주소가 `https`가 아니면 거부한다. 루프백 주소만 예외다.
 2. **응답 크기에 끝이 있다**: 정한 크기(설정값)를 넘는 응답은 읽지 않고 오류로 끝낸다.
 3. **워크스페이스 헤더 자리**: 설정에 워크스페이스 값이 있으면 공식 문서의 헤더로 보낸다(없으면 보내지 않는다).
 4. **키 확인은 응답 모양도 본다**: 2xx여도 공식 문서의 모델 목록 모양이 아니면 실패다.
 5. **헤더로 보낼 수 없는 자격은 따로 구분한다**: "설정 안 됨"이 아니라 "자격 모양이 잘못됨"으로 알린다.
+
+## 2차 작업: 구독은 공식 Claude Code CLI로 (CLI 백엔드)
+
+근거: 사용자 결정(`docs/dev/decisions.md` 2026-11-15), `docs/research/cli-backend.md` 5장. 원본은 OpenClaw `claude-cli`의 "곁가지 한 번 호출"(2.5의 전부 끄는 인자 묶음)이다.
+
+1. **구독 토큰 자리를 없앤다**: `Credential`에서 구독 OAuth 토큰 갈래와 `Authorization: Bearer`로 보내는 길을 지운다. 자격은 API 키 하나다. 이 갈래를 시험하던 테스트도 지운다.
+2. **두 번째 공급자 `ClaudeCliProvider`**(이름은 N1이 정한다)가 `AiProvider`를 구현한다. 설정은 모두 인자로 받는다(라이브러리는 환경 변수를 읽지 않는다):
+   - 실행 파일 절대 경로(없으면 `NotConfigured`, 아무것도 띄우지 않는다 — V31), 전용 로그인 폴더(선택), 작업 폴더(비어 있는 전용 폴더), 자식에게 줄 환경 전부(`base_env`), 호출 하나의 전체 제한, 동시 실행 수(기본 2), 출력 상한(바이트), 끝낼 때의 유예.
+   - 추가 인자를 받는 설정 칸은 만들지 않는다.
+3. **인자 묶음** — 이 순서, 빠짐없이. 시스템 글이 없으면 `--system-prompt-file` 두 칸만 빠진다:
+   ```text
+   -p --output-format stream-json --verbose --model <모델>
+   --system-prompt-file <파일>
+   --safe-mode --tools "" --disallowedTools mcp__* --strict-mcp-config
+   --setting-sources "" --settings <제한 설정 JSON>
+   --disable-slash-commands --no-chrome
+   --no-session-persistence --max-turns 1
+   --permission-mode dontAsk --permission-prompts none
+   ```
+   - `""`는 빈 글자 인자 하나다. 제한 설정 JSON은 `{"disableAllHooks":true,"enabledPlugins":{},"autoMemoryEnabled":false,"claudeMdExcludes":["**/CLAUDE.md","**/CLAUDE.local.md","**/.claude/rules/**"]}`(`cli-backend.md` 2.5).
+   - 어떤 경우에도 인자에 `--bare` · `bypassPermissions` · `--dangerously-skip-permissions` · `--allowedTools` · `--mcp-config` · `--add-dir` · `--plugin-dir` · `--session-id` · `--resume` · `--continue`가 없다. 대화 글은 인자에 없다.
+   - 시스템 글은 작업 폴더 안의 0600 임시 파일에 쓰고, 호출이 끝나면(성공 · 실패 · 시간 초과 · 버려짐 모두) 지운다. 이름은 호출마다 다르다.
+4. **환경**: 부모 환경을 물려주지 않는다(통째로 비우고 `base_env`만 넣는다). `base_env`에 있어도 빼는 것: `ANTHROPIC_`로 시작하는 것, `CLAUDE_CODE_USE_`로 시작하는 것, `OTEL_`로 시작하는 것, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`(`cli-backend.md` 2.2 — 남아 있으면 구독이 아니라 API 키로 과금된다). 넣는 것: `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1`, 요청의 최대 토큰을 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`로, 전용 로그인 폴더가 있으면 `CLAUDE_CONFIG_DIR`. 작업 폴더는 설정의 전용 폴더다.
+5. **표준 입력**: 대화를 글 하나로 만들어 한 번 쓰고 닫는다(`cli-backend.md` 5.2 4번, Hermes 3.2를 줄임). 사용자 글 하나뿐이면 그 글 그대로. 둘 이상이면 각 줄을 `[사용자]` 또는 `[담당]` 머리 줄 다음에 글을 두고 빈 줄로 나누어 이은 뒤, 끝에 빈 줄과 `마지막 사용자 요청에 이어서 답한다.` 한 줄. 10MB(10,000,000바이트)를 넘으면 띄우지 않고 `InvalidRequest`(`cli-backend.md` 4.3).
+6. **출력 읽기** (`stream-json`, 줄마다 JSON — 원본 2.4):
+   - 성공: 끝 코드 0, `type == "result"` 줄이 있고, `is_error`가 참이 아니고, `result`가 글자. 글은 `result`, 멈춘 이유는 `stop_reason`(`end_turn` · `max_tokens` · `stop_sequence` · `refusal` 등 지금 `StopReason`으로, 모르는 값과 `null`은 `Other`), 토큰은 `usage.input_tokens` · `usage.output_tokens`.
+   - 도구 뚫림: 결과의 `permission_denials`가 비어 있지 않거나 `num_turns`가 1보다 크면 `InvalidResponse`(`cli-backend.md` 5.5 7겹).
+   - JSON이 아닌 줄은 건너뛴다. `result` 줄이 없으면 `InvalidResponse`.
+   - 표준 출력 · 표준 오류 가운데 하나라도 출력 상한을 넘으면 프로세스를 끝내고 `InvalidResponse`.
+7. **오류 옮기기** — 지금 `AiError` 종류에만 옮긴다(`cli-backend.md` 5.4 표). 먼저 `result` 줄의 `api_error_status`(숫자)를 본다: 401 · 403 → `Auth`, 429 → `RateLimited`, 500 이상 · 529 → `ProviderUnavailable`, 400 · 404 · 413 → `InvalidRequest`. 없으면 `result` 글을 본다: `Not logged in` · `Login expired` → `Auth{401}`, `hit your` 와 `limit` → `RateLimited`, `another Claude Code process is refreshing` → `ProviderUnavailable{503}`. 그래도 없으면 마지막 `type == "system"`, `subtype == "api_retry"` 줄의 `error`: `authentication_failed` → `Auth{401}`, `oauth_org_not_allowed` · `account_on_hold` · `billing_error` → `Auth{403}`, `rate_limit` → `RateLimited`, `overloaded` → `ProviderUnavailable{529}`, `server_error` → `ProviderUnavailable{500}`, `invalid_request` · `model_not_found` → `InvalidRequest`. 끝 코드가 0이 아니고 결과 줄이 없으면 `InvalidRequest`(표준 오류 첫 줄을 200자로 자른 것). 분류하지 못한 실패 결과는 `InvalidResponse`. 실행 파일이 없으면(띄울 때 `NotFound`) `NotConfigured`, 그 밖에 띄우기 실패 · 신호로 죽음은 `Connection`. `RateLimited`의 기다릴 시간은 이번에는 늘 없음(`None`)이다 — 풀리는 시각의 실제 모양을 확인하지 못했다.
+   - `result` 줄이 실패면 그 뒤에 프로세스가 늦게 끝나도 그 결과가 우선이다(원본 2.7).
+   - 오류 문장 · `Debug`에 표준 출력 · 표준 오류의 원문(200자로 자른 첫 줄 말고는), 환경 값, 대화 글이 들어가지 않는다(E38).
+8. **다시 시도하지 않는다**: CLI가 안에서 이미 다시 시도한다(`api_retry`). CLI 공급자는 어떤 오류도 다시 부르지 않고 바로 올린다. API 키로 몰래 넘어가지도 않는다(원본 2.8 — 과금 주체가 바뀌는 일은 사용자가 정한다).
+9. **동시 실행과 시간**: 세마포어로 동시에 산 자식 수를 묶는다(기본 2). 줄에서 기다린 시간도 전체 제한에 든다. 제한을 넘기면 `Timeout`.
+10. **끝내기**: 자식은 자기 프로세스 그룹으로 띄운다. 제한을 넘기거나 호출이 버려지면(drop) 그룹 전체에 `SIGTERM`, 유예 뒤 살아 있으면 `SIGKILL`. 버려진 경우에도 자식과 그 자식이 남지 않는다. `unsafe` 없이 한다(필요하면 시스템의 `kill` 명령을 부른다).
+11. **설치 · 로그인 확인** (모델을 부르지 않는다 — `cli-backend.md` 5.7):
+   - 버전: `<실행 파일> --version`, 5초 제한. 첫 낱말을 `주.부.수` 버전으로 읽는다. 2.1.259보다 낮으면 "너무 낮음"(`--permission-prompts`가 그 버전부터다).
+   - 로그인: `<실행 파일> auth status --json`, 10초 제한, 환경 · 작업 폴더 · 로그인 폴더는 실제 호출과 같다. 결과는 다섯 가지 + 하나: 로그인됨(`authMethod` · `subscriptionType`을 담는다), 로그인 안 됨(끝 코드 1 또는 `loggedIn` 거짓), 설치 안 됨(실행 파일 없음), 시간 초과, 읽지 못함(JSON이 아님 등), 그리고 로그인됐지만 `authMethod`가 `claude.ai`가 아님("구독이 아님"). 시간 초과여도 **프로세스를 죽이지 않는다**(토큰 갱신 잠금 — 원본 2.6). 기다리기만 그만둔다.
+   - 확인 함수 하나가 둘을 차례로 하고, 설정 화면이 보여 줄 수 있는 상태 하나를 돌려준다.
+
+### 2차가 다른 모듈에 남기는 것
+
+1번으로 `Credential`의 구독 토큰 갈래가 없어지면 조립(`crates/server`의 `keys.rs`)이 컴파일되지 않는다. 이 모듈의 검사(`verify.sh ai`)는 `pi-ai`만 보므로 막히지 않는다. 조립은 다음 차례(gate 6차 · secrets 3차)에서 CLI 공급자를 잇고 구독 토큰 칸을 지우면서 고친다. 그때까지 전체 `verify.sh`는 실패한다.
+
+### 2차의 하지 않는 것
+
+세션 이어 가기(`--session-id` · `--resume`), 오래 사는 프로세스, MCP로 도구 넘기기, `claude setup-token` 토큰 보관, 서버가 갑자기 죽은 뒤 남은 자식 치우기, `--restricted`. 설정 화면 · `pi-secrets` · 조립은 이 모듈 밖이다(다음 작업).
+
+### 2차 테스트 주의
+
+실제 `claude`를 부르지 않는다. 테스트가 임시 폴더에 가짜 실행 파일(셸 스크립트)을 만들어 경로로 준다. 가짜는 받은 인자(한 줄에 하나) · 표준 입력 · 환경 · 작업 폴더를 파일에 적고, 정해 둔 출력 · 끝 코드 · 지연을 낸다. 위 1~11을 모두 이 가짜로 확인한다: 인자 순서, 금지 인자 없음, 프롬프트가 인자에 없음, 환경 지우기와 넣기, 출력 읽기, 오류 표의 줄마다, 시간 초과 뒤 가짜와 그 자식이 죽어 있음, 버려진 호출 뒤 남은 프로세스와 임시 파일 없음, 동시 실행 상한, 출력 상한, 비밀이 새지 않음, 실행 파일 없음, 확인 결과 여섯 가지와 시간 초과 때 죽이지 않음. 오래 자는 가짜는 쓰지 않는다(제한을 짧게 준다).
 
 ## pi-secrets와 잇는 법
 
@@ -38,7 +89,7 @@
 
 ## 하지 않는 것
 
-OAuth 로그인 절차(브라우저 로그인 · 토큰 갱신)는 만들지 않는다. 구독 OAuth의 약관을 아직 확인하지 못했다 — 이번에는 "이미 있는 토큰을 읽어 보내는 자리"까지만 만든다. 도구 호출, 스트리밍, 임베딩, 다른 공급자는 나중 작업이다.
+OAuth 로그인 절차와 구독 토큰을 API에 보내는 길은 만들지 않는다(구독은 2차의 CLI 공급자로만 쓴다). 도구 호출, 스트리밍, 임베딩, 다른 공급자는 나중 작업이다.
 
 ## 테스트 주의
 
