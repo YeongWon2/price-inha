@@ -240,8 +240,7 @@ impl GateBuilder {
     /// 거기에 [`local_only`]를 씌운다: 세션이 없으면 401, 다른 출처면 4xx, 상대가 루프백이
     /// 아니면 거부이고 어느 경우에도 핸들러는 불리지 않는다.
     pub fn local_routes(self, routes: axum::Router) -> Self {
-        let _ = routes;
-        todo!("3차: local_only를 씌워 보호된 경로에 더한다")
+        self.protected_routes(local_only(routes))
     }
 
     /// 상대 주소를 바꿔 본다. **테스트용이다.** 실행 파일은 부르지 않는다.

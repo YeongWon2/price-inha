@@ -69,12 +69,14 @@
 //! - 시작한 뒤 필수 항목이 빠지면(키 파일이 지워짐 등) 멈추고 다시 [`SETUP_REQUIRED`]를 알린다.
 //! - 시작한 뒤 키를 다시 등록하면 새 키로 이어 간다. 키나 종목이 등록되면 물러서 있는 중이어도 바로 다시 시도한다.
 
+use std::io::{ErrorKind, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use pi_market::Symbol;
-use pi_secrets::{Credentials, KeyKind};
-use serde_json::Value;
+use pi_secrets::{Credentials, KeyKind, MIN_SECRET_CHARS};
+use serde_json::{Value, json};
 
 use crate::{AppError, SetupRefusal};
 
@@ -197,12 +199,35 @@ pub struct SetupStatus {
 impl SetupStatus {
     /// 빠진 필수 항목의 이름들([`SETUP_ITEMS`] 순서). 설정 알림의 `missing`이다.
     pub fn missing(&self) -> Vec<&'static str> {
-        todo!("3차: 필수인데 등록되지 않은 항목의 이름")
+        self.items
+            .iter()
+            .filter(|item| item.required && !item.registered)
+            .map(|item| item.name)
+            .collect()
     }
 
     /// 응답 본문(모듈 문서의 모양 그대로). 그 밖의 칸을 넣지 않는다.
     pub fn to_json(&self) -> Value {
-        todo!("3차: 설정 상태를 JSON으로 적는다")
+        let items: Vec<Value> = self
+            .items
+            .iter()
+            .map(|item| {
+                json!({
+                    "name": item.name,
+                    "required": item.required,
+                    "registered": item.registered,
+                })
+            })
+            .collect();
+        let symbols: Vec<&str> = self.symbols.iter().map(Symbol::as_str).collect();
+        json!({
+            "items": items,
+            "ready": self.ready,
+            "started": self.started,
+            "demo": self.demo,
+            "symbols": symbols,
+            "symbols_source": self.symbols_source.as_str(),
+        })
     }
 }
 
@@ -220,9 +245,51 @@ impl KeyRequest {
     /// `pi_secrets::MIN_SECRET_CHARS`보다 짧은 값 · 줄바꿈이 든 값.
     /// 모두 [`SetupRefusal::InvalidInput`]이고, 오류에 받은 값을 싣지 않는다.
     pub fn parse(body: &[u8]) -> Result<KeyRequest, SetupRefusal> {
-        let _ = body;
-        todo!("3차: 키 등록 본문을 읽고 검사한다")
+        let (kind, fields) = key_request_parts(body).ok_or(SetupRefusal::InvalidInput)?;
+        let names = kind.fields();
+        if fields.len() != names.len() {
+            return Err(SetupRefusal::InvalidInput);
+        }
+        let mut values = Credentials::new();
+        for &name in names {
+            let value = fields
+                .get(name)
+                .and_then(Value::as_str)
+                .and_then(usable_secret)
+                .ok_or(SetupRefusal::InvalidInput)?;
+            values = values.with(name, value);
+        }
+        Ok(KeyRequest { kind, values })
     }
+}
+
+/// 본문에서 종류와 칸 묶음을 꺼낸다. 본문은 `item`과 `fields` 두 칸뿐인 JSON 객체여야 한다.
+fn key_request_parts(body: &[u8]) -> Option<(KeyKind, serde_json::Map<String, Value>)> {
+    let Value::Object(mut request) = serde_json::from_slice::<Value>(body).ok()? else {
+        return None;
+    };
+    let kind = match request.get("item")?.as_str()? {
+        KEY_BROKER => KeyKind::Broker,
+        KEY_AI_API_KEY => KeyKind::AiApiKey,
+        KEY_AI_OAUTH => KeyKind::AiOAuth,
+        KEY_DATA => KeyKind::Data,
+        _ => return None,
+    };
+    let Some(Value::Object(fields)) = request.remove("fields") else {
+        return None;
+    };
+    (request.len() == 1).then_some((kind, fields))
+}
+
+/// 등록할 수 있는 값이면 앞뒤 공백을 뗀 글자를 준다(붙여 넣다 딸려 온 공백은 값이 아니다).
+/// 빈 값 · 공백뿐인 값 · 너무 짧은 값 · 줄바꿈 같은 제어 문자가 든 값은 `None`.
+fn usable_secret(raw: &str) -> Option<&str> {
+    let value = raw.trim();
+    let long_enough = value.chars().count() >= MIN_SECRET_CHARS;
+    let writable = !value
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'));
+    (long_enough && writable).then_some(value)
 }
 
 /// 종목 등록 요청의 본문을 읽는다: `{"symbols": [..]}`.
@@ -230,21 +297,79 @@ impl KeyRequest {
 /// 하나 이상 [`MAX_WATCH_SYMBOLS`]개 이하이고, 종목 코드는 `--symbols`와 같은 글자만 받는다.
 /// 아니면 [`SetupRefusal::InvalidInput`].
 pub fn parse_symbols(body: &[u8]) -> Result<Vec<Symbol>, SetupRefusal> {
-    let _ = body;
-    todo!("3차: 종목 등록 본문을 읽고 검사한다")
+    let request: Value = serde_json::from_slice(body).map_err(|_| SetupRefusal::InvalidInput)?;
+    let list = match request.as_object() {
+        Some(request) if request.len() == 1 => request.get("symbols"),
+        _ => None,
+    };
+    list.and_then(symbols_from)
+        .ok_or(SetupRefusal::InvalidInput)
+}
+
+/// JSON 목록을 종목들로 읽는다. 하나 이상 [`MAX_WATCH_SYMBOLS`]개 이하의 종목 코드 글자여야 한다.
+/// 같은 종목을 두 번 적었으면 처음 것만 남긴다.
+fn symbols_from(list: &Value) -> Option<Vec<Symbol>> {
+    let list = list.as_array()?;
+    if list.is_empty() || list.len() > MAX_WATCH_SYMBOLS {
+        return None;
+    }
+    let mut symbols: Vec<Symbol> = Vec::with_capacity(list.len());
+    for code in list {
+        let symbol = crate::settings::symbol(code.as_str()?)?;
+        if !symbols.contains(&symbol) {
+            symbols.push(symbol);
+        }
+    }
+    Some(symbols)
+}
+
+/// 파일 작업 실패는 종류만 남긴다.
+fn home_error(error: &std::io::Error) -> AppError {
+    AppError::Home { kind: error.kind() }
 }
 
 /// 보관 폴더의 [`WATCHLIST_FILE`]에서 저장된 종목을 읽는다. 파일이 없으면 빈 목록이다.
 pub fn load_watchlist(home: &Path) -> Result<Vec<Symbol>, AppError> {
-    let _ = home;
-    todo!("3차: 저장된 종목을 읽는다")
+    let bytes = match std::fs::read(home.join(WATCHLIST_FILE)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(home_error(&error)),
+    };
+    // 읽을 수 없는 모양이면 말없이 비우지 않고 알린다(부른 쪽이 정한다).
+    parse_symbols(&bytes).map_err(|_| AppError::Home {
+        kind: ErrorKind::InvalidData,
+    })
 }
 
 /// 종목을 보관 폴더의 [`WATCHLIST_FILE`]에 원자 쓰기로 둔다
 /// (같은 폴더의 임시 파일에 쓰고 이름을 바꾼다. 임시 파일은 남지 않는다).
 pub fn save_watchlist(home: &Path, symbols: &[Symbol]) -> Result<(), AppError> {
-    let _ = (home, symbols);
-    todo!("3차: 종목을 원자 쓰기로 저장한다")
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let codes: Vec<&str> = symbols.iter().map(Symbol::as_str).collect();
+    let text = json!({ "symbols": codes }).to_string();
+    // 함께 도는 저장이 같은 임시 파일을 쓰지 않게 이름을 다르게 한다.
+    let temp = home.join(format!(
+        ".{WATCHLIST_FILE}.{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = write_new(&temp, text.as_bytes())
+        .and_then(|()| std::fs::rename(&temp, home.join(WATCHLIST_FILE)));
+    written.map_err(|error| {
+        // 쓰다 만 임시 파일을 남기지 않는다(지우지 못해도 더 할 수 있는 일이 없다).
+        let _ = std::fs::remove_file(&temp);
+        home_error(&error)
+    })
+}
+
+/// 새 파일을 만들어 쓰고 디스크에 내린다. 같은 이름이 이미 있으면 실패한다.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// 키 등록 시도의 횟수 제한(3차 규칙 9): `window` 동안 `max`번까지만 확인기를 부른다.
@@ -271,7 +396,13 @@ impl AttemptLimit {
 
     /// 지금 시도해도 되는가. 되면 그 시도를 센다. `window`가 지난 시도는 잊는다.
     pub fn allow(&mut self, now: Instant) -> bool {
-        let _ = (now, self.max, self.window, &self.recent);
-        todo!("3차: 시도 횟수 제한")
+        let window = self.window;
+        self.recent
+            .retain(|at| now.saturating_duration_since(*at) < window);
+        let allowed = u32::try_from(self.recent.len()).is_ok_and(|used| used < self.max);
+        if allowed {
+            self.recent.push(now);
+        }
+        allowed
     }
 }

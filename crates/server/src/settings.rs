@@ -115,22 +115,12 @@ impl Settings {
                 .map(|value| (value, arg))
                 .or_else(|| env(var).map(|value| (value, var)))
         };
-        let home = match pick(&given.home, ARG_HOME, ENV_HOME) {
-            // 준 값이 빈 글자 · 상대 경로면 말없이 기본 폴더로 바꾸지 않고 거부한다.
-            Some((value, name)) => pi_secrets::resolve_dir(Some(OsStr::new(&value)), None)
-                .map_err(|_| SettingsError::InvalidValue { name })?,
-            None => {
-                pi_secrets::resolve_dir(None, user_home).map_err(|_| SettingsError::HomeNotFound)?
-            }
-        };
-        let bind = match pick(&given.bind, ARG_BIND, ENV_BIND) {
-            Some((value, name)) => parsed::<IpAddr>(&value, name)?,
-            None => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        };
-        let port = match pick(&given.port, ARG_PORT, ENV_PORT) {
-            Some((value, name)) => parsed::<u16>(&value, name)?,
-            None => pi_gate::DEFAULT_PORT,
-        };
+        let (home, bind, port) = place(
+            &pick(&given.home, ARG_HOME, ENV_HOME),
+            &pick(&given.bind, ARG_BIND, ENV_BIND),
+            &pick(&given.port, ARG_PORT, ENV_PORT),
+            user_home,
+        )?;
         let symbols = match pick(&given.symbols, ARG_SYMBOLS, ENV_SYMBOLS) {
             Some((value, name)) => symbols(&value, name)?,
             None => Vec::new(),
@@ -138,14 +128,6 @@ impl Settings {
         let market = match pick(&given.market, ARG_MARKET, ENV_MARKET) {
             Some((value, name)) => market(&value, name)?,
             None => Market::Kr,
-        };
-        // 간격들: 밀리초로 받고 0은 받지 않는다.
-        let millis = |picked: Option<(String, &'static str)>, default: Duration| match picked {
-            Some((value, name)) => match parsed::<u64>(&value, name)? {
-                0 => Err(SettingsError::InvalidValue { name }),
-                millis => Ok(Duration::from_millis(millis)),
-            },
-            None => Ok(default),
         };
         let quote_interval = millis(
             pick(&given.interval_ms, ARG_INTERVAL_MS, ENV_QUOTE_INTERVAL_MS),
@@ -163,6 +145,27 @@ impl Settings {
             pick(&given.retry_max_ms, ARG_RETRY_MAX_MS, ENV_RETRY_MAX_MS),
             DEFAULT_RETRY_MAX,
         )?;
+        let calendar_retry = millis(
+            pick(
+                &given.calendar_retry_ms,
+                ARG_CALENDAR_RETRY_MS,
+                ENV_CALENDAR_RETRY_MS,
+            ),
+            DEFAULT_CALENDAR_RETRY,
+        )?;
+        let register_window = millis(
+            pick(
+                &given.register_window_ms,
+                ARG_REGISTER_WINDOW_MS,
+                ENV_REGISTER_WINDOW_MS,
+            ),
+            DEFAULT_REGISTER_WINDOW,
+        )?;
+        let register_attempts = attempts(pick(
+            &given.register_attempts,
+            ARG_REGISTER_ATTEMPTS,
+            ENV_REGISTER_ATTEMPTS,
+        ))?;
         Ok(Settings {
             home,
             bind,
@@ -172,10 +175,9 @@ impl Settings {
             quote_interval,
             retry_initial,
             retry_max,
-            // 3차 뼈대: 아직 인자 · 환경 변수에서 읽지 않는다(기본값만).
-            calendar_retry: DEFAULT_CALENDAR_RETRY,
-            register_attempts: DEFAULT_REGISTER_ATTEMPTS,
-            register_window: DEFAULT_REGISTER_WINDOW,
+            calendar_retry,
+            register_attempts,
+            register_window,
             demo: given.demo,
         })
     }
@@ -200,6 +202,57 @@ impl Settings {
     }
 }
 
+/// 인자나 환경 변수에서 고른 값과 그것을 준 이름.
+type Picked = Option<(String, &'static str)>;
+
+/// 보관 폴더 · 여는 주소 · 여는 포트.
+fn place(
+    home: &Picked,
+    bind: &Picked,
+    port: &Picked,
+    user_home: Option<&Path>,
+) -> Result<(PathBuf, IpAddr, u16), SettingsError> {
+    let home = match home {
+        // 준 값이 빈 글자 · 상대 경로면 말없이 기본 폴더로 바꾸지 않고 거부한다.
+        Some((value, name)) => pi_secrets::resolve_dir(Some(OsStr::new(value)), None)
+            .map_err(|_| SettingsError::InvalidValue { name })?,
+        None => {
+            pi_secrets::resolve_dir(None, user_home).map_err(|_| SettingsError::HomeNotFound)?
+        }
+    };
+    let bind = match bind {
+        Some((value, name)) => parsed::<IpAddr>(value, name)?,
+        None => IpAddr::V4(Ipv4Addr::LOCALHOST),
+    };
+    let port = match port {
+        Some((value, name)) => parsed::<u16>(value, name)?,
+        None => pi_gate::DEFAULT_PORT,
+    };
+    Ok((home, bind, port))
+}
+
+/// 간격: 밀리초로 받고 0은 받지 않는다. 주지 않았으면 기본값이다.
+fn millis(picked: Picked, default: Duration) -> Result<Duration, SettingsError> {
+    match picked {
+        Some((value, name)) => match parsed::<u64>(&value, name)? {
+            0 => Err(SettingsError::InvalidValue { name }),
+            millis => Ok(Duration::from_millis(millis)),
+        },
+        None => Ok(default),
+    }
+}
+
+/// 키 등록 시도 횟수: 0은 받지 않는다. 주지 않았으면 기본값이다.
+fn attempts(picked: Picked) -> Result<u32, SettingsError> {
+    match picked {
+        Some((value, name)) => match parsed::<u32>(&value, name)? {
+            0 => Err(SettingsError::InvalidValue { name }),
+            attempts => Ok(attempts),
+        },
+        None => Ok(DEFAULT_REGISTER_ATTEMPTS),
+    }
+}
+
 const ARG_HOME: &str = "--home";
 const ARG_BIND: &str = "--bind";
 const ARG_PORT: &str = "--port";
@@ -208,10 +261,13 @@ const ARG_MARKET: &str = "--market";
 const ARG_INTERVAL_MS: &str = "--interval-ms";
 const ARG_RETRY_INITIAL_MS: &str = "--retry-initial-ms";
 const ARG_RETRY_MAX_MS: &str = "--retry-max-ms";
+const ARG_CALENDAR_RETRY_MS: &str = "--calendar-retry-ms";
+const ARG_REGISTER_ATTEMPTS: &str = "--register-attempts";
+const ARG_REGISTER_WINDOW_MS: &str = "--register-window-ms";
 const ARG_DEMO: &str = "--demo";
 
 /// 읽는 환경 변수 전부.
-const ENV_NAMES: [&str; 8] = [
+const ENV_NAMES: [&str; 11] = [
     ENV_HOME,
     ENV_BIND,
     ENV_PORT,
@@ -220,6 +276,9 @@ const ENV_NAMES: [&str; 8] = [
     ENV_QUOTE_INTERVAL_MS,
     ENV_RETRY_INITIAL_MS,
     ENV_RETRY_MAX_MS,
+    ENV_CALENDAR_RETRY_MS,
+    ENV_REGISTER_ATTEMPTS,
+    ENV_REGISTER_WINDOW_MS,
 ];
 
 /// 종목 코드 하나의 가장 긴 길이.
@@ -236,6 +295,9 @@ struct Given {
     interval_ms: Option<String>,
     retry_initial_ms: Option<String>,
     retry_max_ms: Option<String>,
+    calendar_retry_ms: Option<String>,
+    register_attempts: Option<String>,
+    register_window_ms: Option<String>,
     demo: bool,
 }
 
@@ -257,6 +319,9 @@ impl Given {
                 ARG_INTERVAL_MS => (&mut given.interval_ms, ARG_INTERVAL_MS),
                 ARG_RETRY_INITIAL_MS => (&mut given.retry_initial_ms, ARG_RETRY_INITIAL_MS),
                 ARG_RETRY_MAX_MS => (&mut given.retry_max_ms, ARG_RETRY_MAX_MS),
+                ARG_CALENDAR_RETRY_MS => (&mut given.calendar_retry_ms, ARG_CALENDAR_RETRY_MS),
+                ARG_REGISTER_ATTEMPTS => (&mut given.register_attempts, ARG_REGISTER_ATTEMPTS),
+                ARG_REGISTER_WINDOW_MS => (&mut given.register_window_ms, ARG_REGISTER_WINDOW_MS),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };
@@ -283,18 +348,19 @@ fn symbols(value: &str, name: &'static str) -> Result<Vec<Symbol>, SettingsError
         .split(',')
         .map(str::trim)
         .filter(|code| !code.is_empty())
-        .map(|code| {
-            let plain = code.len() <= MAX_SYMBOL_LEN
-                && code
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
-            if plain {
-                Ok(Symbol::new(code))
-            } else {
-                Err(SettingsError::InvalidValue { name })
-            }
-        })
+        .map(|code| symbol(code).ok_or(SettingsError::InvalidValue { name }))
         .collect()
+}
+
+/// 종목 코드 하나. 비었거나, 너무 길거나, 종목 코드로 볼 수 없는 글자가 있으면 `None`.
+/// 인자(`--symbols`) · 화면의 종목 등록 · 저장된 종목 파일이 모두 이 검사를 쓴다.
+pub(crate) fn symbol(code: &str) -> Option<Symbol> {
+    let plain = !code.is_empty()
+        && code.len() <= MAX_SYMBOL_LEN
+        && code
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    plain.then(|| Symbol::new(code))
 }
 
 fn market(value: &str, name: &'static str) -> Result<Market, SettingsError> {

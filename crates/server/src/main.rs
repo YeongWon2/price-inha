@@ -10,7 +10,8 @@ use price_inha::{App, AppError, Settings, SettingsError, Wiring, announce_addr};
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [--home <폴더>] [--bind <IP>] [--port <수>] \
 [--symbols <a,b,c>] [--market <kr|us>] [--interval-ms <수>] \
-[--retry-initial-ms <수>] [--retry-max-ms <수>] [--demo]";
+[--retry-initial-ms <수>] [--retry-max-ms <수>] [--calendar-retry-ms <수>] \
+[--register-attempts <수>] [--register-window-ms <수>] [--demo]";
 
 /// 끝난 까닭. 어느 쪽도 비밀 값을 담지 않는다.
 enum Failure {
@@ -57,7 +58,7 @@ async fn run() -> Result<(), Failure> {
     let mode = if demo {
         " (시연용 가짜 시세)"
     } else {
-        ""
+        " (필수 설정이 빠져 있으면 이 주소의 설정 화면에서 등록합니다)"
     };
     say(&format!(
         "http://{} 에서 열렸습니다{mode}. 끄려면 Ctrl+C",

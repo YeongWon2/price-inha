@@ -5,6 +5,7 @@
 
 mod app;
 mod demo;
+mod desk;
 mod error;
 mod feed;
 mod keys;
@@ -12,6 +13,7 @@ mod page;
 mod retry;
 mod settings;
 mod setup;
+mod setup_http;
 
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,

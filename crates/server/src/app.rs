@@ -4,15 +4,19 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use pi_gate::{Gate, GateConfig, GateServer, Publisher};
-use pi_market::{Clock, CredentialSource, MarketAdapter, SystemClock, TossClient};
+use pi_market::{Clock, CredentialSource, MarketAdapter, Symbol, SystemClock, TossClient};
 use pi_secrets::SecretStore;
 use pi_store::{Store, UnixMillis};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::demo::DemoAdapter;
+use crate::desk::{Desk, DeskParts};
 use crate::feed::{Feed, Pace, Source};
-use crate::{AppError, BrokerKeys, SecretsRedactor, Settings, Upstreams, page};
+use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
+use crate::{
+    AppError, BrokerKeys, KeyVerifier, SecretsRedactor, Settings, Upstreams, page, setup_http,
+};
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -97,25 +101,48 @@ pub fn announce_addr(local: SocketAddr) -> SocketAddr {
     SocketAddr::new(loopback, local.port())
 }
 
+/// 이 실행에서 지켜볼 종목과 그 출처.
+///
+/// 인자 · 환경 변수로 줬으면 그것이 먼저다(저장된 것을 읽지도 덮지도 않는다). 아니면 보관 폴더에
+/// 저장된 것을 쓴다. 저장된 파일을 읽지 못하면 없는 것으로 보고 알린다(화면에서 다시 등록하면 고쳐진다).
+fn watched_symbols(settings: &Settings) -> (Vec<Symbol>, SymbolsSource) {
+    if !settings.symbols.is_empty() {
+        return (settings.symbols.clone(), SymbolsSource::Argument);
+    }
+    match load_watchlist(&settings.home) {
+        Ok(saved) if !saved.is_empty() => (saved, SymbolsSource::Saved),
+        Ok(_) => (Vec::new(), SymbolsSource::None),
+        Err(error) => {
+            tracing::warn!(%error, "저장된 종목을 읽지 못해 없는 것으로 봅니다. 화면에서 다시 등록하세요");
+            (Vec::new(), SymbolsSource::None)
+        }
+    }
+}
+
 /// 떠 있는 서버.
 ///
 /// 띄울 때 하는 일:
 ///
 /// 1. 보관 폴더에서 비밀 보관소(`SecretStore::open(home)`)와 저장소(`home/`[`DB_FILE`])를 연다.
-/// 2. 접속 관문을 `bind:port`에 연다. 공개 경로 `GET /`는 `web/index.html`을 내준다
+/// 2. 지켜볼 종목을 정한다: 인자 · 환경 변수로 줬으면 그것, 아니면 보관 폴더에 저장된 것.
+/// 3. 접속 관문을 `bind:port`에 연다. 공개 경로 `GET /`는 `web/index.html`을 내준다
 ///    (프로그램에 넣어 둔 것). 가리기 자리에는 `SecretStore::redact`를 끼운다.
-/// 3. 시세:
-///    - `--demo`면 가짜 어댑터로 시세를 흘린다. 바깥으로 요청을 보내지 않는다.
+///    설정 상태는 세션이 있어야 열리는 경로에, 키 · 종목 등록은 그 컴퓨터에서만 열리는 경로
+///    (`pi_gate::GateBuilder::local_routes`)에 끼운다([`crate::SETUP_PATH`] 등).
+/// 4. 시세:
+///    - `--demo`면 필수 설정 없이 가짜 어댑터로 시세를 흘린다. 바깥으로 요청을 보내지 않는다.
 ///      [`KIND_FEED_STATUS`]는 [`FEED_DEMO`]이고 시세 묶음의 `demo`는 참이다. 값은 받을 때마다 바뀐다.
-///    - 아니고 증권사 키가 등록돼 있으면 토스 어댑터로 `quote_interval`마다 받는다.
+///    - 아니고 **필수 설정이 모두 등록돼 있으면** 토스 어댑터로 `quote_interval`마다 받는다.
 ///      받기 전에는 [`FEED_CONNECTING`], 한 번 받은 뒤에 [`FEED_LIVE`]를 알린다.
 ///      실패하면 [`FEED_BROKER_REJECTED`](인증 실패 · 허용 IP 아님)나
 ///      [`FEED_BROKER_UNREACHABLE`](연결 실패 · 장애)를 알리고, 다시 시도하는 간격을
 ///      `retry_initial`부터 실패할 때마다 두 배로 늘려 `retry_max`에서 멈춘다(물러서기).
 ///      성공하면 `quote_interval`로 돌아온다. 같은 실패가 이어지는 동안 같은 상태를 다시 알리지 않고,
 ///      기록도 상태가 바뀔 때와 정한 간격마다만 남긴다.
-///    - 아니면 받지 않는다. 바깥으로 요청을 보내지 않고 [`FEED_NO_BROKER_KEY`]를 알린다(V31).
-/// 4. 받은 시세는 [`KIND_QUOTES`] 지나가는 이벤트로 보낸다. 가진 시세가 `pi_market::is_stale`
+///    - 필수 설정이 빠져 있으면 시작하지 않는다. 바깥으로 요청을 보내지 않고
+///      [`FEED_SETUP_REQUIRED`]와 [`crate::KIND_SETUP`]을 알린다(V31). 화면에서 마지막 항목이
+///      등록되면 다시 켜지 않아도 바로 시작한다.
+/// 5. 받은 시세는 [`KIND_QUOTES`] 지나가는 이벤트로 보낸다. 가진 시세가 `pi_market::is_stale`
 ///    (기본 30초)이면 [`KIND_QUOTES_STALE`]을 보낸다(N6). 받기에 실패해도 흐름은 이어진다.
 pub struct App {
     gate: GateServer,
@@ -142,36 +169,47 @@ impl App {
             bind: SocketAddr::new(settings.bind, settings.port),
             ..GateConfig::default()
         };
-        let gate = Gate::builder(store.clone(), config)
+        let (symbols, source) = watched_symbols(&settings);
+        let desk = Arc::new(Desk::new(DeskParts {
+            secrets: Arc::clone(&secrets),
+            verifier: KeyVerifier::new(wiring.upstreams.clone()),
+            home: settings.home.clone(),
+            demo: settings.demo,
+            symbols,
+            source,
+            limit: AttemptLimit::new(settings.register_attempts, settings.register_window),
+        }));
+        let mut builder = Gate::builder(store.clone(), config)
             .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
             .redactor(Arc::new(SecretsRedactor::new(Arc::clone(&secrets))))
             .public_routes(page::routes())
-            .build()
-            .serve()
-            .await?;
+            .protected_routes(setup_http::status_routes(Arc::clone(&desk)))
+            // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
+            .local_routes(setup_http::register_routes(Arc::clone(&desk)));
+        if let Some(peer) = wiring.peer_override {
+            builder = builder.peer_override(peer);
+        }
+        let gate = builder.build().serve().await?;
 
         let source = if settings.demo {
             let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
             Source::Demo(Arc::new(demo))
         } else {
             let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));
-            let client = TossClient::new(
-                wiring.upstreams.toss,
-                Arc::clone(&keys),
-                Arc::clone(&wiring.clock),
-            );
+            let client = TossClient::new(wiring.upstreams.toss, keys, Arc::clone(&wiring.clock));
             let adapter: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
-            Source::Broker { adapter, keys }
+            Source::Broker(adapter)
         };
         let feed = Feed::new(
             gate.publisher(),
             wiring.clock,
             settings.market,
-            settings.symbols,
+            desk,
             Pace {
                 interval: settings.quote_interval,
                 retry_initial: settings.retry_initial,
                 retry_max: settings.retry_max,
+                calendar_retry: settings.calendar_retry,
             },
         );
         let (stop, mut stopping) = watch::channel(false);

@@ -53,8 +53,21 @@ pub const LOCAL_ONLY_STATUS: u16 = 403;
 /// 생겨 밖에서 온 요청이 관문을 지나게 되어도 이 경로들은 닫혀 있게 하려는 것이다.
 /// 전달 헤더(`X-Forwarded-For` 등)는 읽지 않는다.
 pub fn local_only(routes: axum::Router) -> axum::Router {
-    let _ = routes;
-    todo!("3차: Peer가 루프백일 때만 지나가게 하는 층을 씌운다")
+    routes.layer(axum::middleware::from_fn(loopback_peer))
+}
+
+/// [`local_only`]의 확인: 확장의 [`Peer`]가 루프백일 때만 넘긴다. 없으면 닫는다.
+async fn loopback_peer(request: Request, next: Next) -> Response {
+    let local = request
+        .extensions()
+        .get::<Peer>()
+        .is_some_and(|Peer(ip)| ip.to_canonical().is_loopback());
+    if local {
+        next.run(request).await
+    } else {
+        let status = StatusCode::from_u16(LOCAL_ONLY_STATUS).unwrap_or(StatusCode::FORBIDDEN);
+        reject(status, "이 컴퓨터에서만 할 수 있습니다")
+    }
 }
 
 fn reject(status: StatusCode, why: &'static str) -> Response {

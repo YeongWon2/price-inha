@@ -108,6 +108,41 @@ fn broker_credentials(values: &Credentials) -> Option<pi_market::Credentials> {
     ))
 }
 
+/// 등록 여부만 보는 자리(설정 상태 · 시작 조건). 값은 내주지 않는다.
+///
+/// 자격 자리([`BrokerKeys`] · [`AiKeys`])가 값을 내주는 것만 등록된 것으로 본다
+/// (칸이 비었거나 읽지 못한 키 파일은 등록되지 않은 것이다).
+pub(crate) struct KeyPresence {
+    store: Arc<SecretStore>,
+    /// 읽지 못했다는 경고를 종류마다 묶는다([`KeyKind::ALL`] 순서).
+    quiet: [Quiet; 4],
+}
+
+impl KeyPresence {
+    pub(crate) fn new(store: Arc<SecretStore>) -> Self {
+        Self {
+            store,
+            quiet: std::array::from_fn(|_| Quiet::default()),
+        }
+    }
+
+    /// 그 종류가 등록돼 있는가.
+    pub(crate) fn has(&self, kind: KeyKind) -> bool {
+        let quiet = KeyKind::ALL
+            .iter()
+            .position(|known| *known == kind)
+            .and_then(|at| self.quiet.get(at));
+        let Some(quiet) = quiet else {
+            return false;
+        };
+        read_kind(&self.store, kind, quiet).is_some_and(|values| match kind {
+            KeyKind::Broker => broker_credentials(&values).is_some(),
+            KeyKind::AiApiKey | KeyKind::Data => field(&values, "api_key").is_some(),
+            KeyKind::AiOAuth => field(&values, "access_token").is_some(),
+        })
+    }
+}
+
 /// AI 자격 자리: [`KeyKind::AiApiKey`]는 `Credential::ApiKey`로,
 /// [`KeyKind::AiOAuth`]는 `access_token`을 `Credential::OAuthToken`으로 준다.
 ///

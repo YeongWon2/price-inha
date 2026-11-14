@@ -40,6 +40,15 @@
   #events { margin: 0; padding: 0; list-style: none; font-size: 13px; }
   #events li { padding: 4px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
   #events:not(:empty) + #no-events { display: none; }
+  [hidden] { display: none !important; }
+  .item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 0 0 12px; }
+  .item h3 { font-size: 15px; margin: 0 0 8px; }
+  .item label { display: block; font-size: 13px; color: var(--dim); margin: 8px 0 2px; }
+  .item input { width: 100%; padding: 6px 8px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+  .item button { margin: 10px 8px 0 0; padding: 6px 14px; font: inherit; }
+  .item .msg { font-size: 13px; }
+  .badge { font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .hint { font-size: 13px; color: var(--dim); }
 </style>
 </head>
 <body>
@@ -47,10 +56,61 @@
   <h1>가격인하</h1>
   <ul id="status" aria-live="polite">
     <li id="st-conn" class="warn">연결하는 중</li>
+    <li id="st-demo" class="warn" hidden>시연 모드 (가짜 시세)</li>
     <li id="st-feed" hidden></li>
     <li id="st-late" class="warn" hidden>시세 늦음</li>
   </ul>
 
+  <section id="setup-view" hidden>
+    <h2>시작 전 필수 설정</h2>
+    <p class="hint">필수 항목이 모두 등록되면 바로 시작합니다. 키는 이 컴퓨터에만 저장되고 다시 보여 주지 않습니다.</p>
+    <p id="setup-missing" class="warn"></p>
+
+    <div class="item">
+      <h3>증권사 키 (필수) <span id="reg-broker" class="badge"></span></h3>
+      <label for="f-client-id">client_id</label>
+      <input id="f-client-id" type="password" autocomplete="off" spellcheck="false">
+      <label for="f-client-secret">client_secret</label>
+      <input id="f-client-secret" type="password" autocomplete="off" spellcheck="false">
+      <button id="b-broker" type="button">증권사 키 등록</button>
+      <span id="m-broker" class="msg" aria-live="polite"></span>
+    </div>
+
+    <div class="item">
+      <h3>AI 키 (필수, 둘 가운데 하나) <span id="reg-ai" class="badge"></span></h3>
+      <label for="f-api-key">API 키 (api_key)</label>
+      <input id="f-api-key" type="password" autocomplete="off" spellcheck="false">
+      <button id="b-ai-key" type="button">API 키 등록</button>
+      <span id="m-ai-key" class="msg" aria-live="polite"></span>
+      <label for="f-access-token">구독 OAuth 토큰 (access_token)</label>
+      <input id="f-access-token" type="password" autocomplete="off" spellcheck="false">
+      <label for="f-refresh-token">refresh_token</label>
+      <input id="f-refresh-token" type="password" autocomplete="off" spellcheck="false">
+      <button id="b-ai-oauth" type="button">구독 토큰 등록</button>
+      <span id="m-ai-oauth" class="msg" aria-live="polite"></span>
+    </div>
+
+    <div class="item">
+      <h3>지켜볼 종목 (필수) <span id="reg-symbols" class="badge"></span></h3>
+      <label for="f-symbols">종목 코드 (쉼표로 나눔, 예: 005930,000660)</label>
+      <input id="f-symbols" type="text" autocomplete="off" spellcheck="false">
+      <button id="b-symbols" type="button">종목 등록</button>
+      <span id="m-symbols" class="msg" aria-live="polite"></span>
+      <p id="symbols-now" class="hint"></p>
+    </div>
+
+    <div class="item">
+      <h3>자료 키 (선택) <span id="reg-data" class="badge"></span></h3>
+      <label for="f-data-key">api_key</label>
+      <input id="f-data-key" type="password" autocomplete="off" spellcheck="false">
+      <button id="b-data" type="button">자료 키 등록</button>
+      <span id="m-data" class="msg" aria-live="polite"></span>
+      <p class="hint">확인할 곳이 아직 없어 지금은 등록되지 않습니다. 없어도 시작합니다.</p>
+    </div>
+  </section>
+
+  <section id="main-view">
+  <p id="rejected" class="bad" hidden></p>
   <div class="wrap">
     <table>
       <thead>
@@ -64,6 +124,7 @@
   <h2>최근 이벤트</h2>
   <ul id="events"></ul>
   <p id="no-events">아직 받은 이벤트가 없습니다.</p>
+  </section>
   <noscript>이 화면은 스크립트가 켜져 있어야 시세를 보여 줍니다.</noscript>
 </main>
 
@@ -73,6 +134,9 @@
 
   var SESSION_PATH = "/api/session";
   var WS_PATH = "/ws";
+  var SETUP_PATH = "/api/setup";
+  var SETUP_KEYS_PATH = "/api/setup/keys";
+  var SETUP_SYMBOLS_PATH = "/api/setup/symbols";
   var RETRY_MIN_MS = 1000;
   var RETRY_MAX_MS = 10000;
   var MAX_EVENTS = 20;
@@ -83,6 +147,24 @@
   var $quotes = document.getElementById("quotes");
   var $empty = document.getElementById("empty");
   var $events = document.getElementById("events");
+  var $demo = document.getElementById("st-demo");
+  var $setupView = document.getElementById("setup-view");
+  var $mainView = document.getElementById("main-view");
+  var $missing = document.getElementById("setup-missing");
+  var $rejected = document.getElementById("rejected");
+  var $symbolsNow = document.getElementById("symbols-now");
+
+  // 설정 항목 이름 → 화면에 적는 말.
+  var ITEM_LABELS = { broker: "증권사 키", ai: "AI 키", symbols: "지켜볼 종목", data: "자료 키" };
+  // 등록 실패 까닭 → 화면에 적는 말.
+  var REASONS = {
+    "key_rejected": "키가 맞지 않습니다. 값을 확인하세요.",
+    "unreachable": "확인할 서버에 닿지 않습니다. 잠시 뒤에 다시 하세요.",
+    "invalid_input": "입력이 잘못됐습니다. 빈 칸이나 너무 짧은 값이 없는지 확인하세요.",
+    "too_many_attempts": "시도가 너무 많습니다. 잠시 뒤에 다시 하세요.",
+    "fixed_by_argument": "종목을 실행 인자로 줘서 이 화면에서는 바꿀 수 없습니다.",
+    "save_failed": "저장하지 못했습니다. 보관 폴더를 확인하세요."
+  };
 
   var lastSeq = null;      // 마지막으로 받은 이벤트 번호. 아직 없으면 null(지금부터 받는다).
   var retryMs = RETRY_MIN_MS;
@@ -148,6 +230,8 @@
     var text = "시세 상태를 알 수 없음";
     var kind = "warn";
     if (state === "no_broker_key") { text = "증권사 키가 없음 (시세를 받지 않습니다)"; kind = "bad"; }
+    else if (state === "setup_required") { text = "필수 설정이 필요함 (시작하지 않았습니다)"; kind = "bad"; }
+    else if (state === "request_rejected") { text = "증권사가 요청을 거절함 (종목을 확인하세요 · 간격을 늘려 다시 시도 중)"; kind = "bad"; }
     else if (state === "demo") { text = "시연 (가짜 시세)"; kind = "warn"; }
     else if (state === "live") { text = "증권사 시세"; kind = "ok"; }
     else if (state === "connecting") { text = "증권사에 연결 중 (아직 받은 시세가 없습니다)"; kind = "warn"; }
@@ -172,6 +256,143 @@
     $late.hidden = list.length === 0;
   }
 
+  // 설정 화면과 본 화면 가운데 하나만 보여 준다.
+  function showView(started, demo) {
+    $setupView.hidden = started;
+    $mainView.hidden = !started;
+    $demo.hidden = !demo;
+  }
+
+  function missingText(names) {
+    var list = Array.isArray(names) ? names : [];
+    if (list.length === 0) { return ""; }
+    var words = list.map(function (name) { return ITEM_LABELS[name] || String(name); });
+    return "아직 등록되지 않은 필수 항목: " + words.join(", ");
+  }
+
+  // 설정 상태(등록 여부만 온다)를 그린다.
+  function showSetupStatus(status) {
+    if (!status || !Array.isArray(status.items)) { return; }
+    var missing = [];
+    status.items.forEach(function (item) {
+      if (!item || typeof item.name !== "string") { return; }
+      var badge = document.getElementById("reg-" + item.name);
+      if (badge) {
+        setText(badge, item.registered === true ? "등록됨" : "등록 안 됨");
+        badge.className = "badge " + (item.registered === true ? "ok" : "warn");
+      }
+      if (item.required === true && item.registered !== true) { missing.push(item.name); }
+    });
+    setText($missing, missingText(missing));
+    var symbols = Array.isArray(status.symbols) ? status.symbols : [];
+    var fixed = status.symbols_source === "argument";
+    setText($symbolsNow, symbols.length === 0 ? "" :
+      "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : ""));
+    showView(status.started === true, status.demo === true);
+  }
+
+  function loadSetup() {
+    fetch(SETUP_PATH, { credentials: "same-origin", cache: "no-store" })
+      .then(function (reply) { return reply.ok ? reply.json() : null; })
+      .then(showSetupStatus)
+      .catch(function () { /* 다음 설정 알림이나 다시 이을 때 다시 읽는다 */ });
+  }
+
+  // 설정 알림: 시작했으면 본 화면으로, 필수 항목이 빠졌으면 설정 화면으로.
+  function showSetup(payload) {
+    if (!payload) { return; }
+    if (payload.state === "started") { showView(true, payload.demo === true); }
+    else if (payload.state === "required") {
+      setText($missing, missingText(payload.missing));
+      showView(false, payload.demo === true);
+    }
+    // 항목별 등록 여부는 설정 상태에서 다시 읽는다.
+    loadSetup();
+  }
+
+  function showRejected(payload) {
+    var list = payload && Array.isArray(payload.symbols) ? payload.symbols : [];
+    setText($rejected, list.length === 0 ? "" :
+      "증권사가 거절한 종목 (빼고 받는 중 · 종목을 확인하세요): " + list.join(", "));
+    $rejected.hidden = list.length === 0;
+  }
+
+  // 등록 요청을 보낸다. 값은 본문으로만 나가고 어디에도 남기지 않는다. 성공하면 칸을 비운다.
+  function register(path, body, inputs, $message, $button) {
+    $button.disabled = true;
+    setText($message, "확인하는 중…");
+    $message.className = "msg";
+    fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    })
+      .then(function (reply) {
+        return reply.json().catch(function () { return null; }).then(function (data) {
+          return { ok: reply.ok, status: reply.status, data: data };
+        });
+      })
+      .then(function (result) {
+        if (result.ok && result.data && result.data.registered === true) {
+          inputs.forEach(function (input) { input.value = ""; });
+          setText($message, "등록됨");
+          $message.className = "msg ok";
+        } else {
+          var reason = result.data && typeof result.data.error === "string" ? result.data.error : "";
+          var text = REASONS[reason];
+          if (!text) {
+            text = result.status === 401 ? "세션이 끝났습니다. 화면을 새로 고치세요."
+              : result.status === 403 ? "이 컴퓨터에서 연 화면에서만 등록할 수 있습니다."
+              : "등록하지 못했습니다.";
+          }
+          setText($message, text);
+          $message.className = "msg bad";
+        }
+        loadSetup();
+      })
+      .catch(function () {
+        setText($message, "서버에 닿지 않습니다.");
+        $message.className = "msg bad";
+      })
+      .then(function () { $button.disabled = false; });
+  }
+
+  // 키 항목 하나의 단추를 잇는다: fields는 { 칸 이름: 입력 칸 id }.
+  function wireKey(buttonId, messageId, item, fields) {
+    var $button = document.getElementById(buttonId);
+    var $message = document.getElementById(messageId);
+    $button.addEventListener("click", function () {
+      var values = {};
+      var inputs = [];
+      Object.keys(fields).forEach(function (name) {
+        var input = document.getElementById(fields[name]);
+        values[name] = input.value.trim();
+        inputs.push(input);
+      });
+      register(SETUP_KEYS_PATH, { item: item, fields: values }, inputs, $message, $button);
+    });
+  }
+
+  function wireSetup() {
+    wireKey("b-broker", "m-broker", "broker",
+      { client_id: "f-client-id", client_secret: "f-client-secret" });
+    wireKey("b-ai-key", "m-ai-key", "ai_api_key", { api_key: "f-api-key" });
+    wireKey("b-ai-oauth", "m-ai-oauth", "ai_oauth",
+      { access_token: "f-access-token", refresh_token: "f-refresh-token" });
+    wireKey("b-data", "m-data", "data", { api_key: "f-data-key" });
+    var $button = document.getElementById("b-symbols");
+    var $message = document.getElementById("m-symbols");
+    var $input = document.getElementById("f-symbols");
+    $button.addEventListener("click", function () {
+      var symbols = $input.value.split(",")
+        .map(function (code) { return code.trim(); })
+        .filter(function (code) { return code.length > 0; });
+      register(SETUP_SYMBOLS_PATH, { symbols: symbols }, [$input], $message, $button);
+    });
+  }
+
   function showEvent(frame) {
     var li = document.createElement("li");
     setText(li, "#" + frame.seq + " · " + timeText(frame.at) + " · " + frame.kind);
@@ -194,6 +415,8 @@
     if (frame.kind === "quotes") { showQuotes(frame.payload); }
     else if (frame.kind === "feed_status") { showFeed(frame.payload); }
     else if (frame.kind === "quotes_stale") { showLate(frame.payload); }
+    else if (frame.kind === "setup") { showSetup(frame.payload); }
+    else if (frame.kind === "symbols_rejected") { showRejected(frame.payload); }
   }
 
   function retryLater() {
@@ -232,6 +455,7 @@
     fetch(SESSION_PATH, { method: "POST", credentials: "same-origin", cache: "no-store" })
       .then(function (reply) {
         if (!reply.ok) { throw new Error("session"); }
+        loadSetup();
         openSocket();
       })
       .catch(function () {
@@ -240,6 +464,7 @@
       });
   }
 
+  wireSetup();
   start();
 })();
 </script>
