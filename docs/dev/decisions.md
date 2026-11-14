@@ -14,6 +14,7 @@
 | 2026-11-14 | 설치할 때 24시간 구동(서비스) 등록을 묻고 기본값은 "예"다 | 설치 |
 | 2026-11-14 | 원본에서 가져오는 기능은 동작 원리를 먼저 뜯고 원본과 같은 동작으로 만든다 | `docs/dev/pipeline.md`, `docs/dev/conformance.md` |
 | 2026-11-14 | Claude 구독은 공식 Claude Code CLI를 부르는 방식(CLI 백엔드)으로 쓴다. 구독 토큰을 API에 직접 보내는 방식은 만들지 않는다(Anthropic이 금지) | D4, `docs/research/cli-backend.md` |
+| 2026-11-14 | 옛 기록 형식(시각 봉투)은 저장소가 남긴 경계 번호 이하에서만 푼다 | store 4차, gate 5차 |
 
 ## 아직 정해지지 않은 것
 
