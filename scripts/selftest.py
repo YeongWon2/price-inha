@@ -84,6 +84,7 @@ def build_fixture(fx):
     sh(["cargo", "fmt", "--all"], fx)
     sh(["git", "add", "-A"], fx)
     sh(["git", "commit", "-q", "-m", "base"], fx)
+    sh(["git", "tag", "base"], fx)
     for m in MODULES:
         sh(["git", "tag", f"red/{m}"], fx)
 
@@ -91,7 +92,10 @@ def build_fixture(fx):
 def reset(fx):
     sh(["git", "checkout", "-q", "--", "."], fx)
     sh(["git", "clean", "-fdq", "-e", "target"], fx)
-    sh(["git", "reset", "-q", "--hard", "HEAD"], fx)
+    # 앞 경우가 커밋하거나 태그를 옮겼어도 처음 상태로 되돌린다.
+    sh(["git", "reset", "-q", "--hard", "base"], fx)
+    for m in MODULES:
+        sh(["git", "tag", "-f", f"red/{m}", "base"], fx)
     shutil.rmtree(fx / ".pipeline", ignore_errors=True)
     shutil.rmtree(fx.parent / "vendor", ignore_errors=True)
 
@@ -220,8 +224,6 @@ def main():
             sh(["git", "commit", "-qam", "x"], fx)
             sh(["git", "tag", "-f", "red/secrets"], fx)
         case(fx, "필수 번호가 빠지면 잡는다", drop_ids, verify, "✗ 5 필수 번호 빠짐 (secrets)")
-        sh(["git", "reset", "-q", "--hard", "red/store"], fx)
-        sh(["git", "tag", "-f", "red/secrets"], fx)
 
         fake_key = "sk-" + "ant-" + "A" * 30
         case(fx, "키처럼 생긴 글자를 잡는다",
@@ -274,6 +276,15 @@ def main():
                     sh(pl + ["start", "N1", "store"], fx)
                     sh(pl + ["gate", "G1", "store"], fx)
             case(fx, "반복: 같은 실패 3번이면 사람에게 넘긴다", three_fails, pl + ["status"], "사람에게", should_fail=False)
+            def red_autolock():
+                todo_lib()
+                sh(["git", "tag", "-d", "red/store"], fx)
+                sh(pl + ["start", "N1", "store"], fx)
+                sh(pl + ["gate", "G1", "store"], fx)
+            case(fx, "그래프: G1 을 통과하면 바로 잠기고 작업 폴더가 깨끗하다", red_autolock,
+                 ["bash", "-c", "test -z \"$(git status --porcelain)\" && git tag -l red/store && python3 -c 'import json;print(json.load(open(\".pipeline/state.json\"))[\"store\"][\"stage\"])'"],
+                 ["red/store", "locked"], should_fail=False)
+
             def green_commit():
                 for c in (["start", "N1", "store"],):
                     sh(pl + c, fx)

@@ -166,6 +166,11 @@ def cmd_gate(st, a):
         d["stage"] = "red_ok" if gate == "G1" else "green"
         d["fails"], d["last_fail"] = 0, ""
         d["log"].append(f"{gate} 통과")
+        if gate == "G1":
+            # red 를 확인하면 바로 잠근다. 남겨 두면 그 사이에 테스트가 바뀌거나 다른 모듈의 범위 검사에 걸린다.
+            save(st)
+            cmd_lock(st, [m])
+            return
         if gate == "G2":
             # 통과한 구현은 바로 커밋한다. 남겨 두면 다른 모듈의 범위 검사가 "맡지 않은 곳"으로 본다.
             run(["git", "add", "--", *dirs(m), "Cargo.lock"])
@@ -189,6 +194,12 @@ def cmd_lock(st, a):
     d = mod(st, m)
     if d["stage"] != "red_ok":
         sys.exit(f"아직 안 된다: 잠그기는 G1 을 통과한 뒤에 한다 (지금: {LABEL[d['stage']]})")
+    # G1 뒤에 고친 것이 있을 수 있으니 잠그기 직전에 한 번 더 확인한다.
+    code, out = run(["bash", "scripts/red.sh", m])
+    if code != 0:
+        d["stage"] = "n1"
+        save(st)
+        sys.exit(out + "\n잠그지 않았다: G1 을 다시 통과해야 한다 (N1 로 되돌림)")
     run(["git", "add", "--", *dirs(m), "Cargo.lock"])
     code, out = run(["git", "commit", "-q", "-m", f"test({m}): 테스트와 뼈대 (red)\n\nG1 통과. 이 뒤로 tests/ 는 잠긴다.", "--", *dirs(m), "Cargo.lock"])
     if code != 0:
