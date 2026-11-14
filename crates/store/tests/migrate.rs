@@ -300,42 +300,42 @@ fn assert_v1_data(store: &Store) {
 
 // 검증: D6
 #[test]
-fn 스키마_버전은_3이고_새_저장소는_3으로_만들어진다() {
-    assert_eq!(SCHEMA_VERSION, 3);
+fn 스키마_버전은_4이고_새_저장소는_4로_만들어진다() {
+    assert_eq!(SCHEMA_VERSION, 4);
     let (_dir, path, store) = temp_store();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     drop(store);
-    assert_eq!(raw_user_version(&path), 3);
+    assert_eq!(raw_user_version(&path), 4);
 }
 
 // 검증: D6, V6, M1, M2, C2, E3, M6
 #[test]
-fn 버전_1_파일을_열면_3으로_올라가고_자료가_그대로다() {
+fn 버전_1_파일을_열면_4로_올라가고_자료가_그대로다() {
     let (_dir, path) = v1_copy();
     // 복사한 파일은 정말 버전 1이다.
     assert_eq!(raw_user_version(&path), 1);
 
     let store = Store::open(&path).unwrap();
     let info = store.info().unwrap();
-    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.schema_version, 4);
     assert_eq!(info.journal_mode, "wal");
     assert!(info.foreign_keys);
     assert_v1_data(&store);
     drop(store);
-    assert_eq!(raw_user_version(&path), 3);
+    assert_eq!(raw_user_version(&path), 4);
 }
 
 // 검증: D6, V6
 #[test]
-fn 올린_파일을_다시_열어도_버전_3이고_이전을_되풀이하지_않는다() {
+fn 올린_파일을_다시_열어도_버전_4이고_이전을_되풀이하지_않는다() {
     let (_dir, path) = v1_copy();
     drop(Store::open(&path).unwrap());
     for _ in 0..3 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 3);
+        assert_eq!(store.info().unwrap().schema_version, 4);
         assert_v1_data(&store);
         drop(store);
-        assert_eq!(raw_user_version(&path), 3);
+        assert_eq!(raw_user_version(&path), 4);
     }
 }
 
@@ -344,11 +344,11 @@ fn 올린_파일을_다시_열어도_버전_3이고_이전을_되풀이하지_�
 fn 버전_1_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는다() {
     let (_dir, path) = v1_copy();
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     std::mem::forget(store);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     assert_v1_data(&store);
 }
 
@@ -357,7 +357,7 @@ fn 버전_1_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는�
 fn 올린_뒤에도_이벤트와_접속_기록과_팀_기록과_매매_번호가_이어진다() {
     let (_dir, path) = v1_copy();
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
 
     assert_eq!(
         store.append("chat", &json!({ "text": "올린 뒤" })).unwrap(),

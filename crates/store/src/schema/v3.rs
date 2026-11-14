@@ -65,7 +65,7 @@ mod tests {
         v2_file(&path, "");
         let before = trigger_sql(&Connection::open(&path).unwrap()).unwrap();
         let conn = open(&path).unwrap();
-        assert_eq!(user_version(&conn).unwrap(), 3);
+        assert_eq!(user_version(&conn).unwrap(), 4);
         assert_eq!(trigger_sql(&conn).unwrap(), before);
         // 새로 만든 파일도 같은 트리거다.
         let (_dir2, fresh) = temp_path();

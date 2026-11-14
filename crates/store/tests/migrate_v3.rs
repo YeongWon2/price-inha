@@ -1,5 +1,6 @@
 #![cfg(test)]
 //! 3차 규칙 3 · 4: 스키마 버전 3. 버전 1 · 2 파일을 열면 3으로 올라가고 자료가 그대로다.
+//! (4차: 최신 스키마 버전이 4가 되어, 열고 난 뒤의 버전을 단언하는 곳만 4로 바꿨다.)
 //!
 //! `tests/fixtures/v2.db`는 3차를 시작하기 전의 코드(스키마 버전 2)로 만든 저장소 파일이다.
 //! WAL을 체크포인트해 파일 하나로 두었다. 테스트는 그 파일을 임시 폴더에 복사해서 연다.
@@ -273,19 +274,19 @@ fn assert_v2_data(store: &Store) {
 
 // 검증: D6, V6, M1, M2, M5, C2, E3, M6
 #[test]
-fn 버전_2_파일을_열면_3으로_올라가고_자료가_그대로다() {
+fn 버전_2_파일을_열면_4로_올라가고_자료가_그대로다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     // 복사한 파일은 정말 버전 2다.
     assert_eq!(raw_user_version(&path), 2);
 
     let store = Store::open(&path).unwrap();
     let info = store.info().unwrap();
-    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.schema_version, 4);
     assert_eq!(info.journal_mode, "wal");
     assert!(info.foreign_keys);
     assert_v2_data(&store);
     drop(store);
-    assert_eq!(raw_user_version(&path), 3);
+    assert_eq!(raw_user_version(&path), 4);
 }
 
 // 검증: D6, V6, C2, E3
@@ -315,16 +316,16 @@ fn 봉투_모양이던_줄의_시각이_이벤트_시각으로_나오고_내용�
 
 // 검증: D6, V6, C2, E3
 #[test]
-fn 올린_버전_2_파일을_다시_열어도_버전_3이고_자료와_시각이_그대로다() {
+fn 올린_버전_2_파일을_다시_열어도_버전_4이고_자료와_시각이_그대로다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     drop(Store::open(&path).unwrap());
     for _ in 0..3 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 3);
+        assert_eq!(store.info().unwrap().schema_version, 4);
         assert_v2_data(&store);
         assert_eq!(store.read_events(all(), 100).unwrap(), v2_timed_events());
         drop(store);
-        assert_eq!(raw_user_version(&path), 3);
+        assert_eq!(raw_user_version(&path), 4);
     }
 }
 
@@ -333,11 +334,11 @@ fn 올린_버전_2_파일을_다시_열어도_버전_3이고_자료와_시각이
 fn 버전_2_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     std::mem::forget(store);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     assert_v2_data(&store);
     assert_eq!(store.read_events(all(), 100).unwrap(), v2_timed_events());
 }
@@ -347,7 +348,7 @@ fn 버전_2_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는�
 fn 버전_2_파일을_올린_뒤에도_번호가_이어지고_새_이벤트에_시각이_남는다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
 
     assert_eq!(
         store.append("chat", &json!({ "text": "올린 뒤" })).unwrap(),
@@ -489,7 +490,7 @@ fn 옛_이름의_줄은_그대로_읽히지만_그_이름으로_새로_쌓을_�
 fn 버전_2_파일을_올린_뒤에도_쓴_승인_번호는_다시_쓰지_못한다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
     for number in [41, 77] {
         match store.set_trade_approval(
             TradeId(1),
@@ -508,11 +509,11 @@ fn 버전_2_파일을_올린_뒤에도_쓴_승인_번호는_다시_쓰지_못한
 
 // 검증: D6, V6, C2, E3
 #[test]
-fn 버전_1_파일의_이벤트는_3으로_올린_뒤_시각이_없음으로_읽힌다() {
+fn 버전_1_파일의_이벤트는_4로_올린_뒤_시각이_없음으로_읽힌다() {
     let (_dir, path) = copy_of(FIXTURE_V1);
     assert_eq!(raw_user_version(&path), 1);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 3);
+    assert_eq!(store.info().unwrap().schema_version, 4);
 
     let plain = store.read_after(0, 100).unwrap();
     assert_eq!(plain.len(), 3);
@@ -535,7 +536,7 @@ fn 버전_1_파일의_이벤트는_3으로_올린_뒤_시각이_없음으로_읽
         4
     );
     drop(store);
-    assert_eq!(raw_user_version(&path), 3);
+    assert_eq!(raw_user_version(&path), 4);
 }
 
 // ───────────── 3차 규칙 4: 기록 보호는 그대로다 ─────────────
@@ -598,12 +599,12 @@ fn event_tables(path: &Path) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-/// 버전 3 파일의 기록 표에 고치기 · 지우기 · 다시 넣기를 해 보고 공개 API로 읽은 것이 그대로인지 본다.
+/// 버전 4 파일의 기록 표에 고치기 · 지우기 · 다시 넣기를 해 보고 공개 API로 읽은 것이 그대로인지 본다.
 fn assert_records_protected(path: &Path) {
     let before = read_records(path);
     assert!(before.events.len() >= 3);
     assert!(before.timed_events.iter().any(|e| e.at.is_some()));
-    assert_eq!(raw_user_version(path), 3);
+    assert_eq!(raw_user_version(path), 4);
 
     let mut sqls: Vec<String> = Vec::new();
     let tables = event_tables(path);
@@ -658,7 +659,7 @@ fn assert_records_protected(path: &Path) {
 
 // 검증: D6, C2, E3, M6, M1
 #[test]
-fn 새로_만든_버전_3_파일의_기록_표는_시각_칸까지_어떤_sql로도_바뀌지_않는다() {
+fn 새로_만든_버전_4_파일의_기록_표는_시각_칸까지_어떤_sql로도_바뀌지_않는다() {
     let (_dir, path, store) = temp_store();
     for (to, cause) in [
         (TeamState::Operating, TeamCause::TradingStart),
@@ -722,4 +723,23 @@ fn 버전_1에서_올린_파일의_기록_표도_시각_칸까지_어떤_sql로�
     );
     drop(store);
     assert_records_protected(&path);
+}
+
+// ───────────── 4차: 이미 버전 3인 파일 ─────────────
+
+/// 4차를 시작하기 전의 코드(스키마 버전 3)로 `v2.db`를 올린 뒤 이벤트 4개를 더 쌓은 파일
+/// (`legacy_boundary.rs` 머리말).
+const FIXTURE_V3: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v3.db");
+
+// 검증: D6, V6, C2, E3, M6, M1
+#[test]
+fn 버전_3에서_올린_파일의_기록_표도_시각_칸까지_어떤_sql로도_바뀌지_않는다() {
+    let (_dir, path) = copy_of(FIXTURE_V3);
+    assert_eq!(raw_user_version(&path), 3);
+    drop(Store::open(&path).unwrap());
+    assert_records_protected(&path);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.read_after(0, 100).unwrap().len(), 11);
+    assert_eq!(store.read_after(0, 7).unwrap(), v2_events());
 }

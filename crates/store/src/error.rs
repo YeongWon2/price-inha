@@ -104,15 +104,34 @@ pub enum StoreError {
     /// 어긋난다. 이벤트는 쌓이지 않고 번호도 쓰지 않는다. (3차)
     #[error("이벤트 종류 이름이 규칙에 어긋난다: {kind:?}")]
     InvalidEventKind {
-        /// 거부된 이름.
+        /// 거부된 이름. 받은 이름(앞뒤 공백을 떼기 전) 그대로다.
+        ///
+        /// (4차) 받은 이름이 [`crate::REJECTED_KIND_KEEP_CHARS`]자보다 길면 앞
+        /// [`crate::REJECTED_KIND_KEEP_CHARS`]자 뒤에 `…`(U+2026) 한 글자를 붙여 담는다(글자 단위로
+        /// 자르므로 여러 바이트 글자가 깨지지 않는다). 그 이하이면 그대로 담는다.
         kind: String,
     },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),
-    /// 파일이 이 저장소의 것이 아니거나, 이 프로그램이 아는 것보다 새 스키마다.
+    /// 열려는 파일을 이 저장소로 쓸 수 없다: 이 저장소가 만든 파일이 아니거나(다른 표가 있거나
+    /// 표시가 다르다), 이 프로그램이 아는 것보다 새 스키마이거나, 스키마 버전 값이 이상하거나,
+    /// WAL을 켤 수 없다.
+    ///
+    /// (4차) 저장 파일을 만들거나 권한을 맞추는 파일 시스템 오류는 여기에 담지 않는다:
+    /// [`StoreError::FileAccess`].
     #[error("저장소 파일을 쓸 수 없다: {0}")]
     Incompatible(String),
+    /// 저장 파일을 만들거나 그 권한을 보거나 좁히는 파일 시스템 작업이 실패했다
+    /// (예: 쓸 수 없는 폴더에 새 저장소를 열려 했다). (4차)
+    #[error("저장 파일을 다룰 수 없다: {}: {source}", path.display())]
+    FileAccess {
+        /// 다루려던 파일(본 파일이나 딸린 파일 `-wal` · `-shm`).
+        path: std::path::PathBuf,
+        /// 파일 시스템 오류.
+        #[source]
+        source: std::io::Error,
+    },
     /// SQLite 오류.
     #[error("SQLite 오류: {0}")]
     Sqlite(#[from] rusqlite::Error),
