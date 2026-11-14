@@ -115,14 +115,30 @@ impl Settings {
             Some((value, name)) => market(&value, name)?,
             None => Market::Kr,
         };
-        let quote_interval = match pick(&given.interval_ms, ARG_INTERVAL_MS, ENV_QUOTE_INTERVAL_MS)
-        {
+        // 간격들: 밀리초로 받고 0은 받지 않는다.
+        let millis = |picked: Option<(String, &'static str)>, default: Duration| match picked {
             Some((value, name)) => match parsed::<u64>(&value, name)? {
-                0 => return Err(SettingsError::InvalidValue { name }),
-                millis => Duration::from_millis(millis),
+                0 => Err(SettingsError::InvalidValue { name }),
+                millis => Ok(Duration::from_millis(millis)),
             },
-            None => DEFAULT_QUOTE_INTERVAL,
+            None => Ok(default),
         };
+        let quote_interval = millis(
+            pick(&given.interval_ms, ARG_INTERVAL_MS, ENV_QUOTE_INTERVAL_MS),
+            DEFAULT_QUOTE_INTERVAL,
+        )?;
+        let retry_initial = millis(
+            pick(
+                &given.retry_initial_ms,
+                ARG_RETRY_INITIAL_MS,
+                ENV_RETRY_INITIAL_MS,
+            ),
+            DEFAULT_RETRY_INITIAL,
+        )?;
+        let retry_max = millis(
+            pick(&given.retry_max_ms, ARG_RETRY_MAX_MS, ENV_RETRY_MAX_MS),
+            DEFAULT_RETRY_MAX,
+        )?;
         Ok(Settings {
             home,
             bind,
@@ -130,8 +146,8 @@ impl Settings {
             symbols,
             market,
             quote_interval,
-            retry_initial: DEFAULT_RETRY_INITIAL,
-            retry_max: DEFAULT_RETRY_MAX,
+            retry_initial,
+            retry_max,
             demo: given.demo,
         })
     }
@@ -162,16 +178,20 @@ const ARG_PORT: &str = "--port";
 const ARG_SYMBOLS: &str = "--symbols";
 const ARG_MARKET: &str = "--market";
 const ARG_INTERVAL_MS: &str = "--interval-ms";
+const ARG_RETRY_INITIAL_MS: &str = "--retry-initial-ms";
+const ARG_RETRY_MAX_MS: &str = "--retry-max-ms";
 const ARG_DEMO: &str = "--demo";
 
 /// 읽는 환경 변수 전부.
-const ENV_NAMES: [&str; 6] = [
+const ENV_NAMES: [&str; 8] = [
     ENV_HOME,
     ENV_BIND,
     ENV_PORT,
     ENV_SYMBOLS,
     ENV_MARKET,
     ENV_QUOTE_INTERVAL_MS,
+    ENV_RETRY_INITIAL_MS,
+    ENV_RETRY_MAX_MS,
 ];
 
 /// 종목 코드 하나의 가장 긴 길이.
@@ -186,6 +206,8 @@ struct Given {
     symbols: Option<String>,
     market: Option<String>,
     interval_ms: Option<String>,
+    retry_initial_ms: Option<String>,
+    retry_max_ms: Option<String>,
     demo: bool,
 }
 
@@ -205,6 +227,8 @@ impl Given {
                 ARG_SYMBOLS => (&mut given.symbols, ARG_SYMBOLS),
                 ARG_MARKET => (&mut given.market, ARG_MARKET),
                 ARG_INTERVAL_MS => (&mut given.interval_ms, ARG_INTERVAL_MS),
+                ARG_RETRY_INITIAL_MS => (&mut given.retry_initial_ms, ARG_RETRY_INITIAL_MS),
+                ARG_RETRY_MAX_MS => (&mut given.retry_max_ms, ARG_RETRY_MAX_MS),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };

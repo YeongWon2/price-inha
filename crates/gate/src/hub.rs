@@ -41,6 +41,8 @@ pub(crate) struct Hub {
     clock: Arc<dyn Clock>,
     redactor: Arc<dyn Redactor>,
     send_buffer: usize,
+    /// 발행하는 내용 하나(JSON으로 적은 글)의 크기 상한(바이트).
+    max_frame_bytes: usize,
     /// 저장 · 나눠 보내기 · 연결 올리기의 순서를 하나로 세운다.
     order: tokio::sync::Mutex<()>,
     inner: Mutex<Inner>,
@@ -82,6 +84,7 @@ impl Hub {
         clock: Arc<dyn Clock>,
         redactor: Arc<dyn Redactor>,
         send_buffer: usize,
+        max_frame_bytes: usize,
     ) -> Self {
         Self {
             store,
@@ -89,6 +92,7 @@ impl Hub {
             redactor,
             // tokio의 줄은 크기 0을 받지 않는다.
             send_buffer: send_buffer.max(1),
+            max_frame_bytes,
             order: tokio::sync::Mutex::new(()),
             inner: Mutex::new(Inner::default()),
         }
@@ -107,8 +111,32 @@ impl Hub {
         &*self.clock
     }
 
-    /// 저장하고 나눠 보낸다. 저장소가 붙인 번호를 돌려준다.
+    /// 내용이 크기 상한 안인가.
+    fn fits(&self, payload: &Value) -> bool {
+        frame::json_len(payload) <= self.max_frame_bytes
+    }
+
+    /// 가린 내용을 돌려준다. 가리기 전이나 뒤에 크기 상한을 넘으면 `None`.
+    ///
+    /// 가리기 전에 먼저 재서, 너무 큰 내용에는 가리기 일을 하지 않는다. 가린 뒤에 다시 재는 것은
+    /// 저장되고 나가는 것이 가린 쪽이기 때문이다(가린 글자가 원래 값보다 길 수 있다).
+    fn redact_within_limit(&self, payload: Value) -> Option<Value> {
+        if !self.fits(&payload) {
+            return None;
+        }
+        let payload = frame::redact_value(&*self.redactor, payload);
+        self.fits(&payload).then_some(payload)
+    }
+
+    /// 가리고 저장하고 나눠 보낸다. 저장소가 붙인 번호를 돌려준다.
     pub(crate) async fn publish(&self, kind: String, payload: Value) -> Result<u64, GateError> {
+        // 저장소에 쓰기 전에 가린다(N8). 종류 이름도 같다.
+        let payload = self
+            .redact_within_limit(payload)
+            .ok_or(GateError::FrameTooLarge {
+                limit: self.max_frame_bytes,
+            })?;
+        let kind = self.redactor.redact(&kind);
         let _order = self.order.lock().await;
         if self.lock().closed {
             return Err(GateError::Closed);
@@ -125,13 +153,22 @@ impl Hub {
         .await
         .map_err(|_| GateError::Task)??;
         let seq = event.seq;
+        // 프레임을 만들 때 한 번 더 가린다(다시 보낼 때와 같은 길).
         let frame = frame::stored(&*self.redactor, event);
         self.broadcast(&mut self.lock(), &frame);
         Ok(seq)
     }
 
     /// 지나가는 이벤트를 보낸다. 종류마다 가장 최근 것 하나를 기억한다.
+    /// 크기 상한을 넘으면 보내지도 기억하지도 않는다.
     pub(crate) fn publish_transient(&self, kind: &str, payload: Value) {
+        let Some(payload) = self.redact_within_limit(payload) else {
+            tracing::warn!(
+                limit = self.max_frame_bytes,
+                "크기 상한을 넘는 지나가는 이벤트를 버립니다"
+            );
+            return;
+        };
         let frame = frame::transient(&*self.redactor, kind, payload, self.clock.now());
         let mut inner = self.lock();
         if inner.closed {

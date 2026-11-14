@@ -1,11 +1,14 @@
 //! 조립: `pi-secrets`를 `pi-market` · `pi-ai`의 자격 자리와 확인기에 잇는다.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use pi_ai::AnthropicConfig;
 use pi_market::TossConfig;
 use pi_secrets::{Credentials, KeyKind, SecretStore, Verifier, VerifyFailure};
+
+use crate::retry::{LOG_EVERY, LogGate};
 
 /// 바깥 서버 설정. 테스트는 가짜 서버 주소를 넣는다.
 #[derive(Debug, Clone, Default)]
@@ -21,28 +24,72 @@ pub struct Upstreams {
 /// 부를 때마다 보관소를 읽는다. 등록되지 않았거나 읽지 못하면 `None`(V31).
 pub struct BrokerKeys {
     store: Arc<SecretStore>,
+    /// 읽지 못했다는 경고를 묶는다(키가 없는 동안 2초마다 읽는다).
+    quiet: Quiet,
 }
 
 impl BrokerKeys {
     /// 보관소에 잇는다.
     pub fn new(store: Arc<SecretStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            quiet: Quiet::default(),
+        }
     }
 }
 
 impl pi_market::CredentialSource for BrokerKeys {
     fn credentials(&self) -> Option<pi_market::Credentials> {
-        let values = read_kind(&self.store, KeyKind::Broker)?;
+        let values = read_kind(&self.store, KeyKind::Broker, &self.quiet)?;
         broker_credentials(&values)
     }
 }
 
+/// 되풀이되는 같은 경고를 묶는 자리(자격 자리는 `&self`로 불리므로 잠금 안에 둔다).
+struct Quiet(Mutex<LogGate>);
+
+impl Default for Quiet {
+    fn default() -> Self {
+        Self(Mutex::new(LogGate::new(LOG_EVERY)))
+    }
+}
+
+impl Quiet {
+    /// 이 실패를 지금 기록할 것인가.
+    fn should_log(&self, what: &str) -> bool {
+        // 잠금을 쥔 채 죽은 스레드가 있어도 묶는 값은 온전하다.
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .should_log(what, Instant::now())
+    }
+
+    /// 실패가 풀렸다.
+    fn clear(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
+}
+
 /// 보관소에서 한 종류를 읽는다. 없거나 읽지 못하면 `None`(값은 기록하지 않는다).
-fn read_kind(store: &SecretStore, kind: KeyKind) -> Option<Credentials> {
+///
+/// 읽지 못한 경고는 실패가 바뀔 때와 [`LOG_EVERY`]마다만 남긴다(같은 경고를 끝없이 찍지 않는다).
+fn read_kind(store: &SecretStore, kind: KeyKind, quiet: &Quiet) -> Option<Credentials> {
     match store.read(kind) {
-        Ok(values) => values,
+        Ok(values) => {
+            quiet.clear();
+            values
+        }
         Err(error) => {
-            tracing::warn!(?kind, %error, "키 파일을 읽지 못해 등록되지 않은 것으로 봅니다");
+            if quiet.should_log(&error.to_string()) {
+                tracing::warn!(
+                    ?kind,
+                    %error,
+                    "키 파일을 읽지 못해 등록되지 않은 것으로 봅니다(같은 실패는 1분에 한 번만 기록합니다)"
+                );
+            }
             None
         }
     }
@@ -69,24 +116,31 @@ fn broker_credentials(values: &Credentials) -> Option<pi_market::Credentials> {
 /// 둘 다 있으면 API 키를 쓴다.
 pub struct AiKeys {
     store: Arc<SecretStore>,
+    /// 읽지 못했다는 경고를 종류마다 묶는다.
+    quiet_api_key: Quiet,
+    quiet_oauth: Quiet,
 }
 
 impl AiKeys {
     /// 보관소에 잇는다.
     pub fn new(store: Arc<SecretStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            quiet_api_key: Quiet::default(),
+            quiet_oauth: Quiet::default(),
+        }
     }
 }
 
 #[async_trait]
 impl pi_ai::CredentialSource for AiKeys {
     async fn current(&self) -> Option<pi_ai::Credential> {
-        let api_key = read_kind(&self.store, KeyKind::AiApiKey)
+        let api_key = read_kind(&self.store, KeyKind::AiApiKey, &self.quiet_api_key)
             .and_then(|values| field(&values, "api_key").map(pi_ai::Secret::new));
         if let Some(key) = api_key {
             return Some(pi_ai::Credential::ApiKey(key));
         }
-        read_kind(&self.store, KeyKind::AiOAuth)
+        read_kind(&self.store, KeyKind::AiOAuth, &self.quiet_oauth)
             .and_then(|values| field(&values, "access_token").map(pi_ai::Secret::new))
             .map(pi_ai::Credential::OAuthToken)
     }

@@ -150,6 +150,9 @@
     if (state === "no_broker_key") { text = "증권사 키가 없음 (시세를 받지 않습니다)"; kind = "bad"; }
     else if (state === "demo") { text = "시연 (가짜 시세)"; kind = "warn"; }
     else if (state === "live") { text = "증권사 시세"; kind = "ok"; }
+    else if (state === "connecting") { text = "증권사에 연결 중 (아직 받은 시세가 없습니다)"; kind = "warn"; }
+    else if (state === "broker_rejected") { text = "증권사가 키를 받지 않음 (키나 허용 IP를 확인하세요 · 간격을 늘려 다시 시도 중)"; kind = "bad"; }
+    else if (state === "broker_unreachable") { text = "증권사에 닿지 않음 (간격을 늘려 다시 시도 중)"; kind = "bad"; }
     setText($feed, text);
     $feed.className = kind;
     $feed.hidden = false;
@@ -162,7 +165,10 @@
     Object.keys(rows).forEach(function (symbol) {
       rows[symbol].tr.classList.toggle("late", lateSymbols[symbol] === true);
     });
-    setText($late, list.length > 0 ? "시세 늦음 (" + list.length + "종목)" : "시세 늦음");
+    // 장 시간을 모르는 채로 판단한 것이면 그렇게 적는다(장이 닫혀서 안 오는 것일 수도 있다).
+    var unknown = payload && payload.hours_unknown === true;
+    var text = list.length > 0 ? "시세 늦음 (" + list.length + "종목)" : "시세 늦음";
+    setText($late, unknown ? text + " · 장 시간을 모름" : text);
     $late.hidden = list.length === 0;
   }
 

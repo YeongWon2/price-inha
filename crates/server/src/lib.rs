@@ -9,6 +9,7 @@ mod error;
 mod feed;
 mod keys;
 mod page;
+mod retry;
 mod settings;
 
 pub use app::{

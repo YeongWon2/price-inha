@@ -67,19 +67,53 @@ fn build(
     if let Some(seq) = seq {
         map.insert("seq".to_owned(), Value::from(seq));
     }
-    map.insert("kind".to_owned(), Value::String(kind));
+    // 다 적은 글을 글자 치환으로 가리지 않는다(JSON이 깨질 수 있다). 값의 나무를 돌며 가린다:
+    // 가려진 글자는 언제나 문자열 자리에 들어가고, 뼈대(`seq` · `at`)는 이 모듈이 만든 값이라 그대로다.
+    map.insert("kind".to_owned(), Value::String(redactor.redact(&kind)));
     map.insert("payload".to_owned(), redact_value(redactor, payload));
     map.insert("at".to_owned(), at);
-    // 글자 하나하나를 먼저 가리고(JSON으로 적으면 모양이 바뀌는 따옴표 · 역빗금이 든 값도 잡는다),
-    // 다 적은 글 전체를 한 번 더 가린다(숫자로 적힌 값 · 종류 이름까지).
-    let text = Value::Object(map).to_string();
-    Frame::from(redactor.redact(&text))
+    Frame::from(Value::Object(map).to_string())
 }
 
-/// JSON 값 안의 모든 글자(값과 이름)를 가린다.
-fn redact_value(redactor: &dyn Redactor, value: Value) -> Value {
+/// 값을 JSON으로 적은 글의 바이트 수. 글을 만들지 않고 센다.
+pub(crate) fn json_len(value: &Value) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    match serde_json::to_writer(&mut count, value) {
+        Ok(()) => count.0,
+        // 세는 쪽은 실패하지 않는다. 그래도 실패하면 "잴 수 없이 크다"로 본다.
+        Err(_) => usize::MAX,
+    }
+}
+
+/// 글자가 아닌 값(숫자 · 불린 · null)을 가린다: JSON으로 적은 글자가 가리기 대상과 겹치면
+/// 가려진 **문자열**로 바꾸고, 겹치지 않으면 그대로 둔다.
+fn redact_scalar(redactor: &dyn Redactor, value: Value) -> Value {
+    let text = value.to_string();
+    let redacted = redactor.redact(&text);
+    if redacted == text {
+        value
+    } else {
+        Value::String(redacted)
+    }
+}
+
+/// JSON 값 안의 모든 글자(값과 이름, 숫자로 적힌 값까지)를 가린다. 결과는 언제나 JSON 값이다.
+pub(crate) fn redact_value(redactor: &dyn Redactor, value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(redactor.redact(&text)),
+        scalar @ (Value::Number(_) | Value::Bool(_) | Value::Null) => {
+            redact_scalar(redactor, scalar)
+        }
         Value::Array(items) => Value::Array(
             items
                 .into_iter()
@@ -91,7 +125,6 @@ fn redact_value(redactor: &dyn Redactor, value: Value) -> Value {
                 .map(|(name, item)| (redactor.redact(&name), redact_value(redactor, item)))
                 .collect(),
         ),
-        other => other,
     }
 }
 
@@ -168,13 +201,51 @@ mod tests {
     }
 
     #[test]
-    fn 숫자로_적힌_값도_글_전체에서_가린다() {
+    fn 숫자로_적힌_값은_가려진_문자열이_되고_프레임은_json이다() {
         let frame = transient(
             &Mask("123456789"),
             "n",
-            json!({ "v": 123456789 }),
+            json!({ "v": 123456789, "in": 91234567890_u64, "list": [123456789, 5], "ok": true }),
+            UnixMillis(1_234_567_890),
+        );
+        assert!(!frame.as_str().contains("123456789\""));
+        let value = parse(&frame);
+        assert_eq!(value["payload"]["v"], json!("[x]"));
+        assert_eq!(value["payload"]["in"], json!("9[x]0"));
+        assert_eq!(value["payload"]["list"], json!(["[x]", 5]));
+        assert_eq!(value["payload"]["ok"], json!(true));
+        // 뼈대는 이 모듈이 만든 값이라 숫자로 남는다.
+        assert_eq!(value["at"], json!(1_234_567_890));
+    }
+
+    #[test]
+    fn 불린과_null도_겹치면_문자열로_가린다() {
+        let frame = transient(
+            &Mask("true"),
+            "n",
+            json!({ "a": true, "b": false, "c": null }),
             UnixMillis(1),
         );
-        assert!(!frame.as_str().contains("123456789"));
+        let value = parse(&frame);
+        assert_eq!(
+            value["payload"],
+            json!({ "a": "[x]", "b": false, "c": null })
+        );
+    }
+
+    #[test]
+    fn 종류_이름도_가린다() {
+        let frame = transient(&Mask("hidden"), "k-hidden", json!(1), UnixMillis(1));
+        assert_eq!(parse(&frame)["kind"], json!("k-[x]"));
+    }
+
+    #[test]
+    fn 글의_바이트_수는_적은_글과_같다() {
+        for value in [
+            json!({ "text": "가나다", "n": [1, 2.5, null] }),
+            json!("\"\n"),
+        ] {
+            assert_eq!(json_len(&value), value.to_string().len());
+        }
     }
 }

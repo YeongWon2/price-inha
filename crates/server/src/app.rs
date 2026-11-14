@@ -1,6 +1,6 @@
 //! 서버 조립: 저장소 · 비밀 보관소 · 시세 · 접속 관문을 잇는다.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use pi_gate::{Gate, GateConfig, GateServer, Publisher};
@@ -11,7 +11,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::demo::DemoAdapter;
-use crate::feed::{Feed, Source};
+use crate::feed::{Feed, Pace, Source};
 use crate::{AppError, BrokerKeys, SecretsRedactor, Settings, Upstreams, page};
 
 /// 저장소 파일 이름(보관 폴더 안).
@@ -74,7 +74,12 @@ impl pi_gate::Clock for GateClock {
 /// 모든 주소로 열었으면(`0.0.0.0` · `::`) 그 주소로는 들어올 수 없으므로 같은 계열의
 /// 루프백(`127.0.0.1` · `::1`)과 같은 포트를 돌려준다. 그 밖에는 그대로 돌려준다.
 pub fn announce_addr(local: SocketAddr) -> SocketAddr {
-    todo!("2차 5번: {local}")
+    let loopback = match local.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        _ => return local,
+    };
+    SocketAddr::new(loopback, local.port())
 }
 
 /// 떠 있는 서버.
@@ -148,7 +153,11 @@ impl App {
             wiring.clock,
             settings.market,
             settings.symbols,
-            settings.quote_interval,
+            Pace {
+                interval: settings.quote_interval,
+                retry_initial: settings.retry_initial,
+                retry_max: settings.retry_max,
+            },
         );
         let (stop, mut stopping) = watch::channel(false);
         let feed = tokio::spawn(async move {

@@ -246,6 +246,7 @@ impl GateBuilder {
             self.clock,
             self.redactor,
             self.config.send_buffer,
+            self.config.max_frame_bytes,
         ));
         Gate {
             hub,

@@ -5,11 +5,12 @@
 use std::io::Write;
 use std::process::ExitCode;
 
-use price_inha::{App, AppError, Settings, SettingsError, Wiring};
+use price_inha::{App, AppError, Settings, SettingsError, Wiring, announce_addr};
 
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [--home <폴더>] [--bind <IP>] [--port <수>] \
-[--symbols <a,b,c>] [--market <kr|us>] [--interval-ms <수>] [--demo]";
+[--symbols <a,b,c>] [--market <kr|us>] [--interval-ms <수>] \
+[--retry-initial-ms <수>] [--retry-max-ms <수>] [--demo]";
 
 /// 끝난 까닭. 어느 쪽도 비밀 값을 담지 않는다.
 enum Failure {
@@ -60,7 +61,8 @@ async fn run() -> Result<(), Failure> {
     };
     say(&format!(
         "http://{} 에서 열렸습니다{mode}. 끄려면 Ctrl+C",
-        app.local_addr()
+        // 모든 주소로 열었으면 실제로 들어올 수 있는 주소(루프백)를 알려 준다.
+        announce_addr(app.local_addr())
     ));
     let waited = wait_for_stop().await;
     say("끄는 중입니다");
