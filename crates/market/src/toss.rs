@@ -7,12 +7,33 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
+use tokio::sync::Mutex;
 
 use crate::{
     Clock, CredentialSource, Credentials, Market, MarketAdapter, MarketCalendar, MarketError,
     Quote, Symbol,
 };
+
+mod http;
+mod wire;
+
+#[cfg(test)]
+mod tests;
+
+/// 현재가 경로.
+const PRICES_PATH: &str = "/api/v1/prices";
+/// 국내 장 시간 경로.
+const CALENDAR_KR_PATH: &str = "/api/v1/market-calendar/KR";
+/// 미국 장 시간 경로.
+const CALENDAR_US_PATH: &str = "/api/v1/market-calendar/US";
+/// 429에 `Retry-After`가 없을 때 기다리는 시간. 한도가 초당 기준이라 1초로 둔다.
+const FALLBACK_RETRY_WAIT: Duration = Duration::from_secs(1);
+/// `Retry-After`가 이것보다 길면 기다리지 않고 바로 한도 초과로 끝낸다
+/// (부른 쪽을 오래 붙잡지 않게).
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
+/// 토큰이 무효가 됐다는 뜻의 오류 코드. 이때만 한 번 다시 발급한다.
+const REISSUE_CODES: [&str; 2] = ["expired-token", "token-revoked"];
 
 /// 토스증권 Open API 기본 주소.
 pub const DEFAULT_BASE_URL: &str = "https://openapi.tossinvest.com";
@@ -43,7 +64,12 @@ impl Default for TossConfig {
     /// [`DEFAULT_BASE_URL`] · [`DEFAULT_TIMEOUT`] · [`DEFAULT_TOKEN_REFRESH_MARGIN`] ·
     /// [`DEFAULT_RATE_LIMIT_RETRIES`].
     fn default() -> Self {
-        todo!()
+        Self {
+            base_url: DEFAULT_BASE_URL.to_string(),
+            timeout: DEFAULT_TIMEOUT,
+            token_refresh_margin: DEFAULT_TOKEN_REFRESH_MARGIN,
+            rate_limit_retries: DEFAULT_RATE_LIMIT_RETRIES,
+        }
     }
 }
 
@@ -62,7 +88,101 @@ impl Default for TossConfig {
 ///   [`MarketError::NoCredentials`]를 돌려준다(V31).
 #[derive(Clone)]
 pub struct TossClient {
-    _private: (),
+    inner: Arc<Inner>,
+}
+
+/// 쥐고 있는 토큰. `Debug`를 만들지 않는다(토큰 글자가 기록으로 나가지 않게).
+struct CachedToken {
+    value: String,
+    expires_at: DateTime<Utc>,
+    /// 이 토큰을 받을 때 쓴 자격. 자격이 바뀌면 이 토큰을 버린다.
+    owner: Credentials,
+}
+
+struct Inner {
+    config: TossConfig,
+    /// 만들지 못했으면 요청할 때 그 오류를 돌려준다.
+    http: Result<reqwest::Client, MarketError>,
+    credentials: Arc<dyn CredentialSource>,
+    clock: Arc<dyn Clock>,
+    /// 발급하는 동안 쥐고 있어서, 동시에 온 요청들은 기다렸다가 같은 토큰을 쓴다.
+    token: Mutex<Option<CachedToken>>,
+}
+
+impl Inner {
+    /// 쓸 수 있는 토큰. 없거나 만료가 가까우면 발급한다.
+    async fn token(
+        &self,
+        http: &reqwest::Client,
+        credentials: &Credentials,
+    ) -> Result<String, MarketError> {
+        let mut slot = self.token.lock().await;
+        let now = self.clock.now();
+        if let Some(cached) = slot.as_ref() {
+            let remaining = cached.expires_at.signed_duration_since(now).to_std();
+            let fresh = remaining.is_ok_and(|left| left >= self.config.token_refresh_margin);
+            if fresh && cached.owner.same_as(credentials) {
+                return Ok(cached.value.clone());
+            }
+        }
+        *slot = None;
+        let issued = http::issue_token(http, &self.config, credentials).await?;
+        // 유효 시간은 요청을 보내기 전 시각부터 센다(실제보다 늦게 만료로 보지 않게).
+        let expires_at = i64::try_from(issued.expires_in)
+            .ok()
+            .and_then(chrono::Duration::try_seconds)
+            .and_then(|life| now.checked_add_signed(life))
+            .ok_or_else(|| http::unexpected("토큰"))?;
+        *slot = Some(CachedToken {
+            value: issued.value.clone(),
+            expires_at,
+            owner: credentials.clone(),
+        });
+        Ok(issued.value)
+    }
+
+    /// 무효가 된 토큰을 버린다. 그 사이 다른 요청이 이미 새 토큰을 받았으면 그대로 둔다.
+    async fn discard_token(&self, used: &str) {
+        let mut slot = self.token.lock().await;
+        if slot.as_ref().is_some_and(|cached| cached.value == used) {
+            *slot = None;
+        }
+    }
+
+    /// 토큰을 실어 GET 하나를 보내고 본문을 돌려준다. 자격 확인 · 무효 토큰 다시 발급 ·
+    /// 429 다시 시도를 여기서 한다.
+    async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<String, MarketError> {
+        let Some(credentials) = self.credentials.credentials() else {
+            // 키가 지워졌으면 그 키로 받은 토큰도 더 쓰지 않는다.
+            *self.token.lock().await = None;
+            return Err(MarketError::NoCredentials);
+        };
+        let http = self.http.as_ref().map_err(Clone::clone)?;
+        let url = http::endpoint(&self.config, path, query)?;
+        let mut retries_left = self.config.rate_limit_retries;
+        let mut reissued = false;
+        loop {
+            let token = self.token(http, &credentials).await?;
+            let request = http.get(url.clone()).bearer_auth(&token);
+            match http::send(request).await {
+                Err(MarketError::AuthFailed { code })
+                    if !reissued && REISSUE_CODES.contains(&code.as_str()) =>
+                {
+                    reissued = true;
+                    self.discard_token(&token).await;
+                }
+                Err(MarketError::RateLimited { retry_after }) if retries_left > 0 => {
+                    let wait = retry_after.unwrap_or(FALLBACK_RETRY_WAIT);
+                    if wait > MAX_RETRY_WAIT {
+                        return Err(MarketError::RateLimited { retry_after });
+                    }
+                    retries_left -= 1;
+                    self.clock.sleep(wait).await;
+                }
+                other => return other,
+            }
+        }
+    }
 }
 
 impl TossClient {
@@ -72,36 +192,65 @@ impl TossClient {
         credentials: Arc<dyn CredentialSource>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        todo!()
+        let http = http::build_client(&config);
+        Self {
+            inner: Arc::new(Inner {
+                config,
+                http,
+                credentials,
+                clock,
+                token: Mutex::new(None),
+            }),
+        }
     }
 
     /// 그 시장의 어댑터. 토큰은 이 연결의 것을 함께 쓴다.
     pub fn adapter(&self, market: Market) -> TossAdapter {
-        todo!()
+        TossAdapter {
+            inner: Arc::clone(&self.inner),
+            market,
+        }
     }
 }
 
 /// 토스증권의 시장 하나(국내 또는 미국).
 pub struct TossAdapter {
-    _private: (),
+    inner: Arc<Inner>,
+    market: Market,
 }
 
 #[async_trait]
 impl MarketAdapter for TossAdapter {
     fn market(&self) -> Market {
-        todo!()
+        self.market
     }
 
     /// `GET /api/v1/prices?symbols=a,b,c`. 200개가 넘으면 200개씩 나눠 부르고 순서대로 잇는다.
     /// `lastPrice` 문자열을 십진수로 읽는다. 받은 시각은 [`Clock::now`].
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
-        todo!()
+        let mut quotes = Vec::with_capacity(symbols.len());
+        for chunk in symbols.chunks(MAX_SYMBOLS_PER_REQUEST) {
+            let joined = chunk
+                .iter()
+                .map(Symbol::as_str)
+                .collect::<Vec<_>>()
+                .join(",");
+            let body = self.inner.get(PRICES_PATH, &[("symbols", &joined)]).await?;
+            quotes.extend(wire::parse_quotes(&body, self.inner.clock.now())?);
+        }
+        Ok(quotes)
     }
 
     /// `GET /api/v1/market-calendar/KR?date=YYYY-MM-DD`(국내) 또는 `/US`(미국).
     /// null인 세션은 뺀다. 국내 `integrated`가 null이면 그날 세션이 없다.
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
-        todo!()
+        let path = match self.market {
+            Market::Kr => CALENDAR_KR_PATH,
+            Market::Us => CALENDAR_US_PATH,
+        };
+        let date = date.format("%Y-%m-%d").to_string();
+        let body = self.inner.get(path, &[("date", &date)]).await?;
+        wire::parse_calendar(&body, self.market)
     }
 }
 
@@ -109,6 +258,10 @@ impl MarketAdapter for TossAdapter {
 ///
 /// 주의: 토스증권은 다시 발급하면 이전 토큰이 무효가 된다. 돌고 있는 [`TossClient`]가
 /// 같은 자격을 쓰고 있었다면 그쪽은 `token-revoked`를 받고 한 번 다시 발급한다.
+///
+/// 한 번만 보낸다: 429여도 기다렸다가 다시 보내지 않고 [`MarketError::RateLimited`]를 돌려준다.
 pub async fn verify(config: &TossConfig, credentials: &Credentials) -> Result<(), MarketError> {
-    todo!()
+    let http = http::build_client(config)?;
+    http::issue_token(&http, config, credentials).await?;
+    Ok(())
 }

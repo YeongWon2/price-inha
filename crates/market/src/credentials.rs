@@ -12,24 +12,35 @@ pub struct Credentials {
 impl Credentials {
     /// 자격을 만든다.
     pub fn new(client_id: impl Into<String>, client_secret: impl Into<String>) -> Self {
-        todo!()
+        Self {
+            client_id: client_id.into(),
+            client_secret: client_secret.into(),
+        }
     }
 
     /// client_id.
     pub fn client_id(&self) -> &str {
-        todo!()
+        &self.client_id
     }
 
     /// client_secret. 토큰 발급 요청 본문에만 쓴다.
     pub fn client_secret(&self) -> &str {
-        todo!()
+        &self.client_secret
+    }
+
+    /// 같은 자격인가. 쥐고 있는 토큰이 지금 자격으로 받은 것인지 볼 때 쓴다.
+    pub(crate) fn same_as(&self, other: &Credentials) -> bool {
+        self.client_id == other.client_id && self.client_secret == other.client_secret
     }
 }
 
 impl fmt::Debug for Credentials {
     /// client_id와 client_secret 글자를 내보내지 않는다.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        f.debug_struct("Credentials")
+            .field("client_id", &"<가림>")
+            .field("client_secret", &"<가림>")
+            .finish()
     }
 }
 

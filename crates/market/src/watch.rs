@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
+use tokio::time::MissedTickBehavior;
 
 use crate::{MarketAdapter, MarketError, Quote, Symbol};
 
@@ -28,5 +29,39 @@ pub fn watch(
     symbols: Vec<Symbol>,
     interval: Duration,
 ) -> mpsc::Receiver<WatchEvent> {
-    todo!()
+    let (tx, rx) = mpsc::channel(WATCH_BUFFER);
+    tokio::spawn(run(adapter, symbols, interval, tx));
+    rx
+}
+
+/// 받는 쪽이 느릴 때 쌓아 두는 개수. 넘으면 받는 쪽이 가져갈 때까지 다음 받기를 미룬다.
+const WATCH_BUFFER: usize = 8;
+
+async fn run(
+    adapter: Arc<dyn MarketAdapter>,
+    symbols: Vec<Symbol>,
+    interval: Duration,
+    tx: mpsc::Sender<WatchEvent>,
+) {
+    // tokio의 interval은 0이면 panic한다. 0이 와도 죽지 않게 가장 짧은 간격으로 바꾼다.
+    let mut ticker = tokio::time::interval(interval.max(Duration::from_millis(1)));
+    // 받기가 간격보다 오래 걸려도 밀린 만큼 몰아서 받지 않는다.
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        // 첫 tick은 바로 온다.
+        tokio::select! {
+            () = tx.closed() => return,
+            _ = ticker.tick() => {}
+        }
+        let event = tokio::select! {
+            () = tx.closed() => return,
+            result = adapter.quotes(&symbols) => match result {
+                Ok(quotes) => WatchEvent::Quotes(quotes),
+                Err(error) => WatchEvent::Failed(error),
+            },
+        };
+        if tx.send(event).await.is_err() {
+            return;
+        }
+    }
 }

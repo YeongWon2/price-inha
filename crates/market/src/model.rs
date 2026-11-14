@@ -20,12 +20,12 @@ pub struct Symbol(String);
 impl Symbol {
     /// 글자 그대로 심볼을 만든다(바꾸지 않는다).
     pub fn new(value: impl Into<String>) -> Self {
-        todo!()
+        Self(value.into())
     }
 
     /// 심볼 글자.
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -93,12 +93,12 @@ pub struct TradingDay {
 impl TradingDay {
     /// 세션이 하나도 없으면(휴장) 참.
     pub fn is_holiday(&self) -> bool {
-        todo!()
+        self.sessions.is_empty()
     }
 
     /// 그 종류의 세션. 없으면(부분 휴장 포함) `None`.
     pub fn session(&self, kind: SessionKind) -> Option<&Session> {
-        todo!()
+        self.sessions.iter().find(|session| session.kind == kind)
     }
 }
 
@@ -125,6 +125,14 @@ impl MarketCalendar {
     ///   09:00에 끝나고 정규장이 09:00에 시작하면 09:00은 정규장이다.
     /// - 국내 단일가 구간(`singlePriceAuction*`)은 따로 나누지 않고 그 세션에 넣는다.
     pub fn session_at(&self, at: DateTime<Utc>) -> Option<Session> {
-        todo!()
+        [
+            &self.previous_business_day,
+            &self.today,
+            &self.next_business_day,
+        ]
+        .into_iter()
+        .flat_map(|day| day.sessions.iter())
+        .find(|session| session.start <= at && at < session.end)
+        .cloned()
     }
 }

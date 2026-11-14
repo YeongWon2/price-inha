@@ -19,6 +19,6 @@ pub trait MarketAdapter: Send + Sync {
 
     /// 그 시각에 열려 있는 세션. 없으면 장 닫힘. 기본은 [`MarketCalendar::session_at`]과 같다.
     fn session_at(&self, calendar: &MarketCalendar, at: DateTime<Utc>) -> Option<Session> {
-        todo!()
+        calendar.session_at(at)
     }
 }

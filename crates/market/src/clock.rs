@@ -21,10 +21,10 @@ pub struct SystemClock;
 #[async_trait]
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
-        todo!()
+        Utc::now()
     }
 
     async fn sleep(&self, duration: Duration) {
-        todo!()
+        tokio::time::sleep(duration).await;
     }
 }

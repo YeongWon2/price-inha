@@ -19,7 +19,9 @@ pub struct StalePolicy {
 impl Default for StalePolicy {
     /// [`DEFAULT_STALE_AFTER`](30초).
     fn default() -> Self {
-        todo!()
+        Self {
+            max_age: DEFAULT_STALE_AFTER,
+        }
     }
 }
 
@@ -34,5 +36,12 @@ pub fn is_stale(
     now: DateTime<Utc>,
     policy: &StalePolicy,
 ) -> bool {
-    todo!()
+    if calendar.session_at(now).is_none() {
+        return false;
+    }
+    // 받은 시각이 지금보다 뒤면(시계가 어긋남) 나이를 잴 수 없으니 늦었다고 하지 않는다.
+    match now.signed_duration_since(quote.received_at).to_std() {
+        Ok(age) => age > policy.max_age,
+        Err(_) => false,
+    }
 }
