@@ -254,6 +254,10 @@ def main():
             todo_lib()
             (fx / "crates/store/tests/t.rs").write_text("#[test]\nfn adds() {\n    assert_eq!(pi_store::add(1, 2), 3);\n}\n")
         case(fx, "G1: 필수 번호가 빠지면 잡는다", red_noids, red + ["store"], "필수 번호 빠짐")
+        def red_upper():
+            todo_lib()
+            append(fx, "crates/store/tests/t.rs", "#[test]\nfn uses_IP_name() {\n    assert_eq!(pi_store::add(1, 2), 3);\n}")
+        case(fx, "G1: 테스트 이름이 clippy 에 걸리면 잡는다 (잠그기 전에)", red_upper, red + ["store"], "✗ 테스트 clippy")
         case(fx, "G1: 컴파일이 안 되면 잡는다",
              lambda: append(fx, "crates/store/tests/t.rs", "fn broken( {"), red + ["store"], "컴파일 안 됨")
 
@@ -270,6 +274,16 @@ def main():
                     sh(pl + ["start", "N1", "store"], fx)
                     sh(pl + ["gate", "G1", "store"], fx)
             case(fx, "반복: 같은 실패 3번이면 사람에게 넘긴다", three_fails, pl + ["status"], "사람에게", should_fail=False)
+            def green_commit():
+                for c in (["start", "N1", "store"],):
+                    sh(pl + c, fx)
+                st = fx / ".pipeline/state.json"
+                import json as _j
+                d = _j.loads(st.read_text()); d["store"]["stage"] = "n2"; st.write_text(_j.dumps(d))
+                append(fx, "crates/store/src/lib.rs", "/// 뺀다.\npub fn sub(a: i64, b: i64) -> i64 {\n    a - b\n}")
+                sh(pl + ["gate", "G2", "store"], fx)
+            case(fx, "그래프: G2 를 통과한 구현은 바로 커밋되어 작업 폴더가 깨끗하다", green_commit,
+                 ["bash", "-c", "test -z \"$(git status --porcelain)\" && git log -1 --format=%s"], "feat(store)", should_fail=False)
             case(fx, "권한: 맡지 않은 곳을 고치면 잡는다",
                  lambda: (sh(pl + ["start", "N1", "store"], fx), append(fx, "crates/ai/src/lib.rs", "// 남의 모듈")),
                  pl + ["scope"], "맡지 않은 곳")

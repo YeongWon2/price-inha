@@ -11,6 +11,7 @@
     pipeline.py scope                  진행 중인 노드가 맡지 않은 곳을 고쳤는지
     pipeline.py resume <모듈>          사람에게 넘어간 모듈을 사람이 다시 연다
     pipeline.py reopen <모듈> <이유>   테스트가 틀렸을 때 조정자가 N1 로 되돌린다
+    pipeline.py amend <모듈> <이유>    뜻이 안 바뀌는 테스트 결함(이름 · 모양)을 조정자가 바로잡고 다시 잠근다
 
 상태는 .pipeline/state.json 에 둔다.
 """
@@ -165,6 +166,11 @@ def cmd_gate(st, a):
         d["stage"] = "red_ok" if gate == "G1" else "green"
         d["fails"], d["last_fail"] = 0, ""
         d["log"].append(f"{gate} 통과")
+        if gate == "G2":
+            # 통과한 구현은 바로 커밋한다. 남겨 두면 다른 모듈의 범위 검사가 "맡지 않은 곳"으로 본다.
+            run(["git", "add", "--", *dirs(m), "Cargo.lock"])
+            c, o = run(["git", "commit", "-q", "-m", f"feat({m}): 구현 (green)\n\nG2 기계 검사 통과.", "--", *dirs(m), "Cargo.lock"])
+            print("커밋했다: feat(%s)" % m if c == 0 else "커밋할 변경 없음")
         save(st)
         return
     sig = hashlib.sha256("\n".join(sorted(l.split(" — ")[0] for l in out.splitlines() if l.startswith("✗"))).encode()).hexdigest()
@@ -231,6 +237,35 @@ def cmd_reopen(st, a):
     d["log"].append("테스트 결함으로 N1 로 되돌림: " + " ".join(a[1:]))
     save(st)
     print(f"{a[0]}: {LABEL['todo']} (N1 부터 다시)")
+
+
+def cmd_amend(st, a):
+    """잠긴 테스트의 결함(이름 · 모양처럼 뜻이 바뀌지 않는 것)을 조정자가 바로잡고 다시 잠근다.
+
+    뜻이 바뀌는 고침은 reopen 으로 N1 부터 다시 한다. 기계가 보는 것: 테스트 수와 필수 번호가 그대로인가.
+    """
+    m = a[0]
+    d = mod(st, m)
+    if len(a) < 2:
+        sys.exit("이유를 적는다: pipeline.py amend <모듈> <이유>")
+    tdirs = [x + "/tests" for x in dirs(m)]
+    count = lambda ref: sum(
+        len([l for l in run(["git", "show", f"{ref}:{f}"])[1].splitlines() if l.strip().startswith(("#[test]", "#[tokio::test"))])
+        for f in run(["git", "ls-tree", "-r", "--name-only", ref, "--", *tdirs])[1].split())
+    before = count(f"red/{m}")
+    run(["git", "add", "--", *tdirs])
+    code, out = run(["git", "commit", "-q", "-m", f"test({m}): 잠긴 테스트 바로잡기\n\n{' '.join(a[1:])}", "--", *tdirs])
+    if code != 0:
+        sys.exit("커밋 실패:\n" + out)
+    after = count("HEAD")
+    code, miss = run(["bash", "-c", f". scripts/lib.sh && missing_ids {m}"])
+    if before != after or miss.strip():
+        run(["git", "reset", "-q", "--soft", "HEAD~1"])
+        sys.exit(f"거부: 테스트 수가 바뀌었거나({before} → {after}) 필수 번호가 빠졌다({miss.strip()}). 뜻이 바뀌는 고침은 reopen 으로 한다")
+    run(["git", "tag", "-f", f"red/{m}"])
+    d["log"].append("잠긴 테스트 바로잡음: " + " ".join(a[1:]))
+    save(st)
+    print(f"바로잡고 다시 잠갔다: red/{m} (테스트 {after}개 그대로)")
 
 
 def main():

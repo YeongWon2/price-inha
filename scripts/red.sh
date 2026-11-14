@@ -29,6 +29,15 @@ if [ "$passed" -gt 0 ]; then
   printf '%s\n' "$out" | grep -E '^test .* \.\.\. ok$' | head -20 | sed 's/^/    /'
 fi
 
+# 테스트 코드도 G2 의 모양 · clippy 검사를 미리 통과해야 한다 (잠근 뒤에는 고칠 수 없다).
+# shellcheck disable=SC2046
+if o=$(cargo fmt $(module_pkgs "$m") --check 2>&1); then say "✓ 모양 (cargo fmt)"
+else say "✗ 모양이 다름 — 고치기: cargo fmt $(module_pkgs "$m")"; fail=1; fi
+# shellcheck disable=SC2046
+if o=$(cargo clippy $(module_pkgs "$m") --tests -- -D warnings -A clippy::unwrap_used -A clippy::expect_used \
+  -A clippy::panic -A missing_docs -A clippy::todo -A unused -A clippy::diverging_sub_expression 2>&1); then say "✓ 테스트 clippy"
+else say "✗ 테스트 clippy — 고치기: 아래 경고를 고친다 (예: 테스트 이름에 라틴 대문자를 쓰지 않는다)"; printf '%s\n' "$o" | grep -E '^(error|warning)' | sort -u | head -20; fail=1; fi
+
 miss=$(missing_ids "$m")
 if [ -n "$miss" ]; then say "✗ 필수 번호 빠짐: $(echo $miss)"; fail=1; else say "✓ 필수 번호 모두 있음"; fi
 
