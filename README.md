@@ -62,6 +62,7 @@ cargo build --release
 - 마지막 필수 항목을 등록하면 다시 켜지 않아도 바로 시작하고 본 화면으로 넘어갑니다.
 - 키와 종목 등록은 가격인하가 도는 그 컴퓨터에서 연 화면에서만 됩니다.
 - 키 등록은 1분에 5번까지 시도할 수 있습니다.
+- 시작한 뒤에도 본 화면에서 설정을 다시 열어 종목과 키를 고칠 수 있습니다.
 - 시작한 뒤 키 파일이 지워지면 멈추고 설정 화면으로 돌아갑니다.
 
 종목은 인자로 줄 수도 있습니다. 인자로 주면 그 실행 동안 그 종목만 쓰고, 화면에서는 바꿀 수 없습니다.
@@ -105,6 +106,8 @@ cargo build --release
 | 장 시간표 다시 받는 간격 | `--calendar-retry-ms <수>` | `PRICE_INHA_CALENDAR_RETRY_MS` | `30000` |
 | 키 등록 시도 횟수 | `--register-attempts <수>` | `PRICE_INHA_REGISTER_ATTEMPTS` | `5` |
 | 키 등록 시도를 세는 시간 | `--register-window-ms <수>` | `PRICE_INHA_REGISTER_WINDOW_MS` | `60000` |
+| 종목 등록 시도 횟수 | `--symbols-attempts <수>` | `PRICE_INHA_SYMBOLS_ATTEMPTS` | `10` |
+| 종목 등록 시도를 세는 시간 | `--symbols-window-ms <수>` | `PRICE_INHA_SYMBOLS_WINDOW_MS` | `60000` |
 | 시연 | `--demo` | 없음 | 끔 |
 
 보관 폴더에는 키 파일과 기록 파일(매매 · 복기 · 지식)이 들어갑니다. 이 폴더를 지우면 모든 상태가 사라집니다.
