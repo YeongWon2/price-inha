@@ -1,5 +1,30 @@
 //! 모의계좌. [`Broker`]의 구현이다.
 //!
+//! # 3차 규칙 (2차 · 1차 설명보다 앞선다)
+//!
+//! 아래 2차 · 1차 설명과 다르면 이 절이 맞다.
+//!
+//! 1. **주문 뒤의 시세만 체결에 쓴다** (`docs/dev/decisions.md` 2026-11-15): 거래소 시각이 있는
+//!    시세는 그 시각이 주문 접수 시각보다 뒤여야 하고, 거래소 시각이 없는 시세는 **받은 시각**이
+//!    접수 시각보다 뒤여야 그 주문의 체결에 쓴다. 그 밖의 (늦지 않은) 시세는 체결에 쓰지 않고
+//!    기억만 한다(시장가 사기가 묶는 돈을 셈하는 데 쓴다).
+//! 2. **옛 시세가 최신을 덮지 않는다**: 거래소 시각이 그 종목의 마지막으로 기억한 시세의 거래소
+//!    시각보다 **앞**인 시세는 체결도 기억도 하지 않는다. 그래서 서로 다른 두 시세가 번갈아 와도
+//!    새 체결이 생기지 않는다. 거래소 시각이 둘 중 하나에만 있으면 앞뒤를 견주지 않는다.
+//! 3. **되살리기 검사를 넓힌다**: [`crate::SnapshotReason`]의 3차 항목들.
+//! 4. **수수료 예비를 늘리지 않는다**: 사는 주문이 묶는 수수료 몫은
+//!    `올림((누적 체결 금액 + 남은 수량 × 묶는 돈을 셈하는 값) × 수수료율) − 이미 뗀 수수료`다.
+//!    체결마다 묶인 돈은 그 체결에 낸 돈(금액 + 수수료)만큼만 줄어든다(지정가 사기). 풀었다가
+//!    되가져가는 일이 없어 쓸 수 있는 돈이 체결 때문에 줄지 않는다.
+//! 5. **마감 취소 시각은 마감 시각이다**: 마감이 된 주문을 어느 호출이 알아챘든(시간 알림 ·
+//!    조회 · 시세 · 주문 내기 · 정정 · 취소) 그 주문의 취소 시각(`canceled_at`)은 그 주문의 마감
+//!    시각이다. 알아챈 호출의 `now`가 아니다.
+//! 6. **비율에 위쪽 끝이 있다**: 수수료율 · 세율 · 시장가 미끄러짐이 1(100%) 이상이면 계좌를
+//!    열지도 되살리지도 않는다([`BrokerError::InvalidConfig`]).
+//! 7. **덜어 낸 것은 받았다고 알려야 지운다**: [`PaperBroker::pending_archive`]가 덜어 낼 것을
+//!    돌려주고(장부는 그대로), 조립하는 쪽이 저장한 뒤 [`PaperBroker::confirm_archived`]로 알리면
+//!    그때 장부에서 지운다. 옛 길 [`PaperBroker::archive_before`]도 남는다(한 번에 떼어 낸다).
+//!
 //! # 2차 규칙 (1차 설명보다 앞선다)
 //!
 //! 아래 "주문을 받을 때의 확인" · "묶는 돈과 수량" · "체결" · "미체결 취소"는 1차의 설명이다.
@@ -147,6 +172,15 @@ pub enum Fault {
 /// 이름으로 값을 고쳐 본다): `ledger.next_id`(다음 식별자 번호, 수), `ledger.holdings`(보유의
 /// 배열. 원소에 `quantity`), `ledger.orders`(접수한 순서의 배열. 원소에 `status` · `quantity` ·
 /// `held_cash`). 수량과 돈은 십진수 글자다.
+///
+/// 3차에 더해 바뀌지 않는 이름: `ledger.holdings[]`의 `average_purchase_price`,
+/// `ledger.orders[]`의 `filled_quantity` · `filled_amount` · `commission` · `tax` · `currency`
+/// (`"Krw"` · `"Usd"`), `ledger.last_quotes`(종목마다 마지막으로 기억한 시세의 배열. 원소에
+/// `price`(십진수 글자) · `received_at`(RFC 3339 시각 글자)).
+///
+/// **내보낸 시각**: 상태 값에는 이 계좌가 마지막으로 받은 `now`(어느 호출이든)가 함께 들어가고,
+/// 그것을 내보낸 시각으로 본다. 마지막 시세의 받은 시각이 이보다 뒤인 상태 값은 되살리지 않는다
+/// ([`SnapshotReason::BadLastQuote`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     /// 값의 모양 번호.
@@ -170,6 +204,9 @@ pub struct Snapshot {
 /// | 끝난 것을 때때로 덜어 내 저장소로 옮겨야 한다([`PaperBroker::archive_before`]) (N1) | 끝난 주문과 체결 기록이 계좌와 상태 값([`Snapshot`])에 계속 쌓여 커진다 |
 /// | 상태 값을 저장하고([`PaperBroker::snapshot`]) 다시 켤 때 되살려야 한다([`PaperBroker::restore`]). 되살린 뒤 달력과 기준가를 다시 넣어야 한다 | 껐다 켜면 계좌가 처음 돈으로 돌아간다. 달력을 넣기 전의 주문은 `CalendarStale`로 거부된다 |
 /// | 체결 알림을 구독했으면 읽어야 한다([`Broker::subscribe`]) | [`PaperConfig::event_buffer`]개가 차면 그 구독이 끊긴다(닫힌 것으로 드러난다) |
+/// | 마감 취소 알림을 받으려면 구독해야 한다. 조회 · 주문 내기 · 정정 · 취소가 먼저 알아채 취소한 것의 알림은 그 호출이 돌려주지 않고 **구독으로만** 온다 | 구독하지 않으면 그렇게 취소된 주문을 알림으로 알 수 없다(조회로만 보인다) |
+/// | 모든 호출의 `now`는 **한 시계**에서 와야 한다(뒤로 가지 않게) | 시각이 뒤로 가면 마감 · 늦은 시세 · 멱등성 키의 판단이 어긋난다 |
+/// | 덜어 낼 것을 받아([`PaperBroker::pending_archive`]) 저장한 **뒤에** 받았다고 알려야 한다([`PaperBroker::confirm_archived`]) | 알리지 않으면 장부에서 지워지지 않고 쌓인다. 저장 전에 알리면 꺼졌을 때 기록이 사라진다 |
 ///
 /// 시간이 흘렀다고 따로 알려 줄 의무는 없다: 모든 호출이 먼저 `now`까지 마감이 된 주문을 취소한다.
 /// 다만 알림을 제때 받으려면 [`PaperBroker::on_time`]을 주기적으로 부른다.
@@ -210,6 +247,7 @@ impl PaperBroker {
 
     /// 처음 돈으로 새 계좌를 연다. 함께 나오는 [`CheckAuthority`]만이 이 계좌가 받는 점검 통과
     /// 표시를 낼 수 있다. 처음 돈이나 비율이 음수면 [`BrokerError::InvalidConfig`].
+    /// 수수료율 · 세율 · 시장가 미끄러짐이 1(100%) 이상이어도 같다(3차 규칙 6. 되살리기도 같다).
     pub fn open(config: PaperConfig) -> Result<(Self, CheckAuthority), BrokerError> {
         config.validate_initial_cash()?;
         config.validate_rules()?;
@@ -288,6 +326,9 @@ impl PaperBroker {
     ///
     /// 이미 처리한 시세가 다시 오면 기억한 시세의 받은 시각만 더 늦은 쪽으로 고친다(같은 값을 방금
     /// 다시 받았으니, 시장가 사기가 묶는 돈을 셈할 때 그만큼 새것으로 본다).
+    ///
+    /// 3차: 거래소 시각이 마지막으로 기억한 시세의 거래소 시각보다 앞인 시세도 체결 · 기억하지
+    /// 않는다(3차 규칙 2). 어느 주문의 체결에 쓰는지는 3차 규칙 1을 따른다.
     pub fn on_quote(&self, quote: &Quote, now: DateTime<Utc>) -> Vec<OrderEvent> {
         fill::on_quote(&mut self.book(), &self.config, quote, now)
     }
@@ -319,6 +360,26 @@ impl PaperBroker {
     /// `now`를 받는 모든 호출이 그때 지난 키를 버린다.
     pub fn archive_before(&self, before: DateTime<Utc>) -> Archived {
         self.book().archive(before)
+    }
+
+    /// 덜어 낼 것을 돌려준다. **장부에서는 아직 지우지 않는다** (3차 규칙 7, N1).
+    ///
+    /// 고르는 것과 순서는 [`PaperBroker::archive_before`]와 같다. 계좌 · 조회 · 상태 값은 그대로이고,
+    /// 다시 부르면 (그사이 바뀐 것이 없으면) 같은 것을 돌려준다. 조립하는 쪽이 이것을 저장한 뒤
+    /// [`PaperBroker::confirm_archived`]로 알리면 그때 지운다. 저장하기 전에 꺼져도 상태 값에
+    /// 남아 있어 기록이 사라지지 않는다.
+    pub fn pending_archive(&self, before: DateTime<Utc>) -> Archived {
+        let _ = before;
+        todo!()
+    }
+
+    /// 저장을 마친 것을 알린다: `archived`에 든 끝난 주문(식별자로)과 체결 기록(같은 값)을 장부에서
+    /// 지운다 (3차 규칙 7). 그 밖의 것은 건드리지 않는다. 이미 지운 것이나 장부에 없는 것은 넘어간다
+    /// (두 번 알려도 같다). 지운 뒤의 계좌는 같은 것을 [`PaperBroker::archive_before`]로 떼어 낸
+    /// 계좌와 같다.
+    pub fn confirm_archived(&self, archived: &Archived) {
+        let _ = archived;
+        todo!()
     }
 
     /// 그 통화의 현금. 다루지 않는 통화는 모두 0이다. 먼저 `now`까지 마감이 된 주문을 취소한다.

@@ -355,3 +355,66 @@ fn 구독이_쥐는_개수가_0이면_계좌를_열지_않는다() {
         Err(BrokerError::InvalidConfig(_))
     ));
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3차 6번: 비율에 위쪽 끝이 있다. 수수료율 · 세율 · 시장가 미끄러짐이 1(100%) 이상이면
+// 계좌를 열지도 되살리지도 않는다.
+// ---------------------------------------------------------------------------------------------
+
+/// 설정의 비율 하나를 바꾸는 함수.
+type RateEdit = fn(&mut PaperConfig, rust_decimal::Decimal);
+
+/// 비율 하나를 `rate`로 바꾼 설정들(국내 · 미국의 수수료율 · 세율 · 미끄러짐), 이름과 함께.
+fn with_rate(rate: &str) -> Vec<(&'static str, PaperConfig)> {
+    let edits: [(&'static str, RateEdit); 6] = [
+        ("국내 수수료율", |c, r| c.kr.commission_rate = r),
+        ("국내 세율", |c, r| c.kr.sell_tax_rate = r),
+        ("국내 미끄러짐", |c, r| c.kr.market_slippage_rate = r),
+        ("미국 수수료율", |c, r| c.us.commission_rate = r),
+        ("미국 팔 때 비용", |c, r| c.us.sell_tax_rate = r),
+        ("미국 미끄러짐", |c, r| c.us.market_slippage_rate = r),
+    ];
+    edits
+        .into_iter()
+        .map(|(name, edit)| {
+            let mut changed = config();
+            edit(&mut changed, d(rate));
+            (name, changed)
+        })
+        .collect()
+}
+
+// 검증: C10
+// 2차 검토의 참고: 수수료율 150%처럼 말이 안 되는 비율로도 계좌가 열렸다.
+#[test]
+fn 비율이_100퍼센트_이상이면_계좌를_열지_않는다() {
+    for rate in ["1", "1.5", "100"] {
+        for (name, changed) in with_rate(rate) {
+            assert!(
+                matches!(
+                    PaperBroker::open(changed),
+                    Err(BrokerError::InvalidConfig(_))
+                ),
+                "{name} {rate}로 계좌가 열렸다"
+            );
+        }
+    }
+    // 테스트 설정의 실제 비율(0.015% · 0.20% · 0.1% 등)로는 열린다.
+    assert!(PaperBroker::open(config()).is_ok());
+}
+
+// 검증: C10, V6
+#[test]
+fn 비율이_100퍼센트_이상인_설정으로는_되살리지_않는다() {
+    let desk = Desk::standard();
+    for (name, changed) in with_rate("1") {
+        assert!(
+            matches!(
+                PaperBroker::restore(changed, desk.broker.snapshot()),
+                Err(BrokerError::InvalidConfig(_))
+            ),
+            "{name} 100%로 되살아났다"
+        );
+    }
+    assert!(PaperBroker::restore(config(), desk.broker.snapshot()).is_ok());
+}

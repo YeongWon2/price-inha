@@ -549,3 +549,302 @@ fn 구독이_쥐는_개수는_설정한_값을_따른다() {
     assert_eq!(desk.usd(), cash("10000", "0", "0"));
     assert_eq!(desk.buying_power(Currency::Usd), d("10000"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3차 3번: 되살리기 검사를 넓힌다. 고치는 이름은 `Snapshot` 문서가 3차에 더해 바뀌지 않는다고 적은
+// 것이다: `holdings[].average_purchase_price`, `orders[].filled_quantity` · `filled_amount` ·
+// `commission` · `tax` · `currency`, `last_quotes[].price` · `received_at`.
+// ---------------------------------------------------------------------------------------------
+
+/// 삼성 1주를 70,000원에 사서 다 체결된 주문 하나와 그 보유가 있는 계좌. 마지막 시세도 하나 있다.
+fn one_filled_buy() -> Desk {
+    let desk = Desk::standard();
+    desk.own(SAM, "1", "70000", at(0));
+    desk
+}
+
+/// 한 시세에 3주씩 체결되는 설정에서 10주 × 70,000원 사기가 3주 체결돼 열려 있는 계좌.
+/// 묶인 돈: 7 × 70,000 + 올림(700,000 × 0.015% = 105) − 뗀 수수료 버림(31.5) = 490,074.
+fn partly_filled_buy() -> Desk {
+    let mut per_quote = config();
+    per_quote.kr.max_fill = pi_paper::MaxFill::PerQuote(d("3"));
+    let desk = Desk::open(per_quote);
+    desk.accepted(&buy(SAM, "10", "70000"), at(0));
+    desk.quote(SAM, "70000", at(1));
+    desk
+}
+
+// 검증: V6
+#[test]
+fn 고치지_않은_상태_값은_되살아나고_3차에_고칠_이름이_들어_있다() {
+    for desk in [one_filled_buy(), partly_filled_buy()] {
+        assert!(restore_edited(&desk, |_| {}).is_ok());
+    }
+    let value = serde_json::to_value(one_filled_buy().broker.snapshot()).unwrap();
+    let ledger = &value["ledger"];
+    assert_eq!(
+        ledger["holdings"][0]["average_purchase_price"],
+        json!("70000")
+    );
+    let order = &ledger["orders"][0];
+    assert_eq!(order["status"], json!("Filled"));
+    assert_eq!(order["filled_quantity"], json!("1"));
+    assert_eq!(order["filled_amount"], json!("70000"));
+    assert_eq!(order["commission"], json!("10"));
+    assert_eq!(order["tax"], json!("0"));
+    assert_eq!(order["currency"], json!("Krw"));
+    assert_eq!(ledger["last_quotes"][0]["price"], json!("70000"));
+    assert!(ledger["last_quotes"][0]["received_at"].is_string());
+
+    let value = serde_json::to_value(partly_filled_buy().broker.snapshot()).unwrap();
+    assert_eq!(value["ledger"]["orders"][0]["held_cash"], json!("490074"));
+    assert_eq!(
+        value["ledger"]["orders"][0]["status"],
+        json!("PartialFilled")
+    );
+}
+
+// 검증: V6
+#[test]
+fn 뗀_수수료_세금_누적_체결_금액이_음수면_되살리지_않는다() {
+    for field in ["commission", "tax", "filled_amount"] {
+        let result = restore_edited(&one_canceled(), |value| {
+            value["ledger"]["orders"][0][field] = json!("-1");
+        });
+        assert_eq!(
+            result.err(),
+            refused(SnapshotReason::BadExecution),
+            "{field}"
+        );
+    }
+}
+
+// 검증: V6
+#[test]
+fn 누적_체결_금액이나_뗀_수수료가_주문_금액을_넘으면_되살리지_않는다() {
+    let desk = one_filled_buy();
+    // 1주 × 지정가 70,000원 사기의 누적 체결 금액이 70,100원: 지정가보다 비싸게 산 적이 없다.
+    let result = restore_edited(&desk, |value| {
+        value["ledger"]["orders"][0]["filled_amount"] = json!("70100");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::BadExecution));
+
+    // 뗀 수수료 · 세금이 누적 체결 금액보다 많다.
+    for field in ["commission", "tax"] {
+        let result = restore_edited(&desk, |value| {
+            value["ledger"]["orders"][0][field] = json!("999999999");
+        });
+        assert_eq!(
+            result.err(),
+            refused(SnapshotReason::BadExecution),
+            "{field}"
+        );
+    }
+}
+
+// 검증: V6
+#[test]
+fn 체결_수량이_정수가_아니면_되살리지_않는다() {
+    let result = restore_edited(&one_canceled(), |value| {
+        value["ledger"]["orders"][0]["filled_quantity"] = json!("0.5");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::BadFilledQuantity));
+}
+
+// 검증: V6
+// 2차의 검사는 열린 사는 주문이 "주문 전체"에 필요한 돈(700,105)까지 묶어도 되살렸다. 3주가 이미
+// 체결됐으니 남은 7주 몫(490,074)을 넘으면 없던 돈이 생긴다.
+#[test]
+fn 묶인_돈이_남은_수량_몫을_넘으면_되살리지_않는다() {
+    let desk = partly_filled_buy();
+    for held in ["700105", "490075"] {
+        let result = restore_edited(&desk, |value| {
+            value["ledger"]["orders"][0]["held_cash"] = json!(held);
+        });
+        assert_eq!(
+            result.err(),
+            refused(SnapshotReason::HeldCashTooLarge),
+            "{held}"
+        );
+    }
+    // 딱 남은 수량 몫이면 되살아난다(고치지 않은 값).
+    assert!(restore_edited(&desk, |_| {}).is_ok());
+}
+
+// 검증: V6, N6
+#[test]
+fn 마지막_시세의_값이_0_이하이거나_받은_시각이_내보낸_시각보다_뒤면_되살리지_않는다() {
+    let desk = one_filled_buy();
+    for price in ["0", "-70000"] {
+        let result = restore_edited(&desk, |value| {
+            value["ledger"]["last_quotes"][0]["price"] = json!(price);
+        });
+        assert_eq!(
+            result.err(),
+            refused(SnapshotReason::BadLastQuote),
+            "{price}"
+        );
+    }
+    // 내보낸 시각은 이 계좌가 마지막으로 받은 시각(0.5초)이다. 받은 시각이 먼 앞날이다.
+    let result = restore_edited(&desk, |value| {
+        value["ledger"]["last_quotes"][0]["received_at"] = json!("2100-01-01T00:00:00Z");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::BadLastQuote));
+}
+
+// 검증: V6
+#[test]
+fn 주문_통화가_시장과_다르면_되살리지_않는다() {
+    // 국내 주문(원화)을 달러 주문으로 적는다.
+    let result = restore_edited(&one_canceled(), |value| {
+        value["ledger"]["orders"][0]["currency"] = json!("Usd");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::CurrencyMismatch));
+}
+
+// 검증: V6
+#[test]
+fn 상태와_체결_수량이_어긋나면_되살리지_않는다() {
+    // 체결이 없는데 전부 체결.
+    let result = restore_edited(&one_canceled(), |value| {
+        value["ledger"]["orders"][0]["status"] = json!("Filled");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::StatusMismatch));
+
+    // 체결이 없는데 일부 체결(열린 주문).
+    let result = restore_edited(&one_open_buy(), |value| {
+        value["ledger"]["orders"][0]["status"] = json!("PartialFilled");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::StatusMismatch));
+
+    // 다 체결됐는데 접수(열린 주문).
+    let result = restore_edited(&one_filled_buy(), |value| {
+        value["ledger"]["orders"][0]["status"] = json!("Pending");
+    });
+    assert_eq!(result.err(), refused(SnapshotReason::StatusMismatch));
+}
+
+// 검증: V6
+#[test]
+fn 평균_산_값이_0_이하이면_되살리지_않는다() {
+    for price in ["0", "-70000"] {
+        let result = restore_edited(&one_filled_buy(), |value| {
+            value["ledger"]["holdings"][0]["average_purchase_price"] = json!(price);
+        });
+        assert_eq!(
+            result.err(),
+            refused(SnapshotReason::NonPositiveAveragePrice),
+            "{price}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// 3차 7번: 덜어 낸 것은 받았다고 알려야 지운다. 덜어 낼 것을 돌려주고(`pending_archive`),
+// 조립하는 쪽이 저장했다고 알린 뒤에(`confirm_archived`) 장부에서 지운다.
+// ---------------------------------------------------------------------------------------------
+
+/// 끝난 주문 셋(15초 전에 접수한 둘, 뒤에 접수한 하나) · 체결 기록 둘 · 열린 주문 하나가 있는 계좌.
+/// 끝난 것을 덜어 내는 앞의 테스트와 같은 장면이다. 열린 주문의 식별자를 함께 돌려준다.
+fn archive_scene() -> (Desk, OrderId) {
+    let desk = Desk::standard();
+    desk.accepted(&buy(SAM, "2", "70000"), at(0));
+    desk.quote(SAM, "70000", at(1));
+    let canceled = desk.accepted(&buy(HYN, "1", "30000"), at(2));
+    desk.cancel(&canceled, at(3)).unwrap();
+    let open = desk.accepted(&buy(HYN, "1", "29950"), at(10));
+    desk.accepted(&buy(SAM, "1", "70000"), at(20));
+    desk.quote(SAM, "70000", at(21));
+    (desk, open)
+}
+
+// 검증: N1, V6
+#[test]
+fn 덜어_낼_것을_돌려받아도_알리기_전에는_장부에_남는다() {
+    let (desk, _) = archive_scene();
+    let (twin, _) = archive_scene();
+    let snapshot_before = desk.broker.snapshot();
+    let closed_before = desk.orders(OrderGroup::Closed);
+    let fills_before = desk.broker.fills();
+
+    let pending = desk.broker.pending_archive(at(15));
+    // 고르는 것은 옛 길(한 번에 떼어 내기)과 같다.
+    assert_eq!(pending, twin.broker.archive_before(at(15)));
+    assert_eq!(pending.orders.len(), 2);
+    assert_eq!(pending.fills.len(), 1);
+
+    // 장부 · 조회 · 상태 값은 그대로다.
+    assert_eq!(desk.broker.snapshot(), snapshot_before);
+    assert_eq!(desk.orders(OrderGroup::Closed), closed_before);
+    assert_eq!(desk.broker.fills(), fills_before);
+    for order in &pending.orders {
+        assert_eq!(desk.order_at(&order.order_id, at(21)), *order);
+    }
+    // 다시 불러도 같은 것을 돌려준다.
+    assert_eq!(desk.broker.pending_archive(at(15)), pending);
+}
+
+// 검증: N1, V6
+#[test]
+fn 받았다고_알리면_그때_지우고_한_번에_떼어_낸_계좌와_같아진다() {
+    let (desk, _) = archive_scene();
+    let (twin, _) = archive_scene();
+    twin.broker.archive_before(at(15));
+
+    let pending = desk.broker.pending_archive(at(15));
+    desk.broker.confirm_archived(&pending);
+    assert_eq!(desk.broker.snapshot(), twin.broker.snapshot());
+    assert_eq!(
+        desk.orders(OrderGroup::Closed),
+        twin.orders(OrderGroup::Closed)
+    );
+    assert_eq!(desk.broker.fills(), twin.broker.fills());
+    assert_eq!(
+        order_error(&desk, &pending.orders[0].order_id, at(21)),
+        Some(BrokerError::OrderNotFound)
+    );
+
+    // 더 덜어 낼 것이 없고, 두 번 알려도 바뀌지 않는다.
+    let empty = desk.broker.pending_archive(at(15));
+    assert!(empty.orders.is_empty() && empty.fills.is_empty());
+    let snapshot = desk.broker.snapshot();
+    desk.broker.confirm_archived(&pending);
+    assert_eq!(desk.broker.snapshot(), snapshot);
+}
+
+// 검증: N1, V6
+// 저장하기 전에 꺼진 경우: 알리기 전의 상태 값에서 되살리면 덜어 낼 것이 그대로 있다.
+#[test]
+fn 알리기_전에_꺼졌다_켜도_덜어_낼_기록이_사라지지_않는다() {
+    let (desk, _) = archive_scene();
+    let pending = desk.broker.pending_archive(at(15));
+
+    let restarted = desk.reopen(config());
+    assert_eq!(restarted.orders(OrderGroup::Closed).len(), 3);
+    assert_eq!(restarted.broker.fills().len(), 2);
+    assert_eq!(restarted.broker.pending_archive(at(15)), pending);
+
+    // 되살린 계좌에서 저장을 마치고 알리면 지운다.
+    restarted.broker.confirm_archived(&pending);
+    assert_eq!(restarted.orders(OrderGroup::Closed).len(), 1);
+    assert_eq!(restarted.broker.fills().len(), 1);
+}
+
+// 검증: N1
+// 알린 것만 지운다: 돌려받은 뒤에 끝난 주문은 그 목록에 없었으니 남는다.
+#[test]
+fn 알린_것만_지우고_그_뒤에_끝난_것은_남긴다() {
+    let (desk, open) = archive_scene();
+    let pending = desk.broker.pending_archive(at(15));
+    // 돌려받은 뒤에, 15초 전에 접수한 열린 주문이 취소된다.
+    desk.cancel(&open, at(22)).unwrap();
+
+    desk.broker.confirm_archived(&pending);
+    let closed = desk.orders(OrderGroup::Closed);
+    assert_eq!(closed.len(), 2);
+    assert!(closed.iter().any(|order| order.order_id == open));
+    let rest = desk.broker.pending_archive(at(15));
+    assert_eq!(rest.orders.len(), 1);
+    assert_eq!(rest.orders[0].order_id, open);
+    assert!(rest.fills.is_empty());
+}

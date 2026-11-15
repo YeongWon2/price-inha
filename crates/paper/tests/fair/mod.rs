@@ -302,3 +302,150 @@ fn 기억한_시세가_주문을_받을_때_늦었으면_시장가를_받지_않
     desk.quote(SAM, "70000", at(7));
     desk.accepted(&market_buy(SAM, "1"), at(12));
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3차 1번: 거래소 시각이 없는 시세는 주문 뒤에 받은 것만 체결에 쓴다 (decisions.md 2026-11-15).
+// 그 밖의 시세는 체결에 쓰지 않고 기억만 한다(시장가 사기가 묶는 돈).
+// ---------------------------------------------------------------------------------------------
+
+// 검증: C10, N6
+#[test]
+fn 거래소_시각이_없고_주문_전에_받은_시세는_체결하지_않고_시장가가_묶는_돈에만_쓴다() {
+    let desk = Desk::standard();
+    let order_id = desk.accepted(&buy(SAM, "1", "70000"), at(10));
+
+    // 접수 5초 전에 받은 69,900원(거래소 시각 없음)을 접수 뒤에 준다: 체결하지 않는다.
+    let before = quote_full(SAM, "69900", Currency::Krw, None, at(5));
+    assert!(desk.on_quote(&before, at(11)).is_empty());
+    assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
+    assert!(desk.broker.fills().is_empty());
+    assert_eq!(desk.krw(), cash("9929989", "70011", "0"));
+
+    // 기억은 한다: 시장가 사기가 그 값으로 묶는다. 69,900 × 1.001 = 69,969.9 → 70,000(100원 단위
+    // 올림), 수수료 10.5 → 11. 받은 지 7초라 늦지 않았다.
+    desk.accepted(&market_buy(SAM, "1"), at(12));
+    assert_eq!(desk.krw(), cash("9859978", "140022", "0"));
+    assert!(desk.broker.fills().is_empty());
+}
+
+// 검증: C10
+// 거래소 시각이 없는 시세가 두 주문 사이에 받은 것이면, 그 전에 받은 주문만 그 시세로 체결한다.
+#[test]
+fn 거래소_시각이_없는_시세는_받은_시각보다_앞서_접수한_주문만_체결한다() {
+    let desk = Desk::standard();
+    let early = desk.accepted(&buy(SAM, "1", "70000"), at(10));
+    let late = desk.accepted(&buy(SAM, "1", "70000"), at(20));
+
+    let quote = quote_full(SAM, "70000", Currency::Krw, None, at(15));
+    let events = desk.on_quote(&quote, at(21));
+    assert_eq!(kinds(&events), vec![OrderEventKind::Fill]);
+    assert_eq!(events[0].order.order_id, early);
+    assert_eq!(desk.order(&early).status, OrderStatus::Filled);
+    assert_eq!(desk.order(&late).status, OrderStatus::Pending);
+    assert_eq!(desk.broker.fills().len(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// 3차 2번: 옛 시세가 최신을 덮지 않는다. 거래소 시각이 마지막으로 기억한 것보다 앞인 시세는
+// 체결도 기억도 하지 않는다.
+// ---------------------------------------------------------------------------------------------
+
+// 검증: C10, E29
+// 2차 검토의 참고: 서로 다른 두 시세(A · B)가 번갈아 오면 "같은 시세" 확인을 매번 비켜 가
+// 한 시세 최대 수량이 번갈아 온 횟수만큼 풀렸다.
+#[test]
+fn 서로_다른_두_시세가_번갈아_와도_실제_거래_수보다_많이_체결하지_않는다() {
+    let desk = Desk::open(per_quote("3"));
+    let order_id = desk.accepted(&buy(SAM, "10", "70000"), at(0));
+
+    // 실제 거래는 둘: 1초에 69,900원, 2초에 70,000원.
+    let older = |received: i64| quote_full(SAM, "69900", Currency::Krw, Some(at(1)), at(received));
+    let newer = |received: i64| quote_full(SAM, "70000", Currency::Krw, Some(at(2)), at(received));
+    desk.on_quote(&older(1), at(1));
+    desk.on_quote(&newer(2), at(2));
+    assert_eq!(desk.order(&order_id).execution.filled_quantity, d("6"));
+
+    // 조회할 때마다 두 값이 번갈아 들어온다.
+    for received in 3..=10 {
+        let quote = if received % 2 == 1 {
+            older(received)
+        } else {
+            newer(received)
+        };
+        let events = desk.on_quote(&quote, at(received));
+        assert!(events.is_empty(), "{received}초: {events:?}");
+    }
+    assert_eq!(desk.order(&order_id).execution.filled_quantity, d("6"));
+    assert_eq!(desk.broker.fills().len(), 2);
+    assert_eq!(desk.holding(SAM).unwrap().quantity, d("6"));
+
+    // 거래소 시각이 새로운 거래가 오면 다시 체결한다.
+    let next = quote_full(SAM, "70000", Currency::Krw, Some(at(11)), at(11));
+    assert_eq!(
+        kinds(&desk.on_quote(&next, at(11))),
+        vec![OrderEventKind::PartialFill]
+    );
+    assert_eq!(desk.order(&order_id).execution.filled_quantity, d("9"));
+}
+
+// 검증: C10
+#[test]
+fn 거래소_시각이_마지막으로_기억한_것보다_앞인_시세로는_체결하지_않는다() {
+    let desk = Desk::standard();
+    let order_id = desk.accepted(&buy(SAM, "1", "70000"), at(10));
+    // 30초의 거래 70,500원: 지정가보다 비싸 체결하지 않지만 마지막 시세로 기억한다.
+    desk.on_quote(
+        &quote_full(SAM, "70500", Currency::Krw, Some(at(30)), at(30)),
+        at(30),
+    );
+    // 20초의 거래 69,000원이 늦게(32초에) 도착한다. 접수 뒤의 거래지만 기억한 것보다 앞이다.
+    let old = quote_full(SAM, "69000", Currency::Krw, Some(at(20)), at(32));
+    assert!(desk.on_quote(&old, at(32)).is_empty());
+    assert_eq!(desk.order(&order_id).status, OrderStatus::Pending);
+    assert!(desk.broker.fills().is_empty());
+    assert_eq!(desk.krw(), cash("9929989", "70011", "0"));
+
+    // 거래소 시각이 기억한 것과 같으면(같은 때의 다른 거래) 앞이 아니다: 체결한다.
+    let same_time = quote_full(SAM, "69900", Currency::Krw, Some(at(30)), at(33));
+    assert_eq!(
+        kinds(&desk.on_quote(&same_time, at(33))),
+        vec![OrderEventKind::Fill]
+    );
+}
+
+// 검증: C10, N6
+// 옛 시세는 기억도 하지 않는다: 시장가 사기가 묶는 돈은 최신 시세로 셈한다.
+#[test]
+fn 옛_시세는_시장가가_묶는_돈을_셈하는_시세를_덮지_않는다() {
+    let desk = Desk::standard();
+    // 2초의 거래 70,000원을 받은 뒤, 1초의 거래 60,000원이 늦게(3초에) 도착한다.
+    desk.on_quote(
+        &quote_full(SAM, "70000", Currency::Krw, Some(at(2)), at(2)),
+        at(2),
+    );
+    desk.on_quote(
+        &quote_full(SAM, "60000", Currency::Krw, Some(at(1)), at(3)),
+        at(3),
+    );
+    // 70,000 × 1.001 → 70,100, 수수료 10.515 → 11. (60,000원이었다면 60,100 + 10 = 60,110.)
+    desk.accepted(&market_buy(SAM, "1"), at(4));
+    assert_eq!(desk.krw(), cash("9929889", "70111", "0"));
+}
+
+// 검증: C10, E29, V6
+#[test]
+fn 되살린_뒤에도_옛_시세가_최신을_덮지_않는다() {
+    let before = Desk::open(per_quote("3"));
+    let order_id = before.accepted(&buy(SAM, "10", "70000"), at(0));
+    before.on_quote(
+        &quote_full(SAM, "70000", Currency::Krw, Some(at(2)), at(2)),
+        at(2),
+    );
+    assert_eq!(before.order(&order_id).execution.filled_quantity, d("3"));
+
+    let after = before.reopen(per_quote("3"));
+    let old = quote_full(SAM, "69900", Currency::Krw, Some(at(1)), at(3));
+    assert!(after.on_quote(&old, at(3)).is_empty());
+    assert_eq!(after.order(&order_id).execution.filled_quantity, d("3"));
+    assert_eq!(after.broker.fills().len(), 1);
+}

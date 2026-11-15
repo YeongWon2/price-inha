@@ -5,8 +5,15 @@
 //! 시간을 알려 주지 않고 흘려보내는 동작을 더했다. 더한 확인: 받은 지정가 주문은 돈이 모자라다는
 //! 이유로 거부로 끝나지 않는다 · 주문마다 뗀 수수료와 세금은 한 번에 체결됐을 때와 같다 ·
 //! 주문 뒤에 온 시세로만 체결된다 · 마감이 지난 주문은 열린 채로 보이지 않는다.
+//!
+//! 3차: 옛 시세(거래소 시각이 마지막으로 기억한 것보다 앞)와 앞서 준 다른 시세를 번갈아 다시 주는
+//! 동작, 같은 값 · 남은 수량 그대로의 정정을 더했다. 더한 확인: 옛 시세로는 체결하지 않는다 ·
+//! 체결된 주문은 그 시세의 거래소 시각보다 앞서 접수한 것이다 · 지정가 사기가 묶은 돈은 반올림
+//! 방향과 상관없이 `남은 수량 × 지정가 + 올림(주문 전체 수수료) − 이미 뗀 수수료`와 끝자리까지 같다.
 
 use std::collections::BTreeMap;
+
+use pi_paper::BrokerError;
 
 use chrono::{DateTime, Utc};
 use pi_market::{Currency, Quote};
@@ -22,7 +29,7 @@ use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::support::{
     Desk, HYN, SAM, at, buy, config, d, day, kr_calendar, market_buy, market_sell, monday,
-    quote_received, sell,
+    quote_full, quote_received, sell,
 };
 
 /// 섞어 볼 동작 하나.
@@ -54,6 +61,13 @@ enum Op {
     Settle,
     /// 상태를 내보냈다가 되살린 계좌로 갈아탄다.
     Reopen,
+    /// 3차: 거래소 시각이 `back`초 전인 시세를 방금 받았다고 준다(늦게 도착한 거래).
+    OldQuote { hynix: bool, step: i8, back: u8 },
+    /// 3차: 그 종목에 앞서 준 시세 가운데 마지막 것이 아닌 하나를 방금 받았다고 다시 준다
+    /// (조회할 때마다 두 값이 번갈아 들어온다).
+    Alternate { hynix: bool, pick: u8 },
+    /// 3차: 열린 지정가 주문 하나를 같은 값 · 남은 수량 그대로 정정해 본다.
+    Modify { pick: u8 },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -80,6 +94,10 @@ fn op() -> impl Strategy<Value = Op> {
         3 => (1u8..=45, any::<bool>()).prop_map(|(seconds, notify)| Op::Wait { seconds, notify }),
         1 => Just(Op::Settle),
         1 => Just(Op::Reopen),
+        2 => (any::<bool>(), -20i8..=20, 1u8..=40)
+            .prop_map(|(hynix, step, back)| Op::OldQuote { hynix, step, back }),
+        2 => (any::<bool>(), any::<u8>()).prop_map(|(hynix, pick)| Op::Alternate { hynix, pick }),
+        2 => any::<u8>().prop_map(|pick| Op::Modify { pick }),
     ]
 }
 
@@ -129,6 +147,8 @@ struct Runner {
     last_quote: Option<Quote>,
     /// 시간으로 마감이 정해진 주문(단타 60초 · 스윙 600초)과 그 마감(초).
     deadlines: BTreeMap<String, i64>,
+    /// 종목마다 계좌가 기억했어야 할 시세들(준 순서). 마지막 것이 최신이다.
+    remembered: BTreeMap<&'static str, Vec<Quote>>,
 }
 
 impl Runner {
@@ -140,7 +160,54 @@ impl Runner {
             placed: Vec::new(),
             last_quote: None,
             deadlines: BTreeMap::new(),
+            remembered: BTreeMap::new(),
         }
+    }
+
+    /// 그 종목에서 마지막으로 기억했어야 할 시세의 거래소 시각.
+    fn latest(&self, symbol: &str) -> Option<DateTime<Utc>> {
+        self.remembered
+            .get(symbol)
+            .and_then(|quotes| quotes.last())
+            .and_then(|quote| quote.exchange_time)
+    }
+
+    /// 거래소 시각이 있는 새 시세를 주고 확인한다. 기억한 것보다 앞이면 체결이 하나도 생기지
+    /// 않아야 한다(3차 2번). 그렇지 않으면 생긴 체결은 모두 그 거래소 시각보다 앞서 접수한 주문의
+    /// 것이어야 한다(3차 1번).
+    fn give(&mut self, symbol: &'static str, quote: Quote) -> Result<(), TestCaseError> {
+        let now = self.now();
+        let traded_at = quote.exchange_time.unwrap();
+        let older = self.latest(symbol).is_some_and(|latest| traded_at < latest);
+        let before = self.desk.broker.fills().len();
+        let events = self.desk.on_quote(&quote, now);
+        let fills = self.desk.broker.fills();
+        if older {
+            prop_assert_eq!(
+                fills.len(),
+                before,
+                "옛 시세로 체결됐다: {:?} {:?}",
+                quote,
+                events
+            );
+        } else {
+            for fill in &fills[before..] {
+                let order = self.desk.order_at(&fill.order_id, now);
+                prop_assert!(
+                    order.ordered_at < traded_at,
+                    "거래소 시각보다 뒤에 접수한 주문이 체결됐다: {:?} {:?}",
+                    quote,
+                    order
+                );
+            }
+            let history = self.remembered.entry(symbol).or_default();
+            history.retain(|known| {
+                known.exchange_time != quote.exchange_time || known.price != quote.price
+            });
+            history.push(quote.clone());
+            self.last_quote = Some(quote);
+        }
+        Ok(())
     }
 
     fn now(&self) -> DateTime<Utc> {
@@ -199,9 +266,35 @@ impl Runner {
             }
             Op::Quote { hynix, step } => {
                 let quote = quote_received(code(hynix), &price(hynix, step), Currency::Krw, now);
-                self.desk.on_quote(&quote, now);
-                self.last_quote = Some(quote);
+                self.give(code(hynix), quote)?;
             }
+            Op::OldQuote { hynix, step, back } => {
+                let traded_at = now - chrono::Duration::seconds(i64::from(back));
+                let quote = quote_full(
+                    code(hynix),
+                    &price(hynix, step),
+                    Currency::Krw,
+                    Some(traded_at),
+                    now,
+                );
+                self.give(code(hynix), quote)?;
+            }
+            Op::Alternate { hynix, pick } => {
+                let earlier: Vec<Quote> = self
+                    .remembered
+                    .get(code(hynix))
+                    .map(|quotes| quotes[..quotes.len().saturating_sub(1)].to_vec())
+                    .unwrap_or_default();
+                if !earlier.is_empty() {
+                    let old = &earlier[usize::from(pick) % earlier.len()];
+                    let again = Quote {
+                        received_at: now,
+                        ..old.clone()
+                    };
+                    self.give(code(hynix), again)?;
+                }
+            }
+            Op::Modify { pick } => self.modify(pick)?,
             Op::Requote => {
                 if let Some(quote) = self.last_quote.clone() {
                     let before = self.desk.broker.fills().len();
@@ -245,6 +338,59 @@ impl Runner {
 }
 
 impl Runner {
+    /// 열린 지정가 주문 하나를 같은 값 · 남은 수량 그대로 정정해 본다. 거부되면 아무것도 바뀌지
+    /// 않는다. 원 미만 버림에서는 묶인 돈이 새 주문에 필요한 돈 이상이라 돈 때문에 거부되지 않는다.
+    fn modify(&mut self, pick: u8) -> Result<(), TestCaseError> {
+        let now = self.now();
+        // 마감 처리가 먼저 일어나 상태가 바뀌는 것과 섞이지 않게, 시간을 먼저 알려 둔다.
+        self.desk.on_time(now);
+        let open: Vec<pi_paper::Order> = self
+            .desk
+            .orders_at(OrderGroup::Open, now)
+            .into_iter()
+            .filter(|order| order.order_type == OrderType::Limit)
+            .collect();
+        if open.is_empty() {
+            return Ok(());
+        }
+        let order = &open[usize::from(pick) % open.len()];
+        let rest = remaining(order).to_string();
+        let price = order.price.unwrap().to_string();
+        let before = self.desk.broker.snapshot();
+        let result = self
+            .desk
+            .modify(&order.order_id, Some(&rest), Some(&price), &rest, now);
+        match result {
+            Ok(new_id) => {
+                if let Some(deadline) = self.deadlines.get(order.order_id.as_str()).copied() {
+                    self.deadlines.insert(new_id.as_str().to_owned(), deadline);
+                }
+                self.placed.push(new_id);
+            }
+            Err(error) => {
+                prop_assert_eq!(
+                    self.desk.broker.snapshot(),
+                    before,
+                    "거부된 정정이 상태를 바꿨다: {:?}",
+                    error
+                );
+                if self.config.kr.rounding.mode == RoundingMode::Down {
+                    prop_assert!(
+                        error != BrokerError::InsufficientBuyingPower,
+                        "같은 값 · 같은 수량 정정이 돈 때문에 거부됐다: {:?}",
+                        order
+                    );
+                }
+                prop_assert!(
+                    error != BrokerError::InsufficientSellableQuantity,
+                    "같은 수량 정정이 팔 수량 때문에 거부됐다: {:?}",
+                    order
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// 마감이 된 주문은 시간을 알려 주지 않았어도 열린 채로 보이지 않는다.
     fn check_deadlines(&self) -> Result<(), TestCaseError> {
         self.desk.set_clock(self.now());
@@ -277,10 +423,12 @@ fn remaining(order: &Order) -> Decimal {
     order.quantity - order.execution.filled_quantity
 }
 
-/// 지정가로 사는 열린 주문이 묶는 돈: 남은 수량 × 지정가 + 올림(× 0.015%).
+/// 지정가로 사는 열린 주문이 묶는 돈 (3차 4번): 남은 수량 × 지정가
+/// + 올림((누적 체결 금액 + 남은 수량 × 지정가) × 0.015%) − 이미 뗀 수수료.
 fn limit_hold(order: &Order) -> Decimal {
     let notional = remaining(order) * order.price.unwrap();
-    notional + (notional * d("0.00015")).ceil()
+    let whole = order.execution.filled_amount + notional;
+    notional + (whole * d("0.00015")).ceil() - order.execution.commission
 }
 
 /// 돈과 수량이 어긋나지 않았는지 공개 API만으로 확인한다. 조회는 `now` 시각으로 한다.
@@ -417,17 +565,11 @@ fn check(
     let all_limit = open_buys
         .iter()
         .all(|order| order.order_type == OrderType::Limit);
-    if all_limit && mode == RoundingMode::Down {
+    // 3차 4번: 수수료 예비를 늘리지 않는다. 체결마다 묶인 돈은 낸 돈만큼만 줄어, 반올림 방향과
+    // 상관없이 위 식과 끝자리까지 같다(2차에는 올림 · 반올림에서 1원 적을 수 있었다).
+    let _ = mode;
+    if all_limit {
         prop_assert_eq!(cash.held, limit_holds, "묶인 돈이 열린 주문과 다르다");
-    } else if all_limit {
-        // 올림 · 반올림에서는 누적 수수료가 남은 수량으로 다시 셈한 몫보다 1원 앞설 수 있어,
-        // 남은 수량에 필요한 돈보다 적게 묶여 있을 수 있다. 더 많이 묶지는 않는다.
-        prop_assert!(
-            cash.held <= limit_holds,
-            "남은 수량에 필요한 돈보다 많이 묶였다: {:?} > {}",
-            cash,
-            limit_holds
-        );
     } else {
         prop_assert!(
             cash.held >= limit_holds,

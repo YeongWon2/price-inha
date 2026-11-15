@@ -559,3 +559,88 @@ fn 미국_주식은_달러와_센트로_셈한다() {
     // 원화는 한 푼도 움직이지 않는다.
     assert_eq!(desk.krw(), cash("10000000", "0", "0"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3차 4번: 수수료 예비를 늘리지 않는다. 묶는 수수료 몫은 `올림(주문 전체 수수료) − 이미 뗀 것`.
+// 체결마다 묶인 돈은 그 체결에 낸 돈(금액 + 수수료)만큼만 줄고, 풀었다 되가져가지 않는다.
+// ---------------------------------------------------------------------------------------------
+
+/// 수수료를 원 단위로 올려 떼고, 한 시세에 1주씩 체결되는 설정.
+fn round_up_one_by_one(krw: &str) -> pi_paper::PaperConfig {
+    let mut config = config_with_krw(krw);
+    config.kr.rounding.mode = RoundingMode::Up;
+    config.kr.max_fill = MaxFill::PerQuote(d("1"));
+    config
+}
+
+// 검증: C10
+// 2차 검토의 참고: 올림에서 2주 × 70,000원을 1주씩 체결하면, 첫 체결의 수수료가 올림(10.5) = 11원이라
+// 남은 1주 몫을 다시 셈한 70,011원이 그때 묶인 70,010원보다 1원 많아 쓸 수 있는 돈에서 1원을
+// 되가져갔다. 주문 전체 수수료는 올림(21) = 21원이고 이미 11원을 뗐으니 남은 몫은 10원이면 된다.
+#[test]
+fn 나눠_체결돼도_묶인_돈은_낸_돈만큼만_줄고_쓸_수_있는_돈을_되가져가지_않는다() {
+    // 처음 돈: 삼성 2주 주문(140,000 + 21 = 140,021)과 하이닉스 1주 주문(30,000 + 올림(4.5) = 30,005)
+    // 을 딱 낼 수 있는 170,026원.
+    let desk = Desk::open(round_up_one_by_one("170026"));
+    let first = desk.accepted(&buy(SAM, "2", "70000"), at(0));
+    assert_eq!(desk.krw(), cash("30005", "140021", "0"));
+
+    // 1주 체결: 70,000 + 수수료 11 = 70,011을 낸다. 묶인 돈은 140,021 − 70,011 = 70,010.
+    assert_eq!(
+        kinds(&desk.quote(SAM, "70000", at(1))),
+        vec![OrderEventKind::PartialFill]
+    );
+    assert_eq!(desk.order(&first).execution.commission, d("11"));
+    assert_eq!(desk.krw(), cash("30005", "70010", "0"));
+
+    // 쓸 수 있는 돈이 줄지 않았으니 하이닉스 1주(30,005)를 낼 수 있다.
+    desk.accepted(&buy(HYN, "1", "30000"), at(2));
+    assert_eq!(desk.krw(), cash("0", "100015", "0"));
+
+    // 남은 1주 체결: 누적 수수료 올림(21) = 21 − 11 = 10원. 70,010을 내고 묶인 것이 0이 된다.
+    assert_eq!(
+        kinds(&desk.quote(SAM, "70000", at(3))),
+        vec![OrderEventKind::Fill]
+    );
+    let order = desk.order(&first);
+    assert_eq!(order.status, OrderStatus::Filled);
+    assert_eq!(order.execution.commission, d("21"));
+    assert_eq!(desk.krw(), cash("0", "30005", "0"));
+}
+
+// 검증: C10
+// 원 미만 버림에서도 같다: 3주 × 70,000원을 1주씩. 전체 수수료 올림(31.5) = 32원을 묶고, 체결마다
+// 버림한 누적 수수료(10 → 21 → 31)에서 이미 뗀 것을 뺀 만큼(10 · 11 · 10)만 뗀다. 묶인 돈은
+// 210,032 → 140,022 → 70,011로 낸 돈만큼만 줄고, 주문이 끝나면 남은 1원(32 − 31)은 풀린다.
+#[test]
+fn 버림에서도_묶인_돈은_낸_돈만큼만_준다() {
+    let mut config = config_with_krw("210032");
+    config.kr.max_fill = MaxFill::PerQuote(d("1"));
+    let desk = Desk::open(config);
+    let order_id = desk.accepted(&buy(SAM, "3", "70000"), at(0));
+    assert_eq!(desk.krw(), cash("0", "210032", "0"));
+
+    let expected = [
+        ("10", "0", "140022"),
+        ("21", "0", "70011"),
+        ("31", "1", "0"),
+    ];
+    for (step, (commission, available, held)) in expected.iter().enumerate() {
+        let now = at(i64::try_from(step).unwrap() + 1);
+        desk.quote(SAM, "70000", now);
+        assert_eq!(
+            desk.order(&order_id).execution.commission,
+            d(commission),
+            "{}번째 체결",
+            step + 1
+        );
+        assert_eq!(
+            desk.krw(),
+            cash(available, held, "0"),
+            "{}번째 체결",
+            step + 1
+        );
+    }
+    assert_eq!(desk.order(&order_id).status, OrderStatus::Filled);
+    assert_eq!(desk.holding(SAM).unwrap().quantity, d("3"));
+}
