@@ -6,6 +6,7 @@
 
 mod check;
 mod command;
+mod groups;
 mod output;
 mod process;
 
@@ -15,15 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 
+use self::groups::Groups;
 use crate::error::AiError;
 use crate::types::{AiProvider, CompletionRequest, CompletionResponse};
 
 /// 동시에 띄우는 CLI 프로세스 수의 기본값.
 pub const CLI_DEFAULT_MAX_CONCURRENCY: usize = 2;
 
-/// 표준 입력 상한(바이트). 넘으면 띄우지 않고 [`AiError::InvalidRequest`]를 낸다.
+/// 표준 입력 상한(바이트). 시스템 글과 표준 입력을 합쳐 넘으면 띄우지 않고
+/// [`AiError::InvalidRequest`]를 낸다.
 pub const CLI_MAX_STDIN_BYTES: usize = 10_000_000;
 
 /// 표준 출력 · 표준 오류를 읽는 상한의 기본값(바이트).
@@ -168,18 +171,31 @@ pub struct ClaudeCliProvider {
     config: ClaudeCliConfig,
     /// 동시에 산 자식 수를 묶는 자리표.
     slots: Arc<Semaphore>,
+    /// 살아 있는 자식 그룹의 명부. 끝내기가 본다.
+    groups: Arc<Groups>,
+    /// 설치 · 로그인 확인을 한 번에 하나만 돌리는 차례표.
+    check_turn: Mutex<()>,
 }
 
 impl ClaudeCliProvider {
     /// 설정으로 공급자를 만든다. 아무것도 띄우지 않는다.
     pub fn new(config: ClaudeCliConfig) -> Self {
         let slots = Arc::new(Semaphore::new(config.max_concurrency.max(1)));
-        Self { config, slots }
+        Self {
+            config,
+            slots,
+            groups: Arc::new(Groups::default()),
+            check_turn: Mutex::new(()),
+        }
     }
 
     /// 설치(`--version`, 5초)와 로그인(`auth status --json`, 10초)을 차례로 확인한다.
     /// 모델을 부르지 않는다. 로그인 확인이 제한을 넘겨도 그 프로세스를 죽이지 않는다.
+    ///
+    /// 한 공급자에서 확인은 한 번에 하나만 돈다(두 번째는 첫 번째가 끝나기를 기다린다).
+    /// 제한을 넘긴 확인 명령의 표준 출력은 뒤에서 끝까지 읽어 버려 그 명령이 스스로 끝나게 한다.
     pub async fn check(&self) -> CliStatus {
+        let _turn = self.check_turn.lock().await;
         check::check(&self.config).await
     }
 
@@ -189,7 +205,9 @@ impl ClaudeCliProvider {
     /// [`AiError::Connection`]), 살아 있는 모든 자식 그룹에 표준 입력을 닫은 뒤
     /// `SIGTERM` → 유예([`ClaudeCliConfig::kill_grace`]) → `SIGKILL`을 보내고, 자식이 거둬질 때까지 기다린다.
     pub async fn shutdown(&self) {
-        todo!()
+        // 자리를 기다리던 호출도 띄우지 않고 연결 실패로 끝난다.
+        self.slots.close();
+        self.groups.shutdown(self.config.kill_grace).await;
     }
 }
 
@@ -197,17 +215,34 @@ impl ClaudeCliProvider {
 impl AiProvider for ClaudeCliProvider {
     /// CLI를 한 번 띄워 응답을 받는다. 어떤 오류도 다시 부르지 않는다.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AiError> {
+        if self.groups.is_closed() {
+            return Err(AiError::Connection);
+        }
         let Some(program) = self.config.command.clone() else {
             return Err(AiError::NotConfigured);
         };
         let input = command::stdin_text(&request.messages);
-        if input.len() > CLI_MAX_STDIN_BYTES {
+        let system_len = request.system.as_ref().map_or(0, String::len);
+        if input.len().saturating_add(system_len) > CLI_MAX_STDIN_BYTES {
             return Err(AiError::InvalidRequest {
-                message: format!("대화 글이 {CLI_MAX_STDIN_BYTES}바이트를 넘습니다"),
+                message: format!(
+                    "시스템 글과 대화 글이 합쳐 {CLI_MAX_STDIN_BYTES}바이트를 넘습니다"
+                ),
             });
         }
+        // 작업 폴더가 없으면 띄우지 않는다. 띄울 때의 `NotFound`는 실행 파일이 없다는 뜻만 남는다.
+        if !self.config.work_dir.is_dir() {
+            return Err(AiError::Connection);
+        }
         let deadline = tokio::time::Instant::now() + self.config.timeout;
-        let call = process::run_once(&self.config, &self.slots, &program, &request, input);
+        let call = process::run_once(
+            &self.config,
+            &self.slots,
+            &self.groups,
+            &program,
+            &request,
+            input,
+        );
         tokio::time::timeout_at(deadline, call)
             .await
             .unwrap_or(Err(AiError::Timeout))

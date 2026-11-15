@@ -13,6 +13,15 @@ use crate::wire::stop_reason;
 /// 오류에 담는 표준 오류 첫 줄의 최대 글자 수.
 const STDERR_LINE_CHARS: usize = 200;
 
+/// 표준 오류에서 가리는 낱말의 앞머리(Anthropic 키 모양).
+const SECRET_PREFIX: &str = concat!("sk-", "ant-");
+
+/// 이만큼 이상 이어진 `[A-Za-z0-9_-]` 덩어리는 비밀로 보고 가린다.
+const MASK_RUN_CHARS: usize = 32;
+
+/// 가린 자리에 넣는 글.
+const MASK: &str = "***";
+
 /// 표준 출력에서 읽어 둔 것.
 #[derive(Default)]
 pub(super) struct StreamState {
@@ -188,7 +197,34 @@ fn stderr_first_line(stderr: &[u8], code: i32) -> String {
     if line.is_empty() {
         return format!("CLI가 끝 코드 {code}로 끝났습니다");
     }
-    line.chars().take(STDERR_LINE_CHARS).collect()
+    mask_secrets(line).chars().take(STDERR_LINE_CHARS).collect()
+}
+
+/// 비밀처럼 보이는 덩어리를 `***`로 바꾼다(원본 2.7).
+///
+/// `[A-Za-z0-9_-]`가 이어진 덩어리 가운데 `sk-ant-`가 든 것과 32자 이상인 것을 가린다.
+fn mask_secrets(line: &str) -> String {
+    let is_token = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut out = String::with_capacity(line.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.contains(SECRET_PREFIX) || run.chars().count() >= MASK_RUN_CHARS {
+            out.push_str(MASK);
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in line.chars() {
+        if is_token(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
 }
 
 #[cfg(test)]
@@ -196,6 +232,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn 비밀처럼_보이는_덩어리만_가린다() {
+        let key = format!("x=sk-{}-abc;", "ant");
+        assert_eq!(mask_secrets(&key), "x=***;");
+        assert_eq!(mask_secrets(&"a".repeat(32)), "***");
+        assert_eq!(mask_secrets(&"a".repeat(31)), "a".repeat(31));
+        assert_eq!(mask_secrets("가 나-다"), "가 나-다");
+    }
 
     #[test]
     fn 모르는_상태는_결과_글로_넘어간다() {

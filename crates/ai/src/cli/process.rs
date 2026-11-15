@@ -2,27 +2,30 @@
 //!
 //! 자식은 자기 프로세스 그룹으로 띄운다. 정상으로 끝나지 않은 채 버려지면(시간 초과 ·
 //! 호출 버림 · 출력 넘침 · 실패 결과 줄) [`GroupGuard`]가 그룹 전체에 `SIGTERM`, 유예 뒤
-//! `SIGKILL`을 보낸다. `unsafe` 없이 시스템 `kill` 명령을 부른다.
+//! `SIGKILL`을 보낸다. 정상으로 거둔 뒤에도 그룹에 `SIGTERM`을 한 번 보내 남은 손주를 끝낸다.
+//! 띄운 그룹은 공급자의 명부([`Groups`])에 적어 끝내기가 찾을 수 있게 한다.
+//! `unsafe` 없이 시스템 `kill` 명령을 부른다.
 
 use std::io;
 use std::os::fd::{AsFd, OwnedFd};
 use std::path::Path;
-use std::process::{Command as StdCommand, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use super::ClaudeCliConfig;
 use super::command::{self, SystemFile};
+use super::groups::{Groups, Registration, signal_group};
 use super::output::{self, StreamState};
 use crate::error::AiError;
 use crate::types::{CompletionRequest, CompletionResponse};
 
-/// 그룹에 신호를 보내는 시스템 명령.
-const KILL_COMMAND: &str = "/bin/kill";
+/// `SIGKILL` 뒤 자식을 거두려고 기다리는 가장 긴 시간.
+const REAP_WAIT: Duration = Duration::from_secs(1);
 
 /// 한 번에 읽는 크기.
 const CHUNK: usize = 16 * 1024;
@@ -31,6 +34,7 @@ const CHUNK: usize = 16 * 1024;
 pub(super) async fn run_once(
     config: &ClaudeCliConfig,
     slots: &Arc<Semaphore>,
+    groups: &Arc<Groups>,
     program: &Path,
     request: &CompletionRequest,
     input: String,
@@ -60,11 +64,19 @@ pub(super) async fn run_once(
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let mut guard = GroupGuard::new(child, config.kill_grace, permit, held);
+    let (close_stdin, stdin_closed) = oneshot::channel();
+    let registration = child
+        .id()
+        .and_then(|pgid| groups.register(pgid, close_stdin));
+    let shut_down = registration.is_none();
+    let mut guard = GroupGuard::new(child, config.kill_grace, permit, held, registration);
+    if shut_down {
+        // 띄우는 사이에 끝내기가 시작됐다. 버려지는 지킴이가 그룹을 끝낸다.
+        return Err(AiError::Connection);
+    }
 
     let collected = collect(
-        stdin,
-        input.into_bytes(),
+        (stdin, input.into_bytes(), stdin_closed),
         stdout,
         stderr,
         config.max_output_bytes,
@@ -111,15 +123,17 @@ struct Collected {
     failed_early: bool,
 }
 
+/// 표준 입력에 쓸 것: 파이프, 글, 끝내기가 닫으라고 알리는 받는 쪽.
+type StdinJob = (Option<ChildStdin>, Vec<u8>, oneshot::Receiver<()>);
+
 /// 표준 입력을 쓰면서 두 출력을 읽는다. 어느 쪽이든 상한을 넘으면 `InvalidResponse`.
 async fn collect(
-    stdin: Option<ChildStdin>,
-    input: Vec<u8>,
+    (stdin, input, stdin_closed): StdinJob,
     stdout: Option<impl AsyncRead + Unpin>,
     stderr: Option<impl AsyncRead + Unpin>,
     limit: usize,
 ) -> Result<Collected, AiError> {
-    let write = write_stdin(stdin, input);
+    let write = write_stdin(stdin, input, stdin_closed);
     let read_out = read_stdout(stdout, limit);
     let read_err = read_capped(stderr, limit);
     tokio::pin!(write, read_out, read_err);
@@ -151,11 +165,18 @@ async fn collect(
 }
 
 /// 표준 입력에 한 번 쓰고 닫는다. 자식이 먼저 끝나 못 쓰면 그만둔다.
-async fn write_stdin(stdin: Option<ChildStdin>, input: Vec<u8>) {
-    if let Some(mut pipe) = stdin
-        && pipe.write_all(&input).await.is_ok()
-    {
-        let _ = pipe.shutdown().await;
+/// 끝내기가 닫으라고 알리면 쓰기를 그만두고 바로 닫는다(원본 2.7).
+async fn write_stdin(stdin: Option<ChildStdin>, input: Vec<u8>, closed: oneshot::Receiver<()>) {
+    let Some(mut pipe) = stdin else {
+        return;
+    };
+    tokio::select! {
+        written = pipe.write_all(&input) => {
+            if written.is_ok() {
+                let _ = pipe.shutdown().await;
+            }
+        }
+        _ = closed => {}
     }
 }
 
@@ -229,6 +250,8 @@ struct GroupGuard {
     permit: Option<OwnedSemaphorePermit>,
     /// 출력 읽는 끝의 사본(그룹을 끝낸 뒤에 닫는다).
     held: Vec<OwnedFd>,
+    /// 공급자 명부의 자리(그룹을 끝낸 뒤에 놓는다).
+    registration: Option<Registration>,
     /// 자식을 거뒀다(그룹을 끝낼 필요가 없다).
     reaped: bool,
 }
@@ -239,6 +262,7 @@ impl GroupGuard {
         grace: Duration,
         permit: OwnedSemaphorePermit,
         held: Vec<OwnedFd>,
+        registration: Option<Registration>,
     ) -> Self {
         Self {
             pgid: child.id(),
@@ -246,6 +270,7 @@ impl GroupGuard {
             grace,
             permit: Some(permit),
             held,
+            registration,
             reaped: false,
         }
     }
@@ -262,44 +287,48 @@ impl GroupGuard {
 }
 
 impl Drop for GroupGuard {
+    /// 거두지 못했으면 그룹에 `SIGTERM` → 유예 → `SIGKILL`을 보내고 거둔다.
+    /// 거뒀어도 남은 손주가 있을 수 있으니 그룹에 `SIGTERM`을 한 번 보낸다.
+    /// 자리표 · 명부 자리는 그 뒤에 놓는다. 막히지 않게 따로 된 실에서 한다.
     fn drop(&mut self) {
         let child = self.child.take();
         let permit = self.permit.take();
+        let registration = self.registration.take();
         let held = std::mem::take(&mut self.held);
-        if self.reaped {
-            return;
-        }
         let Some(pgid) = self.pgid else {
             return;
         };
-        let grace = self.grace;
+        let (reaped, grace) = (self.reaped, self.grace);
         let spawned = std::thread::Builder::new()
             .name("pi-ai-cli-kill".to_string())
             .spawn(move || {
                 signal_group("TERM", pgid);
-                std::thread::sleep(grace);
-                signal_group("KILL", pgid);
-                // 그룹을 끝낸 뒤에 거두고 자리표를 놓는다.
-                if let Some(mut child) = child {
-                    let _ = child.try_wait();
+                if !reaped {
+                    std::thread::sleep(grace);
+                    signal_group("KILL", pgid);
+                    if let Some(child) = child {
+                        reap(child);
+                    }
                 }
                 drop(held);
                 drop(permit);
+                drop(registration);
             });
         if spawned.is_err() {
-            signal_group("KILL", pgid);
+            signal_group(if reaped { "TERM" } else { "KILL" }, pgid);
         }
     }
 }
 
-/// 그룹 전체에 신호를 보낸다(`kill -<신호> -- -<그룹>`).
-fn signal_group(signal: &str, pgid: u32) {
-    let _ = StdCommand::new(KILL_COMMAND)
-        .arg(format!("-{signal}"))
-        .arg("--")
-        .arg(format!("-{pgid}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+/// `SIGKILL`을 보낸 자식을 잠깐 기다려 거둔다. 그 안에 못 거두면 런타임에 맡긴다.
+fn reap(mut child: Child) {
+    let step = Duration::from_millis(10);
+    let mut waited = Duration::ZERO;
+    while waited < REAP_WAIT {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(step);
+        waited += step;
+    }
 }

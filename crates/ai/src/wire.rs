@@ -1,11 +1,13 @@
 //! Anthropic Messages API와 주고받는 JSON 모양, 그리고 응답을 이 모듈의 값으로 옮기는 일.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::credential::{Credential, REDACTED};
 use crate::error::AiError;
+use crate::retry;
 use crate::types::{CompletionRequest, CompletionResponse, Role, StopReason, Usage};
 
 /// 오류에 담는 공급자 설명의 최대 길이(글자 수).
@@ -112,9 +114,31 @@ pub(crate) fn stop_reason(wire: String) -> StopReason {
     }
 }
 
-/// `retry-after` 헤더 값(초)을 읽는다. 초가 아닌 모양이면 `None`.
-pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
-    value.trim().parse().ok().map(Duration::from_secs)
+/// 오류 본문의 `retry_after`(A18, 원본 `provider_retry_after_seconds`).
+///
+/// 본문에 `error` 객체가 있으면 그 안의 값을, 없으면 맨 위의 값을 본다. 숫자(초)나
+/// 글자(`Retry-After`와 같은 모양)를 읽는다. 읽을 수 없거나 기다릴 시간이 없으면 `None`.
+pub(crate) fn body_retry_after(body: &[u8], now: SystemTime) -> Option<Duration> {
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let holder = match value.get("error") {
+        Some(error) if error.is_object() => error,
+        _ => &value,
+    };
+    match holder.get("retry_after")? {
+        Value::Number(n) => retry::seconds_to_wait(n.as_f64()?),
+        Value::String(s) => retry::parse_retry_after(s, now),
+        _ => None,
+    }
+}
+
+/// 키 확인 응답이 공식 문서의 모델 목록 모양(`data` 배열)인지 본다.
+pub(crate) fn check_model_list(body: &[u8]) -> Result<(), AiError> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| AiError::InvalidResponse)?;
+    if value.get("data").is_some_and(Value::is_array) {
+        Ok(())
+    } else {
+        Err(AiError::InvalidResponse)
+    }
 }
 
 /// 성공이 아닌 응답을 상태 코드로 구분한다. 본문이 JSON이 아니어도 구분한다.
@@ -225,11 +249,24 @@ mod tests {
     }
 
     #[test]
-    fn retry_after는_초만_읽는다() {
-        assert_eq!(parse_retry_after("7"), Some(Duration::from_secs(7)));
-        assert_eq!(parse_retry_after(" 12 "), Some(Duration::from_secs(12)));
-        assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
-        assert_eq!(parse_retry_after("-1"), None);
+    fn 본문의_retry_after는_숫자와_글자를_읽고_error_안을_먼저_본다() {
+        let now = SystemTime::now();
+        let read = |v: serde_json::Value| body_retry_after(v.to_string().as_bytes(), now);
+        assert_eq!(
+            read(serde_json::json!({"error": {"retry_after": 1.5}, "retry_after": 9})),
+            Some(Duration::from_millis(1500))
+        );
+        assert_eq!(
+            read(serde_json::json!({"retry_after": "12"})),
+            Some(Duration::from_secs(12))
+        );
+        assert_eq!(
+            read(serde_json::json!({"error": {}, "retry_after": 9})),
+            None
+        );
+        assert_eq!(read(serde_json::json!({"retry_after": -1})), None);
+        assert_eq!(read(serde_json::json!({"retry_after": [1]})), None);
+        assert_eq!(body_retry_after(b"<html>", now), None);
     }
 
     #[test]
