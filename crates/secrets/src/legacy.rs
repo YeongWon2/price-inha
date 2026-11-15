@@ -10,6 +10,17 @@ use std::path::Path;
 /// - 보관 폴더가 없거나 그 이름의 항목이 없으면 "없음"(`false`)이다.
 /// - 오류를 돌려주지 않는다. 볼 수 없으면 "없음"이다.
 pub fn legacy_auth_file_present(dir: &Path) -> bool {
-    let _ = dir;
-    todo!("4차 2번: 옛 auth.json이 있는지만 본다")
+    std::fs::symlink_metadata(dir.join(crate::LEGACY_AUTH_FILE)).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::legacy_auth_file_present;
+
+    #[test]
+    fn 이름이_비슷한_항목은_없음이다() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("auth.json.tmp"), b"{}").unwrap();
+        assert!(!legacy_auth_file_present(tmp.path()));
+    }
 }
