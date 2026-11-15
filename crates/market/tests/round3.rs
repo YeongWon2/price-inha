@@ -225,10 +225,6 @@ fn names(quotes: &[Quote]) -> HashSet<String> {
         .collect()
 }
 
-fn set(list: &[&str]) -> HashSet<String> {
-    list.iter().map(|s| (*s).to_string()).collect()
-}
-
 /// JSON 글자 뒤를 빈칸으로 채워 정확히 `size` 바이트로 만든다(빈칸은 JSON으로 읽힌다).
 fn padded(value: &Value, size: usize) -> String {
     let mut text = value.to_string();
