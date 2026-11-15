@@ -9,11 +9,11 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use pi_store::{ApprovalStatus, ApprovalUse, Store, StoreError, TeamState, UnixMillis};
+use pi_store::{ApprovalStatus, Store, StoreError, UnixMillis};
 
 use crate::error::{Error, RejectReason};
 use crate::record::{self, Memo};
-use crate::subject::{Fingerprint, Side, Subject, fingerprint, same_fingerprint};
+use crate::subject::{Fingerprint, Subject, fingerprint, same_fingerprint};
 
 /// 시계 포트. 이 크레이트는 시스템 시계를 직접 읽지 않는다(ARCH-CLOCK-2).
 pub trait Clock: Send + Sync {
@@ -225,9 +225,12 @@ impl Approvals {
         self.check_subject(&ask.subject, now)?;
         let _turn = lock(&self.requesting);
         let fp = fingerprint(&ask.subject);
-        let merged = record::pending_records(&self.store)?
-            .into_iter()
-            .find(|r| r.fingerprint == fp && r.subject == ask.subject && !r.expired_at(now));
+        let merged = record::pending_records(&self.store)?.into_iter().find(|r| {
+            r.fingerprint == fp
+                && r.subject == ask.subject
+                && !r.expired_at(now)
+                && !r.wait_passed(now)
+        });
         match merged {
             Some(found) => self.merge(found, now),
             None => self.create(ask, fp, now),
@@ -273,6 +276,8 @@ impl Approvals {
             return Ok(Answer::Rejected(RejectReason::AlreadyResolved));
         }
         let (to, reason) = match decision {
+            // 기다릴 시간이 지난 뒤 온 답은 승인이든 거절이든 만료로 닫는다(원본 3.2-2).
+            _ if found.wait_passed(now) => (ApprovalStatus::Expired, RejectReason::Expired),
             Decision::Reject => (ApprovalStatus::Rejected, RejectReason::UserRejected),
             Decision::Approve
                 if same_fingerprint(found.fingerprint.as_str(), shown_fingerprint) =>
@@ -294,125 +299,32 @@ impl Approvals {
         }
     }
 
-    /// 승인을 실행에 쓴다(한 번만). `executing`은 **실행할** 대상이고, 그 지문을 승인한 지문과 비교한다.
-    ///
-    /// 쓸 수 없으면 [`Error::Denied`]이고 실행하지 않는다:
-    /// 없는 번호 `NotFound`, 승인됨이 아님 `NotApproved`, 이미 씀 `AlreadyConsumed`,
-    /// 만료 `Expired`, 지문이 다름 `FingerprintMismatch`, 전체 정지 중의 실전 승격 `FullStop`.
-    ///
-    /// 지문이 달라 거부된 승인은 거절로 바뀐 것으로 다룬다: 그 뒤에는 같은 번호를 어떤 대상으로도 쓸 수 없다(E7).
-    /// 동시에 여러 번 불러도 한 번만 통과한다.
-    pub fn consume(&self, number: &ApprovalNumber, executing: &Subject) -> Result<(), Error> {
-        let now = self.clock.now();
-        let found = {
-            let mut memo = self.memo()?;
-            let Some(found) = memo.find(&self.store, number)? else {
-                return Err(Error::Denied(RejectReason::NotFound));
-            };
-            if memo.is_voided(number) {
-                return Err(Error::Denied(RejectReason::FingerprintMismatch));
-            }
-            found
-        };
-        let fp = fingerprint(executing);
-        let usable = found.status == ApprovalStatus::Approved && !found.consumed;
-        if usable
-            && !found.expired_at(now)
-            && same_fingerprint(found.fingerprint.as_str(), fp.as_str())
-            && matches!(executing, Subject::LivePromotion { .. })
-            && self.store.team_state()? == TeamState::FullStop
-        {
-            return Err(Error::Denied(RejectReason::FullStop));
-        }
-        let using = ApprovalUse {
-            id: found.id,
-            fingerprint: fp.as_str().to_string(),
-        };
-        match self.store.consume_approval(using, now) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(self.consume_denied(err, number, now)),
-        }
-    }
-
-    /// 기한이 된 기다림 요청을 닫고 처리 방침을 돌려준다(E22).
-    ///
-    /// - 주문이고 `wait_until ≤ now < expires_at`: 결과를 답 없음으로 바꾼다. 사는 주문은 알림이 갔으면
-    ///   [`DueAction::ReduceWithinLimit`], 아니면 [`DueAction::DoNotBuy`]. 파는 주문은 [`DueAction::TeamDecides`].
-    /// - 주문이고 `now ≥ expires_at`: 만료로 닫고 [`DueAction::Dropped`].
-    /// - 실전 승격 · 규칙 개선 · 다시 시작: 바꾸지 않고 돌려주지도 않는다(계속 기다린다, V42).
-    /// - 한 번 닫은 요청은 다시 돌려주지 않는다.
-    pub fn expire_due(&self, now: UnixMillis) -> Result<Vec<DueOutcome>, Error> {
-        let mut out = Vec::new();
-        for found in record::pending_records(&self.store)? {
-            let Subject::Order(order) = &found.subject else {
-                continue;
-            };
-            let due = found.wait_until.is_some_and(|t| now.0 >= t.0);
-            if !due && !found.expired_at(now) {
-                continue;
-            }
-            let done = match self
-                .store
-                .resolve_approval(found.id, ApprovalStatus::NoAnswer, now)
-            {
-                Ok(done) => done,
-                Err(StoreError::TransitionDenied { .. }) => continue,
-                Err(err) => return Err(err.into()),
-            };
-            let action = if done.status == ApprovalStatus::Expired {
-                DueAction::Dropped
-            } else if order.side == Side::Sell {
-                DueAction::TeamDecides
-            } else if self.notice_of(&found.number)? == Some(Notice::Sent) {
-                DueAction::ReduceWithinLimit
-            } else {
-                DueAction::DoNotBuy
-            };
-            out.push(DueOutcome {
-                number: found.number.clone(),
-                subject: found.subject.clone(),
-                status: done.status,
-                action,
-            });
-        }
-        Ok(out)
-    }
-
-    /// 프로그램을 다시 켰을 때 부른다(결정 6번). 시각은 시계에서 읽는다.
-    ///
-    /// 기다림 요청 가운데 신호 유효 시간이 지난 것(지금 ≥ 만료 시각)은 만료로 닫고 그 번호들을 돌려준다.
-    /// 유효 시간 안인 것과 만료 시각이 없는 것은 기다림으로 둔다.
-    pub fn on_restart(&self) -> Result<Vec<ApprovalNumber>, Error> {
-        let now = self.clock.now();
-        let mut out = Vec::new();
-        for found in record::pending_records(&self.store)? {
-            if !found.expired_at(now) {
-                continue;
-            }
-            match self
-                .store
-                .resolve_approval(found.id, ApprovalStatus::Expired, now)
-            {
-                Ok(done) if done.status == ApprovalStatus::Expired => out.push(found.number),
-                Ok(_) | Err(StoreError::TransitionDenied { .. }) => {}
-                Err(err) => return Err(err.into()),
-            }
-        }
-        Ok(out)
-    }
-
     /// 승인 요청 한 건. 없으면 `None`.
     pub fn get(&self, number: &ApprovalNumber) -> Result<Option<ApprovalView>, Error> {
-        let Some(found) = self.memo()?.find(&self.store, number)? else {
-            return Ok(None);
+        let (found, voided) = {
+            let mut memo = self.memo()?;
+            let Some(found) = memo.find(&self.store, number)? else {
+                return Ok(None);
+            };
+            (found, memo.is_voided(number))
+        };
+        // 실행 때 지문이 달라 무효가 된 승인은 거절(내용 바뀜)로 보인다. 무효 기록은 이벤트 기록에 남아
+        // 다시 켜도 같다.
+        let (status, reject_reason) = if voided {
+            (
+                ApprovalStatus::Rejected,
+                Some(RejectReason::FingerprintMismatch),
+            )
+        } else {
+            (found.status, None)
         };
         Ok(Some(ApprovalView {
             short_code: found.fingerprint.short_code().to_string(),
             number: found.number,
             subject: found.subject,
             reason: found.reason,
-            status: found.status,
-            reject_reason: None,
+            status,
+            reject_reason,
             fingerprint: found.fingerprint,
             consumed: found.consumed,
             wait_until: found.wait_until,

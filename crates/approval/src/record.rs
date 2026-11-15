@@ -47,6 +47,11 @@ impl Record {
     pub(crate) fn expired_at(&self, now: UnixMillis) -> bool {
         self.expires_at.is_some_and(|end| now.0 >= end.0)
     }
+
+    /// 이 시각에 기다릴 시간이 지났는가(지금 ≥ `wait_until`, 없으면 아니다).
+    pub(crate) fn wait_passed(&self, now: UnixMillis) -> bool {
+        self.wait_until.is_some_and(|t| now.0 >= t.0)
+    }
 }
 
 /// 요약(JSON)에 넣을 내용.

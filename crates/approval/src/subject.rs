@@ -125,10 +125,10 @@ pub fn canonical_json(subject: &Subject) -> String {
             json_str(order_type_code(order.order_type)),
             json_str(&order.signal_id),
         ),
-        Subject::LivePromotion { template, .. } => {
+        Subject::LivePromotion { template, revision } => {
             format!(
-                "{{\"kind\":\"live_promotion\",\"template\":{}}}",
-                template.0
+                "{{\"kind\":\"live_promotion\",\"template\":{},\"revision\":{}}}",
+                template.0, revision
             )
         }
         Subject::RuleImprovement { proposal } => {
