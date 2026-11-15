@@ -340,25 +340,27 @@ pub fn parse_symbols(body: &[u8]) -> Result<Vec<Symbol>, SetupRefusal> {
         Some(request) if request.len() == 1 => request.get("symbols"),
         _ => None,
     };
-    list.and_then(symbols_from)
-        .ok_or(SetupRefusal::InvalidInput)
+    symbols_from(list.ok_or(SetupRefusal::InvalidInput)?)
 }
 
-/// JSON 목록을 종목들로 읽는다. 하나 이상 [`MAX_WATCH_SYMBOLS`]개 이하의 종목 코드 글자여야 한다.
+/// JSON 목록을 종목들로 읽는다. 하나 이상 [`MAX_WATCH_SYMBOLS`]개 이하의 글자 목록이어야 하고
+/// 글자마다 종목 글자 규칙(`pi_market::Symbol::parse`, 7차 4번)에 맞아야 한다. 아니면
+/// [`SetupRefusal::InvalidInput`]이다(어느 글자인지는 싣지 않는다 — 받은 글자를 되돌려 보이지 않는다).
 /// 같은 종목을 두 번 적었으면 처음 것만 남긴다.
-fn symbols_from(list: &Value) -> Option<Vec<Symbol>> {
-    let list = list.as_array()?;
+fn symbols_from(list: &Value) -> Result<Vec<Symbol>, SetupRefusal> {
+    let list = list.as_array().ok_or(SetupRefusal::InvalidInput)?;
     if list.is_empty() || list.len() > MAX_WATCH_SYMBOLS {
-        return None;
+        return Err(SetupRefusal::InvalidInput);
     }
     let mut symbols: Vec<Symbol> = Vec::with_capacity(list.len());
     for code in list {
-        let symbol = crate::settings::symbol(code.as_str()?)?;
+        let code = code.as_str().ok_or(SetupRefusal::InvalidInput)?;
+        let symbol = crate::settings::symbol(code).ok_or(SetupRefusal::InvalidInput)?;
         if !symbols.contains(&symbol) {
             symbols.push(symbol);
         }
     }
-    Some(symbols)
+    Ok(symbols)
 }
 
 /// 파일 작업 실패는 종류만 남긴다.

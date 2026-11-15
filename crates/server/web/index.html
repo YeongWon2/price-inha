@@ -188,7 +188,8 @@
     "cli_too_old": "Claude Code CLI 버전이 너무 낮습니다. 업데이트한 뒤 다시 확인하세요.",
     "cli_not_logged_in": "로그인돼 있지 않습니다. 터미널에서 claude auth login 을 실행한 뒤 다시 확인하세요.",
     "cli_not_subscription": "구독으로 로그인돼 있지 않습니다(API 키로 로그인돼 있습니다). 구독 계정으로 다시 로그인하세요.",
-    "cli_unchecked": "확인하지 못했습니다(시간 초과 · 읽지 못함). 잠시 뒤에 다시 확인하세요."
+    "cli_unchecked": "확인하지 못했습니다(시간 초과 · 읽지 못함). 잠시 뒤에 다시 확인하세요.",
+    "cli_work_dir_not_empty": "보관 폴더의 cli-work 폴더가 비어 있지 않아 CLI를 쓰지 않습니다. 안의 것을 옮기거나 지운 뒤 다시 확인하세요."
   };
 
   // 마지막 CLI 확인 결과(설정 상태의 ai.cli)를 글자로.
@@ -198,7 +199,9 @@
     "too_old": "버전이 너무 낮습니다. 업데이트하세요.",
     "not_logged_in": "로그인돼 있지 않습니다. 터미널에서 claude auth login 을 실행하세요.",
     "not_subscription": "구독이 아닙니다(API 키로 로그인돼 있습니다).",
-    "unchecked": "확인하지 못했습니다(시간 초과 · 읽지 못함)."
+    "unchecked": "확인하지 못했습니다(시간 초과 · 읽지 못함).",
+    "checking": "확인하는 중입니다…",
+    "work_dir_not_empty": "보관 폴더의 cli-work 폴더가 비어 있지 않아 쓰지 않습니다(안의 것은 지우지 않았습니다)."
   };
 
   var lastSeq = null;      // 마지막으로 받은 이벤트 번호. 아직 없으면 null(지금부터 받는다).
@@ -425,6 +428,8 @@
 
   // AI 연결 칸(고른 방식 · 경로 · 확인 상태 · 옛 파일 알림)을 그린다. 키 값은 오지 않는다.
   var aiPicked = false;    // 사용자가 고르기를 눌렀고 아직 서버에 보내지 않았다.
+  // 사용자가 고친 경로 칸(입력 이벤트로 기억한다). 서버에 보내기 전까지 상태가 덮지 않는다.
+  var cliEdited = { "f-cli-command": false, "f-cli-config-dir": false };
   function showAiPick(method) {
     document.getElementById("ai-pick-api").checked = method !== "cli";
     document.getElementById("ai-pick-cli").checked = method === "cli";
@@ -436,11 +441,11 @@
     if (!aiPicked) { showAiPick(ai.method === "cli" ? "cli" : "api_key"); }
     var $command = document.getElementById("f-cli-command");
     if (typeof ai.command === "string" && ($command.value === "" || ai.method === "cli")
-        && document.activeElement !== $command) {
+        && !cliEdited["f-cli-command"] && document.activeElement !== $command) {
       $command.value = ai.command;
     }
     var $dir = document.getElementById("f-cli-config-dir");
-    if (ai.method === "cli" && document.activeElement !== $dir) {
+    if (ai.method === "cli" && !cliEdited["f-cli-config-dir"] && document.activeElement !== $dir) {
       $dir.value = typeof ai.config_dir === "string" ? ai.config_dir : "";
     }
     var line = "";
@@ -488,6 +493,13 @@
           $message.className = "msg bad";
         }
         aiPicked = false;
+        // 서버가 고른 것을 저장했을 때만(성공 · CLI 확인 결과) 칸을 상태에 다시 맞춘다.
+        // 입력이 잘못됐거나 횟수를 넘었으면 사용자가 고치던 글자를 남긴다.
+        var why = data && typeof data.error === "string" ? data.error : "";
+        if (result.ok || why.indexOf("cli_") === 0) {
+          cliEdited["f-cli-command"] = false;
+          cliEdited["f-cli-config-dir"] = false;
+        }
         loadSetup();
       })
       .catch(function () {
@@ -507,6 +519,9 @@
       // CLI는 "확인"을 눌러야 저장하고 확인한다.
       aiPicked = true;
       showAiPick("cli");
+    });
+    Object.keys(cliEdited).forEach(function (id) {
+      document.getElementById(id).addEventListener("input", function () { cliEdited[id] = true; });
     });
     var $button = document.getElementById("b-ai-cli");
     $button.addEventListener("click", function () {

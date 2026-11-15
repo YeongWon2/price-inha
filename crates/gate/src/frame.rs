@@ -39,26 +39,18 @@ pub(crate) fn kind_follows_rule(kind: &str) -> bool {
 /// 저장된 줄을 (시각, 내용)으로 본다.
 ///
 /// - 4차부터 발행한 줄: 시각은 시각 칸, 내용은 저장된 그대로다.
-/// - 3차까지 싼 봉투 줄(`{"at": 정수, "payload": …}` 두 칸): 시각 칸이 비었거나(봉투 그대로 쌓인 줄)
-///   봉투의 시각과 같으면(버전 3으로 올라오며 시각 칸이 채워진 줄) 한 겹 풀어 예전과 같게 보낸다.
-///   (5차) 번호가 저장소의 옛 형식 경계(`legacy_until`) 이하인 줄만 푼다. 경계가 없으면 풀지 않는다.
-fn time_and_payload(
-    seq: u64,
-    legacy_until: Option<u64>,
-    column: Option<UnixMillis>,
-    stored: Value,
-) -> (Value, Value) {
+/// - 3차까지 싼 옛 봉투 줄(`{"at": 정수, "payload": …}`): 한 겹 풀어 예전과 같게 보낸다.
+///   (7차 6번) 옛 봉투인지는 관문이 값의 모양으로 다시 보지 않고 저장소가 원래 글자로 정한다
+///   (`pi_store::Store::legacy_envelope_seqs`, 판정은 저장소 한 곳에만 있다). `legacy`가 그 판정이다.
+///   읽힌 값이 두 칸 객체가 아니면(그럴 일은 없지만) 풀지 않고 그대로 보낸다.
+fn time_and_payload(legacy: bool, column: Option<UnixMillis>, stored: Value) -> (Value, Value) {
     let column_at = column.map(|at| Value::from(at.0));
-    let legacy = legacy_until.is_some_and(|until| seq <= until);
     match stored {
         Value::Object(mut map)
             if legacy
                 && map.len() == 2
-                && map.contains_key(ENVELOPE_PAYLOAD)
-                && map.get(ENVELOPE_AT).is_some_and(Value::is_i64)
-                && column_at
-                    .as_ref()
-                    .is_none_or(|at| map.get(ENVELOPE_AT) == Some(at)) =>
+                && map.contains_key(ENVELOPE_AT)
+                && map.contains_key(ENVELOPE_PAYLOAD) =>
         {
             let at = map.remove(ENVELOPE_AT).unwrap_or(Value::Null);
             let payload = map.remove(ENVELOPE_PAYLOAD).unwrap_or(Value::Null);
@@ -69,13 +61,9 @@ fn time_and_payload(
 }
 
 /// 저장된 이벤트의 프레임: `{"seq", "kind", "payload", "at"}`. 종류는 저장소가 저장한 이름이다.
-/// `legacy_until`은 저장소의 옛 형식 경계 번호다(`pi_store::Store::legacy_envelope_until`).
-pub(crate) fn stored(
-    redactor: &dyn Redactor,
-    event: TimedEvent,
-    legacy_until: Option<u64>,
-) -> Frame {
-    let (at, payload) = time_and_payload(event.seq, legacy_until, event.at, event.payload);
+/// `legacy`는 저장소가 이 줄을 옛 봉투 줄로 판정했는가다(`pi_store::Store::legacy_envelope_seqs`).
+pub(crate) fn stored(redactor: &dyn Redactor, event: TimedEvent, legacy: bool) -> Frame {
+    let (at, payload) = time_and_payload(legacy, event.at, event.payload);
     build(redactor, Some(event.seq), event.kind, payload, at)
 }
 
@@ -194,7 +182,7 @@ mod tests {
         let frame = parse(&stored(
             &NoRedaction,
             timed(7, Some(42), json!({ "n": 1 })),
-            Some(100),
+            false,
         ));
         assert_eq!(
             frame,
@@ -203,40 +191,47 @@ mod tests {
         let frame = parse(&stored(
             &NoRedaction,
             timed(3, None, json!({ "x": true })),
-            Some(100),
+            false,
         ));
         assert_eq!(frame["payload"], json!({ "x": true }));
         assert_eq!(frame["at"], Value::Null);
     }
 
     #[test]
-    fn 옛_봉투_줄은_한_겹만_푼다() {
+    fn 저장소가_옛_봉투라고_한_줄은_한_겹만_푼다() {
         let inner = json!({ "at": 1, "payload": "속" });
         let old = json!({ "at": 9, "payload": inner.clone() });
         for column in [None, Some(9)] {
-            let frame = parse(&stored(
-                &NoRedaction,
-                timed(1, column, old.clone()),
-                Some(1),
-            ));
+            let frame = parse(&stored(&NoRedaction, timed(1, column, old.clone()), true));
             assert_eq!(frame["payload"], inner);
             assert_eq!(frame["at"], json!(9));
         }
     }
 
     #[test]
-    fn 경계_뒤나_경계가_없으면_봉투_모양이어도_풀지_않는다() {
+    fn 저장소가_옛_봉투라고_하지_않으면_봉투_모양이어도_풀지_않는다() {
         let old = json!({ "at": 9, "payload": "속" });
-        for (seq, until) in [(2, Some(1)), (1, None), (1, Some(0))] {
-            for column in [None, Some(9)] {
-                let frame = parse(&stored(
-                    &NoRedaction,
-                    timed(seq, column, old.clone()),
-                    until,
-                ));
-                assert_eq!(frame["payload"], old, "{seq}번, 경계 {until:?}");
-                assert_eq!(frame["at"], column.map_or(Value::Null, |at| json!(at)));
-            }
+        for column in [None, Some(9), Some(42)] {
+            let frame = parse(&stored(&NoRedaction, timed(2, column, old.clone()), false));
+            assert_eq!(frame["payload"], old);
+            assert_eq!(frame["at"], column.map_or(Value::Null, |at| json!(at)));
+        }
+    }
+
+    #[test]
+    fn 옛_봉투라고_해도_두_칸_객체가_아니면_그대로_보낸다() {
+        for payload in [
+            json!({ "at": 9 }),
+            json!([9, 1]),
+            json!({ "at": 9, "payload": 1, "x": 2 }),
+        ] {
+            let frame = parse(&stored(
+                &NoRedaction,
+                timed(1, Some(9), payload.clone()),
+                true,
+            ));
+            assert_eq!(frame["payload"], payload);
+            assert_eq!(frame["at"], json!(9));
         }
     }
 
@@ -246,18 +241,6 @@ mod tests {
         assert_eq!(trimmed_kind("   "), None);
         assert_eq!(trimmed_kind(" Chat "), None);
         assert_eq!(trimmed_kind("\u{200b}chat"), None);
-    }
-
-    #[test]
-    fn 시각_칸과_다른_봉투_모양의_내용은_내용_그대로다() {
-        let payload = json!({ "at": 5, "payload": 1 });
-        let frame = parse(&stored(
-            &NoRedaction,
-            timed(2, Some(42), payload.clone()),
-            Some(100),
-        ));
-        assert_eq!(frame["payload"], payload);
-        assert_eq!(frame["at"], json!(42));
     }
 
     #[test]

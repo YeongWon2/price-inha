@@ -349,9 +349,6 @@ const ENV_NAMES: [&str; 13] = [
     ENV_SYMBOLS_WINDOW_MS,
 ];
 
-/// 종목 코드 하나의 가장 긴 길이.
-const MAX_SYMBOL_LEN: usize = 32;
-
 /// 인자로 준 것들(값은 아직 글자 그대로). 같은 인자를 두 번 주면 뒤의 것을 쓴다.
 #[derive(Default)]
 struct Given {
@@ -424,17 +421,15 @@ fn symbols(value: &str, name: &'static str) -> Result<Vec<Symbol>, SettingsError
         .collect()
 }
 
-/// 종목 코드 하나. 비었거나, 너무 길거나, 종목 코드로 볼 수 없는 글자가 있거나,
-/// 점이 둘 이어지면(`..`, 경로처럼 읽힐 수 있다) `None`. 점 하나(`BRK.B`)는 받는다.
+/// 종목 코드 하나. 글자 규칙은 `pi_market::Symbol::parse`(market 2차)에 맡긴다(7차 4번):
+/// 비었거나, 너무 길거나, 영문 · 숫자 · `.` · `-` 밖의 글자가 있으면 `None`.
+/// 더해서 점이 둘 이어지면(`..`, 경로처럼 읽힐 수 있다) `None`. 점 하나(`BRK.B`)는 받는다.
 /// 인자(`--symbols`) · 화면의 종목 등록 · 저장된 종목 파일이 모두 이 검사를 쓴다.
 pub(crate) fn symbol(code: &str) -> Option<Symbol> {
-    let plain = !code.is_empty()
-        && code.len() <= MAX_SYMBOL_LEN
-        && code
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        && !code.contains("..");
-    plain.then(|| Symbol::new(code))
+    if code.contains("..") {
+        return None;
+    }
+    Symbol::parse(code).ok()
 }
 
 fn market(value: &str, name: &'static str) -> Result<Market, SettingsError> {

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
-use pi_market::{Currency, Market, MarketCalendar, Quote, StalePolicy, Symbol};
+use pi_market::{Currency, Market, MarketCalendar, Quote, StalePolicy, Symbol, TradingDay};
 use serde_json::{Value, json};
 
 /// 마지막으로 알린 "시세 늦음".
@@ -86,11 +86,12 @@ impl Board {
     ///   보지 않는다: 30초 넘게 오지 않은 시세를 늦은 것으로 보고 `hours_unknown`을 참으로 알린다.
     /// - 물어봤는데 시세가 한 번도 오지 않은 종목은 처음 물어본 때부터 잰다(조용히 빠지지 않는다).
     /// - `skip`(증권사가 거절한 종목)은 따로 알리므로 여기에 넣지 않는다.
+    /// - (7차 7번) 달력이 지금을 덮는지는 `MarketCalendar::covers`가, 늦음은 `pi_market::is_stale`이 정한다
+    ///   (따로 세지 않는다). 달력이 없어도 받은 시각이 지금보다 뒤인 시세(시계가 어긋남)는 늦은 것이다.
     pub(crate) fn stale_notice(
         &mut self,
         symbols: &[Symbol],
         skip: &[Symbol],
-        market: Market,
         now: DateTime<Utc>,
     ) -> Option<Value> {
         let policy = StalePolicy::default();
@@ -98,10 +99,12 @@ impl Board {
             .calendar
             .as_ref()
             .map(|(_, calendar)| calendar)
-            .filter(|calendar| covers(calendar, market, now));
+            .filter(|calendar| calendar.covers(now));
         let is_late = |symbol: &&Symbol| match (self.held.get(*symbol), calendar) {
             (Some(quote), Some(calendar)) => pi_market::is_stale(quote, calendar, now, &policy),
-            (Some(quote), None) => older_than(quote.received_at, now, policy.max_age),
+            (Some(quote), None) => {
+                quote.received_at > now || older_than(quote.received_at, now, policy.max_age)
+            }
             (None, _) => self.asked_at.get(*symbol).is_some_and(|asked| {
                 calendar.is_none_or(|calendar| calendar.session_at(now).is_some())
                     && older_than(*asked, now, policy.max_age)
@@ -126,13 +129,6 @@ impl Board {
     }
 }
 
-/// 가진 달력이 지금 시각을 덮는가: 지금의 시장 날짜가 달력의 이전 영업일과 다음 영업일 사이에 있다.
-/// (그 사이의 날은 달력이 세션을 알거나, 영업일이 아니라고 알려 준 날이다.)
-fn covers(calendar: &MarketCalendar, market: Market, now: DateTime<Utc>) -> bool {
-    let today = market_date(market, now);
-    calendar.previous_business_day.date <= today && today <= calendar.next_business_day.date
-}
-
 /// `since`로부터 `max_age`를 넘었는가(딱 그 시간이면 아직 아니다). 장 시간은 보지 않는다.
 /// `since`가 지금보다 뒤면(시계가 어긋남) 나이를 잴 수 없으니 넘었다고 하지 않는다.
 fn older_than(since: DateTime<Utc>, now: DateTime<Utc>, max_age: Duration) -> bool {
@@ -141,15 +137,40 @@ fn older_than(since: DateTime<Utc>, now: DateTime<Utc>, max_age: Duration) -> bo
         .is_ok_and(|age| age > max_age)
 }
 
-/// 그 시장의 오늘 날짜. 달력에는 앞뒤 영업일도 들어 있어 하루쯤 어긋나도 세션을 찾는다.
+/// 그 시장의 오늘 날짜(달력을 받을 날).
+///
+/// 날짜의 경계(그 시장 날짜의 자정, 미국은 서머타임을 따른다)는 따로 세지 않고 `pi_market`의
+/// `MarketCalendar::covers`에 맡긴다(7차 7번): 그 시장에서 있을 수 있는 시차(국내 UTC+9,
+/// 미국 UTC-4 · UTC-5)로 센 날짜 가운데 그 날짜 하나로 된 달력이 지금을 덮는 날을 고른다.
 pub(crate) fn market_date(market: Market, now: DateTime<Utc>) -> NaiveDate {
-    let offset_hours = match market {
-        Market::Us => -5,
-        _ => 9,
+    let offsets: &[i64] = match market {
+        Market::Us => &[-4, -5],
+        _ => &[9],
     };
-    now.checked_add_signed(TimeDelta::hours(offset_hours))
-        .unwrap_or(now)
-        .date_naive()
+    let mut candidates = offsets
+        .iter()
+        .filter_map(|hours| now.checked_add_signed(TimeDelta::hours(*hours)))
+        .map(|local| local.date_naive())
+        .peekable();
+    let first = candidates.peek().copied();
+    candidates
+        .find(|date| one_day(market, *date).covers(now))
+        .or(first)
+        .unwrap_or_else(|| now.date_naive())
+}
+
+/// 그 날짜 하나(세션 없음)로 된 달력. 그 날짜가 지금을 덮는지 볼 때만 쓴다.
+fn one_day(market: Market, date: NaiveDate) -> MarketCalendar {
+    let day = || TradingDay {
+        date,
+        sessions: Vec::new(),
+    };
+    MarketCalendar {
+        market,
+        today: day(),
+        previous_business_day: day(),
+        next_business_day: day(),
+    }
 }
 
 fn currency_code(currency: &Currency) -> &str {
@@ -184,40 +205,43 @@ mod tests {
         );
     }
 
-    fn day(date: NaiveDate) -> pi_market::TradingDay {
-        pi_market::TradingDay {
-            date,
-            sessions: Vec::new(),
-        }
+    #[test]
+    fn 미국_시장_날짜는_서머타임을_따른다() {
+        // 2026-07-15 04:30 UTC = 미 동부 서머타임(UTC-4) 15일 00:30. UTC-5로 세면 14일이다.
+        let summer = Utc.with_ymd_and_hms(2026, 7, 15, 4, 30, 0).single();
+        // 2026-01-15 04:30 UTC = 미 동부 표준시(UTC-5) 14일 23:30.
+        let winter = Utc.with_ymd_and_hms(2026, 1, 15, 4, 30, 0).single();
+        let (Some(summer), Some(winter)) = (summer, winter) else {
+            return;
+        };
+        assert_eq!(
+            Some(market_date(Market::Us, summer)),
+            NaiveDate::from_ymd_opt(2026, 7, 15)
+        );
+        assert_eq!(
+            Some(market_date(Market::Us, winter)),
+            NaiveDate::from_ymd_opt(2026, 1, 14)
+        );
     }
 
     #[test]
-    fn 달력은_이전_영업일부터_다음_영업일까지만_덮는다() {
-        let ymd = |d| NaiveDate::from_ymd_opt(2026, 3, d);
-        let (Some(prev), Some(today), Some(next)) = (ymd(26), ymd(27), ymd(30)) else {
+    fn 달력이_없어도_받은_시각이_미래인_시세는_늦다() {
+        let Some(now) = Utc.with_ymd_and_hms(2026, 3, 25, 1, 0, 0).single() else {
             return;
         };
-        // 금요일(27일)의 달력: 다음 영업일은 월요일(30일)이다.
-        let calendar = MarketCalendar {
-            market: Market::Kr,
-            today: day(today),
-            previous_business_day: day(prev),
-            next_business_day: day(next),
-        };
-        let at = |d, h| Utc.with_ymd_and_hms(2026, 3, d, h, 0, 0).single();
-        let cases = [
-            (at(25, 3), false),
-            (at(26, 3), true),
-            // 주말은 달력이 "영업일이 아니다"라고 알려 준 날이다.
-            (at(28, 3), true),
-            (at(30, 3), true),
-            // 한국은 이미 31일이다.
-            (at(30, 16), false),
-        ];
-        for (now, expected) in cases {
-            let Some(now) = now else { return };
-            assert_eq!(covers(&calendar, Market::Kr, now), expected, "{now}");
-        }
+        let symbols = [Symbol::new("005930")];
+        let mut board = Board::default();
+        board.hold(vec![Quote {
+            symbol: symbols[0].clone(),
+            price: rust_decimal::Decimal::ONE,
+            currency: Currency::Krw,
+            exchange_time: None,
+            received_at: now + TimeDelta::seconds(5),
+        }]);
+        assert_eq!(
+            board.stale_notice(&symbols, &[], now),
+            Some(json!({ "symbols": ["005930"], "hours_unknown": true }))
+        );
     }
 
     #[test]
@@ -239,20 +263,20 @@ mod tests {
         board.asked(&symbols, start + TimeDelta::seconds(20));
         let at = |seconds| start + TimeDelta::seconds(seconds);
         assert_eq!(
-            board.stale_notice(&symbols, &[], Market::Kr, at(30)),
+            board.stale_notice(&symbols, &[], at(30)),
             None,
             "딱 30초는 아직 아니다"
         );
         // 거절된 종목은 따로 알리므로 늦은 종목에 넣지 않는다.
         let skip = [Symbol::new("NOPE")];
         assert_eq!(
-            board.stale_notice(&symbols, &skip, Market::Kr, at(31)),
+            board.stale_notice(&symbols, &skip, at(31)),
             Some(json!({ "symbols": ["005930"], "hours_unknown": true }))
         );
         // 멈추면 늦은 종목이 없어졌다고 알린다.
         board.forget();
         assert_eq!(
-            board.stale_notice(&symbols, &skip, Market::Kr, at(32)),
+            board.stale_notice(&symbols, &skip, at(32)),
             Some(json!({ "symbols": [], "hours_unknown": true }))
         );
     }

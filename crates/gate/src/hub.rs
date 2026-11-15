@@ -5,8 +5,8 @@
 //! 그 전의 이벤트는 모두 저장소에 있고(다시 보내기로 받는다), 그 뒤의 이벤트는 모두 그 연결의
 //! 줄로 간다.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use pi_store::{EventRange, Store, TimedEvent};
 use serde_json::Value;
@@ -46,20 +46,27 @@ pub(crate) struct Hub {
     /// 저장 · 나눠 보내기 · 연결 올리기의 순서를 하나로 세운다.
     order: tokio::sync::Mutex<()>,
     inner: Mutex<Inner>,
-    /// 저장소의 옛 형식 경계 번호(5차). 처음 저장소를 다녀올 때 한 번 읽어 쥔다(바뀌지 않는다).
-    legacy_until: Arc<OnceLock<Option<u64>>>,
 }
 
-/// 쥔 경계 번호를 주고, 아직 없으면 저장소에서 한 번 읽는다. 막히는 일이라 `spawn_blocking` 안에서 부른다.
-fn legacy_until(
-    cell: &OnceLock<Option<u64>>,
+/// 읽은 쪽(`after` 뒤의 `events`, 번호 순서) 가운데 저장소가 **옛 봉투 줄**로 판정한 번호(7차 6번).
+///
+/// 판정은 저장소가 원래 글자로 한다(`Store::legacy_envelope_seqs`): 관문은 읽힌 JSON 값만 받아
+/// 맨 위 칸 이름이 겹친 줄을 옛 봉투와 가를 수 없다. 범위는 읽은 쪽과 같게 맞춘다: 옛 봉투 줄은
+/// 저장된 줄이므로 `(after, 마지막 번호]` 안에서 읽은 줄 수보다 많을 수 없다.
+/// 막히는 일이라 `spawn_blocking` 안에서 부른다.
+fn legacy_seqs(
     store: &Store,
-) -> Result<Option<u64>, pi_store::StoreError> {
-    if let Some(until) = cell.get() {
-        return Ok(*until);
-    }
-    let until = store.legacy_envelope_until()?;
-    Ok(*cell.get_or_init(|| until))
+    after: u64,
+    events: &[TimedEvent],
+) -> Result<BTreeSet<u64>, pi_store::StoreError> {
+    let Some(last) = events.last().map(|event| event.seq) else {
+        return Ok(BTreeSet::new());
+    };
+    Ok(store
+        .legacy_envelope_seqs(after, events.len())?
+        .into_iter()
+        .filter(|seq| *seq <= last)
+        .collect())
 }
 
 /// 받는 쪽에 올리려 했을 때의 결과.
@@ -109,7 +116,6 @@ impl Hub {
             max_frame_bytes,
             order: tokio::sync::Mutex::new(()),
             inner: Mutex::new(Inner::default()),
-            legacy_until: Arc::new(OnceLock::new()),
         }
     }
 
@@ -160,9 +166,7 @@ impl Hub {
         // 바로 보내는 프레임과 다시 보내는 프레임이 같다(종류는 저장된 이름).
         let at = self.clock.now();
         let store = self.store.clone();
-        let cell = Arc::clone(&self.legacy_until);
-        let (event, until) = tokio::task::spawn_blocking(move || {
-            let until = legacy_until(&cell, &store)?;
+        let event = tokio::task::spawn_blocking(move || {
             let seq = store.append_at(&kind, &payload, at)?;
             let range = EventRange {
                 after_seq: seq.saturating_sub(1),
@@ -175,13 +179,15 @@ impl Hub {
                 at: Some(at),
                 payload,
             });
-            Ok::<_, pi_store::StoreError>((event, until))
+            Ok::<_, pi_store::StoreError>(event)
         })
         .await
         .map_err(|_| GateError::Task)??;
         let seq = event.seq;
-        // 프레임을 만들 때 한 번 더 가린다(다시 보낼 때와 같은 길).
-        let frame = frame::stored(&*self.redactor, event, until);
+        // 프레임을 만들 때 한 번 더 가린다(다시 보낼 때와 같은 길). 방금 쌓은 줄은 옛 봉투가 아니다:
+        // 저장소의 옛 형식 경계는 버전을 올릴 때 그때의 마지막 번호 이하로 한 번 정해지고 바뀌지 않으므로
+        // 새로 받은 번호는 늘 경계 뒤다(`legacy_envelope_seqs`도 경계 뒤 번호는 주지 않는다).
+        let frame = frame::stored(&*self.redactor, event, false);
         self.broadcast(&mut self.lock(), &frame);
         Ok(seq)
     }
@@ -237,16 +243,19 @@ impl Hub {
             after_seq: after,
             ..EventRange::default()
         };
-        let cell = Arc::clone(&self.legacy_until);
-        let (events, until) = tokio::task::spawn_blocking(move || {
-            let until = legacy_until(&cell, &store)?;
-            Ok::<_, pi_store::StoreError>((store.read_events(range, REPLAY_PAGE)?, until))
+        let (events, legacy) = tokio::task::spawn_blocking(move || {
+            let events = store.read_events(range, REPLAY_PAGE)?;
+            let legacy = legacy_seqs(&store, after, &events)?;
+            Ok::<_, pi_store::StoreError>((events, legacy))
         })
         .await
         .map_err(|_| GateError::Task)??;
         Ok(events
             .into_iter()
-            .map(|event| (event.seq, frame::stored(&*self.redactor, event, until)))
+            .map(|event| {
+                let old = legacy.contains(&event.seq);
+                (event.seq, frame::stored(&*self.redactor, event, old))
+            })
             .collect())
     }
 

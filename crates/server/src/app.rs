@@ -12,13 +12,18 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::demo::DemoAdapter;
-use crate::desk::{AiParts, Desk, DeskParts};
+use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
 use crate::feed::{Feed, Pace, Source};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::{
     AiChoice, AppError, BrokerKeys, CLI_COMMON_LOCATIONS, KeyVerifier, SecretsRedactor, Settings,
     Upstreams, load_ai_choice, page, setup_http,
 };
+
+/// (7차 11번) 띄울 때 CLI 확인을 기다려 주는 가장 긴 시간. 접속 관문은 이미 연결을 받고 있다.
+/// 보통의 확인(수십 밀리초)은 이 안에 끝나 띄우자마자 결과가 보이고, 넘으면 기다리지 않고
+/// 뒤에서 이어 간다(그동안 상태는 [`crate::CLI_CHECKING`]).
+const CLI_CHECK_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -125,8 +130,8 @@ fn watched_symbols(settings: &Settings) -> (Vec<Symbol>, SymbolsSource) {
     }
 }
 
-/// 설정 책상을 연다: 지켜볼 종목과 고른 AI 연결을 정하고, 고른 것이 CLI면 한 번 확인한다
-/// (모델을 부르지 않는다).
+/// 설정 책상을 연다: 지켜볼 종목과 고른 AI 연결을 정하고, 고른 것이 CLI면 작업 폴더를 준비한다
+/// (막히는 작업 자리에서). CLI 확인은 여기서 하지 않는다(7차 11번, [`App::start`]가 뒤에서 돌린다).
 async fn open_desk(
     settings: &Settings,
     wiring: &Wiring,
@@ -135,6 +140,10 @@ async fn open_desk(
     let (symbols, source) = watched_symbols(settings);
     // 고른 것이 없으면 API 키다. 읽을 수 없으면 고르지 않은 쪽으로 넘어가지 않고 띄우지 않는다.
     let choice = load_ai_choice(&settings.home)?.unwrap_or_else(AiChoice::api_key);
+    let (home, chosen) = (settings.home.clone(), choice.clone());
+    let work = tokio::task::spawn_blocking(move || prepare_work(&home, &chosen))
+        .await
+        .map_err(|_| AppError::Task)??;
     let desk = Arc::new(Desk::new(DeskParts {
         secrets: Arc::clone(secrets),
         verifier: KeyVerifier::new(wiring.upstreams.clone()),
@@ -151,8 +160,8 @@ async fn open_desk(
             cli_locations: wiring.cli_locations.clone(),
             choice,
         },
-    })?);
-    desk.check_cli().await;
+        work,
+    }));
     Ok(desk)
 }
 
@@ -188,6 +197,8 @@ pub struct App {
     /// 시세 흐름을 멈추는 알림.
     stop: watch::Sender<bool>,
     feed: JoinHandle<()>,
+    /// (7차 11번) 뒤에서 도는 CLI 확인(띄울 때 끝났으면 없다). 끌 때 그만둔다.
+    ai_check: Option<JoinHandle<()>>,
     /// 끌 때 닫는다(놓는다).
     store: Store,
 }
@@ -220,6 +231,14 @@ impl App {
             builder = builder.peer_override(peer);
         }
         let gate = builder.build().serve().await?;
+        // 연결을 먼저 받고(관문은 이미 떠 있다), CLI 확인은 짧게만 기다린 뒤 뒤에서 이어 간다
+        // (끝나기 전 상태는 "확인 중").
+        let checking = Arc::clone(&desk);
+        let mut check = Box::pin(async move { checking.check_cli().await });
+        let ai_check = match tokio::time::timeout(CLI_CHECK_GRACE, &mut check).await {
+            Ok(()) => None,
+            Err(_) => Some(tokio::spawn(check)),
+        };
 
         let source = if settings.demo {
             let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
@@ -255,6 +274,7 @@ impl App {
             desk,
             stop,
             feed,
+            ai_check,
             store,
         })
     }
@@ -270,6 +290,10 @@ impl App {
     /// `pi_ai::ClaudeCliProvider`([`crate::cli_config`]: 동시 실행 2, 시간 제한은 AI 요청 시간 제한과 같다,
     /// 환경은 [`Settings::cli_env`], 작업 폴더는 [`crate::prepare_cli_work_dir`]). 고른 것이 바뀌면 새로 만든다.
     /// 고르지 않은 쪽으로 넘어가지 않는다.
+    ///
+    /// (7차 14번) 화면에서 연결을 다시 고르면 쥔 공급자가 바뀐다. 그래서 돌려받은 것을 오래 쥐지 말고
+    /// **쓸 때마다 다시 받는다**(한 번 받은 것은 다시 고르기 전의 연결이다). 작업 폴더가 비어 있지 않아
+    /// CLI를 쓰지 않을 때는 부르면 띄우지 않고 실패하는 공급자다.
     pub fn ai_provider(&self) -> Arc<dyn pi_ai::AiProvider> {
         self.desk.ai_provider()
     }
@@ -279,11 +303,19 @@ impl App {
         self.gate.publisher()
     }
 
-    /// 끈다(Ctrl+C): 시세 받기를 멈추고, 연결을 정리하고, 저장소를 닫는다.
+    /// 끈다(Ctrl+C): 시세 받기를 멈추고, CLI 공급자를 끝내고(남은 자식을 끝내 거둘 때까지 기다린다,
+    /// 7차 5번), 연결을 정리하고, 저장소를 닫는다.
     /// 같은 보관 폴더로 다시 띄우면 이벤트 번호가 이어진다(V6).
     pub async fn shutdown(self) -> Result<(), AppError> {
         self.stop.send_replace(true);
         let feed = self.feed.await.map_err(|_| AppError::Task);
+        // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),
+        // 쥔 CLI 공급자의 자식을 끝낸다.
+        if let Some(check) = self.ai_check {
+            check.abort();
+            let _ = check.await;
+        }
+        self.desk.shutdown_ai().await;
         // 시세 흐름이 비정상으로 끝났어도 연결과 저장소는 정리한다.
         let gate = self.gate.shutdown().await;
         drop(self.store);

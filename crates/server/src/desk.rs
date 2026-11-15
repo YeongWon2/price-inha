@@ -8,10 +8,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use pi_ai::{AiProvider, AnthropicConfig, AnthropicProvider, ClaudeCliProvider, CliStatus};
+use pi_ai::{AiProvider, ClaudeCliProvider, CliStatus};
 use pi_market::Symbol;
 use pi_secrets::{KeyKind, SecretStore, SecretsError, VerifyFailure};
 use tokio::sync::Notify;
+
+mod ai;
 
 use crate::keys::KeyPresence;
 use crate::setup::{
@@ -19,9 +21,11 @@ use crate::setup::{
     SetupItem, SetupStatus, SymbolsSource, parse_symbols, save_watchlist,
 };
 use crate::{
-    AiChoice, AiKeys, AiMethod, AiStatus, AppError, KeyVerifier, SetupRefusal, cli_config,
-    cli_refusal, find_claude, legacy_auth_file, prepare_cli_work_dir, save_ai_choice,
+    AiChoice, AiMethod, AiStatus, AppError, KeyVerifier, SetupRefusal, cli_refusal, find_claude,
+    legacy_auth_file, save_ai_choice,
 };
+use ai::{AiNow, Held, hold};
+pub(crate) use ai::{AiParts, Work, prepare_work};
 
 /// 키 확인 하나가 끝나기를 기다리는 가장 긴 시간. 넘으면 "닿지 않음"이고 저장하지 않는다.
 /// (`pi-ai` · `pi-market`의 요청마다 시간 제한이 따로 있다. 이것은 그 바깥의 끝이다.)
@@ -44,43 +48,8 @@ pub(crate) struct DeskParts {
     pub(crate) limit: AttemptLimit,
     pub(crate) symbols_limit: AttemptLimit,
     pub(crate) ai: AiParts,
-}
-
-/// (6차) AI 연결을 잇는 데 드는 것. 비밀 값은 없다.
-pub(crate) struct AiParts {
-    /// API 키 공급자 설정. 시간 제한은 CLI 공급자도 같이 쓴다.
-    pub(crate) anthropic: AnthropicConfig,
-    /// CLI 자식에게 줄 환경(허용 목록만).
-    pub(crate) cli_env: Vec<(String, String)>,
-    /// 사용자 홈 폴더(CLI 실행 파일을 찾을 때).
-    pub(crate) user_home: Option<PathBuf>,
-    /// `PATH`와 사용자 홈 다음에 CLI 실행 파일을 찾는 자리.
-    pub(crate) cli_locations: Vec<PathBuf>,
-    /// 띄울 때 고른 것.
-    pub(crate) choice: AiChoice,
-}
-
-/// 쥐고 있는 공급자. CLI는 확인을 부르려고 제 모양으로 쥔다.
-#[derive(Clone)]
-enum Held {
-    Api(Arc<AnthropicProvider>),
-    Cli(Arc<ClaudeCliProvider>),
-}
-
-impl Held {
-    fn provider(&self) -> Arc<dyn AiProvider> {
-        match self {
-            Held::Api(provider) => Arc::clone(provider) as Arc<dyn AiProvider>,
-            Held::Cli(provider) => Arc::clone(provider) as Arc<dyn AiProvider>,
-        }
-    }
-}
-
-/// 지금 고른 AI 연결과 그 공급자, 마지막 CLI 확인 결과.
-struct AiNow {
-    choice: AiChoice,
-    cli: Option<CliStatus>,
-    held: Held,
+    /// 띄울 때 고른 것의 작업 폴더 준비 결과([`prepare_work`], 막히는 작업 자리에서 미리 한다).
+    pub(crate) work: Work,
 }
 
 /// 설정 책상.
@@ -105,15 +74,25 @@ pub(crate) struct Desk {
     ai: Mutex<AiNow>,
     /// (6차) AI 연결 고르기를 하나씩 한다(저장 · 공급자 · 확인 결과가 어긋나지 않게).
     choosing: tokio::sync::Mutex<()>,
+    /// (7차 5번) 다시 고르기로 물러난 CLI 공급자. 아직 도는 호출이 있을 수 있어 바로 끝내지 않고,
+    /// 서버가 꺼질 때 함께 끝낸다.
+    retired: Mutex<Vec<Arc<ClaudeCliProvider>>>,
 }
 
 impl Desk {
-    /// 고른 것이 CLI면 그 작업 폴더를 준비하지 못할 때 실패한다. 확인은 [`Desk::check_cli`]가 한다.
-    pub(crate) fn new(parts: DeskParts) -> Result<Self, AppError> {
-        let held = hold(&parts.ai, &parts.secrets, &parts.home, &parts.ai.choice)?;
+    /// 아무것도 띄우지 않고 파일도 건드리지 않는다. 확인은 [`Desk::check_cli`]가 한다.
+    pub(crate) fn new(parts: DeskParts) -> Self {
+        let held = hold(
+            &parts.ai,
+            &parts.secrets,
+            &parts.home,
+            &parts.ai.choice,
+            &parts.work,
+        );
         let ai = AiNow {
             choice: parts.ai.choice.clone(),
             cli: None,
+            work_blocked: matches!(parts.work, Work::NotEmpty),
             held,
         };
         let desk = Self {
@@ -133,16 +112,26 @@ impl Desk {
             ai_parts: parts.ai,
             ai: Mutex::new(ai),
             choosing: tokio::sync::Mutex::new(()),
+            retired: Mutex::new(Vec::new()),
         };
         // 띄우자마자 읽는 설정 상태도 사실과 같게 한다(시세 흐름이 곧 이어서 적는다).
         desk.set_started(desk.demo || desk.ready());
-        Ok(desk)
+        desk
     }
 
     /// (6차) 띄울 때: 고른 것이 CLI면 한 번 확인하고 그 결과를 쥔다(모델을 부르지 않는다).
+    /// (7차 11번) 서버는 이것을 기다리지 않는다(뒤에서 돈다). 끝나면 시세 흐름을 깨운다.
+    /// 작업 폴더가 비어 있지 않으면 확인하지 않는다(CLI를 띄우지 않는다).
     pub(crate) async fn check_cli(&self) {
         let _turn = self.choosing.lock().await;
-        let Held::Cli(cli) = self.ai_now().held.clone() else {
+        let held = {
+            let now = self.ai_now();
+            if now.work_blocked {
+                return;
+            }
+            now.held.clone()
+        };
+        let Held::Cli(cli) = held else {
             return;
         };
         let status = check(&cli).await;
@@ -152,6 +141,19 @@ impl Desk {
         );
         self.ai_now().cli = Some(status);
         self.set_started(self.demo || self.ready());
+        self.wake.notify_one();
+    }
+
+    /// (7차 5번) 서버가 꺼질 때: 쥔 CLI 공급자와 물러난 CLI 공급자를 모두 끝내고 자식이 거둬질 때까지 기다린다.
+    pub(crate) async fn shutdown_ai(&self) {
+        let mut all =
+            std::mem::take(&mut *self.retired.lock().unwrap_or_else(PoisonError::into_inner));
+        if let Held::Cli(cli) = self.ai_now().held.clone() {
+            all.push(cli);
+        }
+        for cli in all {
+            cli.shutdown().await;
+        }
     }
 
     /// 잠금을 쥔 채 죽은 스레드가 있어도 고른 연결은 온전하다(통째로 바꿔 쓴다).
@@ -178,15 +180,17 @@ impl Desk {
                 drop(now);
                 self.presence.has(KeyKind::AiApiKey)
             }
-            AiMethod::Cli => matches!(now.cli, Some(CliStatus::LoggedIn { .. })),
+            AiMethod::Cli => {
+                !now.work_blocked && matches!(now.cli, Some(CliStatus::LoggedIn { .. }))
+            }
         }
     }
 
     /// 설정 상태의 `ai` 칸. CLI를 띄우지 않는다.
     fn ai_status(&self) -> AiStatus {
-        let (choice, cli) = {
+        let (choice, cli, work_blocked) = {
             let now = self.ai_now();
-            (now.choice.clone(), now.cli.clone())
+            (now.choice.clone(), now.cli.clone(), now.work_blocked)
         };
         let command = match choice.method {
             AiMethod::Cli => choice.command,
@@ -213,6 +217,7 @@ impl Desk {
             } else {
                 None
             },
+            work_dir_not_empty: choice.method == AiMethod::Cli && work_blocked,
             legacy_auth_file: legacy_auth_file(&self.home),
         }
     }
@@ -305,31 +310,39 @@ impl Desk {
         outcome
     }
 
-    /// (6차) AI 연결을 고른다: 입력 검사 → (CLI면) 시도 횟수 → 저장 → (CLI면) 확인(모델을 부르지 않는다).
+    /// (6차) AI 연결을 고른다: 입력 검사 → 시도 횟수(7차: API 키도 든다) → 작업 폴더 준비 · 저장
+    /// (막히는 작업 자리에서) → (CLI면) 확인(모델을 부르지 않는다).
     /// 갖춰졌으면 `Ok(true)`, API 키를 골랐는데 키가 아직 없으면 `Ok(false)`, CLI 확인이 로그인된 구독이
-    /// 아니면 그 까닭([`crate::cli_refusal`]). 갖춰졌으면 시세 흐름을 깨우고, 고른 연결로 공급자를 다시 만든다.
+    /// 아니면 그 까닭([`crate::cli_refusal`]), 작업 폴더가 비어 있지 않으면
+    /// [`SetupRefusal::CliWorkDirNotEmpty`](고른 것은 저장되고 CLI를 띄우지 않는다).
+    /// 고른 연결로 공급자를 다시 만들고 시세 흐름을 깨운다.
     pub(crate) async fn choose_ai(&self, body: &[u8]) -> Result<bool, SetupRefusal> {
         let choice = AiChoice::parse(body)?;
         let _turn = self.choosing.lock().await;
-        if choice.method == AiMethod::Cli && !allow(&self.limit) {
-            tracing::warn!("CLI 확인 시도가 너무 많아 확인하지 않고 거부합니다");
+        if !allow(&self.limit) {
+            tracing::warn!("AI 연결 고르기 시도가 너무 많아 거부합니다");
             return Err(SetupRefusal::TooManyAttempts);
         }
-        let held = hold(&self.ai_parts, &self.secrets, &self.home, &choice).map_err(|error| {
-            tracing::warn!(%error, "CLI 작업 폴더를 준비하지 못했습니다");
-            SetupRefusal::SaveFailed
-        })?;
-        save_ai_choice(&self.home, &choice).map_err(|error| {
-            tracing::warn!(%error, "고른 AI 연결을 저장하지 못했습니다");
-            SetupRefusal::SaveFailed
-        })?;
+        let work = self.prepare_and_save(&choice).await?;
+        let work_blocked = matches!(work, Work::NotEmpty);
+        let held = hold(&self.ai_parts, &self.secrets, &self.home, &choice, &work);
         let method = choice.method;
-        *self.ai_now() = AiNow {
+        let new = AiNow {
             choice,
             cli: None,
+            work_blocked,
             held: held.clone(),
         };
+        let old = std::mem::replace(&mut *self.ai_now(), new);
+        if let Held::Cli(cli) = old.held {
+            let mut retired = self.retired.lock().unwrap_or_else(PoisonError::into_inner);
+            // 목록만 쥔 공급자는 도는 호출이 없다(호출은 공급자를 빌려 쓴다). 빼서 끝없이 쌓이지 않게 한다.
+            // 호출이 버려지면 그 자식 그룹은 `pi-ai`가 거둔다.
+            retired.retain(|cli| Arc::strong_count(cli) > 1);
+            retired.push(cli);
+        }
         let outcome = match held {
+            _ if work_blocked => Err(SetupRefusal::CliWorkDirNotEmpty),
             Held::Api(_) => Ok(self.has_ai()),
             Held::Cli(cli) => {
                 let status = check(&cli).await;
@@ -347,6 +360,25 @@ impl Desk {
         // 갖춰졌으면 시작하고, 빠졌으면 시세 흐름이 다음에 볼 때 멈춘다.
         self.wake.notify_one();
         outcome
+    }
+
+    /// (7차 9번) 고른 것의 작업 폴더를 준비하고 고른 것을 저장한다. 막히는 작업 자리에서 한다.
+    async fn prepare_and_save(&self, choice: &AiChoice) -> Result<Work, SetupRefusal> {
+        let (home, choice) = (self.home.clone(), choice.clone());
+        let done = tokio::task::spawn_blocking(move || {
+            let work = prepare_work(&home, &choice)?;
+            save_ai_choice(&home, &choice)?;
+            Ok::<Work, AppError>(work)
+        })
+        .await;
+        match done {
+            Ok(Ok(work)) => Ok(work),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "고른 AI 연결을 준비하거나 저장하지 못했습니다");
+                Err(SetupRefusal::SaveFailed)
+            }
+            Err(_) => Err(SetupRefusal::SaveFailed),
+        }
     }
 
     /// (6차) 고른 연결로 만든 공급자.
@@ -382,26 +414,6 @@ impl Desk {
         }
         Ok(())
     }
-}
-
-/// 고른 연결로 공급자를 만든다. 아무것도 띄우지 않는다.
-fn hold(
-    parts: &AiParts,
-    secrets: &Arc<SecretStore>,
-    home: &std::path::Path,
-    choice: &AiChoice,
-) -> Result<Held, AppError> {
-    Ok(match choice.method {
-        AiMethod::ApiKey => Held::Api(Arc::new(AnthropicProvider::new(
-            parts.anthropic.clone(),
-            Arc::new(AiKeys::new(Arc::clone(secrets))),
-        ))),
-        AiMethod::Cli => {
-            let work = prepare_cli_work_dir(home)?;
-            let config = cli_config(choice, work, parts.cli_env.clone(), parts.anthropic.timeout);
-            Held::Cli(Arc::new(ClaudeCliProvider::new(config)))
-        }
-    })
 }
 
 /// CLI를 확인한다(버전 → 로그인, 모델을 부르지 않는다). 바깥 끝을 넘으면 확인하지 못한 것이다.

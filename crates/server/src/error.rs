@@ -43,6 +43,15 @@ pub enum AppError {
         /// 실패 종류.
         kind: std::io::ErrorKind,
     },
+    /// (7차 12번) 보관 폴더의 설정 파일을 읽을 수 없다. 어느 파일인지(이름)와 종류만 싣는다.
+    /// 파일의 내용(값)은 싣지 않는다.
+    #[error("보관 폴더의 {file} 파일을 읽을 수 없습니다: {kind}")]
+    BadFile {
+        /// 파일 이름(예: [`crate::AI_CHOICE_FILE`]).
+        file: &'static str,
+        /// 실패 종류.
+        kind: std::io::ErrorKind,
+    },
     /// 안에서 돌던 작업이 끝나지 못했다.
     #[error("서버 작업이 비정상으로 끝났습니다")]
     Task,
@@ -92,6 +101,10 @@ pub enum SetupRefusal {
     /// (6차) CLI를 확인하지 못했다(시간 초과 · 읽지 못함).
     #[error("Claude Code CLI를 확인하지 못했습니다")]
     CliUnchecked,
+    /// (7차 10번) 이미 있는 CLI 작업 폴더([`crate::CLI_WORK_DIR`])가 비어 있지 않아 CLI를 쓰지 않는다.
+    /// 그 폴더 안의 것은 지우지 않는다.
+    #[error("CLI 작업 폴더가 비어 있지 않습니다")]
+    CliWorkDirNotEmpty,
 }
 
 impl SetupRefusal {
@@ -110,6 +123,7 @@ impl SetupRefusal {
             SetupRefusal::CliNotLoggedIn => "cli_not_logged_in",
             SetupRefusal::CliNotSubscription => "cli_not_subscription",
             SetupRefusal::CliUnchecked => "cli_unchecked",
+            SetupRefusal::CliWorkDirNotEmpty => "cli_work_dir_not_empty",
         }
     }
 
@@ -128,6 +142,7 @@ impl SetupRefusal {
             | SetupRefusal::CliNotLoggedIn
             | SetupRefusal::CliNotSubscription => 422,
             SetupRefusal::CliUnchecked => 502,
+            SetupRefusal::CliWorkDirNotEmpty => 409,
         }
     }
 }

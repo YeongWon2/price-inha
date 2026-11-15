@@ -83,6 +83,15 @@ impl DemoAdapter {
     }
 }
 
+/// (7차 3번) 시연에 지켜볼 종목이 없을 때 쓰는 시연 종목 하나. 시연(가짜 시세)일 때만 쓰고
+/// 저장된 종목 목록은 바꾸지 않는다(등록된 종목도 아니다).
+pub(crate) fn demo_symbol(market: Market) -> Symbol {
+    match market {
+        Market::Us => Symbol::new("AAPL"),
+        _ => Symbol::new("005930"),
+    }
+}
+
 /// FNV-1a. 종목마다 다른 시작 값을 정하는 데만 쓴다.
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {

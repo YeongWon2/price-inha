@@ -27,6 +27,12 @@
 //! - 아니면 [`cli_refusal`]의 까닭으로 거부한다. 고른 것은 저장돼 있고 AI 연결은 갖춰지지 않은 것이다
 //!   (앞서 갖춰졌어도 지금 확인이 아니면 갖춰지지 않은 것이다. 시작했으면 멈추고 설정이 필요하다고 알린다).
 //! - 띄울 때(`crate::App::start`) 고른 것이 CLI면 한 번 확인하고 그 결과를 쓴다(모델을 부르지 않는다).
+//!   (7차 11번) 서버는 그 확인을 기다리지 않고 먼저 연결을 받는다. 확인은 뒤에서 하고, 끝나기 전 상태는
+//!   [`CLI_CHECKING`]이다(갖춰진 것이 아니다).
+//! - (7차 9번) 작업 폴더 준비와 [`AI_CHOICE_FILE`] 쓰기는 막는 작업 자리(`spawn_blocking`)에서 한다.
+//! - (7차 10번) 이미 있는 작업 폴더가 비어 있지 않으면 지우지 않고 CLI를 쓰지 않는다
+//!   ([`SetupRefusal::CliWorkDirNotEmpty`], 상태는 [`CLI_WORK_NOT_EMPTY`]).
+//! - (7차 13번) API 키를 고르는 것도 등록 시도 횟수 제한에 든다.
 //! - 확인 결과는 마지막 것을 쥔다. 설정 상태를 읽는 것은 CLI를 띄우지 않는다.
 //!
 //! # 설정 상태의 `ai` 칸 (`GET` [`crate::SETUP_PATH`])
@@ -48,6 +54,8 @@
 //!   못 찾으면 `null`.
 //! - `config_dir`: 저장된 전용 로그인 폴더. 없으면 `null`.
 //! - `cli`: 마지막 확인의 [`cli_state`]. CLI를 고르지 않았으면 `null`.
+//!   (7차) 확인이 아직 끝나지 않았으면 [`CLI_CHECKING`], 작업 폴더가 비어 있지 않아 CLI를 쓰지 않으면
+//!   [`CLI_WORK_NOT_EMPTY`]다.
 //! - `cli_version` · `subscription`: 로그인됐을 때만 글자(버전은 `주.부.수` 글자), 아니면 `null`.
 //! - `legacy_auth_file`: 보관 폴더에 옛 [`LEGACY_AUTH_FILE`]이 있는가([`legacy_auth_file`]).
 //! - 숫자 칸은 없다.
@@ -220,8 +228,10 @@ pub struct AiStatus {
     pub command: Option<PathBuf>,
     /// 저장된 전용 로그인 폴더.
     pub config_dir: Option<PathBuf>,
-    /// 마지막 CLI 확인 결과. CLI를 고르지 않았으면 `None`.
+    /// 마지막 CLI 확인 결과. CLI를 고르지 않았거나 아직 확인 중이면 `None`.
     pub cli: Option<CliStatus>,
+    /// (7차 10번) 작업 폴더가 비어 있지 않아 CLI를 쓰지 않는다.
+    pub work_dir_not_empty: bool,
     /// 보관 폴더에 옛 [`LEGACY_AUTH_FILE`]이 있는가.
     pub legacy_auth_file: bool,
 }
@@ -241,28 +251,43 @@ impl AiStatus {
             "method": self.method.as_str(),
             "command": self.command.as_deref().and_then(Path::to_str),
             "config_dir": self.config_dir.as_deref().and_then(Path::to_str),
-            "cli": self.cli.as_ref().map(cli_state),
+            "cli": self.cli_text(),
             "cli_version": logged_in.map(|(v, _)| format!("{}.{}.{}", v.major, v.minor, v.patch)),
             "subscription": logged_in.and_then(|(_, kind)| kind.clone()),
             "legacy_auth_file": self.legacy_auth_file,
         })
     }
+
+    /// `ai.cli` 글자: CLI가 아니면 없음, 작업 폴더가 비어 있지 않으면 [`CLI_WORK_NOT_EMPTY`],
+    /// 확인 결과가 아직 없으면 [`CLI_CHECKING`], 아니면 [`cli_state`].
+    fn cli_text(&self) -> Option<&'static str> {
+        if self.method != AiMethod::Cli {
+            return None;
+        }
+        if self.work_dir_not_empty {
+            return Some(CLI_WORK_NOT_EMPTY);
+        }
+        Some(self.cli.as_ref().map_or(CLI_CHECKING, cli_state))
+    }
 }
 
 /// 보관 폴더의 [`AI_CHOICE_FILE`]에서 고른 것을 읽는다. 파일이 없으면 `None`.
-/// 읽을 수 없는 모양이면 [`AppError::Home`](`InvalidData`)이다.
+/// 읽지 못하거나 읽을 수 없는 모양이면(`InvalidData`) [`AppError::BadFile`]이고, 오류에는
+/// 파일 이름([`AI_CHOICE_FILE`])만 있다(7차 12번, 파일의 값은 넣지 않는다).
 pub fn load_ai_choice(home: &Path) -> Result<Option<AiChoice>, AppError> {
+    let bad = |kind| AppError::BadFile {
+        file: AI_CHOICE_FILE,
+        kind,
+    };
     let bytes = match std::fs::read(home.join(AI_CHOICE_FILE)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(AppError::Home { kind: error.kind() }),
+        Err(error) => return Err(bad(error.kind())),
     };
     // 읽을 수 없는 모양이면 말없이 API 키로 넘어가지 않고 알린다(부른 쪽이 정한다).
     AiChoice::parse(&bytes)
         .map(Some)
-        .map_err(|_| AppError::Home {
-            kind: ErrorKind::InvalidData,
-        })
+        .map_err(|_| bad(ErrorKind::InvalidData))
 }
 
 /// 고른 것을 보관 폴더의 [`AI_CHOICE_FILE`]에 원자 쓰기로 둔다(임시 파일은 남지 않는다).
@@ -314,6 +339,8 @@ pub fn cli_base_env(env: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String
 /// CLI 실행 파일을 찾는다: `path_var`(`:`로 나눈 폴더들)의 `claude` →
 /// `user_home`/[`CLI_USER_LOCATION`] → `fixed`(보통 [`CLI_COMMON_LOCATIONS`]) 순서.
 /// 실행할 수 있는 파일만 본다. 없으면 `None`. 아무것도 띄우지 않는다.
+/// (7차 13번) `path_var`의 상대 경로 항목(`.` · `bin` · `../x` 등)은 후보가 아니다
+/// (서버의 작업 폴더에 따라 다른 파일을 가리키게 된다).
 pub fn find_claude(
     path_var: Option<&str>,
     user_home: Option<&Path>,
@@ -322,8 +349,9 @@ pub fn find_claude(
     let on_path = path_var
         .into_iter()
         .flat_map(|var| var.split(':'))
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| Path::new(dir).join("claude"));
+        .map(Path::new)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("claude"));
     let in_home = user_home.map(|home| home.join(CLI_USER_LOCATION));
     on_path
         .chain(in_home)
@@ -338,19 +366,28 @@ fn executable(path: &Path) -> bool {
 }
 
 /// CLI 자식의 작업 폴더(보관 폴더/[`CLI_WORK_DIR`])를 준비한다: 없으면 만들고, 권한은 0700이다.
+///
+/// (7차 10번) 이미 있는 폴더는 비어 있어야 한다. 안에 무엇이 있으면 지우지 않고
+/// [`AppError::Home`](`DirectoryNotEmpty`)로 거부한다(권한도 바꾸지 않는다).
+/// 막히는 파일 작업이므로 비동기 자리에서는 `spawn_blocking`으로 부른다.
 pub fn prepare_cli_work_dir(home: &Path) -> Result<PathBuf, AppError> {
     let work = home.join(CLI_WORK_DIR);
     let fail = |error: std::io::Error| AppError::Home { kind: error.kind() };
-    match std::fs::DirBuilder::new().mode(0o700).create(&work) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+    let existed = match std::fs::DirBuilder::new().mode(0o700).create(&work) {
+        Ok(()) => false,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => true,
         Err(error) => return Err(fail(error)),
-    }
-    // 이미 있으면 폴더인지 보고(링크는 따라가지 않는다), 권한을 본인만으로 좁힌다.
+    };
+    // 이미 있으면 폴더인지 보고(링크는 따라가지 않는다), 비었는지 보고, 권한을 본인만으로 좁힌다.
     let meta = std::fs::symlink_metadata(&work).map_err(fail)?;
     if !meta.is_dir() {
         return Err(AppError::Home {
             kind: ErrorKind::InvalidData,
+        });
+    }
+    if existed && std::fs::read_dir(&work).map_err(fail)?.next().is_some() {
+        return Err(AppError::Home {
+            kind: ErrorKind::DirectoryNotEmpty,
         });
     }
     if meta.permissions().mode() & 0o777 != 0o700 {

@@ -244,8 +244,12 @@ impl Feed {
     }
 
     /// 지켜보는 종목이 바뀌었으면 받아들인다. 빠진 종목의 것은 버리고, 거절 기억은 처음부터다.
+    /// (7차 3번) 시연인데 지켜볼 종목이 없으면 시연 종목 하나를 쓴다(저장하지 않는다).
     fn adopt_symbols(&mut self) {
-        let symbols = self.desk.symbols();
+        let mut symbols = self.desk.symbols();
+        if symbols.is_empty() && self.desk.demo() {
+            symbols.push(crate::demo::demo_symbol(self.market));
+        }
         if symbols != self.symbols {
             self.symbols = symbols;
             self.board.keep_only(&self.symbols);
@@ -448,9 +452,7 @@ impl Feed {
     /// 늦은 종목이 바뀌었으면 알린다(N6).
     fn announce_stale(&mut self) {
         let now = self.clock.now();
-        let notice = self
-            .board
-            .stale_notice(&self.symbols, &self.rejected, self.market, now);
+        let notice = self.board.stale_notice(&self.symbols, &self.rejected, now);
         if let Some(notice) = notice {
             self.publisher.publish_transient(KIND_QUOTES_STALE, notice);
         }
