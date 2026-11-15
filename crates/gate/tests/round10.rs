@@ -584,3 +584,87 @@ async fn host의_ipv6_표기는_허용_목록_글자_그대로만_받는다() {
         assert_eq!(reply.status, 403, "목록에 없는 표기는 거부한다: {other}");
     }
 }
+
+// ───────────── 6. 취소된 로그인 요청의 자리 반납 ─────────────
+
+/// 블로킹 일꾼이 하나뿐인 실행기. 키 대조(`verify`)는 일꾼을 기다리며 멈춰 서 있게 된다.
+fn single_blocking_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+/// 블로킹 일꾼을 붙잡는다. 돌려받은 보내는 쪽에 보내면 풀어 준다.
+async fn hold_blocking_worker() -> std::sync::mpsc::Sender<()> {
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    drop(tokio::task::spawn_blocking(move || {
+        let _ = wait.recv();
+    }));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    release
+}
+
+/// 로그인 요청을 보내고, 응답을 기다리지 않고 연결을 끊는다(키 대조 도중 취소).
+async fn abandon_login(addr: SocketAddr, key: &str) {
+    let host = local_host(addr);
+    let body = json!({ ACCESS_KEY_FIELD: key }).to_string();
+    let request = format!(
+        "POST {SESSION_PATH} HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+}
+
+/// 키 대조가 멈춰 선 로그인 요청을 `n`번 버린 관문을 돌려준다(키는 미리 만들어 둔다).
+async fn after_abandoned_logins(n: u32) -> (Harness, String) {
+    let h = start_with(|c| c).await;
+    let key = h.key().await;
+    let release = hold_blocking_worker().await;
+    for _ in 0..n {
+        abandon_login(h.addr, WRONG_KEY).await;
+    }
+    release.send(()).unwrap();
+    (h, key)
+}
+
+// 검증: N3 V39 E2
+#[test]
+fn 키_대조_도중_버려진_요청이_다섯_번이어도_맞는_키로_들어온다() {
+    single_blocking_runtime().block_on(async {
+        let (h, key) = after_abandoned_logins(MAX_KEY_FAILURES).await;
+        let reply = enter(h.addr, Some(&key)).await;
+        assert_eq!(
+            reply.status, 204,
+            "버려진 시도가 자리를 붙들고 있으면 안 된다"
+        );
+        assert!(reply.remote_cookie(), "원격 세션이다");
+        assert!(
+            h.server.access_keys().locked().is_empty(),
+            "버려진 시도는 틀림으로 세지 않는다"
+        );
+        assert!(h.alerts.0.lock().unwrap().is_empty(), "잠금 알림도 없다");
+    });
+}
+
+// 검증: N3 V39 E2
+#[test]
+fn 버려진_요청으로_막힌_기기도_열다섯_분_뒤에는_풀려_있다() {
+    single_blocking_runtime().block_on(async {
+        let (h, key) = after_abandoned_logins(MAX_KEY_FAILURES + 2).await;
+        h.set_time(T0 + millis(LOCKOUT));
+        let reply = enter(h.addr, Some(&key)).await;
+        assert_eq!(reply.status, 204, "{LOCKOUT:?} 뒤에는 들어온다");
+        assert!(
+            h.server.access_keys().locked().is_empty(),
+            "잠긴 기기 표에 남지 않는다"
+        );
+    });
+}
