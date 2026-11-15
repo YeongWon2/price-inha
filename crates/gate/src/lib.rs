@@ -114,7 +114,8 @@ pub use access::{
     ACCESS_KEY_ALPHABET, ACCESS_KEY_CHANGED, ACCESS_KEY_FIELD, ACCESS_KEY_LEN,
     ACCESS_KEY_SALT_BYTES, ACCESS_KEY_WRONG, ACCESS_LOCKED, AccessKeys, DEFAULT_LOOPBACK_DELAY_MAX,
     DEFAULT_LOOPBACK_DELAY_START, FORWARDING_HEADERS, IssuedKey, LOCKED_STATUS, LOCKOUT, LockAlert,
-    LockNotice, LockedDevice, MAX_KEY_FAILURES, NoLockAlert, REMOTE_SESSION_MAX_AGE,
+    LockNotice, LockedDevice, MAX_KEY_FAILURES, MAX_TRACKED_DEVICES, NoLockAlert,
+    REMOTE_SESSION_MAX_AGE,
 };
 pub use error::GateError;
 pub use guard::{LOCAL_ONLY_STATUS, Peer, local_only};
@@ -208,6 +209,18 @@ pub struct GateConfig {
     pub loopback_delay_start: Duration,
     /// (9차) 그 컴퓨터를 늦추는 시간의 상한. 기본은 [`DEFAULT_LOOPBACK_DELAY_MAX`].
     pub loopback_delay_max: Duration,
+    /// (10차) 원격 이름: https 프록시(Tailscale Serve 등) 뒤에서 들어오는 이름(포트 없이).
+    /// 기본은 비어 있다.
+    ///
+    /// 이 이름은 Host로 받는다: 포트 없는 `<이름>`(https 프록시가 보내는 모양)과
+    /// `<이름>:<연 포트>`. 이 이름으로 온 요청은 Origin `https://<Host 값>`도 같은 출처로 받는다
+    /// (`http://<Host 값>`도 지금처럼 받는다). 이 목록 밖의 Host는 `https://` Origin을 받지 않는다.
+    /// Host가 아닌 다른 이름의 Origin은 그대로 거부한다. 루프백인지는 이 이름과 상관없이
+    /// 상대 주소와 전달 헤더로만 정한다.
+    pub remote_hosts: Vec<String>,
+    /// (10차) 틀린 횟수 · 잠금을 세어 두는 기기 수의 상한. 기본은 [`MAX_TRACKED_DEVICES`](원본 값).
+    /// 잠긴 기기를 포함해 이 수를 넘게 기억하지 않는다.
+    pub max_tracked_devices: usize,
 }
 
 impl Default for GateConfig {
@@ -233,6 +246,8 @@ impl GateConfig {
             pong_timeout: DEFAULT_PONG_TIMEOUT,
             loopback_delay_start: DEFAULT_LOOPBACK_DELAY_START,
             loopback_delay_max: DEFAULT_LOOPBACK_DELAY_MAX,
+            remote_hosts: Vec::new(),
+            max_tracked_devices: MAX_TRACKED_DEVICES,
         }
     }
 }

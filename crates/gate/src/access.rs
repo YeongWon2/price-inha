@@ -39,6 +39,19 @@
 //!   잠금과 상관없이 유지된다.
 //! - 그 컴퓨터의 요청은 막지 않는다. 그 컴퓨터는 [`AccessKeys::unlock`]으로 잠금을 풀 수 있다
 //!   (그 경로를 잇는 것은 조립하는 쪽이다).
+//! - (10차) 잠금 확인과 실패 기록은 한 번에 한다: 같은 기기가 동시에 여러 요청을 보내도 키를
+//!   맞춰 보는 시도(401을 받는 시도)는 [`MAX_KEY_FAILURES`]번을 넘지 않는다. 나머지는
+//!   [`LOCKED_STATUS`]다. 잠금 알림도 한 번뿐이다.
+//! - (10차) 세어 두는 기기(틀린 횟수만 있는 기기와 잠긴 기기, 그 컴퓨터의 늦춤 횟수)는
+//!   [`crate::GateConfig::max_tracked_devices`]를 넘지 않는다. 잠금 시간이 지난 기기는 상한을
+//!   차지하지 않는다(정리한다). 기기는 IPv4로 바꿀 수 있는 IPv6(`::ffff:a.b.c.d`)를 IPv4로 친다.
+//!
+//! # 원격 세션의 수명 (10차)
+//!
+//! 원격 세션으로 연 실시간 연결도 세션을 만든 때부터 [`crate::Clock`]으로
+//! [`REMOTE_SESSION_MAX_AGE`]가 지나면 닫는다. 늦어도 ping 간격
+//! ([`crate::GateConfig::keepalive_interval`])마다 관문의 시계로 확인한다.
+//! 그 컴퓨터의 세션으로 연 연결은 이 수명으로 닫지 않는다.
 //!
 //! # 키 바꾸기 (V41)
 //!
@@ -75,6 +88,9 @@ pub const MAX_KEY_FAILURES: u32 = 5;
 pub const LOCKOUT: Duration = Duration::from_secs(15 * 60);
 /// 원격 세션의 수명(쿠키 `Max-Age`와 서버 쪽 수명, 결정 10번).
 pub const REMOTE_SESSION_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// (10차) 틀린 횟수 · 잠금을 세어 두는 기기 수 상한의 기본값(원본 OpenClaw 10,000).
+/// [`crate::GateConfig::max_tracked_devices`]의 기본값이다.
+pub const MAX_TRACKED_DEVICES: usize = 10_000;
 /// 잠긴 기기의 시도에 주는 HTTP 상태.
 pub const LOCKED_STATUS: u16 = 429;
 /// 프록시를 거쳤다는 표시로 보는 요청 헤더(소문자). 하나라도 있으면 루프백으로 치지 않는다.
