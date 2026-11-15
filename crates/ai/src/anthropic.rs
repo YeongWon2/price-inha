@@ -228,7 +228,7 @@ impl AnthropicProvider {
     /// `retry`번째(1부터) 다시 시도 전에 기다릴 시간. `Retry-After`가 있으면 그 값이 우선이다.
     fn wait_before(&self, retry: u32, retry_after: Option<Duration>) -> Duration {
         if let Some(after) = retry_after {
-            return self.limits.retry_after_unit.mul_f64(after.as_secs_f64());
+            return retry::scale_wait(self.limits.retry_after_unit, after);
         }
         self.backoff
             .lock()

@@ -180,6 +180,8 @@ pub struct ClaudeCliProvider {
     groups: Arc<Groups>,
     /// 설치 · 로그인 확인을 한 번에 하나만 돌리는 차례표.
     check_turn: Mutex<()>,
+    /// 확인 프로세스가 아직 살아 있는가(앞 확인을 버렸어도). 살아 있으면 새로 띄우지 않는다.
+    probe_alive: Arc<check::ProbeAlive>,
 }
 
 impl ClaudeCliProvider {
@@ -191,6 +193,7 @@ impl ClaudeCliProvider {
             slots,
             groups: Arc::new(Groups::default()),
             check_turn: Mutex::new(()),
+            probe_alive: Arc::default(),
         }
     }
 
@@ -204,7 +207,7 @@ impl ClaudeCliProvider {
     /// [`CliStatus::TimedOut`]을 돌려준다(4차 2). 그래서 확인 프로세스는 쌓이지 않는다.
     pub async fn check(&self) -> CliStatus {
         let _turn = self.check_turn.lock().await;
-        check::check(&self.config).await
+        check::check(&self.config, &self.probe_alive).await
     }
 
     /// 공급자를 끝낸다. 서버가 꺼질 때 부른다.

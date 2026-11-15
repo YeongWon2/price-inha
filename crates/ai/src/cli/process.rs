@@ -3,7 +3,8 @@
 //! 자식은 자기 프로세스 그룹으로 띄운다. 정상으로 끝나지 않은 채 버려지면(시간 초과 ·
 //! 호출 버림 · 출력 넘침 · 실패 결과 줄) [`GroupGuard`]가 그룹 전체에 `SIGTERM`, 유예 뒤
 //! `SIGKILL`을 보낸다. 정상으로 거둔 뒤에도 그룹에 `SIGTERM`을 한 번 보내 남은 손주를 끝낸다.
-//! 띄운 그룹은 공급자의 명부([`Groups`])에 적어 끝내기가 찾을 수 있게 한다.
+//! 자리표를 받자마자 공급자의 명부([`Groups`])에 자리를 잡고 띄운 그룹을 적어 끝내기가 찾을 수 있게
+//! 한다. 띄우는 사이 끝내기가 시작돼 적기가 거부되면 그 자리에서 끝내고 거둔 뒤 돌아간다(ai.md 4차 1).
 //! `unsafe` 없이 시스템 `kill` 명령을 부른다.
 
 use std::io;
@@ -17,10 +18,10 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
-use super::ClaudeCliConfig;
 use super::command::{self, SystemFile};
-use super::groups::{Groups, Registration, signal_group};
+use super::groups::{Groups, Registration, signal_group, signal_group_async};
 use super::output::{self, StreamState};
+use super::{CLI_STDIN_CLOSE_WAIT, ClaudeCliConfig};
 use crate::error::AiError;
 use crate::types::{CompletionRequest, CompletionResponse};
 
@@ -43,6 +44,8 @@ pub(super) async fn run_once(
         .acquire_owned()
         .await
         .map_err(|_| AiError::Connection)?;
+    // 자리표를 받는 순간부터 명부에 센다. 끝내기가 이미 시작됐으면 띄우지 않는다(ai.md 4차 1).
+    let reservation = groups.reserve().ok_or(AiError::Connection)?;
     let system_file = match &request.system {
         Some(text) => {
             Some(SystemFile::create(&config.work_dir, text).map_err(|_| AiError::Connection)?)
@@ -61,17 +64,19 @@ pub(super) async fn run_once(
         .process_group(0);
     let mut child = cmd.spawn().map_err(|e| spawn_error(&e))?;
     let held = held_outputs(&child);
-    let stdin = child.stdin.take();
+    let mut stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let (close_stdin, stdin_closed) = oneshot::channel();
-    let registration = child
+    let attached = child
         .id()
-        .and_then(|pgid| groups.register(pgid, close_stdin));
-    let shut_down = registration.is_none();
-    let mut guard = GroupGuard::new(child, config.kill_grace, permit, held, registration);
-    if shut_down {
-        // 띄우는 사이에 끝내기가 시작됐다. 버려지는 지킴이가 그룹을 끝낸다.
+        .is_some_and(|pgid| reservation.attach(pgid, close_stdin));
+    let mut guard = GroupGuard::new(child, config.kill_grace, permit, held, Some(reservation));
+    if !attached {
+        // 띄우는 사이에 끝내기가 시작됐다. 끝내기와 같은 순서로 이 자리에서 끝내고 거둔 뒤 돌아간다.
+        // 명부의 자리는 거둔 뒤에 놓으므로 끝내기도 그때까지 기다린다.
+        drop(stdin.take());
+        guard.terminate().await;
         return Err(AiError::Connection);
     }
 
@@ -272,6 +277,29 @@ impl GroupGuard {
             held,
             registration,
             reaped: false,
+        }
+    }
+
+    /// 표준 입력이 닫힌 자식을 끝내기와 같은 순서로 끝내고 거둔다: [`CLI_STDIN_CLOSE_WAIT`] 동안
+    /// 스스로 끝나기를 기다리고, 그래도 살아 있으면 그룹에 `SIGTERM` → 유예 → `SIGKILL`.
+    async fn terminate(&mut self) {
+        let (Some(child), Some(pgid)) = (self.child.as_mut(), self.pgid) else {
+            return;
+        };
+        if tokio::time::timeout(CLI_STDIN_CLOSE_WAIT, child.wait())
+            .await
+            .is_err()
+        {
+            signal_group_async("TERM", pgid).await;
+            if tokio::time::timeout(self.grace, child.wait())
+                .await
+                .is_err()
+            {
+                signal_group_async("KILL", pgid).await;
+            }
+        }
+        if child.wait().await.is_ok() {
+            self.reaped = true;
         }
     }
 

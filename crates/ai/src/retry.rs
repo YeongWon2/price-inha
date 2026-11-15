@@ -100,6 +100,13 @@ pub(crate) fn seconds_to_wait(secs: f64) -> Option<Duration> {
     Some(Duration::from_secs_f64(secs.min(cap)))
 }
 
+/// `Retry-After`(이미 [`RETRY_AFTER_CAP`]에서 잘린 값)를 실제로 기다릴 시간으로 늘린다.
+/// 곱이 [`Duration`]으로 나타낼 수 없을 만큼 크면 공황하지 않고 [`Duration::MAX`]에서 멈춘다
+/// (ai.md 4차 5). `tokio::time::sleep`은 그 값을 먼 미래로 다룬다.
+pub(crate) fn scale_wait(unit: Duration, after: Duration) -> Duration {
+    Duration::try_from_secs_f64(unit.as_secs_f64() * after.as_secs_f64()).unwrap_or(Duration::MAX)
+}
+
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
@@ -217,6 +224,20 @@ mod tests {
         ] {
             assert_eq!(parse_http_date(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn 아주_큰_단위도_공황하지_않고_끝에서_멈춘다() {
+        let after = Duration::from_secs(600);
+        assert_eq!(scale_wait(Duration::MAX, after), Duration::MAX);
+        assert_eq!(
+            scale_wait(Duration::from_secs(u64::MAX / 4), after),
+            Duration::MAX
+        );
+        assert_eq!(
+            scale_wait(Duration::from_secs(1), Duration::from_secs(2)),
+            Duration::from_secs(2)
+        );
     }
 
     #[test]

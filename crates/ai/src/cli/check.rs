@@ -1,21 +1,31 @@
 //! 설치 · 로그인 확인(ai.md 2차 11, `cli-backend.md` 5.7). 모델을 부르지 않는다.
 //!
-//! 확인이 제한을 넘기면 기다리기만 그만두고 프로세스는 죽이지 않는다(토큰 갱신 잠금 — 원본 2.6).
-//! 그 대신 표준 출력을 뒤에서 끝까지 읽어 버려(EPIPE로 죽지 않게) 그 프로세스가 스스로 끝나게
-//! 하고 거둔다(ai.md 3차 10).
+//! 확인이 제한을 넘기면 부르는 쪽에는 바로 [`CliStatus::TimedOut`]을 돌려주되 프로세스를 바로
+//! 죽이지 않는다(토큰 갱신 잠금 — 원본 2.6). 따로 된 일이 표준 출력을 계속 읽어 버려(EPIPE로
+//! 죽지 않게) 그 프로세스가 스스로 끝날 수 있게 하고 거둔다(ai.md 3차 10). 제한 뒤
+//! [`CHECK_SETTLE_WAIT`]가 지나도 끝나지 않으면 프로세스 묶음째 `SIGTERM` → 유예 → `SIGKILL`로
+//! 끝내고 거둔다(ai.md 4차 7, 결정 2026-11-15 "CLI 확인 프로세스가 끝나지 않을 때").
+//! 앞 확인의 프로세스가 아직 살아 있으면 새로 띄우지 않는다(4차 2).
 
 use std::io;
 use std::path::Path;
 use std::process::{Output, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
-use tokio::process::{ChildStdout, Command};
+use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::oneshot;
 
 use super::command;
+use super::groups::signal_group_async;
 use super::{CLI_MIN_VERSION, ClaudeCliConfig, CliStatus, CliVersion};
+
+/// 확인 명령이 제한을 넘긴 뒤에도 출력을 읽어 버리며 스스로 끝나기를 기다리는 시간.
+/// 이것이 지나면 묶음째 끝낸다(ai.md 4차 7).
+const CHECK_SETTLE_WAIT: Duration = Duration::from_secs(3);
 
 /// 한 번에 읽는 크기.
 const CHUNK: usize = 16 * 1024;
@@ -29,10 +39,25 @@ enum Probe {
     Missing,
     Failed,
     TimedOut,
+    /// 앞 확인의 프로세스가 아직 살아 있어 띄우지 않았다.
+    Busy,
+}
+
+/// 살아 있는 확인 프로세스가 있는가. 한 공급자가 하나를 쥔다.
+#[derive(Default)]
+pub(super) struct ProbeAlive(AtomicBool);
+
+/// 확인 프로세스를 거두면(또는 그 일이 버려지면) 표시를 내린다.
+struct AliveMark(Arc<ProbeAlive>);
+
+impl Drop for AliveMark {
+    fn drop(&mut self) {
+        self.0.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// 버전과 로그인을 차례로 확인한다.
-pub(super) async fn check(config: &ClaudeCliConfig) -> CliStatus {
+pub(super) async fn check(config: &ClaudeCliConfig, alive: &Arc<ProbeAlive>) -> CliStatus {
     let Some(program) = &config.command else {
         return CliStatus::NotInstalled;
     };
@@ -40,32 +65,55 @@ pub(super) async fn check(config: &ClaudeCliConfig) -> CliStatus {
     if !config.work_dir.is_dir() {
         return CliStatus::Unreadable;
     }
-    let version = match probe(config, program, &["--version"], config.version_timeout).await {
+    let version = match probe(
+        config,
+        alive,
+        program,
+        &["--version"],
+        config.version_timeout,
+    )
+    .await
+    {
         Probe::Done(out) if out.status.success() => match parse_version(&out.stdout) {
             Some(v) => v,
             None => return CliStatus::Unreadable,
         },
         Probe::Done(_) | Probe::Failed => return CliStatus::Unreadable,
         Probe::Missing => return CliStatus::NotInstalled,
-        Probe::TimedOut => return CliStatus::TimedOut,
+        Probe::TimedOut | Probe::Busy => return CliStatus::TimedOut,
     };
     if version < CLI_MIN_VERSION {
         return CliStatus::TooOld { version };
     }
     let args = ["auth", "status", "--json"];
-    match probe(config, program, &args, config.auth_timeout).await {
+    match probe(config, alive, program, &args, config.auth_timeout).await {
         Probe::Done(out) => auth_status(&out, version),
         Probe::Failed => CliStatus::Unreadable,
         Probe::Missing => CliStatus::NotInstalled,
-        Probe::TimedOut => CliStatus::TimedOut,
+        Probe::TimedOut | Probe::Busy => CliStatus::TimedOut,
     }
 }
 
-/// 확인 명령을 실제 호출과 같은 환경 · 작업 폴더로 띄운다. 제한을 넘기면 놓아둔다.
+/// 확인 명령을 실제 호출과 같은 환경 · 작업 폴더로, 자기 프로세스 묶음으로 띄운다.
 ///
-/// 표준 출력은 따로 된 일이 끝까지 읽고(상한은 실제 호출과 같다) 자식을 거둔다.
-/// 제한을 넘겨 기다리기를 그만둬도 그 일은 계속 돈다.
-async fn probe(config: &ClaudeCliConfig, program: &Path, args: &[&str], limit: Duration) -> Probe {
+/// 표준 출력은 따로 된 일([`keep`])이 끝까지 읽고(상한은 실제 호출과 같다) 자식을 거둔다.
+/// 제한을 넘겨 기다리기를 그만두거나 부르는 쪽이 이 일을 버려도 그 일은 계속 돈다.
+/// 앞 확인의 프로세스가 아직 살아 있으면 띄우지 않고 [`Probe::Busy`].
+async fn probe(
+    config: &ClaudeCliConfig,
+    alive: &Arc<ProbeAlive>,
+    program: &Path,
+    args: &[&str],
+    limit: Duration,
+) -> Probe {
+    if alive
+        .0
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Probe::Busy;
+    }
+    let mark = AliveMark(Arc::clone(alive));
     let mut cmd = Command::new(program);
     cmd.args(args)
         .env_clear()
@@ -74,6 +122,7 @@ async fn probe(config: &ClaudeCliConfig, program: &Path, args: &[&str], limit: D
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .process_group(0)
         .kill_on_drop(false);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -81,25 +130,59 @@ async fn probe(config: &ClaudeCliConfig, program: &Path, args: &[&str], limit: D
         Err(_) => return Probe::Failed,
     };
     let stdout = child.stdout.take();
-    let cap = config.max_output_bytes;
     let (done, result) = oneshot::channel();
-    tokio::spawn(async move {
-        let read = drain(stdout, cap).await;
-        let output = match (child.wait().await, read) {
-            (Ok(status), Some(stdout)) => Some(Output {
-                status,
-                stdout,
-                stderr: Vec::new(),
-            }),
-            _ => None,
-        };
-        let _ = done.send(output);
-    });
+    let settle_at = tokio::time::Instant::now() + limit + CHECK_SETTLE_WAIT;
+    tokio::spawn(keep(
+        child,
+        stdout,
+        config.max_output_bytes,
+        settle_at,
+        config.kill_grace,
+        (mark, done),
+    ));
     match tokio::time::timeout(limit, result).await {
         Ok(Ok(Some(out))) => Probe::Done(out),
         Ok(_) => Probe::Failed,
         Err(_) => Probe::TimedOut,
     }
+}
+
+/// 확인 프로세스를 지키는 일. 출력을 읽어 버리며 끝나기를 기다려 거두고, `settle_at`까지
+/// 끝나지 않으면 묶음째 `SIGTERM` → `grace` → `SIGKILL`로 끝내고 거둔다.
+/// 거둔 뒤에 살아 있음 표시를 내리고 결과를 보낸다(다음 확인이 바로 띄울 수 있게).
+async fn keep(
+    mut child: Child,
+    stdout: Option<ChildStdout>,
+    cap: usize,
+    settle_at: tokio::time::Instant,
+    grace: Duration,
+    (mark, done): (AliveMark, oneshot::Sender<Option<Output>>),
+) {
+    let pgid = child.id();
+    let finished = async {
+        let read = drain(stdout, cap).await;
+        (child.wait().await, read)
+    };
+    let output = match tokio::time::timeout_at(settle_at, finished).await {
+        Ok((Ok(status), Some(stdout))) => Some(Output {
+            status,
+            stdout,
+            stderr: Vec::new(),
+        }),
+        Ok(_) => None,
+        Err(_) => {
+            if let Some(pgid) = pgid {
+                signal_group_async("TERM", pgid).await;
+                if tokio::time::timeout(grace, child.wait()).await.is_err() {
+                    signal_group_async("KILL", pgid).await;
+                }
+            }
+            let _ = child.wait().await;
+            None
+        }
+    };
+    drop(mark);
+    let _ = done.send(output);
 }
 
 /// 표준 출력을 끝까지 읽는다. 상한까지만 모으고, 넘치면 나머지는 읽어 버리고 `None`.
