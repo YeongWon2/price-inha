@@ -9,9 +9,7 @@
 //! - 메시지: `000` 정상, `010` 등록되지 않은 키, `011` 사용할 수 없는 키, `013` 조회된 데이타 없음,
 //!   `020` 요청 제한 초과, `100` 필드의 부적절한 값, `800` 시스템 점검.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_data::{
     CorpCode, DataAdapter, DataError, FactKind, FactRequest, FactValue, Fetched, FsDiv, ReportCode,
     SourceName,

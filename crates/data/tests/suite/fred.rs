@@ -8,9 +8,7 @@
 //!
 //! 키가 쿼리(`api_key`)에 실리므로 오류 · 출처 주소에서 가려져야 한다.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_data::{DataAdapter, DataError, FactKind, FactRequest, FactValue, Fetched, SourceName};
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path, query_param};

@@ -1,8 +1,6 @@
 //! 가짜 자료 어댑터: 정한 Fact와 오류를 돌려주고 받은 요청을 적는다.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_data::{
     CorpCode, DataAdapter, DataError, Fact, FactKind, FactRequest, FactValue, FakeDataAdapter,
     Fetched, Source, SourceName,

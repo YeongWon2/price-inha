@@ -8,9 +8,7 @@
 //!
 //! 키가 주소 경로에 실리므로 오류 · 출처 주소에서 가려져야 한다.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_data::{
     DataAdapter, DataError, EcosCycle, EcosSeries, FactKind, FactRequest, FactValue, Fetched,
     SourceName,

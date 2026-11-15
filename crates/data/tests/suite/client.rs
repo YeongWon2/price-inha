@@ -1,12 +1,10 @@
 //! 출처와 무관한 어댑터 규칙: 키 · 시계 · 기본 주소 · 연결 실패 · 시간 초과 · 종류 대응.
 //! 로컬 가짜 서버(wiremock)만 쓴다.
 
-mod common;
-
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use pi_data::{
     CorpCode, DEFAULT_DART_BASE_URL, DEFAULT_ECOS_BASE_URL, DEFAULT_FRED_BASE_URL, DEFAULT_TIMEOUT,
     DataAdapter, DataClient, DataConfig, DataError, EcosCycle, EcosSeries, FactKind, FactRequest,
@@ -251,9 +249,12 @@ async fn 정해진_시간_안에_답이_없으면_시간_초과이고_주소에_
 // 검증: E14
 #[tokio::test]
 async fn 서버가_없으면_닿지_않음이고_주소에_키가_없다() {
-    let server = MockServer::start().await;
-    let gone = config(&server);
-    drop(server);
+    // 빈 포트를 얻고 리스너를 놓는다. 그 주소에는 아무도 듣지 않는다.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let gone =
+        DataConfig::new(base.clone(), base.clone(), base).with_timeout(Duration::from_secs(5));
     let adapter = DataClient::new(gone, TestKeys::all(), TestClock::at(START)).unwrap();
 
     for request in [requests().remove(0), requests().remove(2), fred_request()] {
