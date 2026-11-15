@@ -19,6 +19,10 @@
 4. 비어 있으면 오류가 아니라 `Missing(종류)`로 돌려준다(E32: 판단을 지켜보기로 두는 근거).
 5. `FakeDataAdapter`(정해진 Fact와 오류를 돌려준다).
 
+## 확인기
+
+`pi-secrets`의 `Verifier::verify_slot` 기본은 언제나 거부다. 자료 키를 화면에서 등록하려면 이 모듈이 출처별로 닿는지 확인하는 함수를 공개하고, 조립(server)이 그것으로 `verify_slot`을 구현한다.
+
 ## 하지 않는 것
 
 뉴스 검색(V35)과 SEC EDGAR는 2차로 미룬다(결정 2026-11-16 17번: EDGAR의 User-Agent 연락처는 사용자가 정한다). 저장(store 10차), 판단, 다시 시도 일정(trigger).
