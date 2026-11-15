@@ -1,7 +1,7 @@
 #![cfg(test)]
 //! 8차: 옛 봉투 판정의 이스케이프 칸 이름과 위 끝을 준 옛 봉투 번호.
 //!
-//! - 1번: 칸 이름에 이스케이프가 든 줄(`{"at":1,"payload":2}` 등)도 접속 관문의 `serde_json`이
+//! - 1번: 칸 이름에 유니코드 이스케이프가 든 줄(이름 `at`의 `a`를 백슬래시-u 네 자리로 쓴 줄 등)도 접속 관문의 `serde_json`이
 //!   읽는 이름(이스케이프를 푼 이름)으로 가른다. 겹침도 푼 이름으로 가른다. 경계
 //!   ([`Store::legacy_envelope_until`])와 목록([`Store::legacy_envelope_seqs`])이 함께 따른다.
 //! - 2번: [`Store::legacy_envelope_seqs_upto`]는 `after`보다 크고 `upto` 이하인 옛 봉투 줄 번호만
@@ -66,53 +66,77 @@ fn all_seqs(store: &Store) -> Vec<u64> {
 
 // ───────────── 1번: 이스케이프가 든 칸 이름 ─────────────
 
+/// 이스케이프 글자를 실행 때 만든다: `%XX`는 백슬래시-u-0-0-XX(JSON 유니코드 이스케이프)로,
+/// `^`는 백슬래시 한 글자로 바꾼다. 소스에 이스케이프를 직접 쓰지 않으려는 것이다.
+fn u(text: &'static str) -> &'static str {
+    let backslash = '\\';
+    let esc = format!("{backslash}u00");
+    let out = text.replace('^', &backslash.to_string()).replace('%', &esc);
+    assert!(
+        out.contains(backslash) && !out.contains('%') && !out.contains('^'),
+        "이스케이프가 만들어지지 않았다: {out}"
+    );
+    Box::leak(out.into_boxed_str())
+}
+
+/// `escape_rows`에서 이름이 겹친 줄(겹침이 이스케이프를 풀어야 드러난다)의 자리.
+const OVERLAP_ROWS: std::ops::Range<usize> = 8..16;
+
 /// 손으로 만든 줄: (내용 글자, 시각 칸, 옛 봉투인가). 이름은 `serde_json`이 이스케이프를 풀어 읽는
 /// 이름으로 본다.
 fn escape_rows() -> Vec<(&'static str, Option<i64>, bool)> {
     vec![
-        // 푼 이름이 `at` · `payload`인 두 칸 객체: 옛 봉투 줄이다.
-        (r#"{"at":1,"payload":1}"#, None, true),
-        (r#"{"at":1,"payload":1}"#, Some(1), true),
-        (r#"{"at":2,"payload":"x"}"#, Some(2), true),
-        (r#"{"at":3,"payload":null}"#, None, true),
-        (r#"{"at":4,"payload":{}}"#, None, true),
-        (r#"{"at":4,"payload":[1]}"#, Some(4), true),
-        (r#"{"payload":5,"at":5}"#, Some(5), true),
+        // 0..8 푼 이름이 `at` · `payload`인 두 칸 객체: 옛 봉투 줄이다.
+        (u(r#"{"%61t":1,"payload":1}"#), None, true),
+        (u(r#"{"a%74":1,"payload":1}"#), Some(1), true),
+        (u(r#"{"at":2,"p%61yload":"x"}"#), Some(2), true),
         (
-            r#"{ "at" : -6 , "payload" : {"at": 1, "at": 2} }"#,
+            u(r#"{"%61%74":3,"%70%61%79%6C%6F%61%64":null}"#),
             None,
             true,
         ),
-        // 이름이 겹친 줄: 겹침이 이스케이프를 풀어야 드러난다.
-        (r#"{"at":1,"at":2,"payload":3}"#, None, false),
-        (r#"{"at":1,"at":2,"payload":3}"#, None, false),
-        (r#"{"at":1,"at":2,"payload":3}"#, Some(1), false),
-        (r#"{"at":1,"at":2,"payload":3}"#, Some(2), false),
-        (r#"{"at":1,"at":1,"payload":1}"#, Some(1), false),
-        (r#"{"at":1,"at":1,"payload":1}"#, None, false),
-        (r#"{"at":1,"payload":1,"payload":2}"#, None, false),
-        (r#"{"payload":1,"at":1,"payload":1}"#, Some(1), false),
+        (u(r#"{"at":4,"payl%6Fad":{}}"#), None, true),
+        (u(r#"{"%61t":4,"payload":[1]}"#), Some(4), true),
+        (u(r#"{"payloa%64":5,"%61t":5}"#), Some(5), true),
+        (
+            u(r#"{ "%61t" : -6 , "payload" : {"%61t": 1, "at": 2} }"#),
+            None,
+            true,
+        ),
+        // 8..16 이름이 겹친 줄: 겹침이 이스케이프를 풀어야 드러난다.
+        (u(r#"{"%61t":1,"at":2,"payload":3}"#), None, false),
+        (u(r#"{"at":1,"a%74":2,"payload":3}"#), None, false),
+        (u(r#"{"%61t":1,"%61%74":2,"payload":3}"#), Some(1), false),
+        (u(r#"{"at":1,"%61t":2,"payload":3}"#), Some(2), false),
+        (u(r#"{"%61t":1,"at":1,"payload":1}"#), Some(1), false),
+        (u(r#"{"at":1,"payload":1,"p%61yload":2}"#), None, false),
+        (u(r#"{"at":1,"%70ayload":1,"p%61yload":2}"#), None, false),
+        (u(r#"{"%70ayload":1,"at":1,"payload":1}"#), Some(1), false),
         // 푼 이름이 `at` · `payload`가 아닌 줄
-        (r#"{"bt":1,"payload":1}"#, None, false),
-        (r#"{"At":1,"payload":1}"#, None, false),
-        (r#"{"aT":1,"payload":1}"#, None, false),
-        (r#"{"a\\u0074":1,"payload":1}"#, None, false),
-        (r#"{"\/at":1,"payload":1}"#, None, false),
-        (r#"{"at\u0000":1,"payload":1}"#, None, false),
-        (r#"{"at":1,"payload ":1}"#, None, false),
-        (r#"{"😀":1,"payload":1}"#, None, false),
-        (r#"{"\ud800t":1,"payload":1}"#, None, false),
+        (u(r#"{"%62t":1,"payload":1}"#), None, false),
+        (u(r#"{"%41t":1,"payload":1}"#), None, false),
+        (u(r#"{"a%54":1,"payload":1}"#), None, false),
+        (u(r#"{"%61t":1,"p%41yload":1}"#), None, false),
+        (u(r#"{"a^^u0074":1,"payload":1}"#), None, false),
+        (u(r#"{"^/at":1,"payload":1}"#), None, false),
+        (u(r#"{"at%00":1,"payload":1}"#), None, false),
+        (u(r#"{"%61t":1,"payload%20":1}"#), None, false),
+        (u(r#"{"^ud800t":1,"payload":1}"#), None, false),
         // 이스케이프 이름이어도 나머지 규칙은 그대로다.
-        (r#"{"at":1,"payload":1,"x":2}"#, None, false),
-        (r#"{"at":1,"payload":1}"#, Some(2), false),
-        (r#"{"at":1.0,"payload":1}"#, None, false),
-        (r#"{"at":-0,"payload":1}"#, None, false),
-        (r#"{"at":9223372036854775808,"payload":1}"#, None, false),
-        (r#"{"at":"1","payload":1}"#, None, false),
-        (r#"{"at":1,"payload":"\ud800"}"#, None, false),
-        (r#"{"\u006":1,"payload":1}"#, None, false),
+        (u(r#"{"%61t":1,"payload":1,"x":2}"#), None, false),
+        (u(r#"{"%61t":1,"payload":1}"#), Some(2), false),
+        (u(r#"{"%61t":1.0,"payload":1}"#), None, false),
+        (u(r#"{"%61t":-0,"payload":1}"#), None, false),
+        (
+            u(r#"{"%61t":9223372036854775808,"payload":1}"#),
+            None,
+            false,
+        ),
+        (u(r#"{"%61t":"1","payload":1}"#), None, false),
+        (u(r#"{"%61t":1,"payload":"^ud800"}"#), None, false),
+        (u(r#"{"^u006":1,"payload":1}"#), None, false),
         // 맨 끝은 옛 봉투 줄이라 경계가 여기까지 온다.
-        (r#"{"at":7,"payload":"끝"}"#, None, true),
+        (u(r#"{"%61t":7,"payload":"끝"}"#), None, true),
     ]
 }
 
@@ -145,6 +169,10 @@ fn 이스케이프를_푼_이름이_at_payload이면_옛_봉투_줄로_나온다
     assert_eq!(got, want);
     for (i, (text, at, legacy)) in escape_rows().into_iter().enumerate() {
         let seq = 12 + i as u64;
+        // 옛 봉투 줄은 모두 이스케이프가 든 이름을 쓴다(글자가 풀려 저장되지 않았는지 확인).
+        if legacy {
+            assert!(text.contains("\\u00"), "이스케이프가 없다: {text}");
+        }
         assert_eq!(
             got.contains(&seq),
             legacy,
@@ -163,11 +191,36 @@ fn 이스케이프를_푼_이름이_at_payload이면_옛_봉투_줄로_나온다
 fn 이스케이프로만_드러나는_겹친_이름_줄은_나오지_않는다() {
     let (_dir, _path, store, _) = store_with_escapes();
     let got = all_seqs(&store);
-    for (i, (text, _, _)) in escape_rows().into_iter().enumerate() {
+    let rows = escape_rows();
+    assert_eq!(rows[OVERLAP_ROWS].len(), 8);
+    for (i, &(text, _, legacy)) in rows
+        .iter()
+        .enumerate()
+        .skip(OVERLAP_ROWS.start)
+        .take(OVERLAP_ROWS.len())
+    {
         let seq = 12 + i as u64;
-        if text.contains(r#""at":1,"at""#) || text.contains(r#""at":1,"at""#) {
-            assert!(!got.contains(&seq), "겹친 이름 줄이 나왔다: {seq}번 {text}");
-        }
+        // 겹침 줄은 모두 이스케이프가 든 글자이고, 옛 봉투가 아니라고 적힌 줄이다.
+        assert!(text.contains('\\'), "이스케이프가 없다: {text}");
+        assert!(!legacy, "겹침 줄이 옛 봉투로 적혔다: {text}");
+        // 글자 그대로는 이름이 겹치지 않는다(겹침은 이스케이프를 풀어야 드러난다).
+        let raw_names = ["\"at\"", "\"payload\""];
+        assert!(
+            raw_names.iter().all(|n| text.matches(n).count() <= 1),
+            "글자 그대로 겹친다: {text}"
+        );
+        assert!(!got.contains(&seq), "겹친 이름 줄이 나왔다: {seq}번 {text}");
+    }
+    // 겹침 줄 바로 앞의 줄은 옛 봉투 줄이다(자리 범위가 맞는지 확인).
+    assert!(rows[OVERLAP_ROWS.start - 1].2 && !rows[OVERLAP_ROWS.end].2);
+    // 같은 이스케이프 이름을 쓰되 겹치지 않는 줄은 나온다: 겹친 줄이 빠진 까닭이 이스케이프를
+    // 못 읽어서가 아니라 겹침이어야 한다.
+    for (i, (text, _, _)) in rows.iter().enumerate().take(OVERLAP_ROWS.start) {
+        let seq = 12 + i as u64;
+        assert!(
+            got.contains(&seq),
+            "겹치지 않는 이스케이프 줄이 빠졌다: {seq}번 {text}"
+        );
     }
 }
 
@@ -208,11 +261,11 @@ fn 버전_2_파일의_이스케이프_이름_줄도_같은_규칙이다() {
     raw_insert_v2(
         &path,
         &[
-            (8, r#"{"at":1800000000008,"payload":{"ok":true}}"#),
-            (9, r#"{"at":1800000000009,"payload":9}"#),
-            (10, r#"{"at":1,"at":2,"payload":3}"#),
-            (11, r#"{"bt":1,"payload":1}"#),
-            (12, r#"{"at":-0,"payload":1}"#),
+            (8, u(r#"{"%61t":1800000000008,"payload":{"ok":true}}"#)),
+            (9, u(r#"{"at":1800000000009,"p%61yload":9}"#)),
+            (10, u(r#"{"%61t":1,"at":2,"payload":3}"#)),
+            (11, u(r#"{"%62t":1,"payload":1}"#)),
+            (12, u(r#"{"%61t":-0,"payload":1}"#)),
             (13, r#"{"chat":"at"}"#),
         ],
     );

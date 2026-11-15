@@ -13,8 +13,6 @@
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
-use serde::Deserializer as _;
-use serde::de::{MapAccess, Visitor};
 
 use crate::error::StoreError;
 
@@ -40,102 +38,62 @@ CREATE TRIGGER legacy_boundary_no_insert BEFORE INSERT ON legacy_boundary
 BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
 ";
 
-/// 옛 봉투 **후보** 줄을 넓게 고르는 SQL 조건(`events` 표의 `payload` 칸): 내용이 JSON 객체이고
-/// 맨 위 칸이 두 개다(`json_each`는 이름이 겹친 칸도 하나씩 센다). `CASE`는 JSON이 아닌 내용에서
-/// JSON 함수가 오류를 내지 않게 먼저 `json_valid`를 보려는 것이다.
+/// 옛 봉투 줄을 가르는 SQL 조건(`events` 표의 `payload` · `at` 칸): 내용이 **정확히 두 칸**
+/// (`at` · `payload`)인 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다.
+/// 두 칸은 `json_each`로 센다. `CASE`는 JSON이 아닌 내용에서 JSON 함수가 오류를 내지 않게 먼저
+/// `json_valid`를 보려는 것이다. 이 조건을 지난 줄도 [`readable_by_gate`]를 지나야 옛 봉투 줄이다.
+/// 경계를 정할 때([`boundary_before`])와 옛 봉투 번호를 줄 때([`legacy_envelope_seqs`])가 이 하나를
+/// 함께 쓴다(7차: 규칙을 두 벌로 두지 않는다).
 ///
-/// 8차에서 정리(2026-11-15): 칸 이름 · `at` 값 · 시각 칸의 판정은 SQL에 두지 않고 모두
-/// [`gate_reads_envelope`]가 원래 글자로 한다. SQLite의 JSON 경로(`$.at`)는 이스케이프가 든 이름
-/// (`"at"`)이나 `"at\u0000"` 같은 이름을 `serde_json`(접속 관문)과 다르게 찾으므로, SQL은
-/// 후보를 좁히기만 하고 최종 판정은 관문과 같은 `serde_json`이 한다. 이 조건은 관문이 옛 봉투로
-/// 읽는 줄을 빠뜨리지 않는다(관문이 읽는 두 칸 객체는 SQLite도 JSON 객체로 받고 두 칸으로 센다).
-/// 경계를 정할 때([`boundary_before`])와 옛 봉투 번호를 줄 때([`legacy_envelope_seqs`] ·
-/// [`legacy_envelope_seqs_upto`])가 이 하나와 [`gate_reads_envelope`]를 함께 쓴다(규칙은 한 벌).
+/// 5차에서 좁힘(2026-11-15): `json_type`은 JSON 글자의 모양만 보아 i64 범위 밖의 정수와 `-0`도
+/// `'integer'`라 한다. 그래서 꺼낸 값이 SQL 정수인지(`typeof(json_extract(…))`: 범위 밖이면 실수로
+/// 꺼낸다)와, 적힌 글자(`->`가 원래 글자를 돌려준다)가 `-0`이 아닌지를 더 본다. 맨 위 칸의 이름이
+/// 겹친 객체는 `json_each`가 겹친 칸도 하나씩 세므로 두 칸 조건에서 이미 빠진다.
+/// 시각 칸이 정수가 아닌 줄(버전 2에서 범위 밖 `at`이 실수로 옮겨 적힌 줄)은 내용의 `at`도 범위
+/// 밖이라 정수 조건에서 이미 빠진다.
 ///
-/// (지난 좁힘의 기록: 5차에 `at`이 i64 범위 밖이거나 `-0`인 줄, 6차에 짝 없는 서로게이트
-/// 이스케이프가 든 줄을 뺐다. 지금은 모두 [`gate_reads_envelope`]가 본다.)
-/// (바로잡음 2026-11-14: 처음 SQL은 시각 칸이 채워진 줄만 보고 칸 수를 세지 않았다. 버전 4는 그
-/// 차수 안에서 아직 어느 실제 파일에도 쓰이지 않았으므로 버전 5를 따로 두지 않고 이 단계를 고쳤다.
+/// 6차에서 좁힘(2026-11-15): SQLite `json_valid`는 짝 없는 서로게이트 이스케이프(`"\ud800"`)가
+/// 든 글자도 JSON으로 받지만 `serde_json`(접속 관문)은 거부한다. 그래서 그 판정은
+/// [`readable_by_gate`]가 원래 글자로 한다(관문과 같게).
+/// (바로잡음 2026-11-14: 처음 SQL은 시각 칸이 채워진 줄만 보고 칸 수를 세지 않았다. 버전 4는 이번
+/// 차수 안에서 아직 어느 실제 파일에도 쓰이지 않았으므로 버전 5를 따로 두지 않고 이 단계를 고친다.
 /// 경계는 버전 3 → 4로 올리는 순간에만 정하고, 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
-macro_rules! envelope_candidate {
+macro_rules! envelope_condition {
     () => {
         "CASE WHEN json_valid(payload) THEN
       json_type(payload) = 'object'
       AND (SELECT COUNT(*) FROM json_each(payload)) = 2
+      AND json_type(payload, '$.at') = 'integer'
+      AND typeof(json_extract(payload, '$.at')) = 'integer'
+      AND (payload -> '$.at') <> '-0'
+      AND json_type(payload, '$.payload') IS NOT NULL
+      AND (at IS NULL OR json_extract(payload, '$.at') = at)
   ELSE 0 END"
     };
 }
 
 /// 이미 버전 3인 파일의 옛 봉투 후보 줄, 번호가 큰 순서.
 const V3_FILLED_ENVELOPES: &str = concat!(
-    "SELECT seq, payload, at FROM events WHERE ",
-    envelope_candidate!(),
+    "SELECT seq, payload FROM events WHERE ",
+    envelope_condition!(),
     " ORDER BY seq DESC"
 );
 
-/// 번호가 `?1`보다 크고 `?2` 이하인 옛 봉투 후보 줄, 번호 순서(7차). `seq` 범위가 먼저라
-/// 기본 키로 그 범위만 훑는다.
+/// 번호가 `?1`보다 크고 `?2` 이하인 옛 봉투 후보 줄, 번호 순서(7차).
 const ENVELOPES_BETWEEN: &str = concat!(
-    "SELECT seq, payload, at FROM events WHERE seq > ?1 AND seq <= ?2 AND ",
-    envelope_candidate!(),
+    "SELECT seq, payload FROM events WHERE seq > ?1 AND seq <= ?2 AND ",
+    envelope_condition!(),
     " ORDER BY seq"
 );
 
-/// 옛 봉투 줄의 최종 판정. 접속 관문(`serde_json`)이 원래 글자를 읽어 얻는 것으로 본다:
-///
-/// - 글자 전체가 `serde_json`에 읽힌다(짝 없는 서로게이트 이스케이프 등은 빠진다).
-/// - 맨 위가 정확히 두 칸인 객체이고, 이스케이프를 푼 칸 이름이 `at` · `payload` 하나씩이다
-///   (푼 이름이 겹치면 빠진다).
-/// - `at`이 i64 범위 안의 정수다(`1.0` · `-0` · 범위 밖 정수는 `serde_json`이 정수로 주지 않는다).
-/// - 시각 칸이 비었거나 내용의 `at`과 같다.
-fn gate_reads_envelope(payload: ValueRef<'_>, column: ValueRef<'_>) -> bool {
-    let ValueRef::Text(bytes) = payload else {
-        return false;
-    };
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return false;
-    };
-    let mut de = serde_json::Deserializer::from_str(text);
-    let Ok(Some(at)) = de.deserialize_map(EnvelopeAt) else {
-        return false;
-    };
-    if de.end().is_err() {
-        return false;
-    }
-    match column {
-        ValueRef::Null => true,
-        ValueRef::Integer(column) => column == at,
+/// [`envelope_condition`]을 지난 후보 줄이 접속 관문(`serde_json`)에도 읽히는가. 짝 없는 서로게이트
+/// 이스케이프가 든 글자 등은 관문이 옛 봉투로 풀 수 없으므로 옛 봉투 줄이 아니다.
+fn readable_by_gate(payload: ValueRef<'_>) -> bool {
+    match payload {
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+            .ok()
+            .is_some_and(|text| serde_json::from_str::<serde_json::Value>(text).is_ok()),
         _ => false,
-    }
-}
-
-/// 맨 위 객체를 칸마다 읽어(이름은 이스케이프를 푼 것) 옛 봉투 모양이면 `at`을 준다.
-struct EnvelopeAt;
-
-impl<'de> Visitor<'de> for EnvelopeAt {
-    type Value = Option<i64>;
-
-    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("a JSON object")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut at: Option<serde_json::Value> = None;
-        let mut payload = false;
-        let mut shaped = true;
-        while let Some(name) = map.next_key::<String>()? {
-            // 값도 끝까지 읽어 글자 전체가 관문에 읽히는지 본다.
-            let value: serde_json::Value = map.next_value()?;
-            match name.as_str() {
-                "at" if at.is_none() => at = Some(value),
-                "payload" if !payload => payload = true,
-                _ => shaped = false,
-            }
-        }
-        Ok(match at {
-            Some(serde_json::Value::Number(n)) if shaped && payload => n.as_i64(),
-            _ => None,
-        })
     }
 }
 
@@ -149,7 +107,7 @@ fn scan_envelopes(
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query(params)?;
     while let Some(row) = rows.next()? {
-        if gate_reads_envelope(row.get_ref(1)?, row.get_ref(2)?) && !visit(row.get(0)?) {
+        if readable_by_gate(row.get_ref(1)?) && !visit(row.get(0)?) {
             break;
         }
     }
@@ -214,38 +172,17 @@ pub(crate) fn legacy_envelope_until(conn: &Connection) -> Result<Option<u64>, St
 }
 
 /// 경계 번호 이하이면서 `after`보다 큰 옛 봉투 줄의 번호, 번호 순서로 `max`개까지(7차).
-/// 규칙은 경계를 정할 때와 같은 [`envelope_candidate`] · [`gate_reads_envelope`]다.
+/// 규칙은 경계를 정할 때와 같은 [`envelope_condition`] · [`readable_by_gate`]다.
 pub(crate) fn legacy_envelope_seqs(
     conn: &Connection,
     after: u64,
-    max: usize,
-) -> Result<Vec<u64>, StoreError> {
-    envelope_seqs_until(conn, after, u64::MAX, max)
-}
-
-/// [`legacy_envelope_seqs`]에 위 끝 `upto`를 준 것(8차). 훑는 범위는 `after`보다 크고
-/// `upto`와 경계 가운데 작은 것 이하뿐이다.
-pub(crate) fn legacy_envelope_seqs_upto(
-    conn: &Connection,
-    after: u64,
-    upto: u64,
-    max: usize,
-) -> Result<Vec<u64>, StoreError> {
-    envelope_seqs_until(conn, after, upto, max)
-}
-
-/// 번호가 `after`보다 크고 `min(upto, 경계)` 이하인 옛 봉투 줄의 번호, 번호 순서로 `max`개까지.
-fn envelope_seqs_until(
-    conn: &Connection,
-    after: u64,
-    upto: u64,
     max: usize,
 ) -> Result<Vec<u64>, StoreError> {
     let Some(until) = legacy_envelope_until(conn)? else {
         return Ok(Vec::new());
     };
     // 경계는 i64 범위 안이다. 그보다 큰 `after` 뒤에는 아무것도 없다.
-    let (Ok(after), Ok(until)) = (i64::try_from(after), i64::try_from(until.min(upto))) else {
+    let (Ok(after), Ok(until)) = (i64::try_from(after), i64::try_from(until)) else {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
@@ -311,33 +248,5 @@ mod tests {
             assert!(conn.execute(sql, []).is_err(), "{sql}");
         }
         assert_eq!(legacy_envelope_until(&conn).unwrap(), None);
-    }
-    #[test]
-    fn 칸_이름은_이스케이프를_푼_이름으로_본다() {
-        use rusqlite::types::ValueRef;
-        let cases: [(&str, bool); 9] = [
-            (r#"{"at":1,"payload":2}"#, true),
-            (r#"{"at":1,"payload":2}"#, true),
-            (r#"{"at":1,"at":2,"payload":3}"#, false),
-            (r#"{"at":1,"payload":1,"payload":2}"#, false),
-            (r#"{"at\u0000":1,"payload":1}"#, false),
-            (r#"{"a\\u0074":1,"payload":1}"#, false),
-            (r#"{"at":-0,"payload":1}"#, false),
-            (r#"{"at":1.0,"payload":1}"#, false),
-            (r#"{"at":1,"payload":"\ud800"}"#, false),
-        ];
-        for (text, want) in cases {
-            let got = super::gate_reads_envelope(ValueRef::Text(text.as_bytes()), ValueRef::Null);
-            assert_eq!(got, want, "{text}");
-        }
-        let text = r#"{"at":5,"payload":1}"#.as_bytes();
-        assert!(super::gate_reads_envelope(
-            ValueRef::Text(text),
-            ValueRef::Integer(5)
-        ));
-        assert!(!super::gate_reads_envelope(
-            ValueRef::Text(text),
-            ValueRef::Integer(6)
-        ));
     }
 }
