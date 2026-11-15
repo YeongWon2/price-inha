@@ -282,8 +282,11 @@ impl RiskParams {
     /// (`self.max_drawdown_pct / 2`, 결정 2026-11-16 30번)으로 센다. 한도를 바꾸면 기준도 따라간다(2차 2번).
     /// 나머지 기준은 [`Self::promotion`] 을 쓴다.
     pub fn evaluate_promotion(&self, stats: &crate::PromotionStats) -> crate::Verdict {
-        let _ = stats;
-        todo!()
+        let criteria = PromotionCriteria {
+            max_drawdown_pct: self.max_drawdown_pct / Decimal::TWO,
+            ..self.promotion.clone()
+        };
+        criteria.evaluate(stats)
     }
 }
 
