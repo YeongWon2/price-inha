@@ -140,8 +140,26 @@ async fn run(
 /// 원격 세션이면 키를 바꿔 그 세대가 끝날 때까지 기다린다. 그 컴퓨터의 세션은 끝나지 않는다.
 async fn revoked(shared: &Shared, kind: SessionKind) {
     match kind {
-        SessionKind::Remote { generation, .. } => shared.access.revoked(generation).await,
+        SessionKind::Remote {
+            generation,
+            made_at,
+        } => {
+            tokio::select! {
+                () = shared.access.revoked(generation) => {}
+                () = expired(shared, made_at) => {}
+            }
+        }
         SessionKind::Local => std::future::pending().await,
+    }
+}
+
+/// 원격 세션이 만든 때부터 수명(30일)을 넘길 때까지 기다린다. ping 간격마다 관문의 시계로 본다(10차).
+async fn expired(shared: &Shared, made_at: pi_store::UnixMillis) {
+    loop {
+        tokio::time::sleep(shared.keepalive.interval).await;
+        if !crate::session::remote_alive(made_at, shared.access.now()) {
+            return;
+        }
     }
 }
 

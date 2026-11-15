@@ -23,6 +23,8 @@ pub(crate) struct Shared {
     pub(crate) access: Arc<Access>,
     /// 허용하는 Host 이름(포트 없이).
     pub(crate) allowed_hosts: Vec<String>,
+    /// (10차) https 프록시 뒤에서 들어오는 원격 이름(포트 없이).
+    pub(crate) remote_hosts: Vec<String>,
     /// 실제로 연 포트.
     pub(crate) port: u16,
     pub(crate) peer_override: Option<PeerOverride>,
@@ -122,6 +124,19 @@ fn host_allowed(host: &str, allowed: &[String], port: u16) -> bool {
     })
 }
 
+/// (10차) `host`가 원격 이름인가: 포트 없는 `<이름>`이나 `<이름>:<연 포트>`.
+fn remote_host(host: &str, remote: &[String], port: u16) -> bool {
+    let with_port = format!(":{port}");
+    remote.iter().any(|name| {
+        let Some((head, rest)) = host.split_at_checked(name.len()) else {
+            return false;
+        };
+        !name.is_empty()
+            && head.eq_ignore_ascii_case(name)
+            && (rest.is_empty() || rest == with_port)
+    })
+}
+
 /// 1 · 2단계: Host와 상대 주소. 모든 경로(없는 경로 포함)가 거친다.
 pub(crate) async fn host_and_peer(
     State(shared): State<Arc<Shared>>,
@@ -134,7 +149,9 @@ pub(crate) async fn host_and_peer(
             .uri()
             .authority()
             .is_none_or(|authority| authority.as_str() == host);
-        same_target && host_allowed(host, &shared.allowed_hosts, shared.port)
+        same_target
+            && (host_allowed(host, &shared.allowed_hosts, shared.port)
+                || remote_host(host, &shared.remote_hosts, shared.port))
     });
     if !host_ok {
         return reject(StatusCode::FORBIDDEN, "허용되지 않은 Host입니다");
@@ -181,11 +198,18 @@ fn find_session(shared: &Shared, headers: &HeaderMap, outside: bool) -> Option<S
 }
 
 /// `Origin`이 `http://<Host 헤더 값>`과 같은가. 없거나 여러 개면 아니다.
-fn same_origin(headers: &HeaderMap) -> bool {
+/// (10차) Host가 원격 이름이면 `https://<Host 헤더 값>`도 같은 출처다.
+fn same_origin(headers: &HeaderMap, remote: &[String], port: u16) -> bool {
     match (single(headers, &HOST), single(headers, &ORIGIN)) {
-        (Some(host), Some(origin)) => origin
-            .strip_prefix("http://")
-            .is_some_and(|rest| rest == host),
+        (Some(host), Some(origin)) => {
+            origin
+                .strip_prefix("http://")
+                .is_some_and(|rest| rest == host)
+                || (remote_host(host, remote, port)
+                    && origin
+                        .strip_prefix("https://")
+                        .is_some_and(|rest| rest == host))
+        }
         _ => false,
     }
 }
@@ -195,9 +219,13 @@ fn cross_origin() -> Response {
 }
 
 /// 3단계: 읽기만 하는 요청(`GET` · `HEAD` · `OPTIONS`)이 아니면 같은 출처여야 한다.
-pub(crate) async fn origin_if_changing(request: Request, next: Next) -> Response {
+pub(crate) async fn origin_if_changing(
+    State(shared): State<Arc<Shared>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let reads_only = [Method::GET, Method::HEAD, Method::OPTIONS].contains(request.method());
-    if reads_only || same_origin(request.headers()) {
+    if reads_only || same_origin(request.headers(), &shared.remote_hosts, shared.port) {
         next.run(request).await
     } else {
         cross_origin()
@@ -205,8 +233,12 @@ pub(crate) async fn origin_if_changing(request: Request, next: Next) -> Response
 }
 
 /// 3단계(웹소켓): 언제나 같은 출처여야 한다.
-pub(crate) async fn origin_always(request: Request, next: Next) -> Response {
-    if same_origin(request.headers()) {
+pub(crate) async fn origin_always(
+    State(shared): State<Arc<Shared>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if same_origin(request.headers(), &shared.remote_hosts, shared.port) {
         next.run(request).await
     } else {
         cross_origin()
@@ -303,7 +335,7 @@ mod tests {
     #[test]
     fn origin은_host와_글자까지_같아야_한다() {
         let ok = headers(&[("host", "localhost:1"), ("origin", "http://localhost:1")]);
-        assert!(same_origin(&ok));
+        assert!(same_origin(&ok, &[], 1));
         for origin in [
             "https://localhost:1",
             "http://localhost:1/",
@@ -311,15 +343,18 @@ mod tests {
             "null",
         ] {
             let bad = headers(&[("host", "localhost:1"), ("origin", origin)]);
-            assert!(!same_origin(&bad), "{origin}");
+            assert!(!same_origin(&bad, &[], 1), "{origin}");
         }
-        assert!(!same_origin(&headers(&[("host", "localhost:1")])));
+        assert!(!same_origin(&headers(&[("host", "localhost:1")]), &[], 1));
         let twice = headers(&[
             ("host", "localhost:1"),
             ("origin", "http://localhost:1"),
             ("origin", "http://evil.example"),
         ]);
-        assert!(!same_origin(&twice), "Origin이 여러 개면 믿지 않는다");
+        assert!(
+            !same_origin(&twice, &[], 1),
+            "Origin이 여러 개면 믿지 않는다"
+        );
     }
 
     #[test]

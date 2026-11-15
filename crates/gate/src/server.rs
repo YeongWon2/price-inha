@@ -87,11 +87,13 @@ impl Gate {
                 self.config.loopback_delay_start,
                 self.config.loopback_delay_max,
             ),
+            self.config.max_tracked_devices,
         ));
         let shared = Arc::new(Shared {
             hub: Arc::clone(&self.hub),
             access: Arc::clone(&access),
             allowed_hosts: self.config.allowed_hosts,
+            remote_hosts: self.config.remote_hosts,
             port: addr.port(),
             peer_override: self.peer_override,
             stop: stop_rx.clone(),
@@ -128,14 +130,21 @@ fn routes(shared: Arc<Shared>, public: Router, protected: Router) -> Router {
     let session = || from_fn_with_state(Arc::clone(&shared), guard::session);
     let enter = Router::new()
         .route(SESSION_PATH, post(enter::enter))
-        .layer(from_fn(guard::origin_if_changing));
+        .layer(from_fn_with_state(
+            Arc::clone(&shared),
+            guard::origin_if_changing,
+        ));
     let live = Router::new()
         .route(WS_PATH, get(ws::upgrade))
         .layer(session())
-        .layer(from_fn(guard::origin_always));
-    let protected = protected
-        .layer(session())
-        .layer(from_fn(guard::origin_if_changing));
+        .layer(from_fn_with_state(
+            Arc::clone(&shared),
+            guard::origin_always,
+        ));
+    let protected = protected.layer(session()).layer(from_fn_with_state(
+        Arc::clone(&shared),
+        guard::origin_if_changing,
+    ));
     Router::new()
         .merge(enter)
         .merge(live)

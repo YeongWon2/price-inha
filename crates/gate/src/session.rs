@@ -74,7 +74,7 @@ impl Entry {
 }
 
 /// 원격 세션이 수명 안인가(만든 때부터 [`crate::REMOTE_SESSION_MAX_AGE`] 미만).
-fn remote_alive(made_at: UnixMillis, now: UnixMillis) -> bool {
+pub(crate) fn remote_alive(made_at: UnixMillis, now: UnixMillis) -> bool {
     let life = i64::try_from(crate::REMOTE_SESSION_MAX_AGE.as_millis()).unwrap_or(i64::MAX);
     now.0.saturating_sub(made_at.0) < life
 }

@@ -224,13 +224,14 @@ impl Access {
         clock: Arc<dyn Clock>,
         alert: Arc<dyn LockAlert>,
         loopback_delay: (Duration, Duration),
+        max_tracked: usize,
     ) -> Self {
         Self {
             store,
             clock,
             alert,
             sessions: Sessions::default(),
-            strikes: Strikes::default(),
+            strikes: Strikes::new(max_tracked),
             generation: watch::Sender::new(0),
             loopback_delay,
         }

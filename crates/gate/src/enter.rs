@@ -75,11 +75,13 @@ async fn enter_local(shared: &Shared, ip: IpAddr, key: Option<String>) -> Respon
 async fn enter_remote(shared: &Shared, ip: IpAddr, key: Option<String>) -> Response {
     let access = &shared.access;
     let now = access.now();
-    if access.strikes.locked_until(ip, now).is_some() {
+    // 잠금 확인과 시도 기록을 한 번에: 자리를 잡은 시도만 키를 맞춰 본다.
+    if !access.strikes.reserve(ip, now) {
         let status = StatusCode::from_u16(LOCKED_STATUS).unwrap_or(StatusCode::TOO_MANY_REQUESTS);
         return reject(status, "잠시 뒤에 다시 시도하세요");
     }
     let Some(key) = key else {
+        access.strikes.release(ip);
         return reject(StatusCode::UNAUTHORIZED, DENIED);
     };
     match access.verify(&key).await {
@@ -95,7 +97,10 @@ async fn enter_remote(shared: &Shared, ip: IpAddr, key: Option<String>) -> Respo
             access.remote_failed(ip, now).await;
             reject(StatusCode::UNAUTHORIZED, DENIED)
         }
-        Err(_) => unreadable(),
+        Err(_) => {
+            access.strikes.release(ip);
+            unreadable()
+        }
     }
 }
 
