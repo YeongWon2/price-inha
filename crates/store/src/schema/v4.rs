@@ -40,6 +40,12 @@ BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
 /// 이미 버전 3인 파일에서 경계로 보는 줄(옛 봉투 줄): 내용이 **정확히 두 칸**(`at` · `payload`)인
 /// 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다. 두 칸은 `json_each`로 센다.
 /// `CASE`는 JSON이 아닌 내용에서 JSON 함수가 오류를 내지 않게 먼저 `json_valid`를 보려는 것이다.
+///
+/// 5차에서 좁힘(2026-11-15): `json_type`은 JSON 글자의 모양만 보아 i64 범위 밖의 정수와 `-0`도
+/// `'integer'`라 한다. 그래서 꺼낸 값이 SQL 정수인지(`typeof(json_extract(…))`: 범위 밖이면 실수로
+/// 꺼낸다)와, 적힌 글자(`->`가 원래 글자를 돌려준다)가 `-0`이 아닌지를 더 본다. 맨 위 칸의 이름이
+/// 겹친 객체는 `json_each`가 겹친 칸도 하나씩 세므로 두 칸 조건에서 이미 빠진다.
+/// (이 SQL도 버전 3 → 4로 올리는 순간에만 돈다. 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
 /// (바로잡음 2026-11-14: 처음 SQL은 시각 칸이 채워진 줄만 보고 칸 수를 세지 않았다. 버전 4는 이번
 /// 차수 안에서 아직 어느 실제 파일에도 쓰이지 않았으므로 버전 5를 따로 두지 않고 이 단계를 고친다.
 /// 이 SQL은 버전 3 → 4로 올리는 순간에만 돌고, 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
@@ -49,6 +55,8 @@ WHERE CASE WHEN json_valid(payload) THEN
       json_type(payload) = 'object'
       AND (SELECT COUNT(*) FROM json_each(payload)) = 2
       AND json_type(payload, '$.at') = 'integer'
+      AND typeof(json_extract(payload, '$.at')) = 'integer'
+      AND (payload -> '$.at') <> '-0'
       AND json_type(payload, '$.payload') IS NOT NULL
       AND (at IS NULL OR json_extract(payload, '$.at') = at)
   ELSE 0 END
