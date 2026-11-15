@@ -282,6 +282,9 @@ impl Store {
     ///   **내용의 `at`과 같다**(버전 3으로 올라오며 내용의 `at`을 시각 칸에 옮겨 적은 줄).
     ///   세 칸 이상인 객체, `at`이 정수가 아닌 객체, 내용의 `at`과 다른 시각이 적힌 줄,
     ///   JSON이 아니거나 객체가 아닌 내용은 들지 않는다.
+    ///   칸 이름은 접속 관문의 `serde_json`이 읽는 이름, 곧 이스케이프를 푼 이름으로 본다(8차):
+    ///   `{"at":1,"payload":2}`는 옛 봉투 줄이고, `{"at":1,"at":2,"payload":3}`은 이름이
+    ///   겹친 줄이라 아니다.
     ///   (바로잡음 2026-11-14: 처음 규칙은 "시각 칸이 채워진 봉투 줄"이라 시각 칸이 빈 봉투 줄을 빠뜨렸다.)
     ///   한계: 버전 3에서 [`Store::append_at`]으로 봉투 모양 내용을 내용의 `at`과 같은 시각으로 쌓은
     ///   줄이나 [`Store::append`]로 봉투 모양 내용을 쌓은 줄은 옛 봉투 줄과 파일만 보고는 가를 수
@@ -314,6 +317,26 @@ impl Store {
     /// - 읽기만 한다. 아무것도 바꾸지 않는다.
     pub fn legacy_envelope_seqs(&self, after: u64, max: usize) -> Result<Vec<u64>, StoreError> {
         self.read(|conn| schema::legacy_envelope_seqs(conn, after, max))
+    }
+
+    /// [`Store::legacy_envelope_seqs`]에 훑는 범위의 위 끝을 준 것. (8차, 접속 관문 8차를 받친다)
+    ///
+    /// 번호가 `after`보다 크고 `upto` 이하이면서 경계([`Store::legacy_envelope_until`]) 이하인 줄
+    /// 가운데 옛 봉투 줄의 번호를 번호 순서로 `max`개까지 준다. 경계 뒤의 줄은 `upto`가 커도 늘 빠진다.
+    ///
+    /// - 경계가 없으면(`None`) 언제나 빈 목록이다. `after >= upto`이거나 `max`가 0이어도 빈 목록이다.
+    /// - 옛 봉투 줄의 규칙은 [`Store::legacy_envelope_seqs`]와 한 벌이다(칸 이름은 이스케이프를 푼
+    ///   이름으로 보고, 겹침도 푼 이름으로 가른다).
+    /// - 결과는 `legacy_envelope_seqs(after, usize::MAX)` 가운데 `upto` 이하인 것의 앞 `max`개와 같다.
+    /// - 한 쪽을 읽을 때 `upto`까지만 훑는다: 경계 앞에 옛 봉투가 아닌 줄이 많아도 경계까지 훑지 않는다.
+    /// - 읽기만 한다. 아무것도 바꾸지 않는다.
+    pub fn legacy_envelope_seqs_upto(
+        &self,
+        after: u64,
+        upto: u64,
+        max: usize,
+    ) -> Result<Vec<u64>, StoreError> {
+        todo!()
     }
 
     // ───────────── 접속 기록 (M6) ─────────────
