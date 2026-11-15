@@ -1,8 +1,6 @@
 //! 주문 전 점검의 흐름(C9 · FN1): 판단 상태 · 팀 상태 · 금액 한도 · 수량과 값 · 점검 통과 표시.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_market::Market;
 use pi_paper::{InitialCash, OrderType, PaperBroker, PaperConfig, Side};
 use pi_rules::{

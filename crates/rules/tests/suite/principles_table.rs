@@ -1,9 +1,7 @@
 //! 원칙마다 어기는 주문 안 하나씩(V24). 모두 막히고, 막힌 이유가 남는다(V26 · E10 · E11).
 
-mod common;
-
+use crate::common::*;
 use chrono::Duration;
-use common::*;
 use pi_market::{Currency, Symbol};
 use pi_paper::{OrderType, Side};
 use pi_rules::{

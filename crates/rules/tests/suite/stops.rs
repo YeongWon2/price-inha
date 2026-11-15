@@ -1,8 +1,6 @@
 //! 손실과 멈춤(T13 · E23 · E24 · P3 · P4, 결정 31번).
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_market::Currency;
 use pi_rules::{
     Book, StopContext, StopTransition, TeamStatus, day_loss_pct, drawdown_pct, evaluate_stops,

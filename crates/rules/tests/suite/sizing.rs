@@ -1,8 +1,6 @@
 //! 수량 계산(P1 · P7 · P8), 호가 단위, 비용을 뺀 기대값(P13).
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use pi_rules::{SizeRequest, align_down_to_tick, net_expected_value, size};
 use rust_decimal::Decimal;
 
