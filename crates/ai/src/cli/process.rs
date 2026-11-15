@@ -264,6 +264,9 @@ struct GroupGuard {
     reaped: bool,
     /// 거두기 전에 그룹 전체에 신호를 보냈다(거둔 뒤에 다시 보내지 않는다 — ai.md 5차 6).
     signalled: bool,
+    /// 그룹에 `SIGTERM`은 보냈는데 `SIGKILL` 명령만 실패했다. 버릴 때 그룹이 아직 있으면
+    /// `SIGKILL`을 다시 보낸다(ai.md 7차 5).
+    kill_pending: bool,
     /// 그룹에 신호를 보내는 명령(단위 테스트가 바꿔 넣는다 — ai.md 6차 2).
     kill: &'static Path,
 }
@@ -285,6 +288,7 @@ impl GroupGuard {
             registration,
             reaped: false,
             signalled: false,
+            kill_pending: false,
             kill: Path::new(KILL_COMMAND),
         }
     }
@@ -305,17 +309,36 @@ impl GroupGuard {
             let termed = signal_group_with(self.kill, "TERM", pgid).await;
             self.signalled |= termed;
             let until = tokio::time::Instant::now().checked_add(self.grace);
-            if tokio::time::timeout(self.grace, child.wait()).await.is_ok() {
+            let exited = match self.child.as_mut() {
+                Some(child) => matches!(
+                    tokio::time::timeout(self.grace, child.wait()).await,
+                    Ok(Ok(_))
+                ),
+                None => false,
+            };
+            if exited {
+                // 거둔 것을 먼저 적는다: 남은 손주를 지켜보는 동안 명부에 거둔 그룹 번호가 남아
+                // 끝내기가 확인 없이 그 번호에 신호를 보낼 틈을 없앤다(ai.md 7차 3).
+                self.set_reaped();
                 if termed {
                     let until = until.unwrap_or_else(tokio::time::Instant::now);
                     kill_lingering_with(self.kill, pgid, until).await;
                 }
-            } else if signal_group_with(self.kill, "KILL", pgid).await {
+                return;
+            }
+            if signal_group_with(self.kill, "KILL", pgid).await {
                 self.signalled = true;
             } else {
-                let _ = child.start_kill();
+                // TERM이 갔다면 그룹에 KILL이 아직 가지 않았다: 버릴 때 다시 보낸다(ai.md 7차 5).
+                self.kill_pending = termed;
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.start_kill();
+                }
             }
         }
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
         if let Ok(Ok(_)) = tokio::time::timeout(REAP_WAIT, child.wait()).await {
             self.set_reaped();
         }
@@ -346,6 +369,9 @@ impl Drop for GroupGuard {
     /// 있으면 `SIGKILL`(ai.md 6차 1). 거두기 전에 이미 그룹에 신호를 보냈으면 다시 보내지 않는다
     /// (ai.md 5차 6 — 그때는 [`GroupGuard::terminate`]가 끝까지 끝냈다). 신호 명령을 띄우지 못하면 자식 하나에
     /// `SIGKILL`로 물러선다. 자리표 · 명부 자리는 그 뒤에 놓는다. 막히지 않게 따로 된 실에서 한다.
+    ///
+    /// 끝내기에서 `SIGTERM`은 갔는데 `SIGKILL` 명령만 실패했으면, 그룹이 아직 있을 때(`kill -0`)
+    /// `SIGKILL`을 다시 보낸다(ai.md 7차 5).
     fn drop(&mut self) {
         let child = self.child.take();
         let permit = self.permit.take();
@@ -355,13 +381,16 @@ impl Drop for GroupGuard {
             return;
         };
         let (reaped, signalled, grace, kill) = (self.reaped, self.signalled, self.grace, self.kill);
-        if reaped && signalled {
+        let kill_pending = self.kill_pending;
+        if reaped && signalled && !kill_pending {
             return;
         }
         let spawned = std::thread::Builder::new()
             .name("pi-ai-cli-kill".to_string())
             .spawn(move || {
-                if reaped {
+                if reaped && kill_pending {
+                    kill_lingering(kill, pgid, Duration::ZERO);
+                } else if reaped {
                     if signal_group(kill, "TERM", pgid) {
                         kill_lingering(kill, pgid, grace);
                     }
@@ -373,7 +402,11 @@ impl Drop for GroupGuard {
                 drop(registration);
             });
         if spawned.is_err() {
-            signal_group(kill, if reaped { "TERM" } else { "KILL" }, pgid);
+            if reaped && kill_pending {
+                kill_lingering(kill, pgid, Duration::ZERO);
+            } else {
+                signal_group(kill, if reaped { "TERM" } else { "KILL" }, pgid);
+            }
         }
     }
 }
@@ -493,6 +526,117 @@ mod tests {
         assert!(
             gone_within(pid, Duration::from_secs(5)).await,
             "버린 뒤 물러선 start_kill이 자식을 끝내지 못했다"
+        );
+    }
+
+    /// 그룹이 모두 끝났는가(`kill -0 -- -그룹`이 실패하면 참).
+    fn group_gone(pgid: u32) -> bool {
+        !std::process::Command::new(KILL_COMMAND)
+            .args(["-0", "--", &format!("-{pgid}")])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// 시험이 끝날 때(실패해도) 남은 그룹을 치운다.
+    struct GroupCleanup(u32);
+
+    impl Drop for GroupCleanup {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new(KILL_COMMAND)
+                .args(["-KILL", "--", &format!("-{}", self.0)])
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
+    /// `/bin/sh -c script`를 새 그룹으로 띄운다.
+    fn shell(script: &str) -> Child {
+        Command::new("/bin/sh")
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .kill_on_drop(false)
+            .spawn()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn 끝내기에서_자식을_거두면_남은_손주를_지켜보기_전에_명부가_그룹_번호를_잊는다() {
+        // 자식(sh)은 TERM에 끝나고, 손주(sleep)는 TERM을 무시해 유예 끝까지 남는다.
+        let child = shell("(trap '' TERM; exec /bin/sleep 30) & wait");
+        let pgid = child.id().unwrap();
+        let _cleanup = GroupCleanup(pgid);
+        let groups = Arc::new(Groups::default());
+        let registration = groups.reserve().unwrap();
+        let (tx, _rx) = oneshot::channel();
+        assert!(registration.attach(pgid, tx));
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let grace = Duration::from_millis(1500);
+        let mut guard = GroupGuard::new(child, grace, permit, Vec::new(), Some(registration));
+        let watch = async {
+            // 표준 입력 닫힘 기다림 + TERM 뒤 자식이 끝날 만큼, 그러나 유예가 끝나기 전에 본다.
+            tokio::time::sleep(CLI_STDIN_CLOSE_WAIT + Duration::from_millis(700)).await;
+            (groups.live_pgids(), group_gone(pgid))
+        };
+        let ((), (pgids, gone_mid)) = tokio::join!(guard.terminate(), watch);
+        assert!(
+            !gone_mid,
+            "손주가 지켜보는 동안 남아 있어야 이 시험이 뜻이 있다"
+        );
+        assert!(
+            pgids.is_empty(),
+            "남은 손주를 지켜보는 동안 명부에 거둔 그룹 번호가 남았다: {pgids:?}"
+        );
+        assert!(guard.reaped);
+        assert!(group_gone(pgid), "유예 뒤 SIGKILL로 손주가 끝나지 않았다");
+    }
+
+    #[tokio::test]
+    async fn 끝내기에서_term은_가고_kill_명령만_실패하면_버릴_때_kill을_다시_보낸다() {
+        // 처음 한 번의 -KILL만 실패하고 나머지는 진짜 kill로 넘기는 신호 명령.
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("failed-once");
+        let script = dir.path().join("kill");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"-KILL\" ] && [ ! -e '{m}' ]; then : > '{m}'; exit 1; fi\nexec {k} \"$@\"\n",
+                m = mark.display(),
+                k = KILL_COMMAND
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let kill: &'static Path = Box::leak(script.into_boxed_path());
+
+        // 자식(sh)과 손주(sleep) 모두 TERM을 무시한다.
+        let child = shell("trap '' TERM; /bin/sleep 30; true");
+        let pgid = child.id().unwrap();
+        let _cleanup = GroupCleanup(pgid);
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let mut guard =
+            GroupGuard::new(child, Duration::from_millis(100), permit, Vec::new(), None);
+        guard.kill = kill;
+        tokio::time::timeout(Duration::from_secs(5), guard.terminate())
+            .await
+            .expect("끝내기가 돌아오지 않았다");
+        assert!(mark.exists(), "KILL 명령이 실패하는 길을 지나지 않았다");
+        assert!(guard.signalled, "TERM은 갔다고 적어야 한다");
+        assert!(guard.reaped, "start_kill로 물러선 뒤 자식을 거두지 못했다");
+        assert!(guard.kill_pending, "KILL이 가지 않은 것을 적지 않았다");
+        assert!(!group_gone(pgid), "TERM을 무시한 손주가 남아 있어야 한다");
+        drop(guard);
+        let started = std::time::Instant::now();
+        while !group_gone(pgid) && started.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            group_gone(pgid),
+            "버릴 때 KILL을 다시 보내지 않아 손주가 남았다"
         );
     }
 }

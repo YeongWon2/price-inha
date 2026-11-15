@@ -203,6 +203,8 @@ pub struct ClaudeCliProvider {
     check_turn: Mutex<()>,
     /// 확인 프로세스가 아직 살아 있는가(앞 확인을 버렸어도). 살아 있으면 새로 띄우지 않는다.
     probe_alive: Arc<check::ProbeAlive>,
+    /// 나가는 글의 가리기 자리(ai.md 7차 1). 기본은 [`crate::NoRedaction`].
+    redactor: Arc<dyn crate::Redactor>,
 }
 
 impl ClaudeCliProvider {
@@ -215,6 +217,7 @@ impl ClaudeCliProvider {
             groups: Arc::new(Groups::default()),
             check_turn: Mutex::new(()),
             probe_alive: Arc::default(),
+            redactor: Arc::new(crate::NoRedaction),
         }
     }
 
@@ -225,8 +228,7 @@ impl ClaudeCliProvider {
     /// 끼우지 않으면 [`crate::NoRedaction`]과 같다(글을 그대로 준다).
     #[must_use]
     pub fn with_redactor(self, redactor: Arc<dyn crate::Redactor>) -> Self {
-        let _ = redactor;
-        todo!("ai 7차 1: 나가는 글 가리기 자리")
+        Self { redactor, ..self }
     }
 
     /// 설치(`--version`, 5초)와 로그인(`auth status --json`, 10초)을 차례로 확인한다.
@@ -250,6 +252,12 @@ impl ClaudeCliProvider {
     /// 확인 제한이 아주 커도(`Duration::MAX`) 공황하지 않는다: 끝 시각을 넘치지 않게 세고 넘치면
     /// 제한 없음으로 다루며, 그 셈은 자식을 띄우기 전에 한다(5차 1).
     /// 확인이 정상으로 끝나도 그 프로세스 묶음에 남은 손주를 끝낸다(5차 4).
+    /// 남은 손주가 끝나기를 기다리는 시간도 확인의 제한 시간 안에 든다: 그 기다림 때문에 제한을 넘으면
+    /// 결과는 [`CliStatus::TimedOut`]이다(ai.md 7차 4).
+    ///
+    /// init(좀비를 거두는 1번 프로세스)이 없는 컨테이너에서는 끝난 손주가 좀비로 남아 그룹이 비지 않으므로,
+    /// 매번 끝낼 때의 유예([`ClaudeCliConfig::kill_grace`])를 끝까지 기다린다. 상한이 있어 자원 문제는 아니다
+    /// (ai.md 7차 6). 호출([`AiProvider::complete`])을 끝낼 때도 같다.
     pub async fn check_detailed(&self) -> CliCheck {
         let _turn = self.check_turn.lock().await;
         check::check(&self.config, &self.probe_alive).await
@@ -287,6 +295,9 @@ impl AiProvider for ClaudeCliProvider {
         let Some(program) = self.config.command.clone() else {
             return Err(AiError::NotConfigured);
         };
+        // 가리기는 크기 상한 검사 전에 한다: 상한은 실제로 나가는 가린 글에 건다(ai.md 7차 1).
+        // 표준 입력과 시스템 글 임시 파일은 모두 이 가린 요청에서 만든다.
+        let request = crate::redact::redact_request(self.redactor.as_ref(), request);
         let input = command::stdin_text(&request.messages);
         let system_len = request.system.as_ref().map_or(0, String::len);
         if input.len().saturating_add(system_len) > CLI_MAX_STDIN_BYTES {

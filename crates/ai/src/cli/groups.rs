@@ -153,7 +153,7 @@ impl Groups {
     }
 
     /// 명부에서 이미 띄웠고 아직 거두지 않은 그룹들.
-    fn live_pgids(&self) -> Vec<u32> {
+    pub(super) fn live_pgids(&self) -> Vec<u32> {
         self.lock().live.values().filter_map(|l| l.pgid).collect()
     }
 
@@ -202,6 +202,10 @@ pub(super) async fn signal_group_with(program: &Path, signal: &str, pgid: u32) -
 /// 보낸다(ai.md 6차 1 — `SIGTERM`을 무시하는 손주가 남지 않게). 그룹 이끔이를 이미 거둔 뒤에도 쓴다:
 /// 보내기 바로 앞에 그룹이 아직 있는지(`kill -0`) 확인하므로, 그룹이 비어 번호가 다른 데 다시 쓰일 수
 /// 있게 된 뒤에는 신호를 보내지 않는다(그룹에 프로세스가 하나라도 있으면 그 번호는 다시 쓰이지 않는다).
+///
+/// init(좀비를 거두는 1번 프로세스)이 없는 컨테이너에서는 끝난 손주가 좀비로 남아 그룹이 비지 않는다
+/// (`kill -0`이 좀비에도 성공한다). 그때는 매번 `until`까지 다 기다리고 `SIGKILL`을 보낸 뒤 돌아온다.
+/// 기다림에 상한이 있으므로 자원 문제는 아니다(ai.md 7차 6).
 pub(super) async fn kill_lingering_with(program: &Path, pgid: u32, until: tokio::time::Instant) {
     loop {
         if !signal_group_with(program, "0", pgid).await {

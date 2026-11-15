@@ -19,3 +19,22 @@ impl Redactor for NoRedaction {
         text.to_string()
     }
 }
+
+/// 요청의 시스템 글과 대화 글을 가린 요청을 돌려준다. 모델 · 최대 토큰 · 말한 쪽은 그대로다.
+pub(crate) fn redact_request(
+    redactor: &dyn Redactor,
+    request: crate::CompletionRequest,
+) -> crate::CompletionRequest {
+    crate::CompletionRequest {
+        system: request.system.map(|system| redactor.redact(&system)),
+        messages: request
+            .messages
+            .into_iter()
+            .map(|message| crate::Message {
+                content: redactor.redact(&message.content),
+                ..message
+            })
+            .collect(),
+        ..request
+    }
+}

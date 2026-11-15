@@ -100,6 +100,8 @@ pub struct AnthropicProvider {
     insecure: bool,
     /// 다시 시도 간격의 무작위. 잠금은 간격 하나를 뽑는 동안만 쥔다.
     backoff: Mutex<RetryBackoff>,
+    /// 나가는 글의 가리기 자리(ai.md 7차 1). 기본은 [`crate::NoRedaction`].
+    redactor: Arc<dyn crate::Redactor>,
 }
 
 /// 보낸 요청 하나가 실패한 까닭과, 공급자가 기다리라고 한 시간.
@@ -149,8 +151,7 @@ impl AnthropicProvider {
     /// 끼우지 않으면 [`crate::NoRedaction`]과 같다(글을 그대로 보낸다).
     #[must_use]
     pub fn with_redactor(self, redactor: Arc<dyn crate::Redactor>) -> Self {
-        let _ = redactor;
-        todo!("ai 7차 1: 나가는 글 가리기 자리")
+        Self { redactor, ..self }
     }
 
     fn build(
@@ -173,6 +174,7 @@ impl AnthropicProvider {
             credentials,
             client,
             backoff: Mutex::new(backoff),
+            redactor: Arc::new(crate::NoRedaction),
         }
     }
 
@@ -260,6 +262,8 @@ impl AiProvider for AnthropicProvider {
             .current()
             .await
             .ok_or(AiError::NotConfigured)?;
+        // 가린 요청을 한 번 만들어 다시 시도에도 같은 본문을 보낸다(ai.md 7차 1).
+        let request = crate::redact::redact_request(self.redactor.as_ref(), request);
         let body = wire::MessagesBody::from_request(&request);
         let mut retries = 0;
         loop {
