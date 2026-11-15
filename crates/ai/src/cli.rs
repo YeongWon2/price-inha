@@ -171,6 +171,28 @@ pub enum CliStatus {
     },
 }
 
+/// 확인의 자세한 결과(ai.md 5차 5). [`ClaudeCliProvider::check_detailed`]가 돌려준다.
+///
+/// [`CliStatus::TimedOut`] 하나로 묶이던 "앞 확인이 아직 돈다"를 따로 가른다.
+/// [`ClaudeCliProvider::check`]는 지금처럼 [`CliStatus`]만 돌려주고, 이 갈래를 [`CliStatus::TimedOut`]으로 보인다.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CliCheck {
+    /// 이번 확인이 결과를 냈다(이번 확인 자신이 제한을 넘긴 [`CliStatus::TimedOut`]도 여기다).
+    Status(CliStatus),
+    /// 앞 확인의 프로세스가 아직 살아 있어 새로 띄우지 않았다(ai.md 4차 2 · 5차 5).
+    PreviousProbeAlive,
+}
+
+/// 이 모듈이 작업 폴더에 두는 임시 파일(시스템 글 임시 파일 `.pi-ai-system-…`)의 이름이면 참,
+/// 나머지는 거짓(ai.md 5차 7).
+///
+/// 서버가 비정상으로 꺼진 뒤 남은 그 파일 때문에 작업 폴더가 "비어 있지 않음"이 되지 않게
+/// 조립(gate 8차)이 이 함수로 가른다. `name`은 경로가 아니라 파일 이름 하나다.
+pub fn is_own_work_file(name: &std::ffi::OsStr) -> bool {
+    let _ = name;
+    todo!("ai 5차 7")
+}
+
 /// 공식 Claude Code CLI를 부르는 공급자. 구독은 이것으로 쓴다(D4).
 pub struct ClaudeCliProvider {
     config: ClaudeCliConfig,
@@ -210,12 +232,25 @@ impl ClaudeCliProvider {
         check::check(&self.config, &self.probe_alive).await
     }
 
+    /// [`Self::check`]와 같은 확인을 하되, "앞 확인의 프로세스가 아직 살아 있어 새로 띄우지 않음"을
+    /// [`CliCheck::PreviousProbeAlive`]로 가른다(ai.md 5차 5).
+    ///
+    /// 확인 제한이 아주 커도(`Duration::MAX`) 공황하지 않는다: 끝 시각을 넘치지 않게 세고 넘치면
+    /// 제한 없음으로 다루며, 그 셈은 자식을 띄우기 전에 한다(5차 1).
+    /// 확인이 정상으로 끝나도 그 프로세스 묶음에 남은 손주를 끝낸다(5차 4).
+    pub async fn check_detailed(&self) -> CliCheck {
+        todo!("ai 5차 5")
+    }
+
     /// 공급자를 끝낸다. 서버가 꺼질 때 부른다.
     ///
     /// 새 호출을 받지 않게 하고(이후 [`AiProvider::complete`]는 띄우지 않고
     /// [`AiError::Connection`]), 살아 있는 모든 자식 그룹의 표준 입력을 닫고
     /// [`CLI_STDIN_CLOSE_WAIT`] 동안 스스로 끝나기를 기다린 뒤, 남은 그룹에
     /// `SIGTERM` → 유예([`ClaudeCliConfig::kill_grace`]) → `SIGKILL`을 보내고, 자식이 거둬질 때까지 기다린다.
+    ///
+    /// 설치 · 로그인 확인 프로세스도 묶음째 끝내고 거둔 뒤에 돌아온다(ai.md 5차 3,
+    /// `cli-backend.md` 5.6-3). 꺼지는 중이 아니면 확인을 도중에 죽이지 않는 것(5.6-5)은 그대로다.
     ///
     /// 끝내기와 겹쳐 띄우는 중이던 호출도 남기지 않는다(ai.md 4차 1): 자리표를 받은 호출은
     /// 명부에 세어 끝내기가 기다리거나, 띄운 뒤 등록이 거부되면 그 호출이 돌아가기 전에 자식을 끝내고 거둔다.
