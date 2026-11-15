@@ -247,6 +247,21 @@ pub enum StoreError {
         /// 매매의 판단 시각.
         decided_at: UnixMillis,
     },
+    /// 지식 기록의 값이 규칙에 어긋난다(빈 기록 키 · 빈 조각 · 빈 메타 키). 아무것도 바꾸지 않았다. (11차)
+    #[error("지식 값이 규칙에 어긋난다: {0}")]
+    InvalidKnowledge(String),
+    /// 임베딩 벡터가 비었거나 유한하지 않은 값이 있다. (11차)
+    #[error("임베딩 벡터가 규칙에 어긋난다")]
+    InvalidEmbedding,
+    /// 그 번호의 조각이 없다. (11차)
+    #[error("조각을 찾을 수 없다: {0:?}")]
+    ChunkNotFound(crate::ChunkId),
+    /// 웹 푸시 구독의 값이 규칙에 어긋난다(https가 아닌 주소 · 빈 키). (11차)
+    #[error("웹 푸시 구독이 규칙에 어긋난다")]
+    InvalidPushSubscription,
+    /// 스냅샷을 뜰 자리에 이미 파일이 있다. 그 파일은 건드리지 않았다. (11차)
+    #[error("스냅샷 자리에 이미 파일이 있다: {}", .0.display())]
+    SnapshotTargetExists(std::path::PathBuf),
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

@@ -76,11 +76,13 @@ pub enum TeamCause {
     AnomalyCleared,
     /// 내가 다시 시작을 눌렀다.
     OwnerRestart,
+    /// 백업을 새 폴더에 되살렸다([`crate::Store::mark_restored`]). 이 사유로 가는 길은 그 함수 하나다. (11차)
+    Restored,
 }
 
 impl TeamCause {
     /// 모든 사유.
-    pub const ALL: [TeamCause; 8] = [
+    pub const ALL: [TeamCause; 9] = [
         TeamCause::TradingStart,
         TeamCause::MarketClose,
         TeamCause::NextTradingDayStart,
@@ -89,6 +91,7 @@ impl TeamCause {
         TeamCause::AnomalyDetected,
         TeamCause::AnomalyCleared,
         TeamCause::OwnerRestart,
+        TeamCause::Restored,
     ];
 }
 

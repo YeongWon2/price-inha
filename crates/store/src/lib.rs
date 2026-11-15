@@ -16,10 +16,13 @@ mod codec;
 mod error;
 mod fact;
 mod keep;
+mod knowledge;
 mod log;
 mod model;
 mod proposal;
+mod push;
 mod receipt;
+mod restore;
 mod room;
 mod schema;
 mod session;
@@ -36,6 +39,10 @@ pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, New
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use keep::{ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PaperSnapshot};
+pub use knowledge::{
+    ChunkEmbedding, ChunkId, KnowledgeChunk, KnowledgeHit, KnowledgeKind, KnowledgeQuery,
+    KnowledgeSource, NewKnowledgeRecord,
+};
 pub use model::{
     AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
     Judgment, NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo,
@@ -43,10 +50,12 @@ pub use model::{
     UnixMillis,
 };
 pub use proposal::{NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState};
+pub use push::{NewPushSubscription, PushSubscription};
 pub use receipt::{
     OpenTriggerReceipt, TriggerDelivery, TriggerJob, TriggerReceipt, TriggerReceiptKey,
     TriggerReceiptStatus,
 };
+pub use restore::RestoreOutcome;
 pub use room::{NewRoomEvent, RoomActorKind, RoomAppend, RoomEvent};
 pub use session::{
     AgentMessage, AgentSession, MessageId, MessageRole, NewMessage, SessionId, ToolCall,
@@ -57,7 +66,8 @@ pub use template::{
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
 /// (10차) 10차의 표(세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료)를 더하며 6으로 올린다.
-pub const SCHEMA_VERSION: u32 = 6;
+/// (11차) 지식(조각 · FTS5 trigram · 임베딩 · 메타)과 웹 푸시 구독 표를 더하며 7로 올린다.
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///
