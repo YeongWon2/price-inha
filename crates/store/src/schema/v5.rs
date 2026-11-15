@@ -7,6 +7,10 @@
 //! - 상태는 상태표에 있는 전이로만 바뀌고, 한 번 정해진 칸(내용 · 지문 · 만든 시각 · 승인 번호 ·
 //!   소비 시각)은 되돌리거나 고칠 수 없다.
 //! - 판 · 상태 값 · 접속 키 · 근거 매매처럼 쌓기만 하는 표는 고치기 · 지우기를 막는다.
+//! - (9차 보강) 한 승인 번호는 템플릿(실전중 · 멈춤)과 개선안(냉각중 · 반영됨) 전체에서 한 번만 쓰인다.
+//! - (9차 보강) 개선안이 냉각중 · 반영됨으로 들어갈 때 그 승인은 승인됨이고 소비된 것이어야 한다.
+//! - (9차 보강) 기준 통과 기록은 모의중이 아닐 때 바뀌지 않는다(승격대기 → 모의중으로 돌아갈 때
+//!   지우는 것만 허용). `pass_revision`은 없거나 지금 판과 같다.
 
 /// 버전 4에서 5로 올리는 SQL.
 pub(super) const V5: &str = "
@@ -59,6 +63,7 @@ CREATE TABLE templates (
     CHECK ((pass_revision IS NULL) = (pass_record IS NULL)
        AND (pass_record IS NULL) = (pass_at IS NULL)),
     CHECK ((state = 'simulating') = (pass_record IS NULL)),
+    CHECK (pass_revision IS NULL OR pass_revision = revision),
     CHECK ((state IN ('live', 'stopped')) = (approval_id IS NOT NULL))
 );
 CREATE INDEX templates_by_state ON templates (state, id);
@@ -92,6 +97,18 @@ WHEN NEW.state = 'live' AND OLD.state <> 'live' AND NOT EXISTS (
   SELECT 1 FROM approvals
   WHERE id = NEW.approval_id AND status = 'approved' AND consumed_at IS NOT NULL)
 BEGIN SELECT RAISE(ABORT, 'live template needs a consumed approval'); END;
+CREATE TRIGGER templates_approval_used_once BEFORE UPDATE ON templates
+WHEN NEW.approval_id IS NOT NULL AND NEW.approval_id IS NOT OLD.approval_id AND (
+     EXISTS (SELECT 1 FROM templates WHERE approval_id = NEW.approval_id AND id <> NEW.id)
+  OR EXISTS (SELECT 1 FROM proposals WHERE approval_id = NEW.approval_id))
+BEGIN SELECT RAISE(ABORT, 'approval is used once'); END;
+CREATE TRIGGER templates_pass_fixed BEFORE UPDATE ON templates
+WHEN OLD.state <> 'simulating'
+  AND (NEW.pass_revision IS NOT OLD.pass_revision OR NEW.pass_record IS NOT OLD.pass_record
+       OR NEW.pass_at IS NOT OLD.pass_at)
+  AND NOT (OLD.state = 'promotion_pending' AND NEW.state = 'simulating'
+           AND NEW.pass_revision IS NULL AND NEW.pass_record IS NULL AND NEW.pass_at IS NULL)
+BEGIN SELECT RAISE(ABORT, 'criteria pass is fixed'); END;
 CREATE TRIGGER templates_revision_step BEFORE UPDATE ON templates
 WHEN NEW.revision IS NOT OLD.revision
   AND (OLD.state <> 'simulating' OR NEW.revision <> OLD.revision + 1
@@ -150,6 +167,16 @@ WHEN NEW.state IS NOT OLD.state AND NOT (
   OR (OLD.state = 'proposed' AND NEW.state = 'applied' AND OLD.increases_risk = 0)
   OR (OLD.state = 'cooling' AND NEW.state = 'applied'))
 BEGIN SELECT RAISE(ABORT, 'proposal transition is not allowed'); END;
+CREATE TRIGGER proposals_approval_used_once BEFORE UPDATE ON proposals
+WHEN NEW.approval_id IS NOT NULL AND NEW.approval_id IS NOT OLD.approval_id AND (
+     EXISTS (SELECT 1 FROM proposals WHERE approval_id = NEW.approval_id AND id <> NEW.id)
+  OR EXISTS (SELECT 1 FROM templates WHERE approval_id = NEW.approval_id))
+BEGIN SELECT RAISE(ABORT, 'approval is used once'); END;
+CREATE TRIGGER proposals_need_consumed_approval BEFORE UPDATE ON proposals
+WHEN NEW.state IN ('cooling', 'applied') AND NEW.state IS NOT OLD.state AND NOT EXISTS (
+  SELECT 1 FROM approvals
+  WHERE id = NEW.approval_id AND status = 'approved' AND consumed_at IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'proposal needs a consumed approval'); END;
 CREATE TRIGGER proposal_evidence_no_replace BEFORE INSERT ON proposal_evidence
 WHEN EXISTS (SELECT 1 FROM proposal_evidence
              WHERE proposal_id = NEW.proposal_id
