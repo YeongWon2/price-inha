@@ -8,12 +8,18 @@
 //!
 //! 오류 · 출처 주소에는 키를 가린 주소만 싣는다.
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use pi_secrets::SecretString;
 
-use crate::{Clock, DataAdapter, DataError, FactRequest, Fetched, KeySource, SourceName};
+use crate::http::Endpoint;
+use crate::{
+    Clock, DataAdapter, DataError, FactKind, FactRequest, Fetched, KeySource, SourceName, dart,
+    ecos, fred,
+};
 
 /// DART 기본 주소.
 pub const DEFAULT_DART_BASE_URL: &str = "https://opendart.fss.or.kr";
@@ -74,6 +80,9 @@ pub struct DataClient {
     config: DataConfig,
     keys: Arc<dyn KeySource>,
     clock: Arc<dyn Clock>,
+    dart: Endpoint,
+    ecos: Endpoint,
+    fred: Endpoint,
 }
 
 impl DataClient {
@@ -83,21 +92,80 @@ impl DataClient {
         keys: Arc<dyn KeySource>,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, DataError> {
-        let _ = (config, keys, clock);
-        todo!()
+        let [dart, ecos, fred] = endpoints(&config)?;
+        Ok(Self {
+            config,
+            keys,
+            clock,
+            dart,
+            ecos,
+            fred,
+        })
     }
 
     /// 출처의 키가 지금 있는가.
     pub fn has_key(&self, source: SourceName) -> bool {
-        let _ = (source, &self.config, &self.keys, &self.clock);
-        todo!()
+        self.keys.key(source).is_some()
     }
+
+    /// 만들 때 받은 설정.
+    pub fn config(&self) -> &DataConfig {
+        &self.config
+    }
+
+    /// 그 출처의 키. 없으면 [`DataError::NoKey`](바깥으로 보내지 않는다).
+    fn key_for(&self, source: SourceName) -> Result<SecretString, DataError> {
+        self.keys
+            .key(source)
+            .ok_or(DataError::NoKey { origin: source })
+    }
+}
+
+impl fmt::Debug for DataClient {
+    /// 설정만 보인다(키를 주는 곳 · 시계는 찍지 않는다).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DataClient")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+/// 세 출처의 보내는 곳. 기본 주소 규칙을 출처 순서(DART → ECOS → FRED)로 본다.
+fn endpoints(config: &DataConfig) -> Result<[Endpoint; 3], DataError> {
+    Ok([
+        Endpoint::new(SourceName::Dart, &config.dart_base_url, config.timeout)?,
+        Endpoint::new(SourceName::Ecos, &config.ecos_base_url, config.timeout)?,
+        Endpoint::new(SourceName::Fred, &config.fred_base_url, config.timeout)?,
+    ])
 }
 
 #[async_trait]
 impl DataAdapter for DataClient {
     async fn fetch(&self, request: &FactRequest) -> Result<Fetched, DataError> {
-        let _ = request;
-        todo!()
+        let key = self.key_for(request.kind().source())?;
+        let key = key.expose();
+        let clock = self.clock.as_ref();
+        match request {
+            FactRequest::Disclosures { corp, from, to } => {
+                dart::disclosures(&self.dart, key, clock, corp, *from, *to).await
+            }
+            FactRequest::Financials {
+                corp,
+                year,
+                report,
+                fs,
+            } => dart::financials(&self.dart, key, clock, corp, *year, *report, *fs).await,
+            FactRequest::KoreaRate(series) => {
+                ecos::series(&self.ecos, key, clock, FactKind::KoreaRate, series).await
+            }
+            FactRequest::KoreaFx(series) => {
+                ecos::series(&self.ecos, key, clock, FactKind::KoreaFx, series).await
+            }
+            FactRequest::UsRate {
+                series_id,
+                from,
+                to,
+            } => fred::observations(&self.fred, key, clock, series_id, *from, *to).await,
+        }
     }
 }

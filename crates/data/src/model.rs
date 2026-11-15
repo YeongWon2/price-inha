@@ -25,12 +25,27 @@ impl SourceName {
 
     /// 이 출처의 키를 담는 `pi-secrets` 칸.
     pub fn slot(self) -> KeySlot {
-        todo!()
+        match self {
+            SourceName::Dart => KeySlot::Dart,
+            SourceName::Ecos => KeySlot::Ecos,
+            SourceName::Fred => KeySlot::Fred,
+        }
+    }
+
+    /// 그 칸이 자료 출처 칸이면 그 출처. 아니면 `None`.
+    pub fn from_slot(slot: KeySlot) -> Option<SourceName> {
+        SourceName::ALL
+            .into_iter()
+            .find(|source| source.slot() == slot)
     }
 
     /// 보이는 이름: `DART` · `ECOS` · `FRED`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            SourceName::Dart => "DART",
+            SourceName::Ecos => "ECOS",
+            SourceName::Fred => "FRED",
+        }
     }
 }
 
@@ -67,7 +82,11 @@ impl FactKind {
 
     /// 이 종류를 주는 출처.
     pub fn source(self) -> SourceName {
-        todo!()
+        match self {
+            FactKind::Disclosure | FactKind::Financials => SourceName::Dart,
+            FactKind::KoreaRate | FactKind::KoreaFx => SourceName::Ecos,
+            FactKind::UsRate => SourceName::Fred,
+        }
     }
 }
 
@@ -78,8 +97,13 @@ pub struct CorpCode(String);
 impl CorpCode {
     /// 8자리 ASCII 숫자만 받는다. 아니면 [`DataError::InvalidRequest`]이고 받은 글자를 담지 않는다.
     pub fn parse(text: &str) -> Result<Self, DataError> {
-        let _ = text;
-        todo!()
+        if text.len() == 8 && text.bytes().all(|b| b.is_ascii_digit()) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(DataError::InvalidRequest {
+                detail: "DART 고유번호는 8자리 숫자여야 합니다".to_owned(),
+            })
+        }
     }
 
     /// 고유번호 글자.
@@ -104,7 +128,12 @@ pub enum ReportCode {
 impl ReportCode {
     /// DART에 보내는 글자.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            ReportCode::FirstQuarter => "11013",
+            ReportCode::HalfYear => "11012",
+            ReportCode::ThirdQuarter => "11014",
+            ReportCode::Annual => "11011",
+        }
     }
 }
 
@@ -120,7 +149,10 @@ pub enum FsDiv {
 impl FsDiv {
     /// DART 응답의 글자.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            FsDiv::Consolidated => "CFS",
+            FsDiv::Separate => "OFS",
+        }
     }
 }
 
@@ -140,7 +172,12 @@ pub enum EcosCycle {
 impl EcosCycle {
     /// ECOS 주소에 넣는 글자.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            EcosCycle::Annual => "A",
+            EcosCycle::Quarter => "Q",
+            EcosCycle::Month => "M",
+            EcosCycle::Day => "D",
+        }
     }
 }
 
@@ -200,7 +237,13 @@ pub enum FactRequest {
 impl FactRequest {
     /// 자료 종류.
     pub fn kind(&self) -> FactKind {
-        todo!()
+        match self {
+            FactRequest::Disclosures { .. } => FactKind::Disclosure,
+            FactRequest::Financials { .. } => FactKind::Financials,
+            FactRequest::KoreaRate(_) => FactKind::KoreaRate,
+            FactRequest::KoreaFx(_) => FactKind::KoreaFx,
+            FactRequest::UsRate { .. } => FactKind::UsRate,
+        }
     }
 }
 
@@ -250,8 +293,7 @@ pub struct Fact {
 impl Fact {
     /// 이 판단 시각에 이미 알 수 있던 자료인가: `known_at <= decision_at` (V36 · P10).
     pub fn known_by(&self, decision_at: DateTime<Utc>) -> bool {
-        let _ = decision_at;
-        todo!()
+        self.known_at <= decision_at
     }
 }
 

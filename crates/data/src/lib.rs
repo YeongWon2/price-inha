@@ -8,9 +8,14 @@
 mod adapter;
 mod client;
 mod clock;
+mod dart;
+mod ecos;
 pub mod error;
+mod fred;
+mod http;
 mod keys;
 mod model;
+mod verify;
 
 pub use adapter::{DataAdapter, FakeDataAdapter};
 pub use client::{
@@ -24,3 +29,4 @@ pub use model::{
     CorpCode, EcosCycle, EcosSeries, Fact, FactKind, FactRequest, FactValue, Fetched, FsDiv,
     ReportCode, Source, SourceName,
 };
+pub use verify::{verify_key, verify_slot};

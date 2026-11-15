@@ -1,7 +1,7 @@
 //! 자료 어댑터 trait과 가짜 어댑터.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 
@@ -29,20 +29,28 @@ impl FakeDataAdapter {
 
     /// 그 종류의 요청에 돌려줄 결과를 정한다. 다시 정하면 바뀐다.
     pub fn set(&self, kind: FactKind, result: Result<Fetched, DataError>) {
-        let _ = (kind, result);
-        todo!()
+        lock(&self.results).insert(kind, result);
     }
 
     /// 받은 요청들(받은 순서).
     pub fn calls(&self) -> Vec<FactRequest> {
-        todo!()
+        lock(&self.calls).clone()
     }
 }
 
 #[async_trait]
 impl DataAdapter for FakeDataAdapter {
     async fn fetch(&self, request: &FactRequest) -> Result<Fetched, DataError> {
-        let _ = (request, &self.results, &self.calls);
-        todo!()
+        lock(&self.calls).push(request.clone());
+        let kind = request.kind();
+        lock(&self.results)
+            .get(&kind)
+            .cloned()
+            .unwrap_or(Ok(Fetched::Missing(kind)))
     }
+}
+
+/// 잠금. 다른 스레드가 잠근 채 멈췄어도 안의 값을 그대로 쓴다(가짜라 값이 깨질 일이 없다).
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

@@ -14,7 +14,8 @@ pub trait KeySource: Send + Sync {
 /// 칸의 `api_key` 값을 쓴다. 읽기 오류는 키가 없는 것으로 본다.
 impl KeySource for SecretStore {
     fn key(&self, source: SourceName) -> Option<SecretString> {
-        let _ = source;
-        todo!()
+        let field = source.slot().fields().first()?;
+        let values = self.read_slot(source.slot()).ok()??;
+        values.get(field).cloned()
     }
 }
