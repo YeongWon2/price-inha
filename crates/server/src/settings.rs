@@ -193,9 +193,8 @@ impl Settings {
             symbols_attempts: limits.symbols_attempts,
             symbols_window: limits.symbols_window,
             demo: given.demo,
-            // (6차 뼈대) 구현 단계에서 받은 값으로 채운다.
-            user_home: None,
-            cli_env: Vec::new(),
+            user_home: user_home.map(Path::to_path_buf),
+            cli_env: crate::cli_base_env(env),
         })
     }
 

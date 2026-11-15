@@ -52,11 +52,14 @@
 //! - `legacy_auth_file`: 보관 폴더에 옛 [`LEGACY_AUTH_FILE`]이 있는가([`legacy_auth_file`]).
 //! - 숫자 칸은 없다.
 
+use std::io::{ErrorKind, Write};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use pi_ai::{ClaudeCliConfig, CliStatus};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{AppError, SetupRefusal};
 
@@ -68,7 +71,8 @@ pub const SETUP_AI_PATH: &str = "/api/setup/ai";
 pub const AI_CHOICE_FILE: &str = "ai.json";
 
 /// 예전 구독 토큰 파일 이름(보관 폴더 안). 서버는 있는지만 보고 읽지도 · 고치지도 · 지우지도 않는다.
-pub const LEGACY_AUTH_FILE: &str = "auth.json";
+/// 이름은 `pi-secrets`가 정한다(키 파일 이름은 `pi-secrets`만 안다).
+pub use pi_secrets::LEGACY_AUTH_FILE;
 
 /// CLI 자식의 작업 폴더 이름(보관 폴더 안, 0700, 비어 있다).
 pub const CLI_WORK_DIR: &str = "cli-work";
@@ -153,13 +157,51 @@ impl AiChoice {
     /// `config_dir`가 절대 경로가 아님(빈 글자와 `null`은 없는 것) · 제어 문자가 든 경로.
     /// 모두 [`SetupRefusal::InvalidInput`]이다.
     pub fn parse(body: &[u8]) -> Result<AiChoice, SetupRefusal> {
-        let _ = body;
-        todo!("6차: AI 연결 고르기 본문 읽기")
+        let invalid = SetupRefusal::InvalidInput;
+        let value: Value = serde_json::from_slice(body).map_err(|_| invalid)?;
+        let fields = value.as_object().ok_or(invalid)?;
+        let method = fields
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(invalid)?;
+        let allowed: &[&str] = match method {
+            "api_key" => &["method"],
+            "cli" => &["method", "command", "config_dir"],
+            _ => return Err(invalid),
+        };
+        if fields.keys().any(|name| !allowed.contains(&name.as_str())) {
+            return Err(invalid);
+        }
+        if method == "api_key" {
+            return Ok(AiChoice::api_key());
+        }
+        let command = match fields.get("command") {
+            Some(Value::String(text)) if !text.is_empty() => absolute(text)?,
+            _ => return Err(invalid),
+        };
+        let config_dir = match fields.get("config_dir") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) if text.is_empty() => None,
+            Some(Value::String(text)) => Some(absolute(text)?),
+            Some(_) => return Err(invalid),
+        };
+        Ok(AiChoice {
+            method: AiMethod::Cli,
+            command: Some(command),
+            config_dir,
+        })
     }
 
     /// [`AI_CHOICE_FILE`]에 쓰는 모양.
     pub fn to_json(&self) -> Value {
-        todo!("6차: 고른 AI 연결의 파일 모양")
+        match self.method {
+            AiMethod::ApiKey => json!({ "method": AiMethod::ApiKey.as_str() }),
+            AiMethod::Cli => json!({
+                "method": AiMethod::Cli.as_str(),
+                "command": self.command.as_deref().and_then(Path::to_str),
+                "config_dir": self.config_dir.as_deref().and_then(Path::to_str),
+            }),
+        }
     }
 }
 
@@ -181,27 +223,86 @@ pub struct AiStatus {
 impl AiStatus {
     /// 설정 상태의 `ai` 칸(모듈 문서의 모양 그대로). 숫자 칸은 없다.
     pub fn to_json(&self) -> Value {
-        todo!("6차: 설정 상태의 ai 칸")
+        let logged_in = match &self.cli {
+            Some(CliStatus::LoggedIn {
+                version,
+                subscription_type,
+                ..
+            }) => Some((version, subscription_type)),
+            _ => None,
+        };
+        json!({
+            "method": self.method.as_str(),
+            "command": self.command.as_deref().and_then(Path::to_str),
+            "config_dir": self.config_dir.as_deref().and_then(Path::to_str),
+            "cli": self.cli.as_ref().map(cli_state),
+            "cli_version": logged_in.map(|(v, _)| format!("{}.{}.{}", v.major, v.minor, v.patch)),
+            "subscription": logged_in.and_then(|(_, kind)| kind.clone()),
+            "legacy_auth_file": self.legacy_auth_file,
+        })
     }
 }
 
 /// 보관 폴더의 [`AI_CHOICE_FILE`]에서 고른 것을 읽는다. 파일이 없으면 `None`.
 /// 읽을 수 없는 모양이면 [`AppError::Home`](`InvalidData`)이다.
 pub fn load_ai_choice(home: &Path) -> Result<Option<AiChoice>, AppError> {
-    let _ = home;
-    todo!("6차: 고른 AI 연결 읽기")
+    let bytes = match std::fs::read(home.join(AI_CHOICE_FILE)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(AppError::Home { kind: error.kind() }),
+    };
+    // 읽을 수 없는 모양이면 말없이 API 키로 넘어가지 않고 알린다(부른 쪽이 정한다).
+    AiChoice::parse(&bytes)
+        .map(Some)
+        .map_err(|_| AppError::Home {
+            kind: ErrorKind::InvalidData,
+        })
 }
 
 /// 고른 것을 보관 폴더의 [`AI_CHOICE_FILE`]에 원자 쓰기로 둔다(임시 파일은 남지 않는다).
 pub fn save_ai_choice(home: &Path, choice: &AiChoice) -> Result<(), AppError> {
-    let _ = (home, choice);
-    todo!("6차: 고른 AI 연결 저장")
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let text = choice.to_json().to_string();
+    // 함께 도는 저장이 같은 임시 파일을 쓰지 않게 이름을 다르게 한다.
+    let temp = home.join(format!(
+        ".{AI_CHOICE_FILE}.{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = write_new(&temp, text.as_bytes())
+        .and_then(|()| std::fs::rename(&temp, home.join(AI_CHOICE_FILE)));
+    written.map_err(|error| {
+        // 쓰다 만 임시 파일을 남기지 않는다(지우지 못해도 더 할 수 있는 일이 없다).
+        let _ = std::fs::remove_file(&temp);
+        AppError::Home { kind: error.kind() }
+    })
+}
+
+/// 새 파일을 만들어 쓰고 디스크에 내린다. 같은 이름이 이미 있으면 실패한다.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// 절대 경로이고 제어 문자가 없는 글자만 경로로 받는다.
+fn absolute(text: &str) -> Result<PathBuf, SetupRefusal> {
+    let path = Path::new(text);
+    if !path.is_absolute() || text.chars().any(char::is_control) {
+        return Err(SetupRefusal::InvalidInput);
+    }
+    Ok(path.to_path_buf())
 }
 
 /// 환경에서 [`CLI_ENV_ALLOWLIST`]의 이름만 골라 그 순서로 준다. 없는 이름은 뺀다.
 pub fn cli_base_env(env: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-    let _ = env;
-    todo!("6차: CLI 환경 허용 목록")
+    CLI_ENV_ALLOWLIST
+        .iter()
+        .filter_map(|name| env(name).map(|value| ((*name).to_string(), value)))
+        .collect()
 }
 
 /// CLI 실행 파일을 찾는다: `path_var`(`:`로 나눈 폴더들)의 `claude` →
@@ -212,14 +313,44 @@ pub fn find_claude(
     user_home: Option<&Path>,
     fixed: &[PathBuf],
 ) -> Option<PathBuf> {
-    let _ = (path_var, user_home, fixed);
-    todo!("6차: CLI 실행 파일 찾기")
+    let on_path = path_var
+        .into_iter()
+        .flat_map(|var| var.split(':'))
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| Path::new(dir).join("claude"));
+    let in_home = user_home.map(|home| home.join(CLI_USER_LOCATION));
+    on_path
+        .chain(in_home)
+        .chain(fixed.iter().cloned())
+        .find(|candidate| executable(candidate))
+}
+
+/// 실행할 수 있는 파일인가(폴더 · 실행 권한이 없는 파일은 아니다). 열지 않는다.
+fn executable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 /// CLI 자식의 작업 폴더(보관 폴더/[`CLI_WORK_DIR`])를 준비한다: 없으면 만들고, 권한은 0700이다.
 pub fn prepare_cli_work_dir(home: &Path) -> Result<PathBuf, AppError> {
-    let _ = home;
-    todo!("6차: CLI 작업 폴더")
+    let work = home.join(CLI_WORK_DIR);
+    let fail = |error: std::io::Error| AppError::Home { kind: error.kind() };
+    match std::fs::DirBuilder::new().mode(0o700).create(&work) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(fail(error)),
+    }
+    // 이미 있으면 폴더인지 보고(링크는 따라가지 않는다), 권한을 본인만으로 좁힌다.
+    let meta = std::fs::symlink_metadata(&work).map_err(fail)?;
+    if !meta.is_dir() {
+        return Err(AppError::Home {
+            kind: ErrorKind::InvalidData,
+        });
+    }
+    if meta.permissions().mode() & 0o777 != 0o700 {
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o700)).map_err(fail)?;
+    }
+    Ok(work)
 }
 
 /// 고른 CLI 연결로 공급자 설정을 만든다: 동시 실행 [`CLI_CONCURRENCY`],
@@ -230,15 +361,23 @@ pub fn cli_config(
     base_env: Vec<(String, String)>,
     timeout: Duration,
 ) -> ClaudeCliConfig {
-    let _ = (choice, work_dir, base_env, timeout);
-    todo!("6차: CLI 공급자 설정")
+    let mut config = ClaudeCliConfig::new(choice.command.clone(), work_dir, base_env, timeout);
+    config.config_dir = choice.config_dir.clone();
+    config.max_concurrency = CLI_CONCURRENCY;
+    config
 }
 
 /// 확인 결과를 설정 상태의 `ai.cli` 글자로 옮긴다([`CLI_LOGGED_IN`] 등).
 /// 시간 초과와 읽지 못함은 모두 [`CLI_UNCHECKED`]다.
 pub fn cli_state(status: &CliStatus) -> &'static str {
-    let _ = status;
-    todo!("6차: CLI 상태 글자")
+    match status {
+        CliStatus::LoggedIn { .. } => CLI_LOGGED_IN,
+        CliStatus::NotInstalled => CLI_NOT_INSTALLED,
+        CliStatus::TooOld { .. } => CLI_TOO_OLD,
+        CliStatus::NotLoggedIn => CLI_NOT_LOGGED_IN,
+        CliStatus::NotSubscription { .. } => CLI_NOT_SUBSCRIPTION,
+        CliStatus::TimedOut | CliStatus::Unreadable => CLI_UNCHECKED,
+    }
 }
 
 /// 확인 결과가 "등록됨"이 아니면 그 까닭. 로그인된 구독이면 `None`.
@@ -251,13 +390,19 @@ pub fn cli_state(status: &CliStatus) -> &'static str {
 /// | `NotSubscription` | [`SetupRefusal::CliNotSubscription`] |
 /// | `TimedOut` · `Unreadable` | [`SetupRefusal::CliUnchecked`] |
 pub fn cli_refusal(status: &CliStatus) -> Option<SetupRefusal> {
-    let _ = status;
-    todo!("6차: CLI 확인 실패의 까닭")
+    match status {
+        CliStatus::LoggedIn { .. } => None,
+        CliStatus::NotInstalled => Some(SetupRefusal::CliNotInstalled),
+        CliStatus::TooOld { .. } => Some(SetupRefusal::CliTooOld),
+        CliStatus::NotLoggedIn => Some(SetupRefusal::CliNotLoggedIn),
+        CliStatus::NotSubscription { .. } => Some(SetupRefusal::CliNotSubscription),
+        CliStatus::TimedOut | CliStatus::Unreadable => Some(SetupRefusal::CliUnchecked),
+    }
 }
 
 /// 보관 폴더에 옛 [`LEGACY_AUTH_FILE`]이 있는가. 있는지만 본다(열지 · 읽지 · 고치지 · 지우지 않는다).
 /// 읽을 수 없는 권한의 파일이어도 있으면 참이다.
 pub fn legacy_auth_file(home: &Path) -> bool {
-    let _ = home;
-    todo!("6차: 옛 auth.json 있는지 보기")
+    // 이름의 자리만 본다(링크를 따라가지 않는다). 파일을 열지 않는다.
+    pi_secrets::legacy_auth_file_present(home)
 }

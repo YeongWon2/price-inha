@@ -12,12 +12,12 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::demo::DemoAdapter;
-use crate::desk::{Desk, DeskParts};
+use crate::desk::{AiParts, Desk, DeskParts};
 use crate::feed::{Feed, Pace, Source};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::{
-    AppError, BrokerKeys, CLI_COMMON_LOCATIONS, KeyVerifier, SecretsRedactor, Settings, Upstreams,
-    page, setup_http,
+    AiChoice, AppError, BrokerKeys, CLI_COMMON_LOCATIONS, KeyVerifier, SecretsRedactor, Settings,
+    Upstreams, load_ai_choice, page, setup_http,
 };
 
 /// 저장소 파일 이름(보관 폴더 안).
@@ -125,6 +125,37 @@ fn watched_symbols(settings: &Settings) -> (Vec<Symbol>, SymbolsSource) {
     }
 }
 
+/// 설정 책상을 연다: 지켜볼 종목과 고른 AI 연결을 정하고, 고른 것이 CLI면 한 번 확인한다
+/// (모델을 부르지 않는다).
+async fn open_desk(
+    settings: &Settings,
+    wiring: &Wiring,
+    secrets: &Arc<SecretStore>,
+) -> Result<Arc<Desk>, AppError> {
+    let (symbols, source) = watched_symbols(settings);
+    // 고른 것이 없으면 API 키다. 읽을 수 없으면 고르지 않은 쪽으로 넘어가지 않고 띄우지 않는다.
+    let choice = load_ai_choice(&settings.home)?.unwrap_or_else(AiChoice::api_key);
+    let desk = Arc::new(Desk::new(DeskParts {
+        secrets: Arc::clone(secrets),
+        verifier: KeyVerifier::new(wiring.upstreams.clone()),
+        home: settings.home.clone(),
+        demo: settings.demo,
+        symbols,
+        source,
+        limit: AttemptLimit::new(settings.register_attempts, settings.register_window),
+        symbols_limit: AttemptLimit::new(settings.symbols_attempts, settings.symbols_window),
+        ai: AiParts {
+            anthropic: wiring.upstreams.anthropic.clone(),
+            cli_env: settings.cli_env.clone(),
+            user_home: settings.user_home.clone(),
+            cli_locations: wiring.cli_locations.clone(),
+            choice,
+        },
+    })?);
+    desk.check_cli().await;
+    Ok(desk)
+}
+
 /// 떠 있는 서버.
 ///
 /// 띄울 때 하는 일:
@@ -177,17 +208,7 @@ impl App {
             bind: SocketAddr::new(settings.bind, settings.port),
             ..GateConfig::default()
         };
-        let (symbols, source) = watched_symbols(&settings);
-        let desk = Arc::new(Desk::new(DeskParts {
-            secrets: Arc::clone(&secrets),
-            verifier: KeyVerifier::new(wiring.upstreams.clone()),
-            home: settings.home.clone(),
-            demo: settings.demo,
-            symbols,
-            source,
-            limit: AttemptLimit::new(settings.register_attempts, settings.register_window),
-            symbols_limit: AttemptLimit::new(settings.symbols_attempts, settings.symbols_window),
-        }));
+        let desk = open_desk(&settings, &wiring, &secrets).await?;
         let mut builder = Gate::builder(store.clone(), config)
             .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
             .redactor(Arc::new(SecretsRedactor::new(Arc::clone(&secrets))))

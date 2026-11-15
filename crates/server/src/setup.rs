@@ -238,6 +238,7 @@ impl SetupStatus {
             "demo": self.demo,
             "symbols": symbols,
             "symbols_source": self.symbols_source.as_str(),
+            "ai": self.ai.to_json(),
         })
     }
 }
