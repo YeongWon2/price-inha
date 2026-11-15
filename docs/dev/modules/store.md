@@ -105,6 +105,11 @@
 1. **`Store::legacy_envelope_seqs(after: u64, max: usize) -> Result<Vec<u64>, StoreError>`**: 경계 번호(`legacy_envelope_until`) 이하이면서 `after`보다 큰 줄 가운데 **옛 봉투 줄**인 것의 번호를 번호 순서로 `max`개까지 준다. 옛 봉투 줄의 규칙은 `legacy_envelope_until` 문서의 것과 한 글자도 다르지 않다(정확히 두 칸, 맨 위 칸 이름이 겹치지 않음, `at`이 i64 범위 안의 정수이고 `-0`이 아님, 짝 없는 서로게이트 없음, 시각 칸이 비었거나 내용의 `at`과 같음). 경계가 없으면 빈 목록이다. 판정은 저장된 원래 글자로 한다.
 2. **시각 칸이 실수로 적힌 줄도 읽는다**: 버전 2 파일에서 `at`이 i64 범위 밖인 봉투 줄을 버전 3으로 올리면 시각 칸에 실수가 적힌다. 지금은 `read_events`가 그 줄에서 `InvalidColumnType`으로 실패해 뒤의 이벤트까지 못 읽는다. 시각 칸이 정수가 아니면 시각 없음(`None`)으로 읽는다. 그 줄은 옛 봉투 줄이 아니다(1번 규칙).
 
+## 8차 작업 (7차 검토 · gate 7차 검토의 참고 — 2026-11-15 조정자 결정)
+
+1. **칸 이름에 이스케이프가 든 줄**(예: `{"\u0061t":1,"payload":2}`, `{"a\u0074":…}`)도 옛 봉투 판정이 접속 관문의 `serde_json`이 읽는 이름과 같다: 이스케이프를 푼 이름이 `at` · `payload`이면 그 이름으로 본다. 겹침 판정도 푼 이름으로 한다. 경계(`legacy_envelope_until`)와 목록(`legacy_envelope_seqs`)이 함께 따른다(규칙은 한 벌).
+2. **훑는 범위에 위 끝을 준다**: `Store::legacy_envelope_seqs_upto(after: u64, upto: u64, max: usize)` — `after`보다 크고 `upto` 이하인 옛 봉투 줄 번호만 본다(경계 뒤는 늘 빠진다). 경계 앞에 옛 봉투가 아닌 줄이 많아도 한 쪽을 읽을 때 경계까지 훑지 않는다. 기존 `legacy_envelope_seqs`는 그대로 둔다.
+
 ## 모양
 
 - `Store`는 `Clone + Send + Sync`이고 동기 API다(호출하는 쪽이 필요하면 `spawn_blocking`).
