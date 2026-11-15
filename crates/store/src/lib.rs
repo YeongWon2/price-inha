@@ -2,6 +2,8 @@
 //!
 //! SQLite 파일 하나에 투자 팀 상태 · 매매 · 이벤트 · 접속 기록을 둔다.
 //! (9차) 템플릿 · 승인 요청 · 규칙 개선안 · 모의계좌 상태 값 · 접속 키 해시도 둔다(스키마 버전 5).
+//! (10차) 에이전트 세션 · 메시지 · 팀 논의 방 로그 · 트리거 작업 상태와 영수증 · 자료(Fact)와 매매에
+//! 붙인 근거 자료도 둔다(스키마 버전 6으로 올린다. 옛 파일은 지우지 않고 올린다).
 //!
 //! - 동기 API다. 비동기 코드에서는 호출하는 쪽이 `spawn_blocking`으로 감싼다.
 //! - 시각은 모두 호출하는 쪽이 넘긴다. 저장소 안에서 지금 시각을 읽지 않는다.
@@ -12,11 +14,15 @@
 mod approval;
 mod codec;
 mod error;
+mod fact;
 mod keep;
 mod log;
 mod model;
 mod proposal;
+mod receipt;
+mod room;
 mod schema;
+mod session;
 mod team;
 mod template;
 mod trade;
@@ -28,6 +34,7 @@ use rusqlite::{Connection, TransactionBehavior};
 
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, NewApprovalRequest};
 pub use error::{DenyReason, StoreError, Transition};
+pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use keep::{ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PaperSnapshot};
 pub use model::{
     AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
@@ -36,11 +43,20 @@ pub use model::{
     UnixMillis,
 };
 pub use proposal::{NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState};
+pub use receipt::{
+    OpenTriggerReceipt, TriggerDelivery, TriggerJob, TriggerReceipt, TriggerReceiptKey,
+    TriggerReceiptStatus,
+};
+pub use room::{NewRoomEvent, RoomActorKind, RoomAppend, RoomEvent};
+pub use session::{
+    AgentMessage, AgentSession, MessageId, MessageRole, NewMessage, SessionId, ToolCall,
+};
 pub use template::{
     CriteriaPass, NewTemplate, Template, TemplateId, TemplateRevision, TemplateState,
 };
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
+/// (10차) 10차의 표(세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료)를 더하며 6으로 올린다.
 pub const SCHEMA_VERSION: u32 = 5;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)

@@ -1,8 +1,12 @@
 //! 저장소 오류. 오류 타입은 [`StoreError`] 하나다.
 
 use crate::approval::{ApprovalId, ApprovalStatus};
+use crate::fact::FactId;
 use crate::model::{Amount, RationaleField, TeamState, TradeId, TradeState, UnixMillis};
 use crate::proposal::{ProposalId, ProposalState};
+use crate::receipt::TriggerReceiptKey;
+use crate::room::RoomActorKind;
+use crate::session::SessionId;
 use crate::template::{TemplateId, TemplateState};
 
 /// 거부된 전이가 무엇이었는지.
@@ -187,6 +191,61 @@ pub enum StoreError {
     AccessKeySaltTooShort {
         /// 받은 소금의 길이(바이트).
         len: usize,
+    },
+    /// 그 번호의 세션이 없다. (10차)
+    #[error("세션을 찾을 수 없다: {0:?}")]
+    SessionNotFound(SessionId),
+    /// 끝낸 세션에 쓰거나 다시 끝내려 했다. (10차)
+    #[error("세션 {0:?}는 이미 끝났다")]
+    SessionEnded(SessionId),
+    /// 메시지 규칙([`crate::NewMessage`])에 어긋난다. 묶음 전체를 쓰지 않았다. (10차)
+    #[error("메시지 묶음의 {index}번째가 규칙에 어긋난다")]
+    InvalidMessage {
+        /// 처음 어긴 메시지의 자리(0부터).
+        index: usize,
+    },
+    /// 쓴 쪽의 종류가 그 방 이벤트 종류를 쓸 수 없다. (10차)
+    #[error("{actor_kind:?}는 방 이벤트 '{kind}'를 쓸 수 없다")]
+    RoomEventNotAllowed {
+        /// 쓴 쪽의 종류.
+        actor_kind: RoomActorKind,
+        /// 쓰려던 이벤트 종류.
+        kind: String,
+    },
+    /// 같은 방에 같은 `event_id`로 다른 내용이 이미 있다. (10차)
+    #[error("방 '{room}'의 이벤트 '{event_id}'가 다른 내용으로 이미 있다")]
+    RoomEventConflict {
+        /// 방.
+        room: String,
+        /// 겹친 멱등 키.
+        event_id: String,
+    },
+    /// 그 키의 트리거 영수증이 없다. (10차)
+    #[error("트리거 영수증이 없다: {0:?}")]
+    TriggerReceiptNotFound(TriggerReceiptKey),
+    /// 트리거 영수증을 실행 중으로 닫으려 했다. (10차)
+    #[error("트리거 영수증은 실행 중으로 닫을 수 없다: {0:?}")]
+    TriggerReceiptRunningClose(TriggerReceiptKey),
+    /// 그 번호의 자료가 없다. (10차)
+    #[error("자료를 찾을 수 없다: {0:?}")]
+    FactNotFound(FactId),
+    /// 판단 시각이 없는(판단 전) 매매에 근거 자료를 붙이려 했다. (10차)
+    #[error("매매 {id:?}는 아직 판단되지 않았다: {state:?}")]
+    TradeNotJudged {
+        /// 매매 번호.
+        id: TradeId,
+        /// 그 매매의 지금 상태.
+        state: TradeState,
+    },
+    /// 매매의 판단 시각보다 늦게 알게 된 자료를 근거로 붙이려 했다(V36). 아무것도 붙이지 않았다. (10차)
+    #[error("자료 {fact:?}의 알게 된 시각({known_at:?})이 판단 시각({decided_at:?})보다 늦다")]
+    FactAfterDecision {
+        /// 늦은 자료(준 순서에서 처음 것).
+        fact: FactId,
+        /// 그 자료의 알게 된 시각.
+        known_at: UnixMillis,
+        /// 매매의 판단 시각.
+        decided_at: UnixMillis,
     },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]

@@ -301,7 +301,7 @@ fn assert_v1_data(store: &Store) {
 // 검증: D6
 #[test]
 fn 새_저장소는_최신_스키마_버전으로_만들어진다() {
-    assert_eq!(SCHEMA_VERSION, 5);
+    assert_eq!(SCHEMA_VERSION, 6);
     let (_dir, path, store) = temp_store();
     assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     drop(store);
