@@ -38,6 +38,10 @@ pub(super) fn parse_quotes(
             // 문자열에서 바로 십진수로 읽는다. 자리가 넘쳐 값이 바뀔 것 같으면 받지 않는다.
             let price =
                 Decimal::from_str_exact(&item.last_price).map_err(|_| unexpected("현재가"))?;
+            // 0 이하의 가격은 있을 수 없는 값이다(-0도 0이다).
+            if price <= Decimal::ZERO {
+                return Err(unexpected("현재가"));
+            }
             let exchange_time = item
                 .timestamp
                 .as_deref()

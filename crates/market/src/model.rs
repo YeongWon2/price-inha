@@ -1,6 +1,6 @@
 //! 시세 · 달력 값.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
 use rust_decimal::Decimal;
 
 use crate::MarketError;
@@ -32,8 +32,11 @@ impl Symbol {
     /// [`MarketError::InvalidSymbol`]이다. 오류에는 받은 글자를 담지 않는다.
     /// 시세 어댑터([`crate::TossAdapter`])는 시세를 부르기 전에 모든 종목을 이 규칙으로 확인한다.
     pub fn parse(value: &str) -> Result<Self, MarketError> {
-        let _ = value;
-        todo!()
+        let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-');
+        if value.is_empty() || value.len() > MAX_SYMBOL_LEN || !value.chars().all(allowed) {
+            return Err(MarketError::InvalidSymbol);
+        }
+        Ok(Self(value.to_string()))
     }
 
     /// 심볼 글자.
@@ -158,7 +161,97 @@ impl MarketCalendar {
     /// - 시장 날짜: 국내는 KST(UTC+9), 미국은 미 동부 시각.
     /// - 그 사이의 휴장일 · 주말은 덮는다(달력이 영업일이 아니라고 알려 준 날이다).
     pub fn covers(&self, at: DateTime<Utc>) -> bool {
-        let _ = at;
-        todo!()
+        let start = day_start(self.market, &self.previous_business_day);
+        let end = day_end(self.market, &self.next_business_day);
+        match (start, end) {
+            (Some(start), Some(end)) => start <= at && at < end,
+            // 날짜를 시각으로 바꾸지 못하면(범위 밖) 덮는지 모른다 → 덮지 않는다.
+            _ => false,
+        }
+    }
+}
+
+/// 종목 글자의 가장 긴 길이.
+const MAX_SYMBOL_LEN: usize = 32;
+
+/// 날의 시작: 그 시장 날짜의 자정과 첫 세션의 시작 중 이른 쪽.
+fn day_start(market: Market, day: &TradingDay) -> Option<DateTime<Utc>> {
+    let midnight = market_midnight(market, day.date)?;
+    let first = day.sessions.iter().map(|session| session.start).min();
+    Some(first.map_or(midnight, |first| first.min(midnight)))
+}
+
+/// 날의 끝: 그 다음 날 자정과 마지막 세션의 끝 중 늦은 쪽.
+fn day_end(market: Market, day: &TradingDay) -> Option<DateTime<Utc>> {
+    let midnight = market_midnight(market, day.date.succ_opt()?)?;
+    let last = day.sessions.iter().map(|session| session.end).max();
+    Some(last.map_or(midnight, |last| last.max(midnight)))
+}
+
+/// 그 시장 날짜의 자정(UTC).
+fn market_midnight(market: Market, date: NaiveDate) -> Option<DateTime<Utc>> {
+    let offset_hours = match market {
+        Market::Kr => 9,
+        Market::Us => {
+            if us_eastern_dst_at_midnight(date) {
+                -4
+            } else {
+                -5
+            }
+        }
+    };
+    let local = date.and_hms_opt(0, 0, 0)?;
+    let utc = local.checked_sub_signed(Duration::try_hours(offset_hours)?)?;
+    Some(utc.and_utc())
+}
+
+/// 미 동부의 그날 자정이 서머타임인가.
+///
+/// 서머타임은 3월 둘째 일요일 02:00부터 11월 첫째 일요일 02:00까지다. 바뀌는 날의 자정은
+/// 아직 바뀌기 전이므로, 3월 둘째 일요일 다음 날부터 11월 첫째 일요일까지의 자정이 서머타임이다.
+fn us_eastern_dst_at_midnight(date: NaiveDate) -> bool {
+    let year = date.year();
+    let (Some(begin), Some(end)) = (
+        NaiveDate::from_weekday_of_month_opt(year, 3, Weekday::Sun, 2),
+        NaiveDate::from_weekday_of_month_opt(year, 11, Weekday::Sun, 1),
+    ) else {
+        return false;
+    };
+    begin < date && date <= end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(text: &str) -> NaiveDate {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn 미_동부_자정의_서머타임은_바뀌는_다음_날부터다() {
+        // 2026년: 3월 8일 시작, 11월 1일 끝.
+        assert!(!us_eastern_dst_at_midnight(date("2026-03-08")));
+        assert!(us_eastern_dst_at_midnight(date("2026-03-09")));
+        assert!(us_eastern_dst_at_midnight(date("2026-11-01")));
+        assert!(!us_eastern_dst_at_midnight(date("2026-11-02")));
+        assert!(!us_eastern_dst_at_midnight(date("2026-01-15")));
+    }
+
+    #[test]
+    fn 시장_날짜의_자정은_시장_시각대로_센다() {
+        let at = |text: &str| text.parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(
+            market_midnight(Market::Kr, date("2026-03-25")),
+            Some(at("2026-03-24T15:00:00Z"))
+        );
+        assert_eq!(
+            market_midnight(Market::Us, date("2026-03-25")),
+            Some(at("2026-03-25T04:00:00Z"))
+        );
+        assert_eq!(
+            market_midnight(Market::Us, date("2026-01-15")),
+            Some(at("2026-01-15T05:00:00Z"))
+        );
     }
 }

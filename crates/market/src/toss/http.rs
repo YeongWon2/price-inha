@@ -1,5 +1,6 @@
 //! 요청 하나를 보내고 실패를 구분한다. 어떤 오류에도 응답 본문 · 자격 · 토큰을 담지 않는다.
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use reqwest::header::RETRY_AFTER;
@@ -39,10 +40,26 @@ pub(super) fn endpoint(
     let mut url = Url::parse(&format!("{base}{path}")).map_err(|_| MarketError::Connection {
         detail: "기본 주소가 올바르지 않습니다".to_string(),
     })?;
+    if !is_allowed_scheme(&url) {
+        return Err(MarketError::InsecureBaseUrl);
+    }
     if !query.is_empty() {
         url.query_pairs_mut().extend_pairs(query);
     }
     Ok(url)
+}
+
+/// `https`면 받는다. `http`는 루프백 주소(`127.0.0.0/8` · `::1`, 테스트의 가짜 서버)만 받는다.
+fn is_allowed_scheme(url: &Url) -> bool {
+    match url.scheme() {
+        "https" => true,
+        "http" => url
+            .host_str()
+            .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
+            .and_then(|host| host.parse::<IpAddr>().ok())
+            .is_some_and(|ip| ip.is_loopback()),
+        _ => false,
+    }
 }
 
 /// 발급받은 토큰.
@@ -71,9 +88,13 @@ pub(super) async fn issue_token(
         ("client_id", credentials.client_id()),
         ("client_secret", credentials.client_secret()),
     ];
-    let body = send(http.post(url).form(&form)).await?;
+    let body = send(http.post(url).form(&form), config.max_response_bytes).await?;
     let parsed: TokenResponse = serde_json::from_str(&body).map_err(|_| unexpected("토큰"))?;
     if parsed.access_token.is_empty() {
+        return Err(unexpected("토큰"));
+    }
+    // 유효 시간이 다시 발급 여유 이하이면 받자마자 다시 발급하게 된다(요청마다 서로 토큰을 깬다).
+    if Duration::from_secs(parsed.expires_in) <= config.token_refresh_margin {
         return Err(unexpected("토큰"));
     }
     Ok(IssuedToken {
@@ -90,8 +111,10 @@ pub(super) fn unexpected(what: &str) -> MarketError {
 }
 
 /// 요청을 보내고 2xx면 본문을, 아니면 구분한 오류를 돌려준다.
-pub(super) async fn send(request: RequestBuilder) -> Result<String, MarketError> {
-    let response = request.send().await.map_err(connection_error)?;
+/// 본문은 `max_bytes`까지만 읽는다. 넘으면 더 읽지 않고, 2xx면 응답 모양 오류로 끝내고
+/// 2xx가 아니면 본문 없이(오류 코드 없이) 상태로만 구분한다.
+pub(super) async fn send(request: RequestBuilder, max_bytes: usize) -> Result<String, MarketError> {
+    let mut response = request.send().await.map_err(connection_error)?;
     let status = response.status();
     let retry_after = response
         .headers()
@@ -99,12 +122,40 @@ pub(super) async fn send(request: RequestBuilder) -> Result<String, MarketError>
         .and_then(|value| value.to_str().ok())
         .and_then(|text| text.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
-    let body = response.text().await.map_err(connection_error)?;
-    if status.is_success() {
-        Ok(body)
-    } else {
-        Err(classify(status.as_u16(), retry_after, &body))
+    let body = read_limited(&mut response, max_bytes).await?;
+    match (status.is_success(), body) {
+        (true, Some(body)) => Ok(body),
+        (true, None) => Err(MarketError::UnexpectedResponse {
+            detail: "응답이 정한 크기를 넘습니다".to_string(),
+        }),
+        (false, body) => Err(classify(
+            status.as_u16(),
+            retry_after,
+            body.as_deref().unwrap_or(""),
+        )),
     }
+}
+
+/// 본문을 `max_bytes`까지 읽는다. 넘으면 `None`(넘는 부분은 읽지 않는다).
+/// UTF-8이 아닌 글자는 바꿔 읽는다(그러면 JSON으로 읽히지 않아 응답 모양 오류가 된다).
+async fn read_limited(
+    response: &mut reqwest::Response,
+    max_bytes: usize,
+) -> Result<Option<String>, MarketError> {
+    let declared = response
+        .content_length()
+        .map(|length| usize::try_from(length).unwrap_or(usize::MAX));
+    if declared.is_some_and(|length| length > max_bytes) {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(connection_error)? {
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Ok(None);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 /// 연결 실패의 종류만 남긴다(reqwest 오류 글자는 주소를 담을 수 있어 쓰지 않는다).
@@ -246,5 +297,18 @@ mod tests {
             endpoint(&broken, "/oauth2/token", &[]),
             Err(MarketError::Connection { .. })
         ));
+    }
+
+    #[test]
+    fn 평문은_루프백_주소만_받는다() {
+        let allowed = |base: &str| is_allowed_scheme(&Url::parse(base).unwrap());
+        assert!(allowed("https://openapi.tossinvest.com"));
+        assert!(allowed("http://127.0.0.1:8080"));
+        assert!(allowed("http://127.1.2.3"));
+        assert!(allowed("http://[::1]:8080"));
+        assert!(!allowed("http://localhost:8080"));
+        assert!(!allowed("http://openapi.tossinvest.com"));
+        assert!(!allowed("http://[::2]"));
+        assert!(!allowed("ws://127.0.0.1"));
     }
 }

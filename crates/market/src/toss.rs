@@ -3,6 +3,7 @@
 //! 쓰는 것은 셋뿐이다: `POST /oauth2/token`, `GET /api/v1/prices`,
 //! `GET /api/v1/market-calendar/{KR|US}`. 주문 · 계좌 · 보유는 부르지 않는다.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -119,6 +120,22 @@ struct CachedToken {
     owner: Credentials,
 }
 
+/// 발급이 인증 실패 · 허용 IP 아님으로 끝난 기록. 쉬는 동안 같은 오류를 돌려준다.
+struct IssueFailure {
+    error: MarketError,
+    /// 이 시각부터 다시 발급한다.
+    until: DateTime<Utc>,
+    /// 실패한 자격. 자격이 바뀌면 쉬지 않는다.
+    owner: Credentials,
+}
+
+/// 토큰 자리: 쥐고 있는 토큰과 마지막 발급 실패.
+#[derive(Default)]
+struct TokenSlot {
+    cached: Option<CachedToken>,
+    failure: Option<IssueFailure>,
+}
+
 struct Inner {
     config: TossConfig,
     /// 만들지 못했으면 요청할 때 그 오류를 돌려준다.
@@ -126,7 +143,7 @@ struct Inner {
     credentials: Arc<dyn CredentialSource>,
     clock: Arc<dyn Clock>,
     /// 발급하는 동안 쥐고 있어서, 동시에 온 요청들은 기다렸다가 같은 토큰을 쓴다.
-    token: Mutex<Option<CachedToken>>,
+    token: Mutex<TokenSlot>,
 }
 
 impl Inner {
@@ -138,22 +155,44 @@ impl Inner {
     ) -> Result<String, MarketError> {
         let mut slot = self.token.lock().await;
         let now = self.clock.now();
-        if let Some(cached) = slot.as_ref() {
+        if let Some(cached) = slot.cached.as_ref() {
             let remaining = cached.expires_at.signed_duration_since(now).to_std();
             let fresh = remaining.is_ok_and(|left| left >= self.config.token_refresh_margin);
             if fresh && cached.owner.same_as(credentials) {
                 return Ok(cached.value.clone());
             }
         }
-        *slot = None;
-        let issued = http::issue_token(http, &self.config, credentials).await?;
+        slot.cached = None;
+        if let Some(failure) = slot.failure.as_ref()
+            && now < failure.until
+            && failure.owner.same_as(credentials)
+        {
+            return Err(failure.error.clone());
+        }
+        slot.failure = None;
+        let issued = match http::issue_token(http, &self.config, credentials).await {
+            Ok(issued) => issued,
+            Err(error) => {
+                if matches!(
+                    error,
+                    MarketError::AuthFailed { .. } | MarketError::IpNotAllowed
+                ) {
+                    slot.failure = Some(IssueFailure {
+                        error: error.clone(),
+                        until: cooldown_end(now, self.config.token_failure_cooldown),
+                        owner: credentials.clone(),
+                    });
+                }
+                return Err(error);
+            }
+        };
         // 유효 시간은 요청을 보내기 전 시각부터 센다(실제보다 늦게 만료로 보지 않게).
         let expires_at = i64::try_from(issued.expires_in)
             .ok()
             .and_then(chrono::Duration::try_seconds)
             .and_then(|life| now.checked_add_signed(life))
             .ok_or_else(|| http::unexpected("토큰"))?;
-        *slot = Some(CachedToken {
+        slot.cached = Some(CachedToken {
             value: issued.value.clone(),
             expires_at,
             owner: credentials.clone(),
@@ -164,8 +203,12 @@ impl Inner {
     /// 무효가 된 토큰을 버린다. 그 사이 다른 요청이 이미 새 토큰을 받았으면 그대로 둔다.
     async fn discard_token(&self, used: &str) {
         let mut slot = self.token.lock().await;
-        if slot.as_ref().is_some_and(|cached| cached.value == used) {
-            *slot = None;
+        if slot
+            .cached
+            .as_ref()
+            .is_some_and(|cached| cached.value == used)
+        {
+            slot.cached = None;
         }
     }
 
@@ -174,7 +217,7 @@ impl Inner {
     async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<String, MarketError> {
         let Some(credentials) = self.credentials.credentials() else {
             // 키가 지워졌으면 그 키로 받은 토큰도 더 쓰지 않는다.
-            *self.token.lock().await = None;
+            self.token.lock().await.cached = None;
             return Err(MarketError::NoCredentials);
         };
         let http = self.http.as_ref().map_err(Clone::clone)?;
@@ -184,7 +227,7 @@ impl Inner {
         loop {
             let token = self.token(http, &credentials).await?;
             let request = http.get(url.clone()).bearer_auth(&token);
-            match http::send(request).await {
+            match http::send(request, self.config.max_response_bytes).await {
                 Err(MarketError::AuthFailed { code })
                     if !reissued && REISSUE_CODES.contains(&code.as_str()) =>
                 {
@@ -219,7 +262,7 @@ impl TossClient {
                 http,
                 credentials,
                 clock,
-                token: Mutex::new(None),
+                token: Mutex::new(TokenSlot::default()),
             }),
         }
     }
@@ -231,6 +274,14 @@ impl TossClient {
             market,
         }
     }
+}
+
+/// 쉬는 시간이 끝나는 시각. 너무 길어 셀 수 없으면 아주 먼 뒤로 본다.
+fn cooldown_end(now: DateTime<Utc>, cooldown: Duration) -> DateTime<Utc> {
+    chrono::Duration::from_std(cooldown)
+        .ok()
+        .and_then(|span| now.checked_add_signed(span))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 /// 토스증권의 시장 하나(국내 또는 미국).
@@ -252,6 +303,11 @@ impl MarketAdapter for TossAdapter {
     /// 있으면 아무 요청(토큰 발급 포함)도 보내지 않고 [`MarketError::InvalidSymbol`]이다.
     /// 0 이하의 가격은 [`MarketError::UnexpectedResponse`]다. 요청하지 않은 종목은 버린다.
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
+        // 틀린 종목이 하나라도 있으면 아무것도 보내지 않는다(쿼리에 다른 글자가 섞이지 않게).
+        for symbol in symbols {
+            Symbol::parse(symbol.as_str())?;
+        }
+        let requested: HashSet<&str> = symbols.iter().map(Symbol::as_str).collect();
         let mut quotes = Vec::with_capacity(symbols.len());
         for chunk in symbols.chunks(MAX_SYMBOLS_PER_REQUEST) {
             let joined = chunk
@@ -260,7 +316,12 @@ impl MarketAdapter for TossAdapter {
                 .collect::<Vec<_>>()
                 .join(",");
             let body = self.inner.get(PRICES_PATH, &[("symbols", &joined)]).await?;
-            quotes.extend(wire::parse_quotes(&body, self.inner.clock.now())?);
+            let parsed = wire::parse_quotes(&body, self.inner.clock.now())?;
+            quotes.extend(
+                parsed
+                    .into_iter()
+                    .filter(|quote| requested.contains(quote.symbol.as_str())),
+            );
         }
         Ok(quotes)
     }
