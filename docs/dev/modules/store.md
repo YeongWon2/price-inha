@@ -160,6 +160,10 @@ SQL로 우회하는 테스트(쓴 승인 다시 쓰기, 거절된 승인으로 �
 SQLite는 `recursive_triggers`가 꺼져 있어 `INSERT OR REPLACE` · `REPLACE INTO`가 충돌한 줄을 지울 때 지우기 막기 트리거가 돌지 않는다. 보호한다고 적은 모든 표에 키 충돌 시 거부하는 `BEFORE INSERT` 트리거(`*_no_replace`)를 둔다: room_events `(room, event_id)` · `(room, seq)`, trigger_receipts `(job, slot)`과 같은 job의 running, agent_sessions id와 열린 `(agent, title)`, trades id(판단 시각 V36). 버전 6은 배포 전이라 그 자리에서 고친다(결정 2026-11-16 9차 보강과 같은 방식).
 테스트: 보호한다고 적은 모든 표(이전 차수 것 포함)에 `INSERT OR REPLACE`와 `REPLACE INTO`를 넣어 보는 공통 우회 테스트를 둔다.
 
+## 10차 보강 2 (보강 검토 되돌림)
+
+rowid를 명시한 `INSERT OR REPLACE (rowid, …)`는 선언 키만 보는 트리거를 비켜 옛 줄을 지운다. `INTEGER PRIMARY KEY` 별칭이 없는 보호 표(room_events · trigger_receipts · trade_facts · template_revisions · proposal_evidence)의 `*_no_replace`에 `OR EXISTS (… WHERE rowid = NEW.rowid)`를 더한다. 공통 우회 테스트에 rowid 명시 변형을 보호 표 전체로 더한다.
+
 ## 모양
 
 - `Store`는 `Clone + Send + Sync`이고 동기 API다(호출하는 쪽이 필요하면 `spawn_blocking`).
