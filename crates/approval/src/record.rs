@@ -96,8 +96,8 @@ fn subject_json(subject: &Subject) -> Value {
             "signal_kind": signal_kind_code(o.signal_kind),
             "signal_valid_until": o.signal_valid_until.0,
         }),
-        Subject::LivePromotion { template } => {
-            json!({"kind": "live_promotion", "template": template.0})
+        Subject::LivePromotion { template, revision } => {
+            json!({"kind": "live_promotion", "template": template.0, "revision": revision})
         }
         Subject::RuleImprovement { proposal } => {
             json!({"kind": "rule_improvement", "proposal": proposal.0})
@@ -111,6 +111,7 @@ fn subject_from(v: &Value) -> Option<Subject> {
         "order" => order_from(v).map(Subject::Order),
         "live_promotion" => Some(Subject::LivePromotion {
             template: TemplateId(v.get("template")?.as_i64()?),
+            revision: u32::try_from(v.get("revision")?.as_u64()?).ok()?,
         }),
         "rule_improvement" => Some(Subject::RuleImprovement {
             proposal: ProposalId(v.get("proposal")?.as_i64()?),

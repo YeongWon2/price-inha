@@ -74,6 +74,9 @@ pub enum Subject {
     LivePromotion {
         /// 승격할 템플릿.
         template: TemplateId,
+        /// 승인받을 템플릿 값의 판(`pi_store::Template::revision`). 지문에 넣는다:
+        /// 승인 뒤 값이 새 판으로 바뀌면 그 승인으로 승격할 수 없다.
+        revision: u32,
     },
     /// 규칙 개선안 적용.
     RuleImprovement {
@@ -105,7 +108,7 @@ impl Fingerprint {
 /// - 주문: `{"kind":"order","account":"paper"|"live","symbol":…,"side":"buy"|"sell","quantity":수,`
 ///   `"price":"가격","order_type":"limit"|"market","signal_id":…}`.
 ///   가격은 [`Decimal::normalize`]한 글자다(`71000.00`과 `71000`은 같은 `"71000"`).
-/// - 실전 승격: `{"kind":"live_promotion","template":번호}`
+/// - 실전 승격: `{"kind":"live_promotion","template":번호,"revision":판}`
 /// - 규칙 개선: `{"kind":"rule_improvement","proposal":번호}`
 /// - 다시 시작: `{"kind":"restart"}`
 ///
@@ -122,7 +125,7 @@ pub fn canonical_json(subject: &Subject) -> String {
             json_str(order_type_code(order.order_type)),
             json_str(&order.signal_id),
         ),
-        Subject::LivePromotion { template } => {
+        Subject::LivePromotion { template, .. } => {
             format!(
                 "{{\"kind\":\"live_promotion\",\"template\":{}}}",
                 template.0

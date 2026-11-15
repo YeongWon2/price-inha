@@ -99,6 +99,7 @@ fn non_order_subjects_have_no_deadline() {
         },
         Subject::LivePromotion {
             template: TemplateId(1),
+            revision: 1,
         },
     ] {
         let r = e.approvals.request(ask(subject)).unwrap();
@@ -204,6 +205,7 @@ fn live_promotion_is_refused_during_full_stop() {
         .approvals
         .request(ask(Subject::LivePromotion {
             template: TemplateId(1),
+            revision: 1,
         }))
         .unwrap_err();
     assert!(matches!(err, Error::FullStop), "{err:?}");

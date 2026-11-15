@@ -111,9 +111,10 @@ fn equal_prices_with_different_scale_share_fingerprint() {
 fn other_subjects_canonical_json() {
     assert_eq!(
         canonical_json(&Subject::LivePromotion {
-            template: TemplateId(3)
+            template: TemplateId(3),
+            revision: 2
         }),
-        r#"{"kind":"live_promotion","template":3}"#
+        r#"{"kind":"live_promotion","template":3,"revision":2}"#
     );
     assert_eq!(
         canonical_json(&Subject::RuleImprovement {
@@ -129,16 +130,23 @@ fn other_subjects_canonical_json() {
 fn subject_kind_and_target_separate_fingerprints() {
     let promo1 = fingerprint(&Subject::LivePromotion {
         template: TemplateId(1),
+        revision: 1,
     });
     let promo2 = fingerprint(&Subject::LivePromotion {
         template: TemplateId(2),
+        revision: 1,
+    });
+    // 같은 템플릿이라도 판이 다르면 지문이 다르다(2차 1번).
+    let promo1_rev2 = fingerprint(&Subject::LivePromotion {
+        template: TemplateId(1),
+        revision: 2,
     });
     let rule1 = fingerprint(&Subject::RuleImprovement {
         proposal: ProposalId(1),
     });
     let restart = fingerprint(&Subject::Restart);
     let order = fingerprint(&buy("1"));
-    let all = [&promo1, &promo2, &rule1, &restart, &order];
+    let all = [&promo1, &promo2, &promo1_rev2, &rule1, &restart, &order];
     for (i, a) in all.iter().enumerate() {
         for b in all.iter().skip(i + 1) {
             assert_ne!(a, b);

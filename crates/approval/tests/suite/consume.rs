@@ -52,6 +52,7 @@ fn pending_request_does_not_proceed() {
         },
         Subject::LivePromotion {
             template: TemplateId(4),
+            revision: 1,
         },
         buy("sig-1"),
     ] {
@@ -89,11 +90,13 @@ fn approval_for_one_target_cannot_be_used_for_another() {
     let e = env();
     let promo1 = Subject::LivePromotion {
         template: TemplateId(1),
+        revision: 1,
     };
     let n = approved(&e.approvals, &promo1);
     for other in [
         Subject::LivePromotion {
             template: TemplateId(2),
+            revision: 1,
         },
         Subject::RuleImprovement {
             proposal: ProposalId(1),
@@ -197,6 +200,7 @@ fn live_promotion_is_not_consumed_during_full_stop() {
     let e = env();
     let promo = Subject::LivePromotion {
         template: TemplateId(1),
+        revision: 1,
     };
     let n = approved(&e.approvals, &promo);
     full_stop(&e.store);

@@ -151,6 +151,7 @@ fn restart_rule_and_promotion_keep_waiting() {
         },
         Subject::LivePromotion {
             template: TemplateId(1),
+            revision: 1,
         },
     ];
     let numbers: Vec<_> = subjects

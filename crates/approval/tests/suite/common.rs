@@ -7,7 +7,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use pi_approval::{
     Approvals, Ask, Clock, OrderSubject, OrderType, Side, SignalKind, Subject, WaitTimes,
 };
-use pi_store::{AccountKind, Store, TeamCause, TeamChange, TeamState, UnixMillis};
+use pi_store::{
+    AccountKind, NewProposal, NewTemplate, NewTrade, ProposalId, Store, TeamCause, TeamChange,
+    TeamState, TemplateId, UnixMillis,
+};
 use rust_decimal::Decimal;
 use tempfile::TempDir;
 
@@ -135,4 +138,46 @@ pub fn owner_restart(store: &Store) {
             owner_approved: true,
         })
         .unwrap();
+}
+
+/// 승격대기(판 1)인 템플릿을 만든다.
+pub fn pending_template(store: &Store) -> TemplateId {
+    let made = store
+        .create_template(NewTemplate {
+            value: serde_json::json!({ "이름": "시험 템플릿", "한도": 100 }),
+            at: UnixMillis(T0 - 100),
+        })
+        .unwrap();
+    store
+        .submit_template_for_promotion(
+            made.id,
+            &serde_json::json!({ "기준": "통과" }),
+            UnixMillis(T0 - 90),
+        )
+        .unwrap();
+    made.id
+}
+
+/// 근거 매매 둘로 낸 제안됨인 개선안.
+pub fn proposed(store: &Store, increases_risk: bool) -> ProposalId {
+    let mut evidence = Vec::new();
+    for _ in 0..2 {
+        let trade = store
+            .create_trade(NewTrade {
+                symbol: "005930".to_string(),
+                account: AccountKind::Paper,
+                at: UnixMillis(T0 - 100),
+            })
+            .unwrap();
+        evidence.push(trade.id);
+    }
+    store
+        .create_proposal(NewProposal {
+            content: serde_json::json!({ "규칙": "갭 상승 첫 5분에는 사지 않는다" }),
+            evidence,
+            increases_risk,
+            at: UnixMillis(T0 - 50),
+        })
+        .unwrap()
+        .id
 }

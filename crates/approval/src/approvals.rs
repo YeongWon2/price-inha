@@ -169,8 +169,12 @@ pub struct ApprovalView {
     pub subject: Subject,
     /// 왜 묻는지.
     pub reason: String,
-    /// 지금 결과(저장소의 결과).
+    /// 지금 결과. 저장소의 결과이되, 실행 때 지문이 달라 무효가 된 승인은 [`ApprovalStatus::Rejected`]로
+    /// 보인다(다시 켜도 같다).
     pub status: ApprovalStatus,
+    /// 거절로 보이는 까닭. 실행 때 지문이 달라 무효가 된 승인은
+    /// `Some(`[`RejectReason::FingerprintMismatch`]`)`(내용 바뀜)이다. 승인됨 · 기다림이면 `None`.
+    pub reject_reason: Option<RejectReason>,
     /// 내용 지문.
     pub fingerprint: Fingerprint,
     /// 지문 앞 6자.
@@ -214,6 +218,7 @@ impl Approvals {
     /// - 전체 정지 중에 실전 승격이면 [`Error::FullStop`]. (다시 시작 · 규칙 개선은 만든다.)
     /// - 같은 대상 · 같은 지문의 요청이 기다리는 중이면 새로 만들지 않고 그 번호를 돌려주며
     ///   `repeat`만 1 올린다.
+    ///   기다릴 시간(`wait_until`)이 지난 기다림(지금 ≥ `wait_until`)에는 합치지 않고 새로 만든다.
     /// - 주문의 `wait_until`은 지금 + 신호 종류별 기다릴 시간, `expires_at`은 `signal_valid_until`이다.
     pub fn request(&self, ask: Ask) -> Result<Requested, Error> {
         let now = self.clock.now();
@@ -249,6 +254,8 @@ impl Approvals {
     /// - 없는 번호 → `Rejected(NotFound)`. 아무것도 바뀌지 않는다(E8).
     /// - 이미 처리된 번호 → `Rejected(AlreadyResolved)`. 첫 결과는 그대로다(E8 · V45).
     /// - 만료(지금 ≥ 만료 시각) → 결과를 만료로 닫고 `Rejected(Expired)`(E8).
+    /// - 기다릴 시간이 지난 뒤(지금 ≥ `wait_until`) 온 답은 승인이든 거절이든 결과를 만료로 닫고
+    ///   `Rejected(Expired)`(원본 3.2-2). 그 요청은 [`Approvals::expire_due`]가 다시 돌려주지 않는다.
     /// - 승인인데 화면 지문(`shown_fingerprint`, 64자 전체)이 요청의 지문과 다르면 결과를 거절로 닫고
     ///   `Rejected(FingerprintMismatch)`(E7 · V44). 앞 6자만 보내도 다르다.
     /// - 그 밖의 승인 → [`Answer::Approved`].
@@ -405,6 +412,7 @@ impl Approvals {
             subject: found.subject,
             reason: found.reason,
             status: found.status,
+            reject_reason: None,
             fingerprint: found.fingerprint,
             consumed: found.consumed,
             wait_until: found.wait_until,
