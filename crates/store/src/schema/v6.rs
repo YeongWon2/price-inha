@@ -183,6 +183,7 @@ WHEN NOT EXISTS (
 BEGIN SELECT RAISE(ABORT, 'trade fact must be known by the decision time'); END;
 CREATE TRIGGER trade_facts_no_replace BEFORE INSERT ON trade_facts
 WHEN EXISTS (SELECT 1 FROM trade_facts WHERE trade_id = NEW.trade_id AND fact_id = NEW.fact_id)
+  OR EXISTS (SELECT 1 FROM trade_facts WHERE rowid = NEW.rowid)
 BEGIN SELECT RAISE(ABORT, 'trade_facts is append-only'); END;
 CREATE TRIGGER trade_facts_no_update BEFORE UPDATE ON trade_facts
 BEGIN SELECT RAISE(ABORT, 'trade_facts is append-only'); END;
@@ -205,6 +206,7 @@ BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
 CREATE TRIGGER template_revisions_no_replace BEFORE INSERT ON template_revisions
 WHEN EXISTS (SELECT 1 FROM template_revisions
              WHERE template_id = NEW.template_id AND revision = NEW.revision)
+  OR EXISTS (SELECT 1 FROM template_revisions WHERE rowid = NEW.rowid)
 BEGIN SELECT RAISE(ABORT, 'template_revisions is append-only'); END;
 CREATE TRIGGER key_hashes_no_replace BEFORE INSERT ON key_hashes
 WHEN EXISTS (SELECT 1 FROM key_hashes WHERE generation = NEW.generation)
@@ -217,11 +219,21 @@ BEGIN SELECT RAISE(ABORT, 'agent_sessions rows are kept'); END;
 CREATE TRIGGER room_events_no_replace BEFORE INSERT ON room_events
 WHEN EXISTS (SELECT 1 FROM room_events
              WHERE room = NEW.room AND (seq = NEW.seq OR event_id = NEW.event_id))
+  OR EXISTS (SELECT 1 FROM room_events WHERE rowid = NEW.rowid)
 BEGIN SELECT RAISE(ABORT, 'room_events is append-only'); END;
 CREATE TRIGGER trigger_receipts_no_replace BEFORE INSERT ON trigger_receipts
 WHEN EXISTS (SELECT 1 FROM trigger_receipts
              WHERE job = NEW.job AND (slot = NEW.slot OR status = 'running'))
+  OR EXISTS (SELECT 1 FROM trigger_receipts WHERE rowid = NEW.rowid)
 BEGIN SELECT RAISE(ABORT, 'trigger_receipts rows are kept'); END;
+-- proposal_evidence는 버전 5에서 만들어졌으므로 같은 모양에 rowid 검사를 더해 다시 만든다.
+DROP TRIGGER proposal_evidence_no_replace;
+CREATE TRIGGER proposal_evidence_no_replace BEFORE INSERT ON proposal_evidence
+WHEN EXISTS (SELECT 1 FROM proposal_evidence
+             WHERE proposal_id = NEW.proposal_id
+               AND (pos = NEW.pos OR trade_id = NEW.trade_id))
+  OR EXISTS (SELECT 1 FROM proposal_evidence WHERE rowid = NEW.rowid)
+BEGIN SELECT RAISE(ABORT, 'proposal_evidence is append-only'); END;
 ";
 
 #[cfg(test)]
