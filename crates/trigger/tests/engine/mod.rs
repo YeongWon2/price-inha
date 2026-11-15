@@ -10,7 +10,7 @@ use pi_trigger::{
 };
 
 use crate::support::{
-    Harness, condition, config, d, date, holiday, kr_calendar, kr_day, schedule, utc,
+    Harness, condition, config, d, date, holiday, kr_calendar, kr_day, schedule, settled_tick, utc,
 };
 
 fn open_job() -> ScheduleJob {
@@ -30,7 +30,7 @@ fn open_slot() -> chrono::DateTime<chrono::Utc> {
 async fn 처음_보는_작업은_지난_회차를_발사하지_않는다() {
     let h = Harness::new(utc(2026, 11, 16, 0, 10, 0));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    let report = trigger.tick().await.unwrap();
+    let report = settled_tick(&trigger).await;
     assert_eq!(report.outcome, TickOutcome::Ran);
     assert!(report.wakes.is_empty());
     assert_eq!(h.waker.count(), 0);
@@ -43,11 +43,11 @@ async fn 처음_보는_작업은_지난_회차를_발사하지_않는다() {
 async fn 장_시작_회차에_한_번_깨우고_영수증을_닫는다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     h.clock.set(open_slot());
-    let report = trigger.tick().await.unwrap();
+    let report = settled_tick(&trigger).await;
     let expected = Wake {
         target: Target::Team,
         reason: WakeReason::Schedule,
@@ -71,7 +71,7 @@ async fn 장_시작_회차에_한_번_깨우고_영수증을_닫는다() {
 
     // 같은 회차는 다시 나가지 않는다.
     h.clock.set(utc(2026, 11, 16, 0, 0, 30));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
 }
 
@@ -85,11 +85,11 @@ async fn 휴장일에는_깨우지_않는다() {
         kr_day(date(2026, 11, 17)),
     ));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(utc(2026, 11, 16, 0, 0, 5));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(utc(2026, 11, 16, 3, 0, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 }
 
@@ -99,9 +99,9 @@ async fn 깨우기_전에_작업을_먼저_옮겨_저장하고_영수증을_연�
     let h = Harness::new(before_open());
     h.waker.observe(h.store.clone());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(open_slot());
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
 
     let snapshots = h.waker.snapshots();
     assert_eq!(snapshots.len(), 1);
@@ -126,13 +126,13 @@ async fn 깨우기_전에_작업을_먼저_옮겨_저장하고_영수증을_연�
 async fn tick마다_저장소에서_작업_상태를_다시_읽는다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     let mut job = h.store.job("open").await;
     job.disabled = Some(DisableReason::Manual);
     h.store.inner_save(&job).await;
 
     h.clock.set(open_slot());
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 }
 
@@ -141,7 +141,7 @@ async fn tick마다_저장소에서_작업_상태를_다시_읽는다() {
 async fn 같은_회차의_영수증이_이미_있으면_깨우지_않는다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.store.inner.insert_receipt(Receipt {
         key: ReceiptKey {
             job: JobId::new("open"),
@@ -153,7 +153,7 @@ async fn 같은_회차의_영수증이_이미_있으면_깨우지_않는다() {
         finished_at: Some(open_slot()),
     });
     h.clock.set(open_slot());
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 }
 
@@ -162,7 +162,7 @@ async fn 같은_회차의_영수증이_이미_있으면_깨우지_않는다() {
 async fn 같은_작업이_실행_중이면_새_회차를_깨우지_않는다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.store.inner.insert_receipt(Receipt {
         key: ReceiptKey {
             job: JobId::new("open"),
@@ -174,7 +174,7 @@ async fn 같은_작업이_실행_중이면_새_회차를_깨우지_않는다() {
         finished_at: None,
     });
     h.clock.set(open_slot());
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 }
 
@@ -183,16 +183,16 @@ async fn 같은_작업이_실행_중이면_새_회차를_깨우지_않는다() {
 async fn 전체_정지_중에는_깨우지_않고_기한은_다음_tick에_남는다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.stop.set(true);
     h.clock.set(open_slot());
-    let report = trigger.tick().await.unwrap();
+    let report = settled_tick(&trigger).await;
     assert_eq!(report.outcome, TickOutcome::Stopped);
     assert_eq!(h.waker.count(), 0);
 
     h.stop.set(false);
     h.clock.set(utc(2026, 11, 16, 0, 1, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
     match &h.waker.wakes()[0].events[0] {
         TriggerEvent::Schedule { slot, .. } => assert_eq!(*slot, open_slot()),
@@ -205,7 +205,7 @@ async fn 전체_정지_중에는_깨우지_않고_기한은_다음_tick에_남�
 async fn 저장소에_쓰지_못하면_깨우지_않고_오류다() {
     let h = Harness::new(before_open());
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.store.fail_writes(true);
     h.clock.set(open_slot());
     let result = trigger.tick().await;
@@ -214,7 +214,7 @@ async fn 저장소에_쓰지_못하면_깨우지_않고_오류다() {
 
     h.store.fail_writes(false);
     h.clock.set(utc(2026, 11, 16, 0, 0, 5));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
 }
 
@@ -232,9 +232,9 @@ async fn 같은_tick의_사건은_대상마다_한_번에_묶어_깨운다() {
         ),
     ];
     let trigger = h.trigger(config(jobs, vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(open_slot());
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
 
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 2);
@@ -266,22 +266,25 @@ async fn 같은_tick의_사건은_대상마다_한_번에_묶어_깨운다() {
 async fn 다른_tick이_돌고_있으면_기다리지_않고_바쁨으로_끝난다() {
     let h = Harness::new(before_open());
     let trigger = Arc::new(h.trigger(config(vec![open_job()], vec![])));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(open_slot());
-    h.waker.hold(true);
+    // 2차: 깨우기는 tick 잠금을 쥐지 않으므로, tick이 저장소를 읽는 동안 붙잡아 둔다.
+    h.store.hold_reads(true);
 
     let running = {
         let trigger = trigger.clone();
         tokio::spawn(async move { trigger.tick().await })
     };
-    h.waker.entered().await;
+    h.store.reading().await;
     let second = trigger.tick().await.unwrap();
     assert_eq!(second.outcome, TickOutcome::Busy);
     assert!(second.wakes.is_empty());
 
-    h.waker.release();
+    h.store.hold_reads(false);
+    h.store.release_reads();
     let first = running.await.unwrap().unwrap();
     assert_eq!(first.outcome, TickOutcome::Ran);
+    trigger.settle().await.unwrap();
     assert_eq!(h.waker.count(), 1);
 }
 

@@ -25,6 +25,10 @@ pub struct JobState {
     pub pending_catch_up: Vec<DateTime<Utc>>,
     /// 시세 조건의 다시 걸기 상태. 일정 작업은 `None`. 시세 조건인데 `None`이면 `Armed`로 본다.
     pub condition: Option<ConditionMemory>,
+    /// 상태를 옮기며 발사하기로 한 회차(원본 Hermes `pending_slot`). 상태 옮기기와 같은 단위
+    /// ([`TriggerStore::save_and_open`])로 적는다. 다시 켤 때 이 회차의 영수증이 없으면(상태만 옮겨지고
+    /// 영수증은 적히지 않은, 주인 없는 회차) 되살린다. 영수증이 있으면(닫혔든 실행 중이든) 되살리지 않는다.
+    pub pending_slot: Option<DateTime<Utc>>,
 }
 
 impl JobState {
@@ -38,6 +42,7 @@ impl JobState {
             disabled: None,
             pending_catch_up: Vec::new(),
             condition: None,
+            pending_slot: None,
         }
     }
 }
@@ -119,6 +124,18 @@ pub trait TriggerStore: Send + Sync {
     /// 영수증을 연다. 규칙은 [`OpenReceipt`]의 각 값에 적었다.
     async fn open_receipt(
         &self,
+        key: &ReceiptKey,
+        started_at: DateTime<Utc>,
+    ) -> Result<OpenReceipt, StoreError>;
+    /// 작업 상태 옮기기와 영수증 열기를 **한 단위로** 한다(둘 다 되거나 둘 다 안 된다).
+    ///
+    /// - `Opened`: 상태를 저장하고 영수증을 열었다(`Running`, `NotStarted`, 연 시각 = `started_at`).
+    /// - `Duplicate`: 그 회차는 이미 다뤘다. 상태는 저장하고(회차를 지나간 것으로 옮긴다) 영수증은 그대로 둔다.
+    /// - `AlreadyRunning`: 아무것도 저장하지 않는다. 상태가 그대로라 회차는 기한으로 남는다(회차를 잃지 않는다).
+    /// - `Err`: 아무것도 저장하지 않았다. 엔진은 그 작업만 이번 발사에서 빼고 나머지는 깨운다.
+    async fn save_and_open(
+        &self,
+        job: &JobState,
         key: &ReceiptKey,
         started_at: DateTime<Utc>,
     ) -> Result<OpenReceipt, StoreError>;
@@ -212,6 +229,15 @@ impl TriggerStore for MemoryStore {
             finished_at: None,
         });
         Ok(OpenReceipt::Opened)
+    }
+
+    async fn save_and_open(
+        &self,
+        _job: &JobState,
+        _key: &ReceiptKey,
+        _started_at: DateTime<Utc>,
+    ) -> Result<OpenReceipt, StoreError> {
+        todo!()
     }
 
     async fn mark_delivery_started(&self, key: &ReceiptKey) -> Result<(), StoreError> {

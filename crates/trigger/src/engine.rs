@@ -15,8 +15,8 @@ use tokio::sync::watch;
 use crate::watch::QuoteWatch;
 use crate::{
     Alert, CLOCK_JUMP_TOLERANCE, Clock, ConditionKind, ERROR_BACKOFF, Error, JobId, Monotonic,
-    Receipt, ReceiptStatus, ScheduleKind, ScheduleTimes, StopSignal, Target, TriggerStore, Wake,
-    Waker,
+    Receipt, ReceiptKey, ReceiptStatus, ScheduleKind, ScheduleTimes, StopSignal, Target,
+    TriggerStore, Wake, Waker,
 };
 
 /// 시세를 받는 간격의 기본값(10초). 시세 조건이 있고 장이 열려 있을 때 쓴다.
@@ -118,9 +118,10 @@ pub enum TickOutcome {
 pub struct TickReport {
     /// 어떻게 끝났나.
     pub outcome: TickOutcome,
-    /// 이번에 깨운 것들(실패한 것도 넣는다).
+    /// 이번에 띄운 깨우기들. 띄우기만 하고 끝나기를 기다리지 않는다(결과는 [`Trigger::settle`]).
     pub wakes: Vec<Wake>,
-    /// 이번에 생긴 알림 요구들.
+    /// 지난 보고 뒤로 끝난 깨우기에서 생긴 알림 요구들 가운데 아직 내지 않은 것.
+    /// 알림 요구 하나는 `tick`과 [`Trigger::settle`] 가운데 먼저 가져간 쪽이 한 번만 낸다.
     pub alerts: Vec<Alert>,
     /// 지난 tick 뒤로 벽시계 경과와 단조 시계 경과가 [`crate::CLOCK_JUMP_TOLERANCE`]보다 크게
     /// 달랐나(시계가 뒤로 감 · 절전에서 깸 · 시계 맞춤). 첫 tick은 거짓.
@@ -135,6 +136,27 @@ pub struct TickReport {
 pub struct StartReport {
     /// 실행 중으로 남아 있어 중단됨으로 닫은 영수증들(닫기 전 모습, `delivery` 포함). 다시 돌리지 않는다.
     pub interrupted: Vec<Receipt>,
+    /// 상태는 옮겨졌는데 영수증이 없어 되살린 회차들([`crate::JobState::pending_slot`], 원본 Hermes의
+    /// 주인 없는 대기 회차). 다음 `tick`이 그 회차로 발사한다.
+    pub revived: Vec<ReceiptKey>,
+}
+
+/// 띄워 둔 깨우기 하나가 끝난 결과.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finished {
+    /// 끝난 깨우기(띄울 때 [`TickReport::wakes`]에 넣은 것과 같다).
+    pub wake: Wake,
+    /// 성공했나. 거짓이면 실패로 셌다(물러서기 · 10번이면 끄기).
+    pub ok: bool,
+}
+
+/// [`Trigger::settle`]의 결과.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SettleReport {
+    /// 지난 `settle` 뒤로 끝난 깨우기들(끝난 순). 한 번 낸 것은 다시 내지 않는다.
+    pub finished: Vec<Finished>,
+    /// 아직 내지 않은 알림 요구들(`tick`이 먼저 가져간 것은 빠진다).
+    pub alerts: Vec<Alert>,
 }
 
 /// 깨우기 엔진.
@@ -194,7 +216,8 @@ impl Trigger {
     /// 다시 켠 뒤 처리(E16). `tick` 전에 한 번 부른다.
     ///
     /// 실행 중으로 남은 영수증을 모두 중단됨(`Interrupted`, 닫은 시각 = 지금)으로 닫고 **다시 돌리지 않는다**.
-    /// 놓친 회차는 다음 `tick`이 다룬다.
+    /// 상태는 옮겼는데(`pending_slot`) 그 회차의 영수증이 없으면 되살려 다음 `tick`이 그 회차로 발사한다
+    /// (원본 Hermes 기한 판정 2단계, 2차 3번). 놓친 회차는 다음 `tick`이 다룬다.
     pub async fn start(&self) -> Result<StartReport, Error> {
         let now = self.now();
         let mut interrupted = Vec::new();
@@ -214,7 +237,10 @@ impl Trigger {
             );
             interrupted.push(receipt);
         }
-        Ok(StartReport { interrupted })
+        Ok(StartReport {
+            interrupted,
+            revived: Vec::new(),
+        })
     }
 
     /// tick 하나.
@@ -231,9 +257,29 @@ impl Trigger {
     /// 늦은 시세 깨우기에는 영수증 · 물러서기를 쓰지 않는다.
     ///
     /// 실패하면 연속 실패 수를 올리고 `retry_at` = 끝난 시각 + [`crate::error_backoff`]로 물러서며,
-    /// [`crate::AUTO_DISABLE_AFTER`]번이면 끄고 알림 요구를 낸다. 저장소에 쓰지 못하면 깨우지 않고 오류다.
+    /// [`crate::AUTO_DISABLE_AFTER`]번이면 끄고 알림 요구를 낸다.
+    ///
+    /// 발사는 작업마다 "상태 옮기기 + 영수증 열기"를 한 단위([`crate::TriggerStore::save_and_open`])로 한다.
+    /// 한 작업의 쓰기가 실패하면 그 작업만 이번 발사에서 빠지고(상태 그대로, 회차는 기한으로 남는다)
+    /// 나머지는 깨운다. 이번 tick에 연 영수증을 깨우지 못했으면 실패(`Error`)로 닫아 실행 중으로 남기지 않는다.
+    /// 빠진 작업이 있으면 나머지를 띄운 뒤 [`Error::Store`]를 돌려준다.
+    ///
+    /// 깨우기는 대상마다 따로 띄우고 끝나기를 기다리지 않는다(tick 잠금을 바로 놓는다). 결과가 오면 영수증을
+    /// 닫고 상태를 고친다. 실행 중 영수증이 같은 작업의 중복을 막는다. 끝나기를 기다리려면 [`Trigger::settle`].
     pub async fn tick(&self) -> Result<TickReport, Error> {
         crate::tick::tick(self).await
+    }
+
+    /// 띄워 둔 깨우기가 모두 끝날 때까지 기다린다. 끝난 결과는 띄운 쪽이 이미 반영했다(영수증 닫기 ·
+    /// 연속 실패 수 · 물러서기 · 끄기 · 다시 걸기 상태). 지난 `settle` 뒤로 끝난 것과 아직 내지 않은
+    /// 알림 요구를 돌려준다. 결과를 반영하다 저장소가 실패했으면 [`Error::Store`].
+    pub async fn settle(&self) -> Result<SettleReport, Error> {
+        todo!()
+    }
+
+    /// 지금 띄워 두고 아직 끝나지 않은 깨우기 수.
+    pub fn in_flight(&self) -> usize {
+        todo!()
     }
 
     /// `start`를 부른 뒤 `tick` → `clock.sleep(next_delay)`를 되풀이한다. `stop`이 참이 되면 끝난다.

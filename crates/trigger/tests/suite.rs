@@ -10,15 +10,23 @@
 //! - `price`: 2 시세 조건 · 다시 걸기 · 늦은 시세(N6)
 //! - `failure`: 4 물러서기와 10번이면 끄기
 //! - `timer`: 60초 상한 타이머, 시계가 뒤로 감 · 절전에서 깸, 되풀이
+//!
+//! 2차(1차 검토 되돌림):
+//! - `unit_write`: 2차 1 상태 옮기기 + 영수증 열기를 한 단위로(포트)
+//! - `inflight`: 2차 1 · 2 중간에 실패하는 저장소, 깨우기를 띄워 두고 tick 잠금을 놓기(N6 계속)
+//! - `revive`: 2차 3 다시 켤 때 영수증 없는 옮겨진 회차 되살리기
 
 mod support;
 
 mod condition;
 mod engine;
 mod failure;
+mod inflight;
 mod price;
 mod queue;
 mod restart;
+mod revive;
 mod schedule;
 mod store;
 mod timer;
+mod unit_write;

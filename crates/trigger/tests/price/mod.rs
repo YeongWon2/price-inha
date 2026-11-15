@@ -6,7 +6,7 @@ use pi_trigger::{
     WakeReason,
 };
 
-use crate::support::{Harness, condition, config, d, quote, secs, utc};
+use crate::support::{Harness, condition, config, d, quote, secs, settled_tick, utc};
 
 fn above_100() -> pi_trigger::ConditionJob {
     condition("samsung-100", "005930", ConditionKind::Above(d("100")))
@@ -19,7 +19,7 @@ fn in_session() -> chrono::DateTime<chrono::Utc> {
 /// 지금 받은 시세를 정하고 tick 한 번.
 async fn tick_with_price(h: &Harness, trigger: &pi_trigger::Trigger, price: &str) {
     h.market.set_quote(quote("005930", price, h.clock_now()));
-    trigger.tick().await.unwrap();
+    settled_tick(trigger).await;
 }
 
 trait Now {
@@ -41,9 +41,9 @@ async fn 장이_닫혀_있으면_시세를_받지_않고_깨우지_않는다() {
     h.market
         .set_quote(quote("005930", "150", utc(2026, 11, 16, 6, 0, 0)));
     let trigger = h.trigger(config(vec![], vec![above_100()]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.advance(secs(60));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.market.quote_calls(), 0);
     assert_eq!(h.waker.count(), 0);
 }
@@ -157,11 +157,11 @@ async fn 시세가_30초_넘게_늦으면_팀을_이상으로_한_번_깨운다(
         "50",
         in_session() - chrono::Duration::seconds(30),
     ));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     h.clock.advance(secs(1));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 1);
     assert_eq!(wakes[0].target, Target::Team);
@@ -177,7 +177,7 @@ async fn 시세가_30초_넘게_늦으면_팀을_이상으로_한_번_깨운다(
 
     // 늦은 동안은 다시 깨우지 않는다.
     h.clock.advance(secs(10));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
 
     // 새 시세가 오면 풀리고, 다시 늦으면 다시 깨운다.
@@ -185,7 +185,7 @@ async fn 시세가_30초_넘게_늦으면_팀을_이상으로_한_번_깨운다(
     tick_with_price(&h, &trigger, "50").await;
     assert_eq!(h.waker.count(), 1);
     h.clock.advance(secs(31));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 2);
     assert_eq!(h.waker.wakes()[1].reason, WakeReason::Anomaly);
 }
@@ -198,13 +198,13 @@ async fn 시세를_한_번도_받지_못한_채_30초가_넘으면_이상으로_
         detail: "연결 안 됨".to_string(),
     }));
     let trigger = h.trigger(config(vec![], vec![above_100()]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.advance(secs(30));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     h.clock.advance(secs(1));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 1);
     assert_eq!(wakes[0].reason, WakeReason::Anomaly);

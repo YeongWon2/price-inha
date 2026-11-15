@@ -6,7 +6,7 @@ use pi_trigger::{
 };
 use tokio::sync::watch;
 
-use crate::support::{Harness, condition, config, d, quote, schedule, secs, utc};
+use crate::support::{Harness, condition, config, d, quote, schedule, secs, settled_tick, utc};
 
 fn open_job() -> pi_trigger::ScheduleJob {
     schedule("open", ScheduleKind::MarketOpen, Target::Team)
@@ -21,15 +21,15 @@ async fn 타이머는_다음_회차까지이고_길어야_60초다() {
 
     let h = Harness::new(utc(2026, 11, 15, 23, 50, 0));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    let far = trigger.tick().await.unwrap();
+    let far = settled_tick(&trigger).await;
     assert_eq!(far.next_delay, secs(60));
 
     h.clock.set(utc(2026, 11, 15, 23, 59, 40));
-    let near = trigger.tick().await.unwrap();
+    let near = settled_tick(&trigger).await;
     assert_eq!(near.next_delay, secs(20));
 
     h.clock.set(utc(2026, 11, 16, 0, 0, 0));
-    let fired = trigger.tick().await.unwrap();
+    let fired = settled_tick(&trigger).await;
     assert_eq!(fired.wakes.len(), 1);
     assert_eq!(fired.next_delay, secs(60));
 }
@@ -39,10 +39,10 @@ async fn 타이머는_다음_회차까지이고_길어야_60초다() {
 async fn 기한이_지났는데_발사하지_못했으면_2초_뒤에_다시_본다() {
     let h = Harness::new(utc(2026, 11, 15, 23, 59, 0));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.stop.set(true);
     h.clock.set(utc(2026, 11, 16, 0, 0, 0));
-    let report = trigger.tick().await.unwrap();
+    let report = settled_tick(&trigger).await;
     assert_eq!(report.next_delay, secs(2));
 }
 
@@ -56,11 +56,11 @@ async fn 시세_조건이_있고_장이_열렸으면_시세_간격마다_본다(
         vec![],
         vec![condition("c", "005930", ConditionKind::Above(d("100")))],
     ));
-    let open = trigger.tick().await.unwrap();
+    let open = settled_tick(&trigger).await;
     assert_eq!(open.next_delay, secs(10));
 
     h.clock.set(utc(2026, 11, 16, 8, 0, 0));
-    let closed = trigger.tick().await.unwrap();
+    let closed = settled_tick(&trigger).await;
     assert_eq!(closed.next_delay, secs(60));
 }
 
@@ -69,22 +69,22 @@ async fn 시세_조건이_있고_장이_열렸으면_시세_간격마다_본다(
 async fn 시계가_뒤로_가도_같은_회차를_두_번_발사하지_않는다() {
     let h = Harness::new(utc(2026, 11, 15, 23, 59, 0));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    let first = trigger.tick().await.unwrap();
+    let first = settled_tick(&trigger).await;
     assert!(!first.clock_jumped);
     h.clock.set(utc(2026, 11, 16, 0, 0, 0));
-    let fired = trigger.tick().await.unwrap();
+    let fired = settled_tick(&trigger).await;
     assert!(!fired.clock_jumped);
     assert_eq!(h.waker.count(), 1);
 
     // 벽시계가 30초 뒤로 갔다(단조 시계는 30초 앞으로).
     h.clock.jump_wall(utc(2026, 11, 15, 23, 59, 30), secs(30));
-    let back = trigger.tick().await.unwrap();
+    let back = settled_tick(&trigger).await;
     assert!(back.clock_jumped);
     assert_eq!(h.waker.count(), 1);
 
     // 다시 회차 시각을 지나도 이미 처리한 회차다.
     h.clock.jump_wall(utc(2026, 11, 16, 0, 0, 10), secs(40));
-    let again = trigger.tick().await.unwrap();
+    let again = settled_tick(&trigger).await;
     assert!(!again.clock_jumped);
     assert_eq!(h.waker.count(), 1);
 }
@@ -94,16 +94,16 @@ async fn 시계가_뒤로_가도_같은_회차를_두_번_발사하지_않는다
 async fn 절전에서_깨어_벽시계만_뛰면_알아차리고_놓친_회차를_다룬다() {
     let h = Harness::new(utc(2026, 11, 15, 22, 0, 0));
     let trigger = h.trigger(config(vec![open_job()], vec![]));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
 
     // 노트북이 잠들었다가 09:30 KST에 깼다. 단조 시계는 60초만 흘렀다.
     h.clock.jump_wall(utc(2026, 11, 16, 0, 30, 0), secs(60));
-    let woke = trigger.tick().await.unwrap();
+    let woke = settled_tick(&trigger).await;
     assert!(woke.clock_jumped);
     assert_eq!(h.waker.count(), 1, "유예(2시간) 안이라 지금 발사한다");
 
     h.clock.advance(secs(60));
-    let normal = trigger.tick().await.unwrap();
+    let normal = settled_tick(&trigger).await;
     assert!(!normal.clock_jumped);
     assert_eq!(h.waker.count(), 1);
 }
@@ -128,6 +128,8 @@ async fn 되풀이는_다시_켠_뒤_처리부터_하고_시계로_기다리며_
     h.clock.stop_after(3, stop_tx);
 
     trigger.run(stop_rx).await.unwrap();
+    // 2차: 되풀이는 깨우기를 띄우기만 한다. 끝나기를 기다린 뒤 본다.
+    trigger.settle().await.unwrap();
 
     let sleeps = h.clock.sleeps();
     assert_eq!(sleeps.len(), 3);

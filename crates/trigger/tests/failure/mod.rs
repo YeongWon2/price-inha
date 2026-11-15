@@ -5,7 +5,9 @@ use pi_trigger::{
     Alert, AlertReason, ConditionKind, DisableReason, JobId, ReceiptStatus, ScheduleKind, Target,
 };
 
-use crate::support::{Harness, condition, config, d, kr_next_week_day, quote, schedule, secs, utc};
+use crate::support::{
+    Harness, condition, config, d, kr_next_week_day, quote, schedule, secs, settled_tick, utc,
+};
 
 // 검증: E16, F2
 #[tokio::test]
@@ -21,7 +23,7 @@ async fn 연달아_실패하면_30초_60초_5분_15분_60분으로_물러서고_
     for attempt in 1..=10u32 {
         let now = h.clock.now();
         h.market.set_quote(quote("005930", "100", now));
-        let report = trigger.tick().await.unwrap();
+        let report = settled_tick(&trigger).await;
         assert_eq!(h.waker.count(), attempt as usize, "{attempt}번째 시도");
         let state = h.store.job("samsung-100").await;
         assert_eq!(state.consecutive_errors, attempt);
@@ -33,7 +35,7 @@ async fn 연달아_실패하면_30초_60초_5분_15분_60분으로_물러서고_
             // 물러선 동안 한 번 더 보아도 깨우지 않는다.
             h.clock.advance(secs(5));
             h.market.set_quote(quote("005930", "100", h.clock.now()));
-            trigger.tick().await.unwrap();
+            settled_tick(&trigger).await;
             assert_eq!(h.waker.count(), attempt as usize);
             h.clock.set(retry_at);
         } else {
@@ -69,7 +71,7 @@ async fn 연달아_실패하면_30초_60초_5분_15분_60분으로_물러서고_
     h.waker.fail(false);
     h.clock.advance(secs(60));
     h.market.set_quote(quote("005930", "100", h.clock.now()));
-    let report = trigger.tick().await.unwrap();
+    let report = settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 10);
     assert!(report.alerts.is_empty(), "알림 요구는 끌 때 한 번만 낸다");
 }
@@ -83,10 +85,10 @@ async fn 일정이_실패하면_같은_회차를_다시_돌리지_않고_다음_
         vec![schedule("open", ScheduleKind::MarketOpen, Target::Team)],
         vec![],
     ));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.waker.fail(true);
     h.clock.set(open_slot);
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
     let state = h.store.job("open").await;
     assert_eq!(state.consecutive_errors, 1);
@@ -99,13 +101,13 @@ async fn 일정이_실패하면_같은_회차를_다시_돌리지_않고_다음_
     h.waker.fail(false);
     for at in [utc(2026, 11, 16, 0, 0, 30), utc(2026, 11, 16, 0, 1, 30)] {
         h.clock.set(at);
-        trigger.tick().await.unwrap();
+        settled_tick(&trigger).await;
     }
     assert_eq!(h.waker.count(), 1);
 
     h.market.set_calendar(kr_next_week_day());
     h.clock.set(utc(2026, 11, 17, 0, 0, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 2);
     let state = h.store.job("open").await;
     assert_eq!(state.consecutive_errors, 0);

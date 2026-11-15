@@ -15,7 +15,7 @@ use pi_market::{
 use pi_trigger::{
     ConditionJob, ConditionKind, JobId, JobState, MemoryStore, Monotonic, OpenReceipt, Ports,
     Receipt, ReceiptKey, ReceiptStatus, ScheduleJob, ScheduleKind, ScheduleTimes, StopSignal,
-    StoreError, Target, Trigger, TriggerConfig, TriggerStore, Wake, WakeError, Waker,
+    StoreError, Target, TickReport, Trigger, TriggerConfig, TriggerStore, Wake, WakeError, Waker,
 };
 use rust_decimal::Decimal;
 use tokio::sync::{Notify, watch};
@@ -203,6 +203,8 @@ pub struct RecordingWaker {
     wakes: Mutex<Vec<Wake>>,
     fail: AtomicBool,
     hold: AtomicBool,
+    /// `Some`이면 그 대상의 깨우기만 붙잡는다.
+    hold_target: Mutex<Option<Target>>,
     entered: Notify,
     release: Notify,
     /// 깨우는 동안 들여다볼 저장소와, 깨울 때마다 본 모습(작업 상태들, 영수증들).
@@ -227,6 +229,11 @@ impl RecordingWaker {
     /// 참이면 `release`가 불릴 때까지 깨우기를 끝내지 않는다.
     pub fn hold(&self, hold: bool) {
         self.hold.store(hold, Ordering::SeqCst);
+    }
+
+    /// `Some`이면 `hold` 중에도 그 대상의 깨우기만 붙잡는다(다른 대상은 바로 끝난다).
+    pub fn hold_target(&self, target: Option<Target>) {
+        *self.hold_target.lock().unwrap() = target;
     }
 
     /// 붙잡힌 깨우기가 들어올 때까지 기다린다.
@@ -260,8 +267,12 @@ impl Waker for RecordingWaker {
             };
             self.snapshots.lock().unwrap().push(snapshot);
         }
+        let held = match &*self.hold_target.lock().unwrap() {
+            Some(target) => *target == wake.target,
+            None => true,
+        };
         self.wakes.lock().unwrap().push(wake);
-        if self.hold.load(Ordering::SeqCst) {
+        if held && self.hold.load(Ordering::SeqCst) {
             self.entered.notify_one();
             self.release.notified().await;
         }
@@ -277,11 +288,59 @@ impl Waker for RecordingWaker {
 pub struct FlakyStore {
     pub inner: MemoryStore,
     fail_writes: AtomicBool,
+    /// 0이 아니면 "상태 옮기기 + 영수증 열기" 쓰기 가운데 이 번째(1부터)부터 실패한다.
+    fail_units_from: AtomicUsize,
+    units: AtomicUsize,
+    fail_marks: AtomicBool,
+    hold_reads: AtomicBool,
+    reading: Notify,
+    release_reads: Notify,
 }
 
 impl FlakyStore {
     pub fn fail_writes(&self, fail: bool) {
         self.fail_writes.store(fail, Ordering::SeqCst);
+    }
+
+    /// 지금부터 n번째(1부터) "상태 옮기기 + 영수증 열기" 쓰기부터 실패한다. 0이면 다시 성공한다.
+    pub fn fail_units_from(&self, n: usize) {
+        self.units.store(0, Ordering::SeqCst);
+        self.fail_units_from.store(n, Ordering::SeqCst);
+    }
+
+    /// 지금까지 불린 "상태 옮기기 + 영수증 열기" 쓰기 수(실패한 것도 센다, `fail_units_from`이 0으로 돌린다).
+    pub fn units(&self) -> usize {
+        self.units.load(Ordering::SeqCst)
+    }
+
+    /// 참이면 "넘기기를 시작했다" 쓰기가 실패한다.
+    pub fn fail_delivery_marks(&self, fail: bool) {
+        self.fail_marks.store(fail, Ordering::SeqCst);
+    }
+
+    /// 참이면 작업 상태 읽기(`jobs`)가 `release_reads` 전까지 끝나지 않는다.
+    pub fn hold_reads(&self, hold: bool) {
+        self.hold_reads.store(hold, Ordering::SeqCst);
+    }
+
+    /// 붙잡힌 읽기가 들어올 때까지 기다린다.
+    pub async fn reading(&self) {
+        self.reading.notified().await;
+    }
+
+    pub fn release_reads(&self) {
+        self.release_reads.notify_one();
+    }
+
+    /// 실행 중으로 남은 영수증들.
+    pub async fn running(&self) -> Vec<Receipt> {
+        self.inner
+            .receipts()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|receipt| receipt.status == ReceiptStatus::Running)
+            .collect()
     }
 
     fn check(&self) -> Result<(), StoreError> {
@@ -325,7 +384,26 @@ impl FlakyStore {
 #[async_trait]
 impl TriggerStore for FlakyStore {
     async fn jobs(&self) -> Result<Vec<JobState>, StoreError> {
+        if self.hold_reads.load(Ordering::SeqCst) {
+            self.reading.notify_one();
+            self.release_reads.notified().await;
+        }
         self.inner.jobs().await
+    }
+
+    async fn save_and_open(
+        &self,
+        job: &JobState,
+        key: &ReceiptKey,
+        started_at: DateTime<Utc>,
+    ) -> Result<OpenReceipt, StoreError> {
+        self.check()?;
+        let number = self.units.fetch_add(1, Ordering::SeqCst) + 1;
+        let from = self.fail_units_from.load(Ordering::SeqCst);
+        if from != 0 && number >= from {
+            return Err(StoreError("한 단위 쓰기 실패".to_string()));
+        }
+        self.inner.save_and_open(job, key, started_at).await
     }
 
     async fn save_job(&self, job: &JobState) -> Result<(), StoreError> {
@@ -344,6 +422,9 @@ impl TriggerStore for FlakyStore {
 
     async fn mark_delivery_started(&self, key: &ReceiptKey) -> Result<(), StoreError> {
         self.check()?;
+        if self.fail_marks.load(Ordering::SeqCst) {
+            return Err(StoreError("넘기기 시작을 적지 못함".to_string()));
+        }
         self.inner.mark_delivery_started(key).await
     }
 
@@ -442,4 +523,12 @@ pub fn config(schedules: Vec<ScheduleJob>, conditions: Vec<ConditionJob>) -> Tri
 /// 초.
 pub fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
+}
+
+/// tick 한 번을 돌리고, 띄운 깨우기가 끝날 때까지 기다린다(`settle`). 알림 요구는 둘을 합친다.
+pub async fn settled_tick(trigger: &Trigger) -> TickReport {
+    let mut report = trigger.tick().await.unwrap();
+    let settled = trigger.settle().await.unwrap();
+    report.alerts.extend(settled.alerts);
+    report
 }

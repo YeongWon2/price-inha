@@ -6,7 +6,7 @@ use pi_trigger::{
     TriggerEvent, WakeReason,
 };
 
-use crate::support::{Harness, config, kr_next_week_day, schedule, utc};
+use crate::support::{Harness, config, kr_next_week_day, schedule, settled_tick, utc};
 
 fn running(job: &str, slot: chrono::DateTime<chrono::Utc>, delivery: DeliveryState) -> Receipt {
     Receipt {
@@ -64,9 +64,9 @@ async fn 다시_켜면_실행_중이던_것은_중단됨으로_닫고_다시_돌
     }
 
     // 넘기기를 시작하지 않았던 것도 다시 돌리지 않는다.
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(utc(2026, 11, 16, 6, 40, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 }
 
@@ -86,7 +86,7 @@ async fn 유예_안이면_지금_한_번_발사하고_앞서_놓친_회차는_�
         vec![],
     ));
     trigger.start().await.unwrap();
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
 
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 1);
@@ -126,9 +126,9 @@ async fn 유예를_넘었어도_정규장이_열려_있으면_한_번만_따라�
         vec![],
     ));
     trigger.start().await.unwrap();
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(utc(2026, 11, 16, 2, 31, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
 
     assert_eq!(h.waker.count(), 1);
     match &h.waker.wakes()[0].events[0] {
@@ -159,7 +159,7 @@ async fn 장_밖이면_따라잡지_않고_다음_장_시작_하나로_합친다
     ];
     let trigger = h.trigger(config(jobs.clone(), vec![]));
     trigger.start().await.unwrap();
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     let open = h.store.job("open").await;
@@ -170,7 +170,7 @@ async fn 장_밖이면_따라잡지_않고_다음_장_시작_하나로_합친다
 
     // 밤 동안에도 깨우지 않는다.
     h.clock.set(utc(2026, 11, 16, 12, 0, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     // 다시 꺼졌다 켜져도 미뤄 둔 것은 남는다.
@@ -179,12 +179,12 @@ async fn 장_밖이면_따라잡지_않고_다음_장_시작_하나로_합친다
     h.clock.set(utc(2026, 11, 16, 23, 50, 0));
     let trigger = h.trigger(config(jobs, vec![]));
     trigger.start().await.unwrap();
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 0);
 
     // 화요일 장 시작: 한 번에 묶어 깨운다.
     h.clock.set(utc(2026, 11, 17, 0, 0, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 1);
     let wake = &wakes[0];
@@ -221,7 +221,7 @@ async fn 장_밖이면_따라잡지_않고_다음_장_시작_하나로_합친다
 
     // 한 번 넘긴 것은 다시 넘기지 않는다.
     h.clock.set(utc(2026, 11, 17, 0, 1, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     assert_eq!(h.waker.count(), 1);
 }
 
@@ -233,9 +233,9 @@ async fn 장_밖이라도_유예_안의_마감_뒤_회차는_그냥_발사한다
         vec![schedule("after", ScheduleKind::AfterClose, Target::Team)],
         vec![],
     ));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     h.clock.set(utc(2026, 11, 16, 7, 30, 0));
-    trigger.tick().await.unwrap();
+    settled_tick(&trigger).await;
     let wakes = h.waker.wakes();
     assert_eq!(wakes.len(), 1);
     assert_eq!(
