@@ -193,6 +193,35 @@ WHEN EXISTS (
     SELECT 1 FROM trade_facts AS tf JOIN facts AS f ON f.id = tf.fact_id
     WHERE tf.trade_id = NEW.id AND (NEW.decided_at IS NULL OR f.known_at > NEW.decided_at))
 BEGIN SELECT RAISE(ABORT, 'trade decision time must not precede attached facts'); END;
+
+-- 바꿔치기(`INSERT OR REPLACE` · `REPLACE INTO`) 막기: 충돌한 줄을 REPLACE가 지울 때는
+-- 지우기 막기 트리거가 돌지 않으므로(recursive_triggers 꺼짐) 키가 겹치는 넣기를 스스로 거부한다.
+CREATE TRIGGER trades_no_replace BEFORE INSERT ON trades
+WHEN EXISTS (SELECT 1 FROM trades WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'trades rows are kept'); END;
+CREATE TRIGGER legacy_boundary_no_replace BEFORE INSERT ON legacy_boundary
+WHEN EXISTS (SELECT 1 FROM legacy_boundary WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
+CREATE TRIGGER template_revisions_no_replace BEFORE INSERT ON template_revisions
+WHEN EXISTS (SELECT 1 FROM template_revisions
+             WHERE template_id = NEW.template_id AND revision = NEW.revision)
+BEGIN SELECT RAISE(ABORT, 'template_revisions is append-only'); END;
+CREATE TRIGGER key_hashes_no_replace BEFORE INSERT ON key_hashes
+WHEN EXISTS (SELECT 1 FROM key_hashes WHERE generation = NEW.generation)
+BEGIN SELECT RAISE(ABORT, 'key_hashes is append-only'); END;
+CREATE TRIGGER agent_sessions_no_replace BEFORE INSERT ON agent_sessions
+WHEN EXISTS (SELECT 1 FROM agent_sessions WHERE id = NEW.id)
+  OR (NEW.ended_at IS NULL AND EXISTS (SELECT 1 FROM agent_sessions
+      WHERE agent = NEW.agent AND title = NEW.title AND ended_at IS NULL))
+BEGIN SELECT RAISE(ABORT, 'agent_sessions rows are kept'); END;
+CREATE TRIGGER room_events_no_replace BEFORE INSERT ON room_events
+WHEN EXISTS (SELECT 1 FROM room_events
+             WHERE room = NEW.room AND (seq = NEW.seq OR event_id = NEW.event_id))
+BEGIN SELECT RAISE(ABORT, 'room_events is append-only'); END;
+CREATE TRIGGER trigger_receipts_no_replace BEFORE INSERT ON trigger_receipts
+WHEN EXISTS (SELECT 1 FROM trigger_receipts
+             WHERE job = NEW.job AND (slot = NEW.slot OR status = 'running'))
+BEGIN SELECT RAISE(ABORT, 'trigger_receipts rows are kept'); END;
 ";
 
 #[cfg(test)]
