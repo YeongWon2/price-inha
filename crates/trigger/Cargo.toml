@@ -9,7 +9,13 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
 pi-market = { path = "../market" }
+rust_decimal = "1.43.0"
 thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt", "sync", "time", "macros"] }
+tracing = "0.1.44"
 
 [dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "test-util", "time", "sync"] }
