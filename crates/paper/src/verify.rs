@@ -172,8 +172,12 @@ fn check_quotes(ledger: &Ledger) -> Result<(), SnapshotReason> {
 /// 마지막 시세에 거래소 시각이 없거나, 거래소 시각이 있는 마지막 시세에 기억이 없는 것은
 /// 받아들인다(기억이 없으면 그 시각부터 다시 기억할 뿐 옛 시세를 열지 않는다).
 /// 기억한 시각이 마지막 시각(`last_now`) + [`MAX_EXCHANGE_LEAD`]보다 늦으면(엄격한 초과) 먼 앞날
-/// 기억이라 거부한다(6차 규칙 1). `last_now`가 없으면 기준이 없으므로 이 검사는 하지 않는다(보수적).
+/// 기억이라 거부한다(6차 규칙 1). `last_now`가 없는데(아무 호출도 받지 않음) 기억이 있는 것도
+/// 실행 중에는 만들어지지 않는 손상 값이라 거부한다(7차 규칙 1).
 fn check_marks(ledger: &Ledger) -> Result<(), SnapshotReason> {
+    if ledger.last_now.is_none() && !ledger.trade_marks.is_empty() {
+        return Err(SnapshotReason::BadTradeMark);
+    }
     let lead = chrono::Duration::from_std(MAX_EXCHANGE_LEAD).unwrap_or(chrono::Duration::MAX);
     let latest = ledger.last_now.map(|exported| {
         exported
@@ -265,7 +269,17 @@ mod tests {
             received_at: at(5),
         });
         ledger.check_trade("005930", CashCode::Krw, at(5), Decimal::from(70_000));
+        ledger.last_now = Some(at(5));
         ledger
+    }
+
+    #[test]
+    fn 마지막_시각이_없는데_기억이_있으면_거부한다() {
+        let mut ledger = ledger();
+        ledger.last_now = None;
+        assert_eq!(check_marks(&ledger), Err(SnapshotReason::BadTradeMark));
+        ledger.trade_marks.clear();
+        assert_eq!(check_marks(&ledger), Ok(()));
     }
 
     #[test]
