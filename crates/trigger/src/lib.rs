@@ -13,6 +13,7 @@ mod clock;
 mod condition;
 mod engine;
 pub mod error;
+mod inflight;
 mod model;
 mod plan;
 mod queue;

@@ -12,6 +12,7 @@ use pi_market::{Market, MarketAdapter, StalePolicy, Symbol};
 use rust_decimal::Decimal;
 use tokio::sync::watch;
 
+use crate::inflight::InFlight;
 use crate::watch::QuoteWatch;
 use crate::{
     Alert, CLOCK_JUMP_TOLERANCE, Clock, ConditionKind, ERROR_BACKOFF, Error, JobId, Monotonic,
@@ -169,6 +170,10 @@ pub struct Trigger {
     last_seen: Mutex<Option<(DateTime<Utc>, Duration)>>,
     /// 종목마다의 늦은 시세 감시.
     pub(crate) watches: Mutex<HashMap<(Market, Symbol), QuoteWatch>>,
+    /// 띄워 둔 깨우기들과 끝난 결과.
+    pub(crate) inflight: Arc<InFlight>,
+    /// 다시 켤 때 되살려 다음 tick이 발사할 회차들.
+    pub(crate) revived: Mutex<Vec<ReceiptKey>>,
 }
 
 impl Trigger {
@@ -210,6 +215,8 @@ impl Trigger {
             running: tokio::sync::Mutex::new(()),
             last_seen: Mutex::new(None),
             watches: Mutex::new(HashMap::new()),
+            inflight: Arc::new(InFlight::default()),
+            revived: Mutex::new(Vec::new()),
         })
     }
 
@@ -237,10 +244,37 @@ impl Trigger {
             );
             interrupted.push(receipt);
         }
+        let revived = self.orphans().await?;
+        lock(&self.revived).clone_from(&revived);
         Ok(StartReport {
             interrupted,
-            revived: Vec::new(),
+            revived,
         })
+    }
+
+    /// 상태를 옮겼는데(`pending_slot`) 그 회차의 영수증이 없는 일정 작업의 회차들(원본 Hermes 주인 없는 대기 회차).
+    /// 영수증이 있으면(닫혔든 실행 중이든) 되살리지 않는다.
+    async fn orphans(&self) -> Result<Vec<ReceiptKey>, Error> {
+        let receipts = self.ports.store.receipts().await?;
+        let mut revived = Vec::new();
+        for state in self.ports.store.jobs().await? {
+            let Some(slot) = state.pending_slot else {
+                continue;
+            };
+            if !self.config.schedules.iter().any(|job| job.id == state.id) {
+                continue;
+            }
+            let key = ReceiptKey {
+                job: state.id,
+                slot,
+            };
+            if receipts.iter().any(|receipt| receipt.key == key) {
+                continue;
+            }
+            tracing::warn!(job = %key.job, slot = %key.slot, "영수증 없이 옮겨진 회차를 되살린다");
+            revived.push(key);
+        }
+        Ok(revived)
     }
 
     /// tick 하나.
@@ -274,12 +308,12 @@ impl Trigger {
     /// 연속 실패 수 · 물러서기 · 끄기 · 다시 걸기 상태). 지난 `settle` 뒤로 끝난 것과 아직 내지 않은
     /// 알림 요구를 돌려준다. 결과를 반영하다 저장소가 실패했으면 [`Error::Store`].
     pub async fn settle(&self) -> Result<SettleReport, Error> {
-        todo!()
+        self.inflight.settle().await
     }
 
     /// 지금 띄워 두고 아직 끝나지 않은 깨우기 수.
     pub fn in_flight(&self) -> usize {
-        todo!()
+        self.inflight.count()
     }
 
     /// `start`를 부른 뒤 `tick` → `clock.sleep(next_delay)`를 되풀이한다. `stop`이 참이 되면 끝난다.

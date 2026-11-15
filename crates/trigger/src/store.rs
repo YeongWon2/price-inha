@@ -188,6 +188,35 @@ impl MemoryState {
             .find(|receipt| &receipt.key == key)
             .ok_or_else(|| StoreError(format!("영수증이 없다: {}", key.job)))
     }
+
+    fn upsert_job(&mut self, job: &JobState) {
+        match self.jobs.iter_mut().find(|saved| saved.id == job.id) {
+            Some(saved) => *saved = job.clone(),
+            None => self.jobs.push(job.clone()),
+        }
+    }
+
+    /// 영수증 열기 규칙: 같은 키 → `Duplicate`, 같은 작업이 실행 중 → `AlreadyRunning`, 아니면 연다.
+    fn try_open(&mut self, key: &ReceiptKey, started_at: DateTime<Utc>) -> OpenReceipt {
+        if self.receipts.iter().any(|receipt| &receipt.key == key) {
+            return OpenReceipt::Duplicate;
+        }
+        if let Some(running) = self
+            .receipts
+            .iter()
+            .find(|receipt| receipt.key.job == key.job && receipt.status == ReceiptStatus::Running)
+        {
+            return OpenReceipt::AlreadyRunning(running.key.clone());
+        }
+        self.receipts.push(Receipt {
+            key: key.clone(),
+            status: ReceiptStatus::Running,
+            delivery: DeliveryState::NotStarted,
+            started_at,
+            finished_at: None,
+        });
+        OpenReceipt::Opened
+    }
 }
 
 #[async_trait]
@@ -197,11 +226,7 @@ impl TriggerStore for MemoryStore {
     }
 
     async fn save_job(&self, job: &JobState) -> Result<(), StoreError> {
-        let mut state = self.lock();
-        match state.jobs.iter_mut().find(|saved| saved.id == job.id) {
-            Some(saved) => *saved = job.clone(),
-            None => state.jobs.push(job.clone()),
-        }
+        self.lock().upsert_job(job);
         Ok(())
     }
 
@@ -210,34 +235,21 @@ impl TriggerStore for MemoryStore {
         key: &ReceiptKey,
         started_at: DateTime<Utc>,
     ) -> Result<OpenReceipt, StoreError> {
-        let mut state = self.lock();
-        if state.receipts.iter().any(|receipt| &receipt.key == key) {
-            return Ok(OpenReceipt::Duplicate);
-        }
-        if let Some(running) = state
-            .receipts
-            .iter()
-            .find(|receipt| receipt.key.job == key.job && receipt.status == ReceiptStatus::Running)
-        {
-            return Ok(OpenReceipt::AlreadyRunning(running.key.clone()));
-        }
-        state.receipts.push(Receipt {
-            key: key.clone(),
-            status: ReceiptStatus::Running,
-            delivery: DeliveryState::NotStarted,
-            started_at,
-            finished_at: None,
-        });
-        Ok(OpenReceipt::Opened)
+        Ok(self.lock().try_open(key, started_at))
     }
 
     async fn save_and_open(
         &self,
-        _job: &JobState,
-        _key: &ReceiptKey,
-        _started_at: DateTime<Utc>,
+        job: &JobState,
+        key: &ReceiptKey,
+        started_at: DateTime<Utc>,
     ) -> Result<OpenReceipt, StoreError> {
-        todo!()
+        let mut state = self.lock();
+        let outcome = state.try_open(key, started_at);
+        if !matches!(outcome, OpenReceipt::AlreadyRunning(_)) {
+            state.upsert_job(job);
+        }
+        Ok(outcome)
     }
 
     async fn mark_delivery_started(&self, key: &ReceiptKey) -> Result<(), StoreError> {
