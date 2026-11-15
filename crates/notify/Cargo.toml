@@ -1,0 +1,13 @@
+[package]
+name = "pi-notify"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2.0.21"
+pi-store = { path = "../store" }

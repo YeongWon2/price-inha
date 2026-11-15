@@ -1128,6 +1128,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "pi-agent"
+version = "0.1.0"
+dependencies = [
+ "pi-ai",
+ "pi-store",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-ai"
 version = "0.1.0"
 dependencies = [
@@ -1173,6 +1182,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-exec"
+version = "0.1.0"
+dependencies = [
+ "pi-approval",
+ "pi-market",
+ "pi-paper",
+ "pi-rules",
+ "pi-store",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-gate"
 version = "0.1.0"
 dependencies = [
@@ -1191,6 +1212,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-journal"
+version = "0.1.0"
+dependencies = [
+ "pi-store",
+ "pi-template",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-market"
 version = "0.1.0"
 dependencies = [
@@ -1205,6 +1235,14 @@ dependencies = [
  "tokio",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "pi-notify"
+version = "0.1.0"
+dependencies = [
+ "pi-store",
+ "thiserror",
 ]
 
 [[package]]
