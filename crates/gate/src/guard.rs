@@ -5,21 +5,22 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::header::{COOKIE, HOST, ORIGIN, SET_COOKIE};
+use axum::http::header::{COOKIE, HOST, ORIGIN};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use pi_store::NewAccess;
 use tokio::sync::{mpsc, watch};
 
+use crate::access::Access;
 use crate::hub::Hub;
-use crate::session::Sessions;
-use crate::{ACCESS_ENTER, PeerOverride, SESSION_COOKIE};
+use crate::session::SessionKind;
+use crate::{FORWARDING_HEADERS, PeerOverride, SESSION_COOKIE, SESSION_PATH};
 
 /// 요청 처리에 함께 쓰는 것들.
 pub(crate) struct Shared {
     pub(crate) hub: Arc<Hub>,
-    pub(crate) sessions: Sessions,
+    /// 접속 키 · 세션 · 잠금(9차).
+    pub(crate) access: Arc<Access>,
     /// 허용하는 Host 이름(포트 없이).
     pub(crate) allowed_hosts: Vec<String>,
     /// 실제로 연 포트.
@@ -42,6 +43,11 @@ pub(crate) struct Shared {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Peer(pub IpAddr);
 
+/// 그 컴퓨터의 요청이 아니다(상대가 루프백이 아니거나 전달 헤더가 있다). 관문이 확장에 넣는다(9차).
+/// 이 표시가 있으면 [`Peer`]가 루프백이어도 [`local_only`]는 닫는다.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Outside;
+
 /// [`local_only`]가 그 컴퓨터 밖의 요청을 거부할 때의 HTTP 상태.
 pub const LOCAL_ONLY_STATUS: u16 = 403;
 
@@ -51,19 +57,21 @@ pub const LOCAL_ONLY_STATUS: u16 = 403;
 /// 요청의 확장에 든 [`Peer`]가 루프백이면 핸들러로 넘기고, 루프백이 아니거나 [`Peer`]가
 /// **없으면** [`LOCAL_ONLY_STATUS`]로 거부한다(핸들러는 불리지 않는다).
 ///
-/// 지금은 루프백이 아닌 요청이 관문에서 모두 401이라 이 확인까지 오지 않는다. 접속 키(T17)가
-/// 생겨 밖에서 온 요청이 관문을 지나게 되어도 이 경로들은 닫혀 있게 하려는 것이다.
-/// 전달 헤더(`X-Forwarded-For` 등)는 읽지 않는다.
+/// (9차) 접속 키로 원격 세션을 가진 다른 기기의 요청도 관문을 지나지만, 이 경로들은 닫혀 있다.
+/// 관문이 그 컴퓨터의 요청이 아니라고 본 요청(전달 헤더가 있는 루프백 포함)도 닫는다.
+/// 전달 헤더(`X-Forwarded-For` 등)의 값은 읽지 않는다.
 pub fn local_only(routes: axum::Router) -> axum::Router {
     routes.layer(axum::middleware::from_fn(loopback_peer))
 }
 
-/// [`local_only`]의 확인: 확장의 [`Peer`]가 루프백일 때만 넘긴다. 없으면 닫는다.
+/// [`local_only`]의 확인: 확장의 [`Peer`]가 루프백이고 관문이 밖이라고 표시하지 않았을 때만
+/// 넘긴다. [`Peer`]가 없으면 닫는다.
 async fn loopback_peer(request: Request, next: Next) -> Response {
-    let local = request
-        .extensions()
-        .get::<Peer>()
-        .is_some_and(|Peer(ip)| ip.to_canonical().is_loopback());
+    let extensions = request.extensions();
+    let local = extensions.get::<Outside>().is_none()
+        && extensions
+            .get::<Peer>()
+            .is_some_and(|Peer(ip)| ip.to_canonical().is_loopback());
     if local {
         next.run(request).await
     } else {
@@ -131,7 +139,7 @@ pub(crate) async fn host_and_peer(
     if !host_ok {
         return reject(StatusCode::FORBIDDEN, "허용되지 않은 Host입니다");
     }
-    // 전달 헤더는 읽지 않는다. 연결의 실제 상대 주소만 본다.
+    // 전달 헤더의 값은 읽지 않는다. 연결의 실제 상대 주소만 본다.
     let actual = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -140,17 +148,36 @@ pub(crate) async fn host_and_peer(
         Some(replace) => replace(addr),
         None => addr,
     });
-    let ip = peer.map(|addr| addr.ip().to_canonical());
-    match ip {
-        Some(ip) if ip.is_loopback() => {
-            request.extensions_mut().insert(Peer(ip));
-            next.run(request).await
-        }
-        _ => reject(
-            StatusCode::UNAUTHORIZED,
-            "이 컴퓨터에서만 들어올 수 있습니다",
-        ),
+    let Some(ip) = peer.map(|addr| addr.ip().to_canonical()) else {
+        return reject(StatusCode::UNAUTHORIZED, "상대 주소를 알 수 없습니다");
+    };
+    request.extensions_mut().insert(Peer(ip));
+    if ip.is_loopback() && !forwarded(request.headers()) {
+        return next.run(request).await;
     }
+    // 그 컴퓨터 밖: 접속 키로 세션을 만드는 경로만 열고, 나머지는 원격 세션이 있어야 한다.
+    request.extensions_mut().insert(Outside);
+    let entering = request.method() == Method::POST && request.uri().path() == SESSION_PATH;
+    if entering || find_session(&shared, request.headers(), true).is_some() {
+        next.run(request).await
+    } else {
+        reject(StatusCode::UNAUTHORIZED, "접속 키로 들어와야 합니다")
+    }
+}
+
+/// 전달 헤더([`FORWARDING_HEADERS`])가 하나라도 있는가(값은 보지 않는다).
+fn forwarded(headers: &HeaderMap) -> bool {
+    FORWARDING_HEADERS
+        .iter()
+        .any(|name| headers.contains_key(*name))
+}
+
+/// 쿠키의 세션 값들 가운데 살아 있는 세션의 종류. `outside`면 원격 세션만 친다.
+fn find_session(shared: &Shared, headers: &HeaderMap, outside: bool) -> Option<SessionKind> {
+    let now = shared.access.session_now();
+    session_values(headers)
+        .filter_map(|value| shared.access.sessions.find(value, now))
+        .find(|kind| !outside || matches!(kind, SessionKind::Remote { .. }))
 }
 
 /// `Origin`이 `http://<Host 헤더 값>`과 같은가. 없거나 여러 개면 아니다.
@@ -198,50 +225,21 @@ fn session_values(headers: &HeaderMap) -> impl Iterator<Item = &str> {
         .map(|(_, value)| value)
 }
 
-/// 4단계: 살아 있는 세션이 있어야 한다.
+/// 4단계: 살아 있는 세션이 있어야 한다. 그 컴퓨터 밖의 요청은 원격 세션이어야 한다.
+/// 지난 요청의 확장에 세션 종류를 넣는다(실시간 연결이 키를 바꿀 때 닫히는 데 쓴다).
 pub(crate) async fn session(
     State(shared): State<Arc<Shared>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
-    let alive = session_values(request.headers()).any(|value| shared.sessions.is_alive(value));
-    if alive {
-        next.run(request).await
-    } else {
-        reject(StatusCode::UNAUTHORIZED, "세션이 없습니다")
+    let outside = request.extensions().get::<Outside>().is_some();
+    match find_session(&shared, request.headers(), outside) {
+        Some(kind) => {
+            request.extensions_mut().insert(kind);
+            next.run(request).await
+        }
+        None => reject(StatusCode::UNAUTHORIZED, "세션이 없습니다"),
     }
-}
-
-/// `POST /api/session`: 접속 기록을 남기고 세션을 준다(C15 · M6).
-///
-/// 기록을 남기지 못하면 세션도 주지 않는다.
-pub(crate) async fn enter(
-    State(shared): State<Arc<Shared>>,
-    axum::Extension(Peer(ip)): axum::Extension<Peer>,
-) -> Response {
-    let access = NewAccess {
-        at: shared.hub.clock().now(),
-        origin: ip.to_string(),
-        action: ACCESS_ENTER.to_owned(),
-    };
-    let store = shared.hub.store().clone();
-    let recorded = tokio::task::spawn_blocking(move || store.record_access(access)).await;
-    if !matches!(recorded, Ok(Ok(_))) {
-        tracing::error!("접속 기록을 남기지 못해 세션을 주지 않습니다");
-        return reject(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "접속 기록을 남기지 못했습니다",
-        );
-    }
-    let Ok(value) = shared.sessions.create() else {
-        tracing::error!("난수를 얻지 못해 세션을 주지 않습니다");
-        return reject(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "세션을 만들지 못했습니다",
-        );
-    };
-    let cookie = format!("{SESSION_COOKIE}={value}; HttpOnly; SameSite=Strict; Path=/");
-    (StatusCode::NO_CONTENT, [(SET_COOKIE, cookie)]).into_response()
 }
 
 #[cfg(test)]

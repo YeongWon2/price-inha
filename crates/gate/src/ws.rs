@@ -18,6 +18,7 @@ use crate::LAST_SEQ_PARAM;
 use crate::frame::Frame;
 use crate::guard::Shared;
 use crate::hub::{Attach, Hub, Subscription};
+use crate::session::SessionKind;
 
 /// 화면이 보내는 프레임의 크기 상한. 화면은 보낼 것이 없으므로 작게 둔다.
 pub(crate) const MAX_INCOMING_BYTES: usize = 4 * 1024;
@@ -76,6 +77,7 @@ impl Drop for Slot {
 pub(crate) async fn upgrade(
     State(shared): State<Arc<Shared>>,
     RawQuery(query): RawQuery,
+    axum::Extension(kind): axum::Extension<SessionKind>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let Ok(last_seq) = parse_last_seq(query.as_deref()) else {
@@ -91,7 +93,7 @@ pub(crate) async fn upgrade(
     upgrade
         .max_message_size(MAX_INCOMING_BYTES)
         .max_frame_size(MAX_INCOMING_BYTES)
-        .on_upgrade(move |socket| run(socket, shared, last_seq, slot))
+        .on_upgrade(move |socket| run(socket, shared, last_seq, kind, slot))
 }
 
 /// 연결이 끝난 까닭.
@@ -106,18 +108,40 @@ enum End {
     Failed,
     /// ping에 정한 시간 안에 pong이 없었다(죽은 연결).
     Silent,
+    /// 접속 키를 바꿔 이 연결의 원격 세션이 끝났다(V41).
+    Revoked,
 }
 
-async fn run(mut socket: WebSocket, shared: Arc<Shared>, last_seq: Option<u64>, _slot: Slot) {
+async fn run(
+    mut socket: WebSocket,
+    shared: Arc<Shared>,
+    last_seq: Option<u64>,
+    kind: SessionKind,
+    _slot: Slot,
+) {
     let mut stop = shared.stop.clone();
-    let end = match stream(&mut socket, &shared, last_seq, &mut stop).await {
-        Ok(never) => match never {},
-        Err(end) => end,
+    let end = tokio::select! {
+        streamed = stream(&mut socket, &shared, last_seq, &mut stop) => match streamed {
+            Ok(never) => match never {},
+            Err(end) => end,
+        },
+        () = revoked(&shared, kind) => End::Revoked,
     };
     // 밀린 연결은 쓰기가 막혀 있으니 인사 없이 닫는다.
-    if matches!(end, End::Shutdown | End::Failed | End::Silent) {
+    if matches!(
+        end,
+        End::Shutdown | End::Failed | End::Silent | End::Revoked
+    ) {
         let goodbye = socket.send(Message::Close(None));
         let _ = tokio::time::timeout(CLOSE_TIMEOUT, goodbye).await;
+    }
+}
+
+/// 원격 세션이면 키를 바꿔 그 세대가 끝날 때까지 기다린다. 그 컴퓨터의 세션은 끝나지 않는다.
+async fn revoked(shared: &Shared, kind: SessionKind) {
+    match kind {
+        SessionKind::Remote { generation, .. } => shared.access.revoked(generation).await,
+        SessionKind::Local => std::future::pending().await,
     }
 }
 

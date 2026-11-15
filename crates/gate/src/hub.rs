@@ -127,10 +127,6 @@ impl Hub {
         &self.store
     }
 
-    pub(crate) fn clock(&self) -> &dyn Clock {
-        &*self.clock
-    }
-
     /// 내용이 크기 상한 안인가.
     fn fits(&self, payload: &Value) -> bool {
         frame::json_len(payload) <= self.max_frame_bytes
