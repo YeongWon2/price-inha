@@ -1,0 +1,40 @@
+//! 조건으로 찾기(종목 · 기간 · 손익). 원본에 없는 우리 고유 기능(4.3).
+
+use pi_store::UnixMillis;
+use rust_decimal::Decimal;
+
+/// 조건 검색이 견주는 매매 한 건의 요약. 호출하는 쪽(조립하는 곳)이 저장소의 매매에서 만든다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TradeRecord {
+    /// 색인에 올린 기록 키(`NewKnowledgeRecord::record_ref`와 같은 글자).
+    pub record_ref: String,
+    /// 종목 코드.
+    pub symbol: String,
+    /// 닫힌(팔린) 시각.
+    pub closed_at: UnixMillis,
+    /// 손익. 아직 모르면 `None`.
+    pub pnl: Option<Decimal>,
+}
+
+/// 매매 요약을 내는 포트.
+pub trait TradeCatalog {
+    /// 모든 매매의 요약. 순서는 정해지지 않았다.
+    fn trades(&self) -> Vec<TradeRecord>;
+}
+
+/// 조건. 정한 것만 거른다(모두 `None`이면 모든 매매). 양끝은 모두 **포함**한다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Condition {
+    /// 이 종목만.
+    pub symbol: Option<String>,
+    /// 이 시각 이후(포함)에 닫힌 것.
+    pub from: Option<UnixMillis>,
+    /// 이 시각 이전(포함)에 닫힌 것.
+    pub to: Option<UnixMillis>,
+    /// 손익이 이 값 이상(포함). 손익을 모르는 매매는 빠진다.
+    pub min_pnl: Option<Decimal>,
+    /// 손익이 이 값 이하(포함). 손익을 모르는 매매는 빠진다.
+    pub max_pnl: Option<Decimal>,
+    /// 가장 많이 줄 개수. `None`이면 설정의 기본 개수.
+    pub max: Option<usize>,
+}
