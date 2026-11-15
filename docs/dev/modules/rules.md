@@ -39,6 +39,10 @@
 
 `RiskParams`의 칸은 공개라 `adjust`를 거치지 않고 바뀔 수 있다. 점검은 언제나 `AbsoluteCaps::FIXED`로 다시 막는다(템플릿 값이 상한을 넘어도 상한이 이긴다).
 
+## 승격 판정
+
+승격 기준 판정은 `pi_template::RiskParams::evaluate_promotion`으로만 부른다(`promotion.evaluate`를 직접 부르면 낡은 낙폭 기준을 쓸 수 있다).
+
 ## 하지 않는 것
 
 AI 호출, 승인 요청 만들기(approval), 주문 내기(exec), 저장, 시계 읽기. VI · 거래정지 자료를 직접 가져오지 않는다(받은 표시만 본다).

@@ -21,6 +21,10 @@
    - 반영해도 상한을 넘지 않는다(pi-template로 확인).
 5. 하루 정리 내용(V12): 한 일, 손익, 복기, 마지막 백업 완료 시각(V50).
 
+## 승격 판정
+
+승격 기준 판정은 `pi_template::RiskParams::evaluate_promotion`으로만 부른다(`promotion.evaluate`를 직접 부르면 낡은 낙폭 기준을 쓸 수 있다).
+
 ## 하지 않는 것
 
 AI로 복기 글 쓰기(agent의 복기 담당), 알림 보내기(notify), 화면.
