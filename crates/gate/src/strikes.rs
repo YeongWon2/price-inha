@@ -21,6 +21,35 @@ struct Count {
     until: Option<UnixMillis>,
 }
 
+/// 잡아 둔 시도 자리. 끝내지 않고 버려지면(요청 취소) 자리를 돌려준다.
+pub(crate) struct Slot<'a> {
+    strikes: &'a Strikes,
+    device: IpAddr,
+}
+
+impl Slot<'_> {
+    /// 키를 틀렸다(자리를 쓴다). 이번에 잠기면 알림 내용을 돌려준다.
+    pub(crate) fn fail(self, now: UnixMillis) -> Option<LockNotice> {
+        let this = std::mem::ManuallyDrop::new(self);
+        this.strikes.record_failure(this.device, now)
+    }
+
+    /// 맞는 키로 들어왔다.
+    pub(crate) fn succeed(self) {
+        let this = std::mem::ManuallyDrop::new(self);
+        this.strikes.clear(this.device);
+    }
+
+    /// 키를 맞춰 보지 않고 자리를 돌려준다.
+    pub(crate) fn release(self) {}
+}
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.strikes.give_back(self.device);
+    }
+}
+
 /// 기기마다 틀린 횟수와 잠금.
 pub(crate) struct Strikes {
     remote: Mutex<HashMap<IpAddr, Count>>,
@@ -54,8 +83,9 @@ impl Strikes {
 
     /// 키를 맞춰 볼 자리를 잡는다. 잠겨 있거나 이미 맞춰 보는 중인 시도까지 합쳐 틀릴 수 있는
     /// 횟수를 채웠으면 거짓(잠금 확인과 시도 기록을 한 번에 한다). 잠금 시간이 지났으면 표시를 지운다.
-    /// 참이면 [`Strikes::fail`] · [`Strikes::succeed`] · [`Strikes::release`] 중 하나로 끝내야 한다.
-    pub(crate) fn reserve(&self, device: IpAddr, now: UnixMillis) -> bool {
+    /// 받은 [`Slot`]은 `fail` · `succeed` · `release`로 끝낸다. 요청이 중간에 취소되어 버려지면
+    /// `Drop`이 자리를 돌려준다.
+    pub(crate) fn reserve(&self, device: IpAddr, now: UnixMillis) -> Option<Slot<'_>> {
         let mut remote = lock(&self.remote);
         if let Some(count) = remote.get_mut(&device) {
             if count.until.is_some_and(|until| now >= until) {
@@ -63,18 +93,21 @@ impl Strikes {
             } else if count.until.is_some()
                 || count.failures.saturating_add(count.pending) >= MAX_KEY_FAILURES
             {
-                return false;
+                return None;
             }
         }
         if !remote.contains_key(&device) {
             make_room(&mut remote, self.max_tracked, now);
         }
         remote.entry(device).or_default().pending += 1;
-        true
+        Some(Slot {
+            strikes: self,
+            device,
+        })
     }
 
     /// 잡은 자리를 키를 맞춰 보지 않고 돌려준다.
-    pub(crate) fn release(&self, device: IpAddr) {
+    fn give_back(&self, device: IpAddr) {
         let mut remote = lock(&self.remote);
         if let Some(count) = remote.get_mut(&device) {
             count.pending = count.pending.saturating_sub(1);
@@ -86,7 +119,7 @@ impl Strikes {
 
     /// 다른 기기가 키를 틀렸다(잡아 둔 자리를 쓴다). 이번에 잠기면 알림 내용을 돌려준다
     /// (이미 잠겨 있으면 없음).
-    pub(crate) fn fail(&self, device: IpAddr, now: UnixMillis) -> Option<LockNotice> {
+    fn record_failure(&self, device: IpAddr, now: UnixMillis) -> Option<LockNotice> {
         let mut remote = lock(&self.remote);
         if !remote.contains_key(&device) {
             make_room(&mut remote, self.max_tracked, now);
@@ -114,7 +147,7 @@ impl Strikes {
     }
 
     /// 다른 기기가 맞는 키로 들어왔다.
-    pub(crate) fn succeed(&self, device: IpAddr) {
+    fn clear(&self, device: IpAddr) {
         lock(&self.remote).remove(&device);
     }
 
@@ -201,18 +234,25 @@ mod tests {
         let strikes = Strikes::default();
         let now = UnixMillis(1_000);
         for _ in 1..MAX_KEY_FAILURES {
-            assert!(strikes.reserve(A, now));
-            assert!(strikes.fail(A, now).is_none());
+            assert!(strikes.reserve(A, now).unwrap().fail(now).is_none());
         }
-        assert!(strikes.reserve(A, now));
-        let notice = strikes.fail(A, now).expect("다섯 번째에 잠긴다");
+        let notice = strikes
+            .reserve(A, now)
+            .unwrap()
+            .fail(now)
+            .expect("다섯 번째에 잠긴다");
         assert_eq!(notice.failures, MAX_KEY_FAILURES);
         assert_eq!(notice.until, UnixMillis(1_000 + lockout_millis()));
-        assert!(!strikes.reserve(A, now), "잠긴 동안은 자리를 주지 않는다");
-        assert!(strikes.reserve(B, now), "다른 기기는 그대로");
-        assert!(strikes.reserve(A, notice.until), "시간이 지나면 풀린다");
         assert!(
-            strikes.fail(A, notice.until).is_none(),
+            strikes.reserve(A, now).is_none(),
+            "잠긴 동안은 자리를 주지 않는다"
+        );
+        assert!(strikes.reserve(B, now).is_some(), "다른 기기는 그대로");
+        let slot = strikes
+            .reserve(A, notice.until)
+            .expect("시간이 지나면 풀린다");
+        assert!(
+            slot.fail(notice.until).is_none(),
             "풀린 뒤에는 처음부터 센다"
         );
     }
@@ -222,15 +262,13 @@ mod tests {
         let strikes = Strikes::default();
         let now = UnixMillis(0);
         for _ in 1..MAX_KEY_FAILURES {
-            strikes.reserve(A, now);
-            strikes.fail(A, now);
+            strikes.reserve(A, now).unwrap().fail(now);
         }
-        strikes.succeed(A);
-        assert!(strikes.fail(A, now).is_none());
+        strikes.reserve(A, now).unwrap().succeed();
+        assert!(strikes.reserve(A, now).unwrap().fail(now).is_none());
         assert!(!strikes.unlock(A, now), "잠기지 않았으면 거짓");
         for _ in 0..MAX_KEY_FAILURES {
-            strikes.reserve(B, now);
-            strikes.fail(B, now);
+            strikes.reserve(B, now).unwrap().fail(now);
         }
         assert_eq!(strikes.locked(now).len(), 1);
         assert!(strikes.unlock(B, now));
@@ -241,17 +279,19 @@ mod tests {
     fn 동시에_잡는_자리는_다섯을_넘지_않고_상한이_차면_오래_잠긴_기기부터_버린다() {
         let strikes = Strikes::new(2);
         let now = UnixMillis(0);
-        let taken = (0..30).filter(|_| strikes.reserve(A, now)).count();
-        assert_eq!(taken, MAX_KEY_FAILURES as usize);
-        strikes.release(A);
-        assert!(strikes.reserve(A, now), "돌려준 자리는 다시 쓴다");
+        let mut slots: Vec<Slot<'_>> = (0..30).filter_map(|_| strikes.reserve(A, now)).collect();
+        assert_eq!(slots.len(), MAX_KEY_FAILURES as usize);
+        slots.pop().unwrap().release();
+        assert!(strikes.reserve(A, now).is_some(), "돌려준 자리는 다시 쓴다");
+        drop(slots);
+        assert!(strikes.reserve(A, now).is_some(), "버려진 자리도 돌아온다");
         let strikes = Strikes::new(2);
         let c = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
         for (offset, device) in [(0_i64, A), (1, B), (2, c)] {
             let at = UnixMillis(offset);
             let mut tried = 0;
-            while strikes.reserve(device, at) {
-                strikes.fail(device, at);
+            while let Some(slot) = strikes.reserve(device, at) {
+                slot.fail(at);
                 tried += 1;
                 assert!(tried <= 5);
             }

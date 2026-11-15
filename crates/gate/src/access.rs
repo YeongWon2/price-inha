@@ -70,7 +70,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
 use crate::session::{Now, Sessions};
-use crate::strikes::Strikes;
+use crate::strikes::{Slot, Strikes};
 use crate::{Clock, GateError};
 
 /// 접속 키를 담는 JSON 본문의 칸 이름.
@@ -298,12 +298,13 @@ impl Access {
     }
 
     /// 다른 기기가 키를 틀렸다: 기록하고, 이번에 잠기면 잠김을 기록하고 알린다.
-    pub(crate) async fn remote_failed(&self, device: IpAddr, now: UnixMillis) {
+    /// 기록하는 도중 취소돼 `slot`이 버려지면 자리만 돌아온다.
+    pub(crate) async fn remote_failed(&self, slot: Slot<'_>, device: IpAddr, now: UnixMillis) {
         let origin = device.to_string();
         if !self.record(&origin, ACCESS_KEY_WRONG, now).await {
             tracing::error!("접속 키 틀림을 기록하지 못했습니다");
         }
-        if let Some(notice) = self.strikes.fail(device, now) {
+        if let Some(notice) = slot.fail(now) {
             tracing::warn!(%device, "접속 키를 여러 번 틀린 기기를 잠갔습니다");
             if !self.record(&origin, ACCESS_LOCKED, now).await {
                 tracing::error!("잠김을 기록하지 못했습니다");

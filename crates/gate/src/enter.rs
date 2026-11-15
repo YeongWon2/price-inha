@@ -76,17 +76,17 @@ async fn enter_remote(shared: &Shared, ip: IpAddr, key: Option<String>) -> Respo
     let access = &shared.access;
     let now = access.now();
     // 잠금 확인과 시도 기록을 한 번에: 자리를 잡은 시도만 키를 맞춰 본다.
-    if !access.strikes.reserve(ip, now) {
+    let Some(slot) = access.strikes.reserve(ip, now) else {
         let status = StatusCode::from_u16(LOCKED_STATUS).unwrap_or(StatusCode::TOO_MANY_REQUESTS);
         return reject(status, "잠시 뒤에 다시 시도하세요");
-    }
+    };
     let Some(key) = key else {
-        access.strikes.release(ip);
+        slot.release();
         return reject(StatusCode::UNAUTHORIZED, DENIED);
     };
     match access.verify(&key).await {
         Ok(Some(generation)) => {
-            access.strikes.succeed(ip);
+            slot.succeed();
             let kind = SessionKind::Remote {
                 generation,
                 made_at: now,
@@ -94,11 +94,11 @@ async fn enter_remote(shared: &Shared, ip: IpAddr, key: Option<String>) -> Respo
             grant(shared, ip, kind).await
         }
         Ok(None) => {
-            access.remote_failed(ip, now).await;
+            access.remote_failed(slot, ip, now).await;
             reject(StatusCode::UNAUTHORIZED, DENIED)
         }
         Err(_) => {
-            access.strikes.release(ip);
+            slot.release();
             unreadable()
         }
     }
