@@ -79,6 +79,22 @@ AI 검토에서 기계로 잡을 수 있는 종류의 문제가 나오면, 고�
 | paper | `pi-paper` | A8 주문 실행기 가운데 모의계좌와 체결 | `pi-market` |
 | gate | `pi-gate` | A2 접속 관문, 실시간 연결 | `pi-store` |
 | server | `price-inha` | 실행 파일, 조립 | 모두 |
+| template | `pi-template` | A6 가운데 템플릿 값 · 절대 상한 · 승격 기준 | 없음 |
+| rules | `pi-rules` | A6 규칙 엔진 | `pi-template`, `pi-paper`, `pi-market` |
+| approval | `pi-approval` | A7 승인 관리 | `pi-store` |
+| exec | `pi-exec` | A8 주문 실행기(모의계좌 바깥) | `pi-paper`, `pi-market`, `pi-store` |
+| data | `pi-data` | A10 자료 어댑터 | `pi-secrets` |
+| trigger | `pi-trigger` | A5 트리거 감시 | `pi-market` |
+| agent | `pi-agent` | A4 에이전트 실행기 | `pi-ai`, `pi-store` |
+| journal | `pi-journal` | A4 복기 · M4 · 하루 정리 | `pi-store`, `pi-template` |
+| knowledge | `pi-knowledge` | A12 지식 검색 | `pi-store` |
+| backup | `pi-backup` | A14 백업기 | `pi-store`, `pi-secrets` |
+| office | `pi-office` | A3 사무실 서버 + A1 3D 사무실 화면 | `pi-store` |
+| notify | `pi-notify` | A3 알림 · 웹 푸시 + A1 폰 화면 | `pi-store` |
+
+새 모듈(template 아래 12개)은 2026-11-16 로드맵(`docs/dev/roadmap.md`)으로 더했다. 표의 행은 계획이고, `architecture.toml`의 `[crates.*]` 항목은 그 크레이트를 처음 만드는 N1 커밋과 함께 더한다(없는 크레이트가 표에 있으면 ARCH-CRATE가 모든 모듈 검사를 깨기 때문이다).
+**새 모듈을 더하는 절차** (N0, 조정자): (1) `architecture.toml`에 그 크레이트 항목(과 새 금지 모양, 그 표본을 `scripts/selftest.py` `PATTERN_SAMPLES`에)을 더하고 `[crates.price-inha] internal`에 이름을 더한다. (2) 같은 커밋에 워크스페이스 뼈대 `crates/<모듈>/`(`Cargo.toml`, 문서 주석만 있는 `src/lib.rs`, `src/error.rs`)를 만든다(워크스페이스는 `crates/*`를 이미 구성원으로 둔다). (3) `python3.14 scripts/selftest.py`를 돌려 통과시키고 커밋한다. (4) 그다음 N1을 시작한다. 검사 스크립트(`scripts/lib.sh`)는 `crates/<모듈>/Cargo.toml`이 있는 모듈만 검사한다. 그래서 뼈대를 만든 뒤 G1 전까지는 전체 검사(`scripts/verify.sh`)가 그 모듈의 필수 번호 빠짐으로 실패한다. 이 사이에는 모듈별 검사(`scripts/verify.sh <모듈>`)를 쓴다.
+조립(`crates/server`)은 2026-11-16부터 gate가 아니라 server 모듈이다(`docs/dev/modules/server.md`).
 
 컨벤션 요약: 오류는 모듈마다 `src/error.rs`의 `thiserror` enum, 공개 항목에는 문서 주석, 라이브러리는 환경 변수 · 시계를 직접 읽지 않고 인자로 받음, 기록은 `tracing`(`println!` 금지), 돈은 십진수, 파일 500줄 · 함수 80줄 이하.
 

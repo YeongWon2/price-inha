@@ -28,7 +28,8 @@ GRAPH = tomllib.loads((ROOT / "docs/dev/graph.toml").read_text(encoding="utf-8")
 STATE_FILE = ROOT / ".pipeline/state.json"
 # 실행기가 만드는 커밋 끝에 붙는 줄. 바꿀 때는 이 한 곳만 고친다.
 COAUTHOR = "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-DIRS = {"gate": ["crates/gate", "crates/server"]}
+# 모듈 → 폴더. 기본은 crates/<모듈>(server 는 crates/server). 2026-11-16 조립을 gate 에서 server 로 떼어 냄.
+DIRS = {}
 # 단계 순서: 할 일 → N1 중 → red 확인됨 → 잠김 → N2 중 → green → N3 중 → 검토 통과
 ORDER = ["todo", "n1", "red_ok", "locked", "n2", "green", "n3", "reviewed"]
 LABEL = {

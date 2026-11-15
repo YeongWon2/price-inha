@@ -17,7 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RULES = tomllib.loads((ROOT / "docs/dev/architecture.toml").read_text(encoding="utf-8"))
-MODULES = ["store", "secrets", "ai", "market", "paper", "gate"]
+# 규칙 파일에 있는 크레이트의 모듈(폴더 이름). crates/server 는 server 모듈이다.
+MODULES = [Path(rule["dir"]).name for rule in RULES["crates"].values()]
+# 테스트에서 부르는 크레이트 이름. server(price-inha)는 실행 파일뿐이라 부를 라이브러리가 없다.
+TEST_CRATE = {m: f"pi_{m}" for m in MODULES}
+TEST_CRATE["server"] = None
 
 # 금지 모양마다 "어긴 코드 한 줄"과 넣을 파일. architecture.toml 에 모양을 더하면 여기에도 더해야 한다.
 PATTERN_SAMPLES = {
@@ -73,9 +77,10 @@ def build_fixture(fx):
     for m in MODULES:
         t = fx / f"crates/{m}/tests"
         t.mkdir()
-        crate = f"pi_{m}"
+        crate = TEST_CRATE[m]
+        call = f"{crate}::add(1, 2)" if crate else "1 + 2"
         (t / "t.rs").write_text(
-            f"// 검증: {', '.join(required_ids(m))}\n#[test]\nfn adds() {{\n    assert_eq!({crate}::add(1, 2), 3);\n}}\n"
+            f"// 검증: {', '.join(required_ids(m))}\n#[test]\nfn adds() {{\n    assert_eq!({call}, 3);\n}}\n"
         )
     sh(["git", "init", "-q", "-b", "main"], fx)
     sh(["git", "config", "user.email", "selftest@example.invalid"], fx)

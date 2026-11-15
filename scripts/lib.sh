@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
 # 파이프라인 스크립트가 함께 쓰는 표. docs/dev/pipeline.md 6장과 같아야 한다.
-MODULES="store secrets ai market paper gate"
+# 모든 모듈(그래프 docs/dev/graph.toml 과 같은 순서). 폴더는 crates/<모듈>, 패키지는 pi-<모듈>(server 는 price-inha).
+ALL_MODULES="store secrets ai market paper gate server template rules approval exec data trigger agent journal knowledge backup office notify"
 
 module_dirs() { # 모듈 → 폴더들
-  case "$1" in
-    gate) echo "crates/gate crates/server" ;;
-    store|secrets|ai|market|paper) echo "crates/$1" ;;
+  case " $ALL_MODULES " in
+    *" $1 "*) echo "crates/$1" ;;
     *) echo "모르는 모듈: $1" >&2; return 1 ;;
   esac
 }
 
 module_pkgs() { # 모듈 → cargo -p 인자
   case "$1" in
-    gate) echo "-p pi-gate -p price-inha" ;;
+    server) echo "-p price-inha" ;;
     *) echo "-p pi-$1" ;;
   esac
 }
+
+# 검사하는 모듈: 크레이트가 이미 있는 것만(새 모듈은 그 크레이트를 처음 만드는 커밋부터 들어온다).
+MODULES=""
+for _m in $ALL_MODULES; do
+  [ -f "crates/$_m/Cargo.toml" ] && MODULES="$MODULES $_m"
+done
+MODULES="${MODULES# }"
+unset _m
 
 module_test_dirs() {
   local d out=""
