@@ -1,8 +1,68 @@
 //! 오류.
 
+use chrono::{DateTime, Utc};
+use pi_paper::{AccountKind, BrokerError};
+use pi_store::{StoreError, TradeId, TradeState};
 use thiserror::Error;
 
-/// 이 모듈의 오류.
+/// 이 모듈의 오류. 거부된 호출은 증권사에 주문을 내지 않는다(아래 각 줄에 예외를 적는다).
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum Error {}
+pub enum Error {
+    /// 다시 켠 뒤 저장소의 주문됨 매매와 증권사 주문을 아직 맞춰 보지 않았다(E16).
+    /// [`crate::Executor::reconcile`]이 끝나기 전에는 새 주문(사기 · 팔기 · 다시 내기)을 받지 않는다.
+    #[error("다시 켠 뒤 증권사와 맞춰 보기 전이라 새 주문을 받지 않는다")]
+    NotReady,
+
+    /// 계좌 종류가 증권사의 것과 다르다(E25). 템플릿의 계좌 종류나 매매의 계좌 종류 가운데
+    /// 증권사와 다른 것이 `found`다. 매매는 그대로이고 주문을 내지 않는다.
+    #[error("계좌 종류가 다르다: 증권사 {broker:?}, 받은 것 {found:?}")]
+    AccountKindMismatch {
+        /// 증권사의 계좌 종류.
+        broker: AccountKind,
+        /// 다른 쪽의 계좌 종류.
+        found: AccountKind,
+    },
+
+    /// 점검 통과 표시의 내용이 매매와 맞지 않는다: 종목이 다르거나, 사는 길에 파는 표시가
+    /// (또는 그 반대가) 왔거나, 다시 내는 파는 주문의 내용이 처음 것과 다르다.
+    /// 매매는 그대로이고 주문을 내지 않는다.
+    #[error("점검 통과 표시의 내용이 매매와 맞지 않는다")]
+    PermitMismatch,
+
+    /// 승인대기인 매매인데 승인 소비 결과가 없다. 매매는 그대로이고 주문을 내지 않는다.
+    #[error("승인대기인 매매는 승인 소비 결과가 있어야 낸다")]
+    ApprovalRequired,
+
+    /// 파는 주문은 보유중인 매매에만 낸다. 지금 상태를 담는다.
+    #[error("보유중이 아닌 매매다: {0:?}")]
+    NotHolding(TradeState),
+
+    /// 다시 낼 파는 주문이 없다.
+    #[error("다시 낼 파는 주문이 없다: {0:?}")]
+    NoPendingSell(TradeId),
+
+    /// 다시 낼 때가 아직 아니다(물러서기 간격, E30). 증권사를 부르지 않고 횟수도 그대로다.
+    #[error("다시 낼 때가 아직 아니다: {retry_at}")]
+    RetryNotDue {
+        /// 다시 낼 수 있는 가장 이른 시각.
+        retry_at: DateTime<Utc>,
+    },
+
+    /// 증권사가 주문을 받지 않거나 응답하지 않았다(E13 · E30). 이상 감지 멈춤 요구다.
+    /// 팀 상태를 바꾸는 것은 부르는 쪽이 한다.
+    #[error("증권사 주문 실패(이상 감지 멈춤 요구): {0}")]
+    AnomalyStop(BrokerError),
+
+    /// 증권사가 그 밖의 이유로 주문을 거부했다(점검 표시가 맞지 않음(E33) 등).
+    #[error("증권사가 주문을 거부했다: {0}")]
+    Rejected(BrokerError),
+
+    /// 저장소 오류. 주문됨으로 저장하지 못했으면 주문을 내지 않는다(persist-before-execute).
+    #[error("저장소: {0}")]
+    Store(#[from] StoreError),
+
+    /// 저장소의 계좌 스냅샷을 되살릴 수 없다(V6). 처음 계좌로 열지 않는다.
+    #[error("계좌 스냅샷을 되살릴 수 없다: {0}")]
+    Snapshot(String),
+}
