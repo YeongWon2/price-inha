@@ -38,25 +38,29 @@ CREATE TRIGGER legacy_boundary_no_insert BEFORE INSERT ON legacy_boundary
 BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
 ";
 
-/// 이미 버전 3인 파일에서 경계로 보는 줄(옛 봉투 줄): 내용이 **정확히 두 칸**(`at` · `payload`)인
-/// 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다. 두 칸은 `json_each`로 센다.
-/// `CASE`는 JSON이 아닌 내용에서 JSON 함수가 오류를 내지 않게 먼저 `json_valid`를 보려는 것이다.
+/// 옛 봉투 줄을 가르는 SQL 조건(`events` 표의 `payload` · `at` 칸): 내용이 **정확히 두 칸**
+/// (`at` · `payload`)인 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다.
+/// 두 칸은 `json_each`로 센다. `CASE`는 JSON이 아닌 내용에서 JSON 함수가 오류를 내지 않게 먼저
+/// `json_valid`를 보려는 것이다. 이 조건을 지난 줄도 [`readable_by_gate`]를 지나야 옛 봉투 줄이다.
+/// 경계를 정할 때([`boundary_before`])와 옛 봉투 번호를 줄 때([`legacy_envelope_seqs`])가 이 하나를
+/// 함께 쓴다(7차: 규칙을 두 벌로 두지 않는다).
 ///
 /// 5차에서 좁힘(2026-11-15): `json_type`은 JSON 글자의 모양만 보아 i64 범위 밖의 정수와 `-0`도
 /// `'integer'`라 한다. 그래서 꺼낸 값이 SQL 정수인지(`typeof(json_extract(…))`: 범위 밖이면 실수로
 /// 꺼낸다)와, 적힌 글자(`->`가 원래 글자를 돌려준다)가 `-0`이 아닌지를 더 본다. 맨 위 칸의 이름이
 /// 겹친 객체는 `json_each`가 겹친 칸도 하나씩 세므로 두 칸 조건에서 이미 빠진다.
-/// (이 SQL도 버전 3 → 4로 올리는 순간에만 돈다. 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
+/// 시각 칸이 정수가 아닌 줄(버전 2에서 범위 밖 `at`이 실수로 옮겨 적힌 줄)은 내용의 `at`도 범위
+/// 밖이라 정수 조건에서 이미 빠진다.
 ///
 /// 6차에서 좁힘(2026-11-15): SQLite `json_valid`는 짝 없는 서로게이트 이스케이프(`"\ud800"`)가
-/// 든 글자도 JSON으로 받지만 `serde_json`(접속 관문)은 거부한다. 그래서 이 SQL은 후보 줄만 번호가
-/// 큰 순서로 내고, [`boundary_before`]가 `serde_json`으로 읽히는 첫 줄을 경계로 고른다(관문과 같게).
+/// 든 글자도 JSON으로 받지만 `serde_json`(접속 관문)은 거부한다. 그래서 그 판정은
+/// [`readable_by_gate`]가 원래 글자로 한다(관문과 같게).
 /// (바로잡음 2026-11-14: 처음 SQL은 시각 칸이 채워진 줄만 보고 칸 수를 세지 않았다. 버전 4는 이번
 /// 차수 안에서 아직 어느 실제 파일에도 쓰이지 않았으므로 버전 5를 따로 두지 않고 이 단계를 고친다.
-/// 이 SQL은 버전 3 → 4로 올리는 순간에만 돌고, 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
-const V3_FILLED_ENVELOPES: &str = "
-SELECT seq, payload FROM events
-WHERE CASE WHEN json_valid(payload) THEN
+/// 경계는 버전 3 → 4로 올리는 순간에만 정하고, 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
+macro_rules! envelope_condition {
+    () => {
+        "CASE WHEN json_valid(payload) THEN
       json_type(payload) = 'object'
       AND (SELECT COUNT(*) FROM json_each(payload)) = 2
       AND json_type(payload, '$.at') = 'integer'
@@ -64,9 +68,51 @@ WHERE CASE WHEN json_valid(payload) THEN
       AND (payload -> '$.at') <> '-0'
       AND json_type(payload, '$.payload') IS NOT NULL
       AND (at IS NULL OR json_extract(payload, '$.at') = at)
-  ELSE 0 END
-ORDER BY seq DESC
-";
+  ELSE 0 END"
+    };
+}
+
+/// 이미 버전 3인 파일의 옛 봉투 후보 줄, 번호가 큰 순서.
+const V3_FILLED_ENVELOPES: &str = concat!(
+    "SELECT seq, payload FROM events WHERE ",
+    envelope_condition!(),
+    " ORDER BY seq DESC"
+);
+
+/// 번호가 `?1`보다 크고 `?2` 이하인 옛 봉투 후보 줄, 번호 순서(7차).
+const ENVELOPES_BETWEEN: &str = concat!(
+    "SELECT seq, payload FROM events WHERE seq > ?1 AND seq <= ?2 AND ",
+    envelope_condition!(),
+    " ORDER BY seq"
+);
+
+/// [`envelope_condition`]을 지난 후보 줄이 접속 관문(`serde_json`)에도 읽히는가. 짝 없는 서로게이트
+/// 이스케이프가 든 글자 등은 관문이 옛 봉투로 풀 수 없으므로 옛 봉투 줄이 아니다.
+fn readable_by_gate(payload: ValueRef<'_>) -> bool {
+    match payload {
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+            .ok()
+            .is_some_and(|text| serde_json::from_str::<serde_json::Value>(text).is_ok()),
+        _ => false,
+    }
+}
+
+/// 후보 질의를 돌려 옛 봉투 줄의 번호를 질의 순서대로 `visit`에 넘긴다. `visit`이 거짓을 주면 멈춘다.
+fn scan_envelopes(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+    mut visit: impl FnMut(i64) -> bool,
+) -> Result<(), StoreError> {
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query(params)?;
+    while let Some(row) = rows.next()? {
+        if readable_by_gate(row.get_ref(1)?) && !visit(row.get(0)?) {
+            break;
+        }
+    }
+    Ok(())
+}
 
 /// 이전을 시작하기 전(아무 단계도 돌리기 전)에 경계 번호를 정한다. 규칙은
 /// [`crate::Store::legacy_envelope_until`]의 문서 주석에 있다.
@@ -85,24 +131,14 @@ pub(super) fn boundary_before(conn: &Connection, version: u32) -> Result<Option<
     }
 }
 
-/// 이미 버전 3인 파일의 옛 봉투 줄 가운데 가장 큰 번호. SQL이 고른 후보 가운데 `serde_json`이
-/// 읽지 못하는 줄(짝 없는 서로게이트 이스케이프 등)은 접속 관문이 옛 봉투로 풀 수 없으므로 뺀다.
+/// 이미 버전 3인 파일의 옛 봉투 줄 가운데 가장 큰 번호.
 fn v3_last_envelope(conn: &Connection) -> Result<Option<i64>, StoreError> {
-    let mut stmt = conn.prepare(V3_FILLED_ENVELOPES)?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let seq: i64 = row.get(0)?;
-        let readable = match row.get_ref(1)? {
-            ValueRef::Text(bytes) => std::str::from_utf8(bytes)
-                .ok()
-                .is_some_and(|text| serde_json::from_str::<serde_json::Value>(text).is_ok()),
-            _ => false,
-        };
-        if readable {
-            return Ok(Some(seq));
-        }
-    }
-    Ok(None)
+    let mut last = None;
+    scan_envelopes(conn, V3_FILLED_ENVELOPES, [], |seq| {
+        last = Some(seq);
+        false
+    })?;
+    Ok(last)
 }
 
 /// 모든 단계를 돌린 뒤: 경계 줄을 넣고 더 넣지 못하게 막는다.
@@ -133,6 +169,40 @@ pub(crate) fn legacy_envelope_until(conn: &Connection) -> Result<Option<u64>, St
             StoreError::Incompatible(format!("옛 기록 형식의 경계 번호가 이상하다: {seq}"))
         }),
     }
+}
+
+/// 경계 번호 이하이면서 `after`보다 큰 옛 봉투 줄의 번호, 번호 순서로 `max`개까지(7차).
+/// 규칙은 경계를 정할 때와 같은 [`envelope_condition`] · [`readable_by_gate`]다.
+pub(crate) fn legacy_envelope_seqs(
+    conn: &Connection,
+    after: u64,
+    max: usize,
+) -> Result<Vec<u64>, StoreError> {
+    let Some(until) = legacy_envelope_until(conn)? else {
+        return Ok(Vec::new());
+    };
+    // 경계는 i64 범위 안이다. 그보다 큰 `after` 뒤에는 아무것도 없다.
+    let (Ok(after), Ok(until)) = (i64::try_from(after), i64::try_from(until)) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    if max == 0 || after >= until {
+        return Ok(out);
+    }
+    let mut bad = None;
+    scan_envelopes(conn, ENVELOPES_BETWEEN, [after, until], |seq| {
+        match u64::try_from(seq) {
+            Ok(seq) => out.push(seq),
+            Err(_) => bad = Some(seq),
+        }
+        bad.is_none() && out.len() < max
+    })?;
+    if let Some(seq) = bad {
+        return Err(StoreError::Incompatible(format!(
+            "이벤트 번호가 이상하다: {seq}"
+        )));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -89,7 +89,8 @@ pub(crate) fn read_after(
 /// 범위에 드는 이벤트를 시각과 함께, 번호 순서로 `max`개까지.
 ///
 /// 시각 조건은 경계를 빼고(같은 시각은 빠진다), 시각 칸이 빈 줄은 시각 조건이 있으면 빠진다
-/// (SQL에서 빈 칸과의 비교는 참이 아니다).
+/// (SQL에서 빈 칸과의 비교는 참이 아니다). 시각 칸이 정수가 아닌 줄(7차)은 시각 없음으로 읽고,
+/// 시각 조건이 있으면 빠진다.
 pub(crate) fn read_events(
     conn: &Connection,
     range: EventRange,
@@ -110,12 +111,17 @@ pub(crate) fn read_events(
     let mut rows = stmt.query(rusqlite::params_from_iter(binds))?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
-        let at: Option<i64> = row.get(2)?;
+        // 시각 칸이 정수가 아니면(버전 2 파일에서 i64 범위 밖의 `at`이 실수로 옮겨 적힌 줄, 7차)
+        // 시각 없음으로 읽는다.
+        let at = match row.get_ref(2)? {
+            rusqlite::types::ValueRef::Integer(at) => Some(UnixMillis(at)),
+            _ => None,
+        };
         let text: String = row.get(3)?;
         out.push(TimedEvent {
             seq: codec::seq(row, 0)?,
             kind: row.get(1)?,
-            at: at.map(UnixMillis),
+            at,
             payload: serde_json::from_str(&text)?,
         });
     }
@@ -135,6 +141,10 @@ fn events_query(after_at: bool, before_at: bool) -> String {
         "events"
     };
     let mut sql = format!("SELECT seq, kind, at, payload FROM {source} WHERE seq > ?");
+    if after_at || before_at {
+        // 시각 칸에 실수가 적힌 줄은 시각 없음이므로 시각 조건에서 빠진다(7차).
+        sql.push_str(" AND typeof(at) = 'integer'");
+    }
     if after_at {
         sql.push_str(" AND at > ?");
     }

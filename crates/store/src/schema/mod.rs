@@ -20,7 +20,7 @@ use v2::V2;
 use v3::V3;
 use v4::V4;
 
-pub(crate) use v4::legacy_envelope_until;
+pub(crate) use v4::{legacy_envelope_seqs, legacy_envelope_until};
 
 /// 이 저장소가 만든 파일이라는 표시(`application_id`). 글자 "PIST".
 const APPLICATION_ID: i64 = 0x5049_5354;

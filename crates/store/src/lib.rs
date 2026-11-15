@@ -313,8 +313,7 @@ impl Store {
     ///   줄(`{"at":1,"payload":1,"payload":2}` 등)을 옛 봉투와 가를 수 없으므로 이 목록을 쓴다.
     /// - 읽기만 한다. 아무것도 바꾸지 않는다.
     pub fn legacy_envelope_seqs(&self, after: u64, max: usize) -> Result<Vec<u64>, StoreError> {
-        let _ = (after, max);
-        todo!()
+        self.read(|conn| schema::legacy_envelope_seqs(conn, after, max))
     }
 
     // ───────────── 접속 기록 (M6) ─────────────
