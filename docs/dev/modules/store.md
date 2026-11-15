@@ -164,6 +164,10 @@ SQLite는 `recursive_triggers`가 꺼져 있어 `INSERT OR REPLACE` · `REPLACE 
 
 rowid를 명시한 `INSERT OR REPLACE (rowid, …)`는 선언 키만 보는 트리거를 비켜 옛 줄을 지운다. `INTEGER PRIMARY KEY` 별칭이 없는 보호 표(room_events · trigger_receipts · trade_facts · template_revisions · proposal_evidence)의 `*_no_replace`에 `OR EXISTS (… WHERE rowid = NEW.rowid)`를 더한다. 공통 우회 테스트에 rowid 명시 변형을 보호 표 전체로 더한다.
 
+## 다음 차수 후보
+
+1. 잠긴 픽스처 폴더에 실수로 커밋된 `tests/fixtures/v5.db-shm` · `v5.db-wal`(빈 SQLite 부속 파일)을 지운다(다음 N1 때).
+
 ## 모양
 
 - `Store`는 `Clone + Send + Sync`이고 동기 API다(호출하는 쪽이 필요하면 `spawn_blocking`).
