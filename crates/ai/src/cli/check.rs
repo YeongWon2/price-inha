@@ -21,7 +21,7 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::Instant;
 
 use super::command;
-use super::groups::{KILL_COMMAND, signal_group_with};
+use super::groups::{KILL_COMMAND, kill_lingering_with, signal_group_with};
 use super::{CLI_MIN_VERSION, ClaudeCliConfig, CliCheck, CliStatus, CliVersion};
 
 /// 확인 명령이 제한을 넘긴 뒤에도 출력을 읽어 버리며 스스로 끝나기를 기다리는 시간.
@@ -223,19 +223,33 @@ struct Ender {
 }
 
 impl Ender {
-    /// 그룹에 `SIGTERM` → 유예 → `SIGKILL`을 보내고 거둔다. 신호 명령을 띄우지 못하면
+    /// 그룹에 `SIGTERM` → 유예 → `SIGKILL`을 보내고 거둔다. 자식이 유예 안에 끝나도 그룹이 유예
+    /// 뒤까지 남아 있으면 `SIGKILL`(ai.md 6차 1). 신호 명령을 띄우지 못하면
     /// `start_kill`로 물러서고, 마지막 기다림에는 [`REAP_WAIT`] 상한을 둔다(ai.md 5차 2).
     async fn end(&self, child: &mut Child, pgid: Option<u32>) {
-        if !self.signal("TERM", pgid).await {
+        let termed = self.signal("TERM", pgid).await;
+        if !termed {
             let _ = child.start_kill();
         }
+        let until = Instant::now().checked_add(self.grace);
         if tokio::time::timeout(self.grace, child.wait()).await.is_ok() {
+            if termed {
+                self.linger(pgid, until).await;
+            }
             return;
         }
         if !self.signal("KILL", pgid).await {
             let _ = child.start_kill();
         }
         let _ = tokio::time::timeout(REAP_WAIT, child.wait()).await;
+    }
+
+    /// 거둔 뒤 `SIGTERM`을 받은 그룹이 `until`까지 비지 않으면 `SIGKILL`(ai.md 6차 1).
+    /// 끝 시각이 넘치면 지금 본다.
+    async fn linger(&self, pgid: Option<u32>, until: Option<Instant>) {
+        if let Some(pgid) = pgid {
+            kill_lingering_with(self.kill, pgid, until.unwrap_or_else(Instant::now)).await;
+        }
     }
 
     async fn signal(&self, signal: &str, pgid: Option<u32>) -> bool {
@@ -247,7 +261,7 @@ impl Ender {
 }
 
 /// 확인 프로세스를 지키는 일. 출력을 읽어 버리며 끝나기를 기다려 거두고, 정상으로 거두면 묶음에
-/// 남은 손주를 `SIGTERM` 한 번으로 끝낸다(ai.md 5차 4). `settle_at`까지 끝나지 않거나 끝내기가
+/// 남은 손주에 `SIGTERM`을 보내고 유예 뒤에도 남으면 `SIGKILL`(ai.md 5차 4 · 6차 1). `settle_at`까지 끝나지 않거나 끝내기가
 /// 시작되면 묶음째 `SIGTERM` → 유예 → `SIGKILL`로 끝내고 거둔다(4차 7 · 5차 3).
 /// 거둔 그룹 번호에는 신호를 다시 보내지 않는다(5차 6).
 /// 거둔 뒤에 살아 있음 표시를 내리고 결과를 보낸다(다음 확인이 바로 띄울 수 있게).
@@ -288,8 +302,11 @@ async fn keep(
     };
     let output = match finished {
         Some((Ok(status), read)) => {
-            // 거뒀다. 묶음에 남은 손주를 한 번만 끝낸다.
-            ender.signal("TERM", pgid).await;
+            // 거뒀다. 묶음에 남은 손주에 `SIGTERM`, 유예 뒤에도 남으면 `SIGKILL`(6차 1).
+            let until = Instant::now().checked_add(ender.grace);
+            if ender.signal("TERM", pgid).await {
+                ender.linger(pgid, until).await;
+            }
             read.map(|stdout| Output {
                 status,
                 stdout,

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{Notify, oneshot};
 
@@ -169,10 +169,10 @@ impl Groups {
     }
 }
 
-/// 그룹 전체에 신호를 보낸다(`kill -<신호> -- -<그룹>`). 막히는 함수 안에서 쓴다.
-/// 신호 명령이 떠서 성공으로 끝났으면 참.
-pub(super) fn signal_group(signal: &str, pgid: u32) -> bool {
-    StdCommand::new(KILL_COMMAND)
+/// `program`을 신호 명령으로 써서 그룹 전체에 신호를 보낸다(`kill -<신호> -- -<그룹>`).
+/// 막히는 함수 안에서 쓴다. 신호 명령이 떠서 성공으로 끝났으면 참.
+pub(super) fn signal_group(program: &Path, signal: &str, pgid: u32) -> bool {
+    StdCommand::new(program)
         .args(kill_args(signal, pgid))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -181,7 +181,7 @@ pub(super) fn signal_group(signal: &str, pgid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// [`signal_group`]의 비동기판.
+/// [`KILL_COMMAND`]로 그룹 전체에 신호를 보내는 비동기판.
 pub(super) async fn signal_group_async(signal: &str, pgid: u32) -> bool {
     signal_group_with(Path::new(KILL_COMMAND), signal, pgid).await
 }
@@ -197,6 +197,45 @@ pub(super) async fn signal_group_with(program: &Path, signal: &str, pgid: u32) -
         .await
         .is_ok_and(|s| s.success())
 }
+
+/// 그룹에 `SIGTERM`을 보낸 뒤 `until`까지 그룹이 비기를 기다리고, 그때도 남아 있으면 `SIGKILL`을
+/// 보낸다(ai.md 6차 1 — `SIGTERM`을 무시하는 손주가 남지 않게). 그룹 이끔이를 이미 거둔 뒤에도 쓴다:
+/// 보내기 바로 앞에 그룹이 아직 있는지(`kill -0`) 확인하므로, 그룹이 비어 번호가 다른 데 다시 쓰일 수
+/// 있게 된 뒤에는 신호를 보내지 않는다(그룹에 프로세스가 하나라도 있으면 그 번호는 다시 쓰이지 않는다).
+pub(super) async fn kill_lingering_with(program: &Path, pgid: u32, until: tokio::time::Instant) {
+    loop {
+        if !signal_group_with(program, "0", pgid).await {
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= until {
+            signal_group_with(program, "KILL", pgid).await;
+            return;
+        }
+        tokio::time::sleep(LINGER_POLL.min(until - now)).await;
+    }
+}
+
+/// [`kill_lingering_with`]의 막히는 판. `grace` 동안 기다린다.
+pub(super) fn kill_lingering(program: &Path, pgid: u32, grace: Duration) {
+    let until = Instant::now().checked_add(grace);
+    loop {
+        if !signal_group(program, "0", pgid) {
+            return;
+        }
+        let now = Instant::now();
+        match until {
+            Some(until) if now < until => std::thread::sleep(LINGER_POLL.min(until - now)),
+            _ => {
+                signal_group(program, "KILL", pgid);
+                return;
+            }
+        }
+    }
+}
+
+/// 남은 그룹이 비었는지 다시 보는 간격.
+const LINGER_POLL: Duration = Duration::from_millis(20);
 
 fn kill_args(signal: &str, pgid: u32) -> [String; 3] {
     [format!("-{signal}"), "--".to_string(), format!("-{pgid}")]
