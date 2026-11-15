@@ -146,7 +146,8 @@ use crate::{fill, verify};
 pub const IDEMPOTENCY_WINDOW: Duration = Duration::from_secs(600);
 
 /// 지금 내보내는 [`Snapshot`]의 모양 번호. 2: 마지막 시세에 거래소 시각 · 받은 시각이 들어갔다.
-const SNAPSHOT_VERSION: u32 = 2;
+/// 3: 내보낸 시각(이 계좌가 마지막으로 받은 `now`, `ledger.last_now`)이 들어갔다.
+const SNAPSHOT_VERSION: u32 = 3;
 
 /// 장애 흉내 (E13 · E30). 테스트와 시연에서 증권사 장애를 일으킨다.
 ///
@@ -262,7 +263,10 @@ impl PaperBroker {
     /// 말이 안 되는 상태 값은 되살리지 않는다 (V6): [`BrokerError::InvalidSnapshot`]에
     /// [`SnapshotReason`]을 담아 돌려준다. 다음 식별자가 이미 있는 식별자보다 크지 않음, 끝난
     /// 주문에 묶인 돈이 남음, 열린 파는 주문의 합이 보유를 넘음, 같은 종목의 보유가 둘, 주문 수량이
-    /// 0 이하, 열린 사는 주문이 그 주문에 필요한 돈보다 많이 묶음 — 모두 거부한다.
+    /// 0 이하, 열린 사는 주문이 남은 수량 몫보다 많이 묶음, 뗀 수수료 · 세금 · 누적 체결 금액이
+    /// 말이 안 됨, 체결 수량이 정수가 아님, 상태와 체결 수량이 어긋남, 주문 통화가 시장과 다름,
+    /// 평균 산 값이 0 이하, 마지막 시세의 값이 0 이하이거나 받은 시각이 내보낸 시각보다 뒤 — 모두
+    /// 거부한다(3차 규칙 3).
     pub fn restore(
         config: PaperConfig,
         snapshot: Snapshot,
@@ -369,8 +373,7 @@ impl PaperBroker {
     /// [`PaperBroker::confirm_archived`]로 알리면 그때 지운다. 저장하기 전에 꺼져도 상태 값에
     /// 남아 있어 기록이 사라지지 않는다.
     pub fn pending_archive(&self, before: DateTime<Utc>) -> Archived {
-        let _ = before;
-        todo!()
+        self.book().pending_archive(before)
     }
 
     /// 저장을 마친 것을 알린다: `archived`에 든 끝난 주문(식별자로)과 체결 기록(같은 값)을 장부에서
@@ -378,8 +381,7 @@ impl PaperBroker {
     /// (두 번 알려도 같다). 지운 뒤의 계좌는 같은 것을 [`PaperBroker::archive_before`]로 떼어 낸
     /// 계좌와 같다.
     pub fn confirm_archived(&self, archived: &Archived) {
-        let _ = archived;
-        todo!()
+        self.book().confirm_archived(archived);
     }
 
     /// 그 통화의 현금. 다루지 않는 통화는 모두 0이다. 먼저 `now`까지 마감이 된 주문을 취소한다.

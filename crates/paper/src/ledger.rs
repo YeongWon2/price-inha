@@ -250,6 +250,9 @@ pub(crate) struct Ledger {
     pub last_quotes: Vec<QuoteRecord>,
     /// 다음에 낼 식별자 번호.
     pub next_id: u64,
+    /// 이 계좌가 받은 가장 늦은 `now`(어느 호출이든). 상태 값의 내보낸 시각이다.
+    /// 아직 아무 호출도 받지 않았으면 없다.
+    pub last_now: Option<DateTime<Utc>>,
 }
 
 impl Ledger {
@@ -268,6 +271,7 @@ impl Ledger {
             idempotency: BTreeMap::new(),
             last_quotes: Vec::new(),
             next_id: 1,
+            last_now: None,
         }
     }
 

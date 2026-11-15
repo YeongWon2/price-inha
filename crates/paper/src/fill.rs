@@ -113,13 +113,10 @@ fn fill_quantity(
     (affordable, order.order_type == OrderType::Market)
 }
 
-/// 이 시세가 이 주문을 접수한 **뒤에** 온 것인가: 받은 시각이, 거래소 시각이 있으면 그것도,
-/// 접수 시각보다 뒤여야 한다.
+/// 이 시세가 이 주문을 접수한 **뒤의** 것인가 (3차 규칙 1, `docs/dev/decisions.md` 2026-11-15):
+/// 거래소 시각이 있으면 그 시각이, 없으면 받은 시각이 접수 시각보다 뒤여야 한다.
 fn after_order(order: &OrderRecord, quote: &Quote) -> bool {
-    quote.received_at > order.ordered_at
-        && quote
-            .exchange_time
-            .is_none_or(|traded_at| traded_at > order.ordered_at)
+    quote.exchange_time.unwrap_or(quote.received_at) > order.ordered_at
 }
 
 /// 체결할 수 있으면 그 계획. 주문 전의 시세 · 낡은 달력 · 늦은 시세 · 닫힌 장 · 못 쓰는 유형 ·
@@ -193,7 +190,9 @@ fn record(order: &mut OrderRecord, plan: &Plan, now: DateTime<Utc>) -> FillRecor
     }
 }
 
-/// 사는 체결의 돈: 묶은 돈을 풀어 비용을 내고, 남은 수량만큼 다시 묶는다.
+/// 사는 체결의 돈: 묶은 돈을 풀어 비용을 내고, 남은 수량 몫(3차 규칙 4)만큼 다시 묶는다.
+/// 지정가 사기는 남은 수량 몫이 언제나 "묶었던 돈 − 이번에 낸 돈" 이하라 쓸 수 있는 돈을
+/// 되가져가지 않는다.
 fn settle_buy(book: &mut Book, config: &PaperConfig, index: usize, fill: &FillRecord) {
     let Some(order) = book.ledger.orders.get(index) else {
         return;
@@ -203,7 +202,7 @@ fn settle_buy(book: &mut Book, config: &PaperConfig, index: usize, fill: &FillRe
         order.hold_price,
         config.rules(fill.market.market()),
     ) {
-        (true, Some(price), Some(rules)) => money::buy_hold(order.remaining(), price, rules),
+        (true, Some(price), Some(rules)) => money::open_buy_hold(order, price, rules),
         _ => Some(Decimal::ZERO),
     };
     let released = order.held_cash;
@@ -296,6 +295,16 @@ fn remember(book: &mut Book, quote: &Quote, currency: CashCode) -> bool {
     seen
 }
 
+/// 거래소 시각이 그 종목의 마지막으로 기억한 시세의 거래소 시각보다 앞인가. 둘 중 하나라도
+/// 거래소 시각이 없으면 견주지 않는다.
+fn older_than_remembered(book: &Book, quote: &Quote, currency: CashCode) -> bool {
+    let last = book
+        .ledger
+        .last_quote(quote.symbol.as_str(), currency)
+        .and_then(|last| last.exchange_time);
+    matches!((quote.exchange_time, last), (Some(traded_at), Some(last)) if traded_at < last)
+}
+
 /// 시세 하나를 처리한다: 마감이 된 주문을 취소하고, 쓸 수 있는 시세면 기억하고, 처음 보는
 /// 시세면 그 종목의 열린 주문을 접수한 순서대로 체결해 본다.
 pub(crate) fn on_quote(
@@ -315,6 +324,10 @@ pub(crate) fn on_quote(
     }
     // 받은 시각이 앞날인 시세와 늦은 시세(N6)는 체결도 기억도 하지 않는다.
     if quote.received_at > now || too_old(quote.received_at, now, &config.stale) {
+        return out;
+    }
+    // 거래소 시각이 마지막으로 기억한 시세보다 앞인 옛 시세는 체결도 기억도 하지 않는다(3차 규칙 2).
+    if older_than_remembered(book, quote, currency) {
         return out;
     }
     if remember(book, quote, currency) {

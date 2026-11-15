@@ -339,6 +339,15 @@ impl MarketRules {
         if rates.iter().any(Decimal::is_sign_negative) {
             return bad("비율은 음수일 수 없습니다");
         }
+        // 3차 규칙 6: 수수료율 · 세율 · 미끄러짐이 1(100%) 이상이면 말이 안 된다.
+        let charges = [
+            self.commission_rate,
+            self.sell_tax_rate,
+            self.market_slippage_rate,
+        ];
+        if charges.iter().any(|rate| *rate >= Decimal::ONE) {
+            return bad("수수료율 · 세율 · 미끄러짐은 1(100%)보다 작아야 합니다");
+        }
         if self.rounding.scale > MAX_MONEY_SCALE {
             return bad("돈의 소수 자릿수가 너무 큽니다");
         }

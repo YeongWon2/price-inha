@@ -5,6 +5,7 @@
 
 use rust_decimal::{Decimal, RoundingStrategy};
 
+use crate::ledger::OrderRecord;
 use crate::{MarketRules, MoneyRounding, RoundingMode, Side};
 
 /// `value`를 `scale` 자리에서 `mode`로 맞춘다.
@@ -45,6 +46,26 @@ pub(crate) fn buy_hold(quantity: Decimal, price: Decimal, rules: &MarketRules) -
         rules.rounding.scale,
         RoundingMode::Up,
     );
+    notional.checked_add(fee)
+}
+
+/// 열린 사는 주문이 묶는 돈 (3차 규칙 4): `남은 수량 × 값 + 올림((누적 체결 금액 + 남은 수량 × 값)
+/// × 수수료율) − 이미 뗀 수수료`. 수수료 몫은 0보다 작지 않다. 아무것도 체결되지 않은 주문은
+/// [`buy_hold`]와 같다. 주문 단위로 누적해 떼는 수수료는 어느 방향으로 맞추든 올린 값을 넘지
+/// 않으므로, 이만큼 쥐고 있으면 남은 수량을 다 체결할 수 있다.
+pub(crate) fn open_buy_hold(
+    order: &OrderRecord,
+    price: Decimal,
+    rules: &MarketRules,
+) -> Option<Decimal> {
+    let notional = order.remaining().checked_mul(price)?;
+    let whole = order.filled_amount.checked_add(notional)?;
+    let fee_total = round(
+        whole.checked_mul(rules.commission_rate)?,
+        rules.rounding.scale,
+        RoundingMode::Up,
+    );
+    let fee = fee_total.checked_sub(order.commission)?.max(Decimal::ZERO);
     notional.checked_add(fee)
 }
 

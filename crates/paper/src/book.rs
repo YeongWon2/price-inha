@@ -11,7 +11,7 @@ use tokio::sync::mpsc::Sender;
 use crate::calendar;
 use crate::ledger::{CashCode, Ledger, Lot, MarketCode, OrderRecord};
 use crate::{
-    Archived, CloseReason, Fault, IDEMPOTENCY_WINDOW, OrderEvent, OrderEventKind, OrderStatus,
+    Archived, CloseReason, Fault, Fill, IDEMPOTENCY_WINDOW, OrderEvent, OrderEventKind, OrderStatus,
 };
 
 /// 종목 하나에 기억하는 기준가의 날짜 수. 오늘 것과 미리 넣은 다음 영업일 것이면 충분하다.
@@ -23,6 +23,11 @@ pub(crate) fn key_alive(accepted_at: DateTime<Utc>, now: DateTime<Utc>) -> bool 
     now.signed_duration_since(accepted_at)
         .to_std()
         .map_or(true, |age| age < IDEMPOTENCY_WINDOW)
+}
+
+/// 덜어 낼 주문인가: 끝났고 접수 시각이 `before`보다 앞이다.
+fn archivable(order: &OrderRecord, before: DateTime<Utc>) -> bool {
+    !order.is_open() && order.ordered_at < before
 }
 
 /// 계좌의 속. 잠금 안에 있다.
@@ -124,17 +129,63 @@ impl Book {
     }
 
     /// `now`를 받는 모든 호출이 먼저 하는 일: 지난 멱등성 키를 버리고, 마감이 된 주문을 취소한다.
+    /// 받은 `now`는 상태 값의 내보낸 시각으로 기억한다(가장 늦은 것).
     pub(crate) fn advance(&mut self, now: DateTime<Utc>, out: &mut Vec<OrderEvent>) {
+        self.ledger.last_now = Some(self.ledger.last_now.map_or(now, |last| last.max(now)));
         self.ledger
             .idempotency
             .retain(|_, key| key_alive(key.accepted_at, now));
         self.expire(now, out);
     }
 
+    /// 덜어 낼 것: 끝난 주문 가운데 접수 시각이 `before`보다 앞인 것과, 체결 기록 가운데 체결
+    /// 시각이 `before`보다 앞인 것 (N1). 장부는 그대로이고 순서도 그대로다.
+    pub(crate) fn pending_archive(&self, before: DateTime<Utc>) -> Archived {
+        Archived {
+            orders: self
+                .ledger
+                .orders
+                .iter()
+                .filter(|order| archivable(order, before))
+                .map(OrderRecord::view)
+                .collect(),
+            fills: self
+                .ledger
+                .fills
+                .iter()
+                .filter(|fill| fill.filled_at < before)
+                .map(|fill| fill.view())
+                .collect(),
+        }
+    }
+
+    /// 저장을 마친 것을 장부에서 지운다 (3차 규칙 7): `archived`에 든 끝난 주문(식별자로)과 체결
+    /// 기록(같은 값, 든 개수만큼). 열린 주문 · 장부에 없는 것은 넘어간다.
+    pub(crate) fn confirm_archived(&mut self, archived: &Archived) {
+        self.ledger.orders.retain(|order| {
+            order.is_open()
+                || !archived
+                    .orders
+                    .iter()
+                    .any(|gone| gone.order_id == order.order_id)
+        });
+        let mut saved: Vec<&Fill> = archived.fills.iter().collect();
+        self.ledger.fills.retain(|fill| {
+            let view = fill.view();
+            match saved.iter().position(|gone| **gone == view) {
+                Some(found) => {
+                    saved.swap_remove(found);
+                    false
+                }
+                None => true,
+            }
+        });
+    }
+
     /// 끝난 주문 가운데 접수 시각이 `before`보다 앞인 것과, 체결 기록 가운데 체결 시각이
     /// `before`보다 앞인 것을 장부에서 떼어 돌려준다 (N1). 순서는 그대로다.
     pub(crate) fn archive(&mut self, before: DateTime<Utc>) -> Archived {
-        let old = |order: &OrderRecord| !order.is_open() && order.ordered_at < before;
+        let old = |order: &OrderRecord| archivable(order, before);
         let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.ledger.orders)
             .into_iter()
             .partition(old);
@@ -150,21 +201,22 @@ impl Book {
     }
 
     /// 마감이 된(`now >= 마감`) 열린 주문을 접수한 순서대로 취소한다 (E12 · E29 · N4).
+    /// 취소 시각은 알아챈 `now`가 아니라 그 주문의 마감 시각이다(3차 규칙 5).
     fn expire(&mut self, now: DateTime<Utc>, out: &mut Vec<OrderEvent>) {
-        let due: Vec<usize> = self
+        let due: Vec<(usize, DateTime<Utc>)> = self
             .ledger
             .orders
             .iter()
             .enumerate()
             .filter(|(_, order)| order.is_open() && now >= order.deadline)
-            .map(|(index, _)| index)
+            .map(|(index, order)| (index, order.deadline))
             .collect();
-        for index in due {
+        for (index, deadline) in due {
             self.close(
                 index,
                 OrderStatus::Canceled,
                 CloseReason::UnfilledTimeout,
-                Some(now),
+                Some(deadline),
             );
             self.emit(OrderEventKind::Canceled, index, out);
         }
