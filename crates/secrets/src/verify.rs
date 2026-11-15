@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use crate::{Credentials, KeyKind, MIN_SECRET_CHARS, SecretsError, VerifyFailure};
+use crate::{Credentials, KeyKind, KeySlot, MIN_SECRET_CHARS, SecretsError, VerifyFailure};
 
 /// 그 키로 실제로 닿는지 확인한다 (C3 · E4).
 ///
@@ -17,6 +17,19 @@ pub trait Verifier: Send + Sync {
         kind: KeyKind,
         values: &Credentials,
     ) -> impl Future<Output = Result<(), VerifyFailure>> + Send;
+
+    /// 6차 칸([`KeySlot`])을 확인한다. `Ok(())`면 저장한다. `Err`면 저장하지 않는다.
+    ///
+    /// `values`는 칸 검사를 지난 것만 온다. 기본 구현은 언제나 [`VerifyFailure::Unreachable`]이다
+    /// (이 칸을 확인할 줄 모르는 확인기로는 저장되지 않는다). 그래서 이 메서드를 더해도 이미 있는
+    /// 확인기 구현은 그대로 컴파일된다.
+    fn verify_slot(
+        &self,
+        slot: KeySlot,
+        values: &Credentials,
+    ) -> impl Future<Output = Result<(), VerifyFailure>> + Send {
+        async { todo!() }
+    }
 }
 
 /// 키 파일에 쓸 수 없는 글자인가: 줄바꿈을 비롯한 제어 문자(탭은 받는다)와 유니코드 줄 · 문단 나눔.

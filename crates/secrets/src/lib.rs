@@ -54,6 +54,7 @@ mod kind;
 mod legacy;
 mod redact;
 mod secret;
+mod slot;
 mod store;
 mod targets;
 mod verify;
@@ -63,6 +64,7 @@ pub use fsio::resolve_dir;
 pub use kind::KeyKind;
 pub use legacy::legacy_auth_file_present;
 pub use secret::{Credentials, SecretString};
+pub use slot::{KeySlot, SlotRegistered, SlotStatus};
 pub use store::{KeyStatus, Registered, SecretStore};
 pub use verify::Verifier;
 
@@ -80,6 +82,13 @@ pub const ENV_FILE: &str = ".env";
 /// 이 이름은 이 모듈만 안다(`ARCH-SECRET-FILES`). 화면이 "옛 파일이 남아 있다"고 알릴 때는
 /// [`legacy_auth_file_present`]로 있는지만 본다.
 pub const LEGACY_AUTH_FILE: &str = "auth.json";
+
+/// 백업이 대상에서 빼야 하는 파일 이름들 (E39 · N8, 결정 2026-11-16 23 · 24번).
+///
+/// 이 모듈이 키를 두는 파일([`ENV_FILE`]: 모든 키 · 6차 칸 · VAPID 비밀키)과
+/// 옛 구독 토큰 파일([`LEGACY_AUTH_FILE`])이다. 백업기는 파일 이름을 직접 쓰지 않고 이것을 쓴다
+/// (`ARCH-SECRET-FILES`).
+pub const BACKUP_EXCLUDED_FILES: &[&str] = &[ENV_FILE, LEGACY_AUTH_FILE];
 
 /// 비밀 값 자리에 대신 들어가는 글자.
 pub const REDACTED: &str = "[가려짐]";
