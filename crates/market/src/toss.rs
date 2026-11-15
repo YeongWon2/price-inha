@@ -312,16 +312,19 @@ impl MarketAdapter for TossAdapter {
     ///
     /// 부르기 전에 모든 종목을 [`Symbol::parse`]의 규칙으로 확인한다. 틀린 종목이 하나라도
     /// 있으면 아무 요청(토큰 발급 포함)도 보내지 않고 [`MarketError::InvalidSymbol`]이다.
-    /// 요청하지 않은 종목은 버린다(0 이하 가격이어도 오류가 아니다). 요청한 종목의 0 이하
+    /// 요청하지 않은 종목은 버린다(0 이하 가격이어도 오류가 아니다). 요청 여부는 묶음마다
+    /// 따로 본다: 다른 묶음에서 요청한 종목이 섞여 와도 그 묶음에서는 버린다. 요청한 종목의 0 이하
     /// 가격은 [`MarketError::UnexpectedResponse`]다.
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
         // 틀린 종목이 하나라도 있으면 아무것도 보내지 않는다(쿼리에 다른 글자가 섞이지 않게).
         for symbol in symbols {
             Symbol::parse(symbol.as_str())?;
         }
-        let requested: HashSet<&str> = symbols.iter().map(Symbol::as_str).collect();
         let mut quotes = Vec::with_capacity(symbols.len());
         for chunk in symbols.chunks(MAX_SYMBOLS_PER_REQUEST) {
+            // 요청 종목은 묶음마다 따로 둔다. 다른 묶음의 종목이 섞여 와도 그 묶음의 값은
+            // 버리므로 한 종목이 결과에 두 번 들어가지 않는다.
+            let requested: HashSet<&str> = chunk.iter().map(Symbol::as_str).collect();
             let joined = chunk
                 .iter()
                 .map(Symbol::as_str)
