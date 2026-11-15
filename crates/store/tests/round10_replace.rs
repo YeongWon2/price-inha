@@ -121,7 +121,7 @@ fn fact(known_at: i64) -> NewFact {
 /// - 세션: 끝난 것 하나와 열린 것(`AGENT`, `OPEN_TITLE`) 하나, 각각 메시지 하나.
 /// - 방 `ROOM`: 이벤트 1 · 2번.
 /// - 영수증: `CLOSED_JOB` 1번 슬롯은 닫힘(ok), `RUNNING_JOB` 2번 슬롯은 실행 중.
-/// - 자료 둘(알게 된 시각 40 · 41)을 판단 시각 50인 매매에 붙인다.
+/// - 자료 셋(알게 된 시각 40 · 41 · 42) 가운데 앞의 둘을 판단 시각 50인 매매에 붙인다.
 fn fill(store: &Store) -> TradeId {
     let evidence = vec![new_trade(store), new_trade(store)];
     store
@@ -167,7 +167,8 @@ fn fill(store: &Store) -> TradeId {
         .open_trigger_receipt(&key(RUNNING_JOB, 2), t(32))
         .unwrap();
 
-    let facts = store.save_facts(&[fact(40), fact(41)]).unwrap();
+    // 셋째 자료(알게 된 시각 42)는 붙이지 않는다: rowid 우회가 쓸 아직 없는 (매매, 자료) 짝이 된다.
+    let facts = store.save_facts(&[fact(40), fact(41), fact(42)]).unwrap();
     let judged = new_trade(store);
     store
         .judge_trade(
@@ -428,6 +429,154 @@ fn 새_파일에서도_보호하는_표에_기존_줄을_다시_넣으면_거부
     ] {
         for rowid in rowids(&path, table) {
             assert_replace_rejected(table, &format!("rowid = {rowid}"), &[]);
+        }
+    }
+}
+
+// ───────────── rowid 명시 우회 ─────────────
+
+/// 칸 하나가 `INTEGER PRIMARY KEY`(rowid 별칭)인 표의 그 칸 이름.
+fn rowid_alias(path: &Path, table: &str) -> Option<String> {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let pks: Vec<(String, String)> = conn
+        .prepare(&format!(
+            "SELECT name, upper(type) FROM pragma_table_info('{table}') WHERE pk > 0"
+        ))
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    match pks.as_slice() {
+        [(name, ty)] if ty == "INTEGER" => Some(name.clone()),
+        _ => None,
+    }
+}
+
+/// 선언한 유일 키(기본 키 · UNIQUE 제약)에 든 칸들.
+fn unique_key_columns(path: &Path, table: &str) -> Vec<String> {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let cols: Vec<String> = conn
+        .prepare(&format!(
+            "SELECT DISTINCT ii.name FROM pragma_index_list('{table}') AS il \
+             JOIN pragma_index_info(il.name) AS ii \
+             WHERE il.\"unique\" = 1 AND il.origin IN ('pk', 'u') ORDER BY ii.seqno"
+        ))
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    cols
+}
+
+/// 같은 rowid에 선언 키가 다른 값이 들어가도록 바꿀 칸과 값(SQL 식). 표가 시키는 다음 번호 ·
+/// 시작 상태 · 알게 된 시각 규칙은 지키는 값이라 다른 트리거에 걸려 거부되지 않는다.
+fn other_keys(path: &Path, table: &str) -> Vec<(String, String)> {
+    let own = |col: &str, expr: &str| (col.to_string(), expr.to_string());
+    match table {
+        "room_events" => vec![
+            own(
+                "seq",
+                "(SELECT MAX(seq) + 1 FROM room_events AS m WHERE m.room = room_events.room)",
+            ),
+            own("event_id", "event_id || '-x'"),
+        ],
+        "trigger_receipts" => vec![
+            own("job", "job || '-x'"),
+            own("status", "'running'"),
+            own("delivery", "'not_started'"),
+            own("finished_at", "NULL"),
+        ],
+        "template_revisions" => vec![own(
+            "revision",
+            "(SELECT MAX(revision) + 1 FROM template_revisions AS m \
+             WHERE m.template_id = template_revisions.template_id)",
+        )],
+        "trade_facts" => vec![own(
+            "fact_id",
+            "(SELECT id FROM facts WHERE id NOT IN (SELECT fact_id FROM trade_facts) LIMIT 1)",
+        )],
+        _ if rowid_alias(path, table).is_some() => Vec::new(),
+        _ => unique_key_columns(path, table)
+            .into_iter()
+            .map(|col| {
+                let expr = format!(
+                    "CASE typeof({col}) WHEN 'integer' THEN {col} + 1000000 \
+                     WHEN 'text' THEN {col} || '-x' ELSE {col} END"
+                );
+                (col, expr)
+            })
+            .collect(),
+    }
+}
+
+/// `rowid`를 그대로 두고 선언 키만 다른 값으로 바꿔 넣는 SQL. rowid 별칭 칸은 목록에서 빼
+/// rowid가 그 칸을 정하게 한다.
+fn rowid_sql(path: &Path, verb: &str, table: &str, rowid: i64) -> String {
+    let alias = rowid_alias(path, table);
+    let overrides = other_keys(path, table);
+    let cols: Vec<String> = columns(path, table)
+        .into_iter()
+        .filter(|c| alias.as_deref() != Some(c.as_str()))
+        .collect();
+    let values = cols
+        .iter()
+        .map(|c| {
+            overrides
+                .iter()
+                .find(|(name, _)| name == c)
+                .map_or_else(|| format!("\"{c}\""), |(_, expr)| expr.clone())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{verb} \"{table}\" (rowid, {}) SELECT rowid, {values} FROM \"{table}\" WHERE rowid = {rowid}",
+        cols.join(", ")
+    )
+}
+
+// 검증: M1 M2 C11 V36
+#[test]
+fn 보호하는_모든_표에_기존_rowid를_명시하고_다른_키를_넣으면_거부되고_줄이_그대로다() {
+    let (_dir, path, judged) = filled_v5();
+    let before_api = api_view(&path, judged);
+    let mut passed = Vec::new();
+    for table in PROTECTED {
+        let before = rows(&path, table);
+        for rowid in rowids(&path, table) {
+            for verb in VERBS {
+                let sql = rowid_sql(&path, verb, table, rowid);
+                passed.extend(attempt_in_tx(&path, table, &sql));
+            }
+        }
+        if rows(&path, table) != before {
+            passed.push(format!("{table}: 줄이 바뀌었다"));
+        }
+    }
+    assert!(
+        passed.is_empty(),
+        "rowid를 명시한 넣기가 옛 줄을 지웠다:\n{}",
+        passed.join("\n")
+    );
+    assert_eq!(api_view(&path, judged), before_api);
+}
+
+// 검증: M1 M2 V36
+#[test]
+fn 새_파일에서도_rowid를_명시한_넣기는_옛_줄을_바꿔치기하지_못한다() {
+    let (_dir, path, _judged) = filled_new();
+    for table in [
+        "room_events",
+        "trigger_receipts",
+        "trade_facts",
+        "proposal_evidence",
+    ] {
+        for rowid in rowids(&path, table) {
+            for verb in VERBS {
+                let sql = rowid_sql(&path, verb, table, rowid);
+                assert_eq!(attempt_in_tx(&path, table, &sql), None, "{table}");
+            }
         }
     }
 }
