@@ -169,6 +169,15 @@ use crate::{fill, verify};
 /// 접수한 지 딱 이 시간이 되면 같은 키도 새 주문으로 본다.
 pub const IDEMPOTENCY_WINDOW: Duration = Duration::from_secs(600);
 
+/// 거래소 시각이 받은 시각보다 앞서도 되는 가장 긴 시간: 5분 (5차 1번).
+/// 받은 시각보다 이보다 **넘게** 앞선 거래소 시각은 그 시세의 거래소 시각으로 쓰지 않는다
+/// (거래소 시각이 없는 시세와 같이 다룬다). 딱 이만큼 앞선 것은 쓴다.
+pub const MAX_EXCHANGE_LEAD: Duration = Duration::from_secs(300);
+
+/// 종목마다 가장 늦은 거래소 시각에 쓴 거래의 값을 기억하는 개수의 상한: 64 (5차 3번).
+/// 넘으면 가장 오래 기억한 값부터 버린다.
+pub const MAX_SAME_TIME_PRICES: usize = 64;
+
 /// 지금 내보내는 [`Snapshot`]의 모양 번호. 2: 마지막 시세에 거래소 시각 · 받은 시각이 들어갔다.
 /// 3: 내보낸 시각(이 계좌가 마지막으로 받은 `now`, `ledger.last_now`)이 들어갔다.
 /// 4: 종목마다의 가장 늦은 거래소 시각과 그 시각에 쓴 거래(`ledger.trade_marks`)가 들어갔다.
