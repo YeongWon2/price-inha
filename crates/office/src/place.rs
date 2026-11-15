@@ -34,13 +34,31 @@ impl Agent {
 
     /// 이벤트와 지도 정의 파일에 쓰는 이름: `news`, `strategy`, `risk`, `review`, `trader`, `leader`.
     pub fn id(self) -> &'static str {
-        todo!()
+        match self {
+            Agent::News => "news",
+            Agent::Strategy => "strategy",
+            Agent::Risk => "risk",
+            Agent::Review => "review",
+            Agent::Trader => "trader",
+            Agent::Leader => "leader",
+        }
     }
 
     /// [`Agent::id`]의 거꾸로. 모르는 이름이면 `None`.
     pub fn from_id(id: &str) -> Option<Agent> {
-        let _ = id;
-        todo!()
+        Agent::ALL.into_iter().find(|a| a.id() == id)
+    }
+
+    /// [`Agent::ALL`] 안의 자리 번호(0~5).
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Agent::News => 0,
+            Agent::Strategy => 1,
+            Agent::Risk => 2,
+            Agent::Review => 3,
+            Agent::Trader => 4,
+            Agent::Leader => 5,
+        }
     }
 }
 
@@ -58,7 +76,11 @@ pub enum Place {
 impl Place {
     /// 이벤트에 쓰는 이름: `bed`, `desk`, `meeting`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Place::Bed => "bed",
+            Place::Desk => "desk",
+            Place::Meeting => "meeting",
+        }
     }
 }
 
@@ -90,7 +112,12 @@ pub enum Work {
 impl Work {
     /// 이벤트에 쓰는 이름.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Work::Idle => "idle",
+            Work::Queued => "queued",
+            Work::Thinking => "thinking",
+            Work::Failed => "failed",
+        }
     }
 }
 
@@ -105,11 +132,27 @@ pub struct AgentView {
     pub work: Work,
 }
 
+impl AgentView {
+    /// 이벤트 `office.agent`의 내용: `{"agent", "place", "work"}`.
+    pub(crate) fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "agent": self.agent.id(),
+            "place": self.place.as_str(),
+            "work": self.work.as_str(),
+        })
+    }
+}
+
 /// 팀 상태와 담당 활동으로 있어야 할 곳을 정한다(V13 · V15, 결정 2026-11-16 25번).
 ///
 /// - 출근 · 퇴근은 팀 상태(M1)에 묶는다: 운용 중이 아니면(쉬는 중 · 멈춤 · 정지) 활동과 상관없이 침대.
 /// - 운용 중이면 논의 참가는 논의 탁자, 그 밖은 자기 책상.
 pub fn place_of(team: TeamState, activity: Activity) -> Place {
-    let _ = (team, activity);
-    todo!()
+    if team != TeamState::Operating {
+        return Place::Bed;
+    }
+    match activity {
+        Activity::Discussing => Place::Meeting,
+        Activity::Idle | Activity::Working => Place::Desk,
+    }
 }

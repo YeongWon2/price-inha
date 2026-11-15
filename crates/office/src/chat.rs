@@ -16,6 +16,16 @@ pub enum Room {
     Direct,
 }
 
+impl Room {
+    /// 이벤트에 쓰는 이름: `team`, `direct`.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Room::Team => "team",
+            Room::Direct => "direct",
+        }
+    }
+}
+
 /// 응답의 단계.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -33,12 +43,17 @@ pub enum ChatStatus {
 impl ChatStatus {
     /// 이벤트에 쓰는 이름.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            ChatStatus::Queued => "queued",
+            ChatStatus::Thinking => "thinking",
+            ChatStatus::Complete => "complete",
+            ChatStatus::Failed => "failed",
+        }
     }
 
     /// 끝난 단계인가(complete · failed). 끝난 응답은 다시 바뀌지 않는다.
     pub fn is_terminal(self) -> bool {
-        todo!()
+        matches!(self, ChatStatus::Complete | ChatStatus::Failed)
     }
 }
 
@@ -62,4 +77,20 @@ pub struct ChatResponse {
     pub updated_at: UnixMillis,
     /// 실패 까닭(failed일 때만). 빈 답이면 `"empty_response"`.
     pub error: Option<String>,
+}
+
+impl ChatResponse {
+    /// 이벤트 `office.chat`의 내용: 객체 전체.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "requestId": self.request_id,
+            "sourceMessageId": self.source_message_id,
+            "agent": self.agent.id(),
+            "room": self.room.as_str(),
+            "status": self.status.as_str(),
+            "content": self.content,
+            "updatedAt": self.updated_at.0,
+            "error": self.error,
+        })
+    }
 }
