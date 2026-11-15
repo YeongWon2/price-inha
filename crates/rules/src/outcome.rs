@@ -3,7 +3,7 @@
 use pi_paper::ApprovedOrder;
 use rust_decimal::Decimal;
 
-use crate::{Funding, ProductKind, RationaleField, TeamStatus, TradeStage};
+use crate::{ApprovalGrant, Funding, ProductKind, RationaleField, TeamStatus, TradeStage};
 
 /// 규칙 엔진이 맡은 원칙 번호(`principles.md` P1~P13, 결정 2026-11-16 3번).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -98,6 +98,8 @@ pub enum Violation {
     ApiError,
     /// P11: 자료 이상이 있다.
     DataAnomaly,
+    /// P11: 받은 시세의 종목이 주문 안의 종목과 다르다(사고팔기 모두 막는다).
+    QuoteSymbolMismatch,
     /// P12 · E18: 장이 열려 있지 않다.
     MarketClosed,
     /// P12: 지금 세션에서 받지 않는 호가 유형이다.
@@ -118,6 +120,9 @@ pub enum Violation {
     TradeCountReached,
     /// P12: API 요청 한도에 닿았다.
     ApiLimitReached,
+    /// P12 · 결정 7번: 시장가 사기가 자동 주문 금액 한도를 넘는다. 승인이 필요한 사는 주문은
+    /// 지정가로만 낸다(승인 지문에 값이 들어가야 한다).
+    MarketBuyOverAutoLimit,
     /// P13: 비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다.
     NoPositiveEdge,
 }
@@ -142,7 +147,8 @@ impl Violation {
             Violation::StaleQuote
             | Violation::AccountMismatch
             | Violation::ApiError
-            | Violation::DataAnomaly => Principle::P11,
+            | Violation::DataAnomaly
+            | Violation::QuoteSymbolMismatch => Principle::P11,
             Violation::MarketClosed
             | Violation::OrderTypeNotAllowed
             | Violation::OutsidePriceLimit
@@ -152,7 +158,8 @@ impl Violation {
             | Violation::DuplicateOrder
             | Violation::OverMaxOrderAmount
             | Violation::TradeCountReached
-            | Violation::ApiLimitReached => Principle::P12,
+            | Violation::ApiLimitReached
+            | Violation::MarketBuyOverAutoLimit => Principle::P12,
             Violation::NoPositiveEdge => Principle::P13,
         }
     }
@@ -181,6 +188,7 @@ impl Violation {
             Violation::AccountMismatch => "계좌가 기록과 어긋난다",
             Violation::ApiError => "바깥 API 오류가 있다",
             Violation::DataAnomaly => "자료 이상이 있다",
+            Violation::QuoteSymbolMismatch => "받은 시세의 종목이 주문 안의 종목과 다르다",
             Violation::MarketClosed => "장이 열려 있지 않다",
             Violation::OrderTypeNotAllowed => "지금 세션에서 받지 않는 호가 유형이다",
             Violation::OutsidePriceLimit => "값이 가격제한폭 밖이다",
@@ -191,6 +199,9 @@ impl Violation {
             Violation::OverMaxOrderAmount => "1회 최대 주문 금액을 넘는다",
             Violation::TradeCountReached => "일일 최대 매매 횟수에 닿았다",
             Violation::ApiLimitReached => "API 요청 한도에 닿았다",
+            Violation::MarketBuyOverAutoLimit => {
+                "시장가 사기가 자동 주문 금액 한도를 넘는다(승인이 필요한 사기는 지정가만)"
+            }
             Violation::NoPositiveEdge => "비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다",
         };
         text.to_string()
@@ -229,6 +240,9 @@ pub enum Reason {
     MissingRationale(Vec<RationaleField>),
     /// E11: 어긴 원칙들(하나 이상).
     Violations(Vec<Violation>),
+    /// 승인이 이 주문을 덮지 못한다: 승인 증표가 비었거나, 다시 점검한 주문 내용이
+    /// 승인을 기다리던 내용과 다르다. 종류는 [`BlockKind::ApprovalRejected`]다.
+    ApprovalMismatch,
 }
 
 impl Reason {
@@ -236,7 +250,9 @@ impl Reason {
     /// 근거가 빠지면 P9, 그 가운데 손절값이 있으면 P2도 들어간다. 판단 · 팀 상태 때문이면 비어 있다.
     pub fn principles(&self) -> Vec<Principle> {
         let mut found = match self {
-            Reason::NotJudged(_) | Reason::TeamNotOperating(_) => Vec::new(),
+            Reason::NotJudged(_) | Reason::TeamNotOperating(_) | Reason::ApprovalMismatch => {
+                Vec::new()
+            }
             Reason::MissingRationale(fields) => {
                 let mut list = vec![Principle::P9];
                 if fields.contains(&RationaleField::Stop) {
@@ -290,6 +306,10 @@ impl Blocked {
                     .collect();
                 format!("원칙을 어겼다: {}", lines.join("; "))
             }
+            Reason::ApprovalMismatch => {
+                "승인이 이 주문을 덮지 못한다(증표가 비었거나 다시 점검한 내용이 다르다)"
+                    .to_string()
+            }
         }
     }
 }
@@ -306,17 +326,28 @@ fn field_name(field: RationaleField) -> &'static str {
     }
 }
 
-/// 점검을 다 지난 주문. 규칙 엔진만 만든다(칸이 비공개).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 점검을 다 지난 주문. 규칙 엔진만 만든다(칸이 비공개). `Clone`이 아니다: 한 번 지난
+/// 점검으로 점검 통과 표시를 두 번 받을 수 없다.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Passed {
     order: ApprovedOrder,
     amount: Decimal,
+    approval: Option<ApprovalGrant>,
 }
 
 impl Passed {
     /// 이 크레이트 안에서만 만든다.
     pub(crate) fn new(order: ApprovedOrder, amount: Decimal) -> Self {
-        Self { order, amount }
+        Self {
+            order,
+            amount,
+            approval: None,
+        }
+    }
+
+    /// 승인으로 지난 주문이면 그 승인 증표([`crate::approved`]). 한도 안이라 바로 지났으면 `None`.
+    pub fn approval(&self) -> Option<&ApprovalGrant> {
+        self.approval.as_ref()
     }
 
     /// 규칙 엔진이 셈한 주문 내용.
@@ -369,8 +400,8 @@ impl PendingApproval {
     }
 }
 
-/// 주문 전 점검의 결과(C9).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 주문 전 점검의 결과(C9). [`Passed`]가 `Clone`이 아니라 이것도 `Clone`이 아니다.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// 다 지났다. [`crate::issue`]로 점검 통과 표시를 받는다.
     Pass(Passed),
