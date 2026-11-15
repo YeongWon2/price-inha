@@ -12,6 +12,7 @@ mod anthropic;
 mod cli;
 mod credential;
 mod error;
+mod redact;
 mod retry;
 mod types;
 mod wire;
@@ -28,6 +29,7 @@ pub use cli::{
 };
 pub use credential::{Credential, CredentialSource, Secret};
 pub use error::AiError;
+pub use redact::{NoRedaction, Redactor};
 pub use retry::{RETRY_AFTER_CAP, RETRY_MAX_DELAY, RetryBackoff, parse_retry_after};
 pub use types::{
     AiProvider, CompletionRequest, CompletionResponse, Message, Role, StopReason, Usage,

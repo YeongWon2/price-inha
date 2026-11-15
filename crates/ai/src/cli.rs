@@ -218,6 +218,17 @@ impl ClaudeCliProvider {
         }
     }
 
+    /// 나가는 글의 가리기 자리를 끼운 공급자를 돌려준다(ai.md 7차 1, E38 · V47).
+    ///
+    /// 끼운 뒤에는 CLI에 주는 글 — 표준 입력(대화 글)과 시스템 글 임시 파일의 내용 — 이
+    /// 쓰기 전에 `redactor`를 거친다. 인자(`--model` 등)와 환경은 바꾸지 않는다.
+    /// 끼우지 않으면 [`crate::NoRedaction`]과 같다(글을 그대로 준다).
+    #[must_use]
+    pub fn with_redactor(self, redactor: Arc<dyn crate::Redactor>) -> Self {
+        let _ = redactor;
+        todo!("ai 7차 1: 나가는 글 가리기 자리")
+    }
+
     /// 설치(`--version`, 5초)와 로그인(`auth status --json`, 10초)을 차례로 확인한다.
     /// 모델을 부르지 않는다.
     ///

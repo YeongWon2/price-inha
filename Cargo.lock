@@ -1228,6 +1228,9 @@ dependencies = [
 name = "pi-template"
 version = "0.1.0"
 dependencies = [
+ "rust_decimal",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1235,8 +1238,13 @@ dependencies = [
 name = "pi-trigger"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "pi-market",
+ "rust_decimal",
  "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

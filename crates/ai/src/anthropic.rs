@@ -142,6 +142,17 @@ impl AnthropicProvider {
         Ok(Self::build(config, limits, credentials))
     }
 
+    /// 나가는 글의 가리기 자리를 끼운 공급자를 돌려준다(ai.md 7차 1, E38 · V47).
+    ///
+    /// 끼운 뒤에는 요청의 시스템 글과 대화 글 모두가 보내기 전에 `redactor`를 거친다
+    /// (다시 시도로 다시 보내는 요청도 같다). 모델 이름 · 최대 토큰 같은 칸은 바꾸지 않는다.
+    /// 끼우지 않으면 [`crate::NoRedaction`]과 같다(글을 그대로 보낸다).
+    #[must_use]
+    pub fn with_redactor(self, redactor: Arc<dyn crate::Redactor>) -> Self {
+        let _ = redactor;
+        todo!("ai 7차 1: 나가는 글 가리기 자리")
+    }
+
     fn build(
         config: AnthropicConfig,
         limits: AnthropicLimits,
