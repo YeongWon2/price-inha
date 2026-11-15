@@ -45,6 +45,10 @@ pub const DEFAULT_TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
 pub const DEFAULT_RATE_LIMIT_RETRIES: u32 = 2;
 /// 현재가 요청 하나에 담는 종목 수의 한도(공식 명세).
 pub const MAX_SYMBOLS_PER_REQUEST: usize = 200;
+/// 토큰 발급이 인증 실패 · 허용 IP 아님으로 끝난 뒤 발급을 다시 보내지 않는 시간(기본값).
+pub const DEFAULT_TOKEN_FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
+/// 읽는 응답 본문 크기의 한도 기본값(1 MiB). 현재가 200종목 응답이 넉넉히 들어간다.
+pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// 토스증권 어댑터 설정.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,17 +62,27 @@ pub struct TossConfig {
     /// 429를 받았을 때 `Retry-After`만큼 기다렸다가 다시 시도하는 횟수.
     /// 2면 요청은 많아야 3번 나간다.
     pub rate_limit_retries: u32,
+    /// 토큰 발급이 인증 실패([`MarketError::AuthFailed`]) · 허용 IP 아님
+    /// ([`MarketError::IpNotAllowed`])으로 끝나면, 이 시간 동안 발급을 다시 보내지 않고
+    /// 같은 오류를 돌려준다. 다른 실패(장애 · 연결 · 응답 모양)에는 쉬지 않는다.
+    pub token_failure_cooldown: Duration,
+    /// 응답 본문을 이 크기(바이트)까지만 읽는다. 넘으면 읽지 않고
+    /// [`MarketError::UnexpectedResponse`]로 끝낸다(딱 이 크기는 읽는다).
+    pub max_response_bytes: usize,
 }
 
 impl Default for TossConfig {
     /// [`DEFAULT_BASE_URL`] · [`DEFAULT_TIMEOUT`] · [`DEFAULT_TOKEN_REFRESH_MARGIN`] ·
-    /// [`DEFAULT_RATE_LIMIT_RETRIES`].
+    /// [`DEFAULT_RATE_LIMIT_RETRIES`] · [`DEFAULT_TOKEN_FAILURE_COOLDOWN`] ·
+    /// [`DEFAULT_MAX_RESPONSE_BYTES`].
     fn default() -> Self {
         Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             timeout: DEFAULT_TIMEOUT,
             token_refresh_margin: DEFAULT_TOKEN_REFRESH_MARGIN,
             rate_limit_retries: DEFAULT_RATE_LIMIT_RETRIES,
+            token_failure_cooldown: DEFAULT_TOKEN_FAILURE_COOLDOWN,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
     }
 }
@@ -86,6 +100,12 @@ impl Default for TossConfig {
 /// - 동시에 여러 요청이 와도 토큰 발급은 한 번만 나간다.
 /// - 자격이 없으면([`CredentialSource::credentials`]가 `None`) 요청을 보내지 않고
 ///   [`MarketError::NoCredentials`]를 돌려준다(V31).
+/// - 토큰 유효 시간(`expires_in`)이 `token_refresh_margin` 이하이면 받지 않고
+///   [`MarketError::UnexpectedResponse`]로 끝낸다(요청마다 다시 발급해 토큰을 깨지 않게).
+/// - 발급이 인증 실패 · 허용 IP 아님이면 `token_failure_cooldown` 동안 발급을 다시 보내지
+///   않고 같은 오류를 돌려준다(국내 · 미국 어댑터가 함께 쉰다).
+/// - 기본 주소가 `https`가 아니면(루프백 주소 `127.0.0.0/8` · `::1`만 예외) 요청을 보내지
+///   않고 [`MarketError::InsecureBaseUrl`]을 돌려준다. 응답 본문은 `max_response_bytes`까지만 읽는다.
 #[derive(Clone)]
 pub struct TossClient {
     inner: Arc<Inner>,
@@ -227,6 +247,10 @@ impl MarketAdapter for TossAdapter {
 
     /// `GET /api/v1/prices?symbols=a,b,c`. 200개가 넘으면 200개씩 나눠 부르고 순서대로 잇는다.
     /// `lastPrice` 문자열을 십진수로 읽는다. 받은 시각은 [`Clock::now`].
+    ///
+    /// 부르기 전에 모든 종목을 [`Symbol::parse`]의 규칙으로 확인한다. 틀린 종목이 하나라도
+    /// 있으면 아무 요청(토큰 발급 포함)도 보내지 않고 [`MarketError::InvalidSymbol`]이다.
+    /// 0 이하의 가격은 [`MarketError::UnexpectedResponse`]다. 요청하지 않은 종목은 버린다.
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
         let mut quotes = Vec::with_capacity(symbols.len());
         for chunk in symbols.chunks(MAX_SYMBOLS_PER_REQUEST) {
@@ -258,6 +282,9 @@ impl MarketAdapter for TossAdapter {
 ///
 /// 주의: 토스증권은 다시 발급하면 이전 토큰이 무효가 된다. 돌고 있는 [`TossClient`]가
 /// 같은 자격을 쓰고 있었다면 그쪽은 `token-revoked`를 받고 한 번 다시 발급한다.
+///
+/// 기본 주소 규칙(`https`, 루프백만 예외) · 토큰 유효 시간 규칙 · 응답 크기 한도는
+/// [`TossClient`]와 같다.
 ///
 /// 한 번만 보낸다: 429여도 기다렸다가 다시 보내지 않고 [`MarketError::RateLimited`]를 돌려준다.
 pub async fn verify(config: &TossConfig, credentials: &Credentials) -> Result<(), MarketError> {

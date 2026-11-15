@@ -30,6 +30,11 @@ impl Default for StalePolicy {
 /// `now`에 장이 열려 있고(`calendar.session_at(now)`가 세션을 준다 — 프리 · 애프터 ·
 /// 데이마켓도 열린 것으로 본다) `now - quote.received_at`이 `policy.max_age`를 넘으면 참.
 /// 장이 닫힌 동안은 늦은 것으로 보지 않는다. 기준은 거래소 시각이 아니라 받은 시각이다.
+///
+/// 모르면 멈추는 쪽으로 본다(2차):
+/// - 달력이 `now`를 덮지 않으면([`MarketCalendar::covers`]가 거짓) 늦은 것이다
+///   ("장 닫힘"이 아니라 "달력이 낡음").
+/// - 받은 시각이 `now`보다 뒤면(시계가 어긋남) 장이 열렸든 닫혔든 늦은 것이다.
 pub fn is_stale(
     quote: &Quote,
     calendar: &MarketCalendar,

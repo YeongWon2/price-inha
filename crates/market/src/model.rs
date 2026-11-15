@@ -3,6 +3,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
+use crate::MarketError;
+
 /// 시장. 나중에 코인이 더해질 수 있어 `non_exhaustive`다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -21,6 +23,17 @@ impl Symbol {
     /// 글자 그대로 심볼을 만든다(바꾸지 않는다).
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
+    }
+
+    /// 글자를 확인해 심볼을 만든다(바꾸지 않는다).
+    ///
+    /// 받는 글자: 영문(`A-Z` · `a-z`) · 숫자(`0-9`) · `.` · `-`(공식 명세의 종목 글자).
+    /// 비었거나, 다른 글자(빈칸 · `,` · `&` · 한글 · 전각 글자 등)가 있거나, 32자를 넘으면
+    /// [`MarketError::InvalidSymbol`]이다. 오류에는 받은 글자를 담지 않는다.
+    /// 시세 어댑터([`crate::TossAdapter`])는 시세를 부르기 전에 모든 종목을 이 규칙으로 확인한다.
+    pub fn parse(value: &str) -> Result<Self, MarketError> {
+        let _ = value;
+        todo!()
     }
 
     /// 심볼 글자.
@@ -134,5 +147,18 @@ impl MarketCalendar {
         .flat_map(|day| day.sessions.iter())
         .find(|session| session.start <= at && at < session.end)
         .cloned()
+    }
+
+    /// 이 달력이 그 시각을 덮는가(N6). 덮지 않으면 "장 닫힘"인지 알 수 없다(달력이 낡음).
+    ///
+    /// 덮는 범위는 이전 영업일의 시작(포함)부터 다음 영업일의 끝(제외)까지다.
+    /// - 날의 시작은 그 시장 날짜의 자정과 그날 첫 세션의 시작 중 이른 쪽,
+    ///   날의 끝은 그 다음 날 자정과 그날 마지막 세션의 끝 중 늦은 쪽이다
+    ///   (미국 데이마켓 · 애프터마켓처럼 시장 날짜 밖으로 나가는 세션도 덮는다).
+    /// - 시장 날짜: 국내는 KST(UTC+9), 미국은 미 동부 시각.
+    /// - 그 사이의 휴장일 · 주말은 덮는다(달력이 영업일이 아니라고 알려 준 날이다).
+    pub fn covers(&self, at: DateTime<Utc>) -> bool {
+        let _ = at;
+        todo!()
     }
 }

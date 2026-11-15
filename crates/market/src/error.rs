@@ -53,4 +53,11 @@ pub enum MarketError {
         /// 실패 종류. 자격을 담지 않는다.
         detail: String,
     },
+    /// 종목 글자가 틀렸다([`crate::Symbol::parse`]의 규칙). 받은 글자를 담지 않는다.
+    /// 어댑터는 이때 바깥으로 요청을 보내지 않는다.
+    #[error("종목 글자가 올바르지 않습니다")]
+    InvalidSymbol,
+    /// 기본 주소가 `https`가 아니다(루프백 주소만 예외). 바깥으로 요청을 보내지 않는다.
+    #[error("증권사 기본 주소는 https여야 합니다")]
+    InsecureBaseUrl,
 }

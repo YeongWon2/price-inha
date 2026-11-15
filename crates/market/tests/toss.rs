@@ -9,9 +9,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use pi_market::{
-    Clock, CredentialSource, Credentials, Currency, DEFAULT_BASE_URL, DEFAULT_RATE_LIMIT_RETRIES,
-    DEFAULT_TIMEOUT, DEFAULT_TOKEN_REFRESH_MARGIN, MAX_SYMBOLS_PER_REQUEST, Market, MarketAdapter,
-    MarketError, SessionKind, Symbol, TossClient, TossConfig, verify,
+    Clock, CredentialSource, Credentials, Currency, DEFAULT_BASE_URL, DEFAULT_MAX_RESPONSE_BYTES,
+    DEFAULT_RATE_LIMIT_RETRIES, DEFAULT_TIMEOUT, DEFAULT_TOKEN_FAILURE_COOLDOWN,
+    DEFAULT_TOKEN_REFRESH_MARGIN, MAX_SYMBOLS_PER_REQUEST, Market, MarketAdapter, MarketError,
+    SessionKind, Symbol, TossClient, TossConfig, verify,
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -113,6 +114,8 @@ fn config_for(base_url: &str) -> TossConfig {
         timeout: Duration::from_secs(5),
         token_refresh_margin: Duration::from_secs(60),
         rate_limit_retries: 2,
+        // 2차에 더해진 설정(발급 실패 쉼 · 응답 크기 한도)은 기본값을 쓴다.
+        ..TossConfig::default()
     }
 }
 
@@ -1727,4 +1730,500 @@ async fn verify는_틀린_키와_허용되지_않은_ip와_연결_실패를_구�
         .await
         .unwrap_err();
     assert!(matches!(err, MarketError::Connection { .. }));
+}
+
+// ───────────── 2차: 설정 ─────────────
+
+// 검증: D5
+#[test]
+fn 발급_실패_쉼과_응답_크기_한도는_설정값이고_기본값이_있다() {
+    let config = TossConfig::default();
+    assert_eq!(
+        config.token_failure_cooldown,
+        DEFAULT_TOKEN_FAILURE_COOLDOWN
+    );
+    assert!(config.token_failure_cooldown > Duration::ZERO);
+    assert_eq!(config.max_response_bytes, DEFAULT_MAX_RESPONSE_BYTES);
+    // 현재가 200종목 응답이 들어가는 크기다.
+    assert!(config.max_response_bytes >= 64 * 1024);
+}
+
+// ───────────── 2차: 토큰 유효 시간 ─────────────
+
+// 검증: D5
+#[tokio::test]
+async fn 토큰_유효_시간이_다시_발급_여유_이하이면_응답_모양_오류다() {
+    for (expires_in, margin) in [(60, 60), (59, 60), (1, 60), (0, 60), (300, 300)] {
+        let server = MockServer::start().await;
+        mount_tokens(&server, &[TOKEN_1], expires_in).await;
+        mount_echo_prices(&server).await;
+        let clock = TestClock::at(START);
+        let mut config = config_for(&server.uri());
+        config.token_refresh_margin = Duration::from_secs(margin);
+        let adapter =
+            TossClient::new(config, TestCredentials::present(), clock.clone()).adapter(Market::Kr);
+
+        let err = adapter.quotes(&symbols(&["005930"])).await.unwrap_err();
+        assert!(
+            matches!(err, MarketError::UnexpectedResponse { .. }),
+            "expires_in {expires_in} · 여유 {margin} → {err:?}"
+        );
+        assert_eq!(count(&server, PRICES_PATH).await, 0);
+        assert_error_has_no_secret(&err);
+    }
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 토큰_유효_시간이_여유보다_길면_받아서_다시_쓴다() {
+    let server = MockServer::start().await;
+    mount_tokens(&server, &[TOKEN_1, TOKEN_2], 61).await;
+    mount_echo_prices(&server).await;
+    let clock = TestClock::at(START);
+    let adapter = client(&server, &clock).adapter(Market::Kr);
+
+    adapter.quotes(&symbols(&["005930"])).await.unwrap();
+    adapter.quotes(&symbols(&["005930"])).await.unwrap();
+    assert_eq!(count(&server, TOKEN_PATH).await, 1);
+    let prices = requests_to(&server, PRICES_PATH).await;
+    assert!(
+        prices
+            .iter()
+            .all(|r| bearer(r) == format!("Bearer {TOKEN_1}"))
+    );
+}
+
+// ───────────── 2차: 발급 실패 뒤 쉬기 ─────────────
+
+/// 토큰 발급이 처음 `times`번은 `failure`로, 그 뒤로는 `TOKEN_1`로 답한다.
+async fn mount_token_failure_then_success(
+    server: &MockServer,
+    failure: ResponseTemplate,
+    times: u64,
+) {
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(failure)
+        .up_to_n_times(times)
+        .mount(server)
+        .await;
+    mount_tokens(server, &[TOKEN_1], 86400).await;
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 발급이_인증_실패면_쉬는_동안_다시_보내지_않고_같은_오류다() {
+    let server = MockServer::start().await;
+    mount_token_failure_then_success(
+        &server,
+        oauth_error(401, "invalid_client", "Client authentication failed."),
+        1,
+    )
+    .await;
+    mount_echo_prices(&server).await;
+    mount_calendar(&server, US_PATH, us_business_day_body()).await;
+    let clock = TestClock::at(START);
+    let mut config = config_for(&server.uri());
+    config.token_failure_cooldown = Duration::from_secs(30);
+    let toss = TossClient::new(config, TestCredentials::present(), clock.clone());
+    let kr = toss.adapter(Market::Kr);
+    let us = toss.adapter(Market::Us);
+    let auth_failed = MarketError::AuthFailed {
+        code: "invalid_client".to_string(),
+    };
+
+    assert_eq!(
+        kr.quotes(&symbols(&["005930"])).await.unwrap_err(),
+        auth_failed
+    );
+    assert_eq!(count(&server, TOKEN_PATH).await, 1);
+
+    // 쉬는 동안: 발급을 다시 보내지 않고 같은 오류. 다른 시장 어댑터도 함께 쉰다.
+    assert_eq!(
+        kr.quotes(&symbols(&["005930"])).await.unwrap_err(),
+        auth_failed
+    );
+    assert_eq!(
+        us.calendar(day("2026-03-25")).await.unwrap_err(),
+        auth_failed
+    );
+    clock.advance(Duration::from_secs(29));
+    assert_eq!(
+        kr.quotes(&symbols(&["005930"])).await.unwrap_err(),
+        auth_failed
+    );
+    assert_eq!(count(&server, TOKEN_PATH).await, 1);
+    assert_eq!(count(&server, PRICES_PATH).await, 0);
+    assert_eq!(count(&server, US_PATH).await, 0);
+    // 쉬는 것은 기다리는 것이 아니다.
+    assert!(clock.slept().is_empty());
+
+    // 쉬는 시간이 지나면 다시 발급한다.
+    clock.advance(Duration::from_secs(2));
+    let quotes = kr.quotes(&symbols(&["005930"])).await.unwrap();
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(count(&server, TOKEN_PATH).await, 2);
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 발급이_허용_ip_아님이면_쉬고_쉬는_시간은_설정값이다() {
+    let server = MockServer::start().await;
+    mount_token_failure_then_success(
+        &server,
+        oauth_error(403, "access_denied", "IP address not allowed"),
+        1,
+    )
+    .await;
+    mount_calendar(&server, KR_PATH, kr_business_day_body()).await;
+    let clock = TestClock::at(START);
+    let mut config = config_for(&server.uri());
+    config.token_failure_cooldown = Duration::from_secs(5);
+    let adapter =
+        TossClient::new(config, TestCredentials::present(), clock.clone()).adapter(Market::Kr);
+
+    assert_eq!(
+        adapter.calendar(day("2026-03-25")).await.unwrap_err(),
+        MarketError::IpNotAllowed
+    );
+    clock.advance(Duration::from_secs(4));
+    assert_eq!(
+        adapter.calendar(day("2026-03-25")).await.unwrap_err(),
+        MarketError::IpNotAllowed
+    );
+    assert_eq!(count(&server, TOKEN_PATH).await, 1);
+    assert_eq!(count(&server, KR_PATH).await, 0);
+
+    clock.advance(Duration::from_secs(2));
+    adapter.calendar(day("2026-03-25")).await.unwrap();
+    assert_eq!(count(&server, TOKEN_PATH).await, 2);
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 장애나_이상한_응답으로_발급이_실패하면_쉬지_않는다() {
+    let failures = [
+        api_error(500, "internal-error"),
+        api_error(503, "maintenance"),
+        ResponseTemplate::new(200).set_body_json(json!({ "token_type": "Bearer" })),
+    ];
+    for failure in failures {
+        let server = MockServer::start().await;
+        mount_token_failure_then_success(&server, failure, 1).await;
+        mount_echo_prices(&server).await;
+        let clock = TestClock::at(START);
+        let adapter = client(&server, &clock).adapter(Market::Kr);
+
+        adapter.quotes(&symbols(&["005930"])).await.unwrap_err();
+        // 시각을 옮기지 않아도 바로 다시 발급한다.
+        let quotes = adapter.quotes(&symbols(&["005930"])).await.unwrap();
+        assert_eq!(quotes.len(), 1);
+        assert_eq!(count(&server, TOKEN_PATH).await, 2);
+    }
+}
+
+// ───────────── 2차: 종목 글자 확인 ─────────────
+
+// 검증: D5
+#[tokio::test]
+async fn 틀린_종목이_하나라도_있으면_아무_요청도_보내지_않고_오류다() {
+    let mut many: Vec<Symbol> = (0..250).map(|i| Symbol::new(format!("S{i:04}"))).collect();
+    // 두 번째 묶음(201번째 뒤)에 틀린 종목이 있어도 첫 묶음조차 보내지 않는다.
+    many[230] = Symbol::new("S0230?X");
+    let too_long = "A".repeat(33);
+    let cases: Vec<(Vec<Symbol>, String)> = vec![
+        (symbols(&["005930", "AAPL,MSFT"]), "AAPL,MSFT".to_string()),
+        (symbols(&["005930&debug=1"]), "005930&debug=1".to_string()),
+        (symbols(&["", "005930"]), String::new()),
+        (symbols(&["삼성전자"]), "삼성전자".to_string()),
+        (symbols(&[too_long.as_str()]), too_long.clone()),
+        (many, "S0230?X".to_string()),
+    ];
+    for (list, bad) in cases {
+        let server = MockServer::start().await;
+        mount_tokens(&server, &[TOKEN_1], 86400).await;
+        mount_echo_prices(&server).await;
+        let clock = TestClock::at(START);
+        let adapter = client(&server, &clock).adapter(Market::Kr);
+
+        let err = adapter.quotes(&list).await.unwrap_err();
+        assert_eq!(err, MarketError::InvalidSymbol, "{bad:?}");
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "틀린 종목이 있으면 토큰 발급도 현재가도 보내지 않는다: {bad:?}"
+        );
+        if !bad.is_empty() {
+            assert!(!err.to_string().contains(&bad));
+            assert!(!format!("{err:?}").contains(&bad));
+        }
+    }
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 점과_빼기가_든_종목은_그대로_묻는다() {
+    let server = MockServer::start().await;
+    mount_tokens(&server, &[TOKEN_1], 86400).await;
+    mount_echo_prices(&server).await;
+    let clock = TestClock::at(START);
+    let adapter = client(&server, &clock).adapter(Market::Us);
+
+    let quotes = adapter.quotes(&symbols(&["BRK.B", "BF-B"])).await.unwrap();
+    assert_eq!(quotes.len(), 2);
+    let req = &requests_to(&server, PRICES_PATH).await[0];
+    assert_eq!(query_value(req, "symbols").as_deref(), Some("BRK.B,BF-B"));
+}
+
+// ───────────── 2차: 가격 · 요청하지 않은 종목 ─────────────
+
+// 검증: D5
+#[tokio::test]
+async fn 영_이하의_가격은_응답_모양_오류다() {
+    for price in ["0", "0.00", "-0", "-1", "-0.0001", "-72000"] {
+        let server = MockServer::start().await;
+        mount_tokens(&server, &[TOKEN_1], 86400).await;
+        mount_prices(
+            &server,
+            json!({ "result": [
+                price_item("005930", "72000", "KRW"),
+                price_item("000660", price, "KRW"),
+            ]}),
+        )
+        .await;
+        let clock = TestClock::at(START);
+        let adapter = client(&server, &clock).adapter(Market::Kr);
+
+        let err = adapter
+            .quotes(&symbols(&["005930", "000660"]))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, MarketError::UnexpectedResponse { .. }),
+            "{price} → {err:?}"
+        );
+    }
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 아주_작은_양의_가격은_받는다() {
+    let server = MockServer::start().await;
+    mount_tokens(&server, &[TOKEN_1], 86400).await;
+    mount_prices(
+        &server,
+        json!({ "result": [ price_item("TINY", "0.0001", "USD") ] }),
+    )
+    .await;
+    let clock = TestClock::at(START);
+    let adapter = client(&server, &clock).adapter(Market::Us);
+
+    let quotes = adapter.quotes(&symbols(&["TINY"])).await.unwrap();
+    assert_eq!(quotes[0].price, dec("0.0001"));
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 요청하지_않은_종목이_응답에_있으면_버린다() {
+    let server = MockServer::start().await;
+    mount_tokens(&server, &[TOKEN_1], 86400).await;
+    mount_prices(
+        &server,
+        json!({ "result": [
+            price_item("000660", "185500", "KRW"),
+            price_item("005930", "72000", "KRW"),
+            price_item("AAPL", "185.70", "USD"),
+        ]}),
+    )
+    .await;
+    let clock = TestClock::at(START);
+    let adapter = client(&server, &clock).adapter(Market::Kr);
+
+    let quotes = adapter.quotes(&symbols(&["005930"])).await.unwrap();
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(quotes[0].symbol, Symbol::new("005930"));
+    assert_eq!(quotes[0].price, dec("72000"));
+
+    let quotes = adapter
+        .quotes(&symbols(&["005930", "000660"]))
+        .await
+        .unwrap();
+    let got: HashSet<String> = quotes
+        .iter()
+        .map(|q| q.symbol.as_str().to_string())
+        .collect();
+    let want: HashSet<String> = ["005930", "000660"].into_iter().map(String::from).collect();
+    assert_eq!(got, want);
+
+    // 요청한 종목이 응답에 하나도 없으면 빈 목록이다(오류가 아니다).
+    let quotes = adapter.quotes(&symbols(&["035720"])).await.unwrap();
+    assert!(quotes.is_empty());
+}
+
+// ───────────── 2차: 평문 주소 ─────────────
+
+// 검증: D5, V31
+#[tokio::test]
+async fn 기본_주소가_https가_아니면_요청을_보내지_않고_거부한다() {
+    let credentials = Credentials::new(CLIENT_ID, CLIENT_SECRET);
+    for base in [
+        "http://192.0.2.1",
+        "http://192.0.2.1:8080",
+        "http://10.0.0.1",
+        "ftp://192.0.2.1",
+    ] {
+        let clock = TestClock::at(START);
+        let mut config = config_for(base);
+        config.timeout = Duration::from_millis(200);
+        let adapter = TossClient::new(config.clone(), TestCredentials::present(), clock.clone())
+            .adapter(Market::Kr);
+
+        let err = adapter.quotes(&symbols(&["005930"])).await.unwrap_err();
+        assert_eq!(err, MarketError::InsecureBaseUrl, "{base}");
+        let err = adapter.calendar(day("2026-03-25")).await.unwrap_err();
+        assert_eq!(err, MarketError::InsecureBaseUrl, "{base}");
+        let err = verify(&config, &credentials).await.unwrap_err();
+        assert_eq!(err, MarketError::InsecureBaseUrl, "{base}");
+        assert_error_has_no_secret(&err);
+    }
+}
+
+// 검증: D5
+#[tokio::test]
+async fn https면_루프백이_아니어도_주소_때문에_거부하지_않는다() {
+    let clock = TestClock::at(START);
+    let mut config = config_for("https://192.0.2.1");
+    config.timeout = Duration::from_millis(200);
+    let adapter =
+        TossClient::new(config, TestCredentials::present(), clock.clone()).adapter(Market::Kr);
+
+    // 닿지 않는 주소라 연결 실패다(주소 거부가 아니다).
+    let err = adapter.quotes(&symbols(&["005930"])).await.unwrap_err();
+    assert!(matches!(err, MarketError::Connection { .. }), "{err:?}");
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 루프백_주소의_가짜_서버는_http여도_쓴다() {
+    let server = MockServer::start().await;
+    assert!(server.uri().starts_with("http://127.0.0.1"));
+    mount_tokens(&server, &[TOKEN_1], 86400).await;
+    mount_echo_prices(&server).await;
+    let clock = TestClock::at(START);
+    let adapter = client(&server, &clock).adapter(Market::Kr);
+
+    assert_eq!(
+        adapter.quotes(&symbols(&["005930"])).await.unwrap().len(),
+        1
+    );
+    verify(
+        &config_for(&server.uri()),
+        &Credentials::new(CLIENT_ID, CLIENT_SECRET),
+    )
+    .await
+    .unwrap();
+}
+
+// ───────────── 2차: 응답 크기 한도 ─────────────
+
+/// JSON 글자 뒤를 빈칸으로 채워 정확히 `size` 바이트로 만든다(빈칸은 JSON으로 읽힌다).
+fn padded(value: &Value, size: usize) -> String {
+    let mut text = value.to_string();
+    assert!(text.len() <= size);
+    text.push_str(&" ".repeat(size - text.len()));
+    text
+}
+
+fn json_body(text: String) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_raw(text, "application/json")
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 현재가_응답이_정한_크기를_넘으면_오류고_딱_그_크기면_읽는다() {
+    let limit = 2048;
+    let body = json!({ "result": [ price_item("005930", "72000", "KRW") ] });
+    for (size, ok) in [(limit, true), (limit + 1, false), (limit * 50, false)] {
+        let server = MockServer::start().await;
+        mount_tokens(&server, &[TOKEN_1], 86400).await;
+        Mock::given(method("GET"))
+            .and(path(PRICES_PATH))
+            .respond_with(json_body(padded(&body, size)))
+            .mount(&server)
+            .await;
+        let clock = TestClock::at(START);
+        let mut config = config_for(&server.uri());
+        config.max_response_bytes = limit;
+        let adapter =
+            TossClient::new(config, TestCredentials::present(), clock.clone()).adapter(Market::Kr);
+
+        let result = adapter.quotes(&symbols(&["005930"])).await;
+        if ok {
+            assert_eq!(result.unwrap()[0].price, dec("72000"), "{size}");
+        } else {
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, MarketError::UnexpectedResponse { .. }),
+                "{size} → {err:?}"
+            );
+        }
+    }
+}
+
+// 검증: D5
+#[tokio::test]
+async fn 장_시간과_토큰_응답도_크기_한도를_넘으면_오류다() {
+    let limit = 4096;
+
+    // 장 시간.
+    let server = MockServer::start().await;
+    mount_tokens(&server, &[TOKEN_1], 86400).await;
+    Mock::given(method("GET"))
+        .and(path(KR_PATH))
+        .respond_with(json_body(padded(&kr_business_day_body(), limit + 1)))
+        .mount(&server)
+        .await;
+    let clock = TestClock::at(START);
+    let mut config = config_for(&server.uri());
+    config.max_response_bytes = limit;
+    let adapter = TossClient::new(config.clone(), TestCredentials::present(), clock.clone())
+        .adapter(Market::Kr);
+    let err = adapter.calendar(day("2026-03-25")).await.unwrap_err();
+    assert!(
+        matches!(err, MarketError::UnexpectedResponse { .. }),
+        "{err:?}"
+    );
+
+    // 토큰: 크기를 넘는 본문에 자격이 들어 있어도 오류에 담지 않는다.
+    let server = MockServer::start().await;
+    let token = json!({
+        "access_token": TOKEN_1,
+        "token_type": "Bearer",
+        "expires_in": 86400,
+        "echo": CLIENT_SECRET,
+    });
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(json_body(padded(&token, limit + 1)))
+        .mount(&server)
+        .await;
+    mount_echo_prices(&server).await;
+    let mut config = config_for(&server.uri());
+    config.max_response_bytes = limit;
+    let adapter = TossClient::new(config.clone(), TestCredentials::present(), clock.clone())
+        .adapter(Market::Kr);
+    let err = adapter.quotes(&symbols(&["005930"])).await.unwrap_err();
+    assert!(
+        matches!(err, MarketError::UnexpectedResponse { .. }),
+        "{err:?}"
+    );
+    assert_error_has_no_secret(&err);
+    assert_eq!(count(&server, PRICES_PATH).await, 0);
+
+    let err = verify(&config, &Credentials::new(CLIENT_ID, CLIENT_SECRET))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, MarketError::UnexpectedResponse { .. }),
+        "{err:?}"
+    );
 }

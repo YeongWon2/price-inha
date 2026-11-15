@@ -638,3 +638,245 @@ async fn 지켜보기는_받는_쪽이_사라지면_멈춘다() {
     tokio::time::sleep(INTERVAL * 10).await;
     assert_eq!(fake.quote_calls(), after);
 }
+
+// ───────────── 2차: 종목 글자 ─────────────
+
+// 검증: D5
+#[test]
+fn 종목_글자는_영문_숫자_점_빼기만_받는다() {
+    let longest = "A".repeat(32);
+    for ok in [
+        "005930",
+        "000660",
+        "AAPL",
+        "BRK.B",
+        "BF-B",
+        "7203",
+        "A",
+        longest.as_str(),
+    ] {
+        assert_eq!(Symbol::parse(ok), Ok(Symbol::new(ok)), "{ok}");
+    }
+}
+
+// 검증: D5
+#[test]
+fn 틀린_종목_글자는_거부하고_오류에_그_글자를_담지_않는다() {
+    let too_long = "A".repeat(33);
+    for bad in [
+        "",
+        " ",
+        "005930 ",
+        " AAPL",
+        "AAPL,MSFT",
+        "A&B=1",
+        "A/B",
+        "A_B",
+        "A?B",
+        "A%2C",
+        "A+B",
+        "A#B",
+        "삼성전자",
+        "ＡＡＰＬ",
+        "A\nB",
+        "A\u{0}B",
+        too_long.as_str(),
+    ] {
+        let err = Symbol::parse(bad).unwrap_err();
+        assert_eq!(err, MarketError::InvalidSymbol, "{bad:?}");
+        if bad.trim().chars().count() >= 3 {
+            assert!(!err.to_string().contains(bad), "{bad:?}");
+            assert!(!format!("{err:?}").contains(bad), "{bad:?}");
+        }
+    }
+}
+
+// 검증: D5
+#[test]
+fn 심볼_new는_글자를_확인하지_않고_그대로_둔다() {
+    // 1차 모양 그대로다(공개 API는 더하기만 한다).
+    assert_eq!(Symbol::new("A,B").as_str(), "A,B");
+}
+
+// ───────────── 2차: 달력이 덮는 범위 (N6) ─────────────
+
+/// 금요일이 기준일이고 다음 영업일이 월요일인 국내 달력.
+fn kr_weekend_calendar() -> MarketCalendar {
+    MarketCalendar {
+        market: Market::Kr,
+        today: kr_day("2026-03-27"),
+        previous_business_day: kr_day("2026-03-26"),
+        next_business_day: kr_day("2026-03-30"),
+    }
+}
+
+// 검증: N6, D5
+#[test]
+fn 국내_달력은_이전_영업일_자정부터_다음_영업일_끝까지_덮는다() {
+    let cal = kr_calendar(); // 03-24 ~ 03-26 (KST)
+    assert!(cal.covers(ts("2026-03-24T00:00:00+09:00")));
+    assert!(cal.covers(ts("2026-03-24T07:00:00+09:00")));
+    assert!(cal.covers(ts("2026-03-25T10:00:00+09:00")));
+    assert!(cal.covers(ts("2026-03-25T23:00:00+09:00")));
+    assert!(cal.covers(ts("2026-03-26T23:59:59.999+09:00")));
+
+    assert!(!cal.covers(ts("2026-03-23T23:59:59.999+09:00")));
+    assert!(!cal.covers(ts("2026-03-27T00:00:00+09:00")));
+    assert!(!cal.covers(ts("2026-03-27T10:00:00+09:00")));
+    assert!(!cal.covers(ts("2026-04-10T10:00:00+09:00")));
+    assert!(!cal.covers(ts("2025-03-25T10:00:00+09:00")));
+}
+
+// 검증: N6, D5
+#[test]
+fn 영업일_사이의_주말과_휴장일도_덮는다() {
+    let cal = kr_weekend_calendar();
+    assert!(cal.covers(ts("2026-03-28T12:00:00+09:00")));
+    assert!(cal.covers(ts("2026-03-29T12:00:00+09:00")));
+    assert!(cal.session_at(ts("2026-03-28T12:00:00+09:00")).is_none());
+
+    let holiday_cal = MarketCalendar {
+        market: Market::Kr,
+        today: holiday("2026-05-05"),
+        previous_business_day: kr_day("2026-05-04"),
+        next_business_day: kr_day("2026-05-06"),
+    };
+    assert!(holiday_cal.covers(ts("2026-05-05T10:00:00+09:00")));
+}
+
+// 검증: N6, D5
+#[test]
+fn 미국_달력은_날짜_밖으로_나가는_세션까지_덮는다() {
+    let cal = us_calendar("2026-03-25"); // 이전 03-24 · 다음 03-26
+    // 이전 영업일의 데이마켓 시작(미 동부로는 그 전날 저녁)도 덮는다.
+    assert!(cal.covers(ts("2026-03-24T09:00:00+09:00")));
+    // 기준일 정규장이 날짜를 넘은 새벽.
+    assert!(cal.covers(ts("2026-03-26T01:00:00+09:00")));
+    // 애프터마켓과 데이마켓 사이(장 닫힘).
+    assert!(cal.covers(ts("2026-03-25T08:00:00+09:00")));
+    assert!(cal.session_at(ts("2026-03-25T08:00:00+09:00")).is_none());
+    // 다음 영업일의 애프터마켓 끝 직전.
+    assert!(cal.covers(ts("2026-03-27T06:59:59+09:00")));
+
+    assert!(!cal.covers(ts("2026-03-22T12:00:00+09:00")));
+    assert!(!cal.covers(ts("2026-03-28T12:00:00+09:00")));
+    assert!(!cal.covers(ts("2026-04-10T12:00:00+09:00")));
+}
+
+// ───────────── 2차: 모르면 늦은 것으로 본다 (N6) ─────────────
+
+// 검증: N6
+#[test]
+fn 달력이_덮지_않는_시각이면_늦은_시세다() {
+    let cal = kr_calendar();
+    let policy = StalePolicy::default();
+
+    // 달력이 끝난 뒤: 실제로는 장이 열렸을 수 있지만 이 달력으로는 모른다.
+    let q = quote("005930", "72000", "2026-03-26T19:59:00+09:00");
+    assert!(is_stale(&q, &cal, ts("2026-03-27T10:00:00+09:00"), &policy));
+    assert!(is_stale(&q, &cal, ts("2026-03-27T00:00:00+09:00"), &policy));
+
+    // 방금 받은 시세여도 달력이 덮지 않으면 늦은 것이다.
+    let fresh = quote("005930", "72000", "2026-04-10T10:00:00+09:00");
+    assert!(is_stale(
+        &fresh,
+        &cal,
+        ts("2026-04-10T10:00:00+09:00"),
+        &policy
+    ));
+
+    // 달력이 시작하기 전.
+    let early = quote("005930", "72000", "2026-03-20T10:00:00+09:00");
+    assert!(is_stale(
+        &early,
+        &cal,
+        ts("2026-03-20T10:00:05+09:00"),
+        &policy
+    ));
+}
+
+// 검증: N6
+#[test]
+fn 달력이_덮는_장_닫힘과_달력이_낡음을_구분한다() {
+    let cal = kr_calendar();
+    let policy = StalePolicy::default();
+    let q = quote("005930", "72000", "2026-03-26T19:59:00+09:00");
+
+    // 덮는 범위 안의 밤: 장 닫힘 → 늦지 않았다.
+    let night = ts("2026-03-26T23:00:00+09:00");
+    assert!(cal.covers(night));
+    assert!(cal.session_at(night).is_none());
+    assert!(!is_stale(&q, &cal, night, &policy));
+
+    // 덮는 범위 밖: 달력이 낡음 → 늦었다.
+    let after = ts("2026-03-27T01:00:00+09:00");
+    assert!(!cal.covers(after));
+    assert!(cal.session_at(after).is_none());
+    assert!(is_stale(&q, &cal, after, &policy));
+}
+
+// 검증: N6
+#[test]
+fn 미국_달력이_덮지_않는_시각이면_늦은_시세다() {
+    let cal = us_calendar("2026-03-25");
+    let mut q = quote("AAPL", "185.70", "2026-03-27T06:00:00+09:00");
+    q.currency = Currency::Usd;
+    assert!(is_stale(
+        &q,
+        &cal,
+        ts("2026-03-28T12:00:00+09:00"),
+        &StalePolicy::default()
+    ));
+}
+
+// 검증: N6
+#[test]
+fn 받은_시각이_미래면_장_중에는_늦은_시세다() {
+    let cal = kr_calendar();
+    let policy = StalePolicy::default();
+    let q = quote("005930", "72000", "2026-03-25T10:00:00.001+09:00");
+    assert!(is_stale(&q, &cal, ts("2026-03-25T10:00:00+09:00"), &policy));
+
+    let far = quote("005930", "72000", "2026-03-25T11:00:00+09:00");
+    assert!(is_stale(
+        &far,
+        &cal,
+        ts("2026-03-25T10:00:00+09:00"),
+        &policy
+    ));
+
+    // 같은 순간은 미래가 아니다.
+    let same = quote("005930", "72000", "2026-03-25T10:00:00+09:00");
+    assert!(!is_stale(
+        &same,
+        &cal,
+        ts("2026-03-25T10:00:00+09:00"),
+        &policy
+    ));
+}
+
+// 검증: N6
+#[test]
+fn 받은_시각이_미래면_장이_닫혀도_늦은_시세다() {
+    let cal = kr_calendar();
+    let policy = StalePolicy::default();
+    let q = quote("005930", "72000", "2026-03-25T23:00:01+09:00");
+    let now = ts("2026-03-25T23:00:00+09:00");
+    assert!(cal.session_at(now).is_none());
+    assert!(is_stale(&q, &cal, now, &policy));
+
+    // 휴장일에도 같다.
+    let holiday_cal = MarketCalendar {
+        market: Market::Kr,
+        today: holiday("2026-05-05"),
+        previous_business_day: kr_day("2026-05-04"),
+        next_business_day: kr_day("2026-05-06"),
+    };
+    let q = quote("005930", "72000", "2026-05-05T10:00:30+09:00");
+    assert!(is_stale(
+        &q,
+        &holiday_cal,
+        ts("2026-05-05T10:00:00+09:00"),
+        &policy
+    ));
+}
