@@ -1,6 +1,7 @@
 //! 서버 조립: 저장소 · 비밀 보관소 · 시세 · 접속 관문을 잇는다.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use pi_gate::{Gate, GateConfig, GateServer, Publisher};
@@ -15,7 +16,8 @@ use crate::desk::{Desk, DeskParts};
 use crate::feed::{Feed, Pace, Source};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::{
-    AppError, BrokerKeys, KeyVerifier, SecretsRedactor, Settings, Upstreams, page, setup_http,
+    AppError, BrokerKeys, CLI_COMMON_LOCATIONS, KeyVerifier, SecretsRedactor, Settings, Upstreams,
+    page, setup_http,
 };
 
 /// 저장소 파일 이름(보관 폴더 안).
@@ -66,6 +68,9 @@ pub struct Wiring {
     /// 상대 주소를 바꿔 본다(`pi_gate::GateBuilder::peer_override`에 넘긴다). **테스트용이다.**
     /// 실행 파일은 `None`으로 둔다.
     pub peer_override: Option<pi_gate::PeerOverride>,
+    /// (6차) `PATH`와 사용자 홈 다음에 CLI 실행 파일을 찾는 자리(이 순서). 기본은 `crate::CLI_COMMON_LOCATIONS`.
+    /// 테스트는 임시 폴더를 넣거나 비운다.
+    pub cli_locations: Vec<PathBuf>,
 }
 
 impl Default for Wiring {
@@ -75,6 +80,7 @@ impl Default for Wiring {
             upstreams: Upstreams::default(),
             clock: Arc::new(SystemClock),
             peer_override: None,
+            cli_locations: CLI_COMMON_LOCATIONS.iter().map(PathBuf::from).collect(),
         }
     }
 }
@@ -146,6 +152,8 @@ fn watched_symbols(settings: &Settings) -> (Vec<Symbol>, SymbolsSource) {
 ///    (기본 30초)이면 [`KIND_QUOTES_STALE`]을 보낸다(N6). 받기에 실패해도 흐름은 이어진다.
 pub struct App {
     gate: GateServer,
+    /// 설정 책상(6차: 고른 AI 연결의 공급자를 쥔다).
+    desk: Arc<Desk>,
     /// 시세 흐름을 멈추는 알림.
     stop: watch::Sender<bool>,
     feed: JoinHandle<()>,
@@ -205,7 +213,7 @@ impl App {
             gate.publisher(),
             wiring.clock,
             settings.market,
-            desk,
+            Arc::clone(&desk),
             Pace {
                 interval: settings.quote_interval,
                 retry_initial: settings.retry_initial,
@@ -223,6 +231,7 @@ impl App {
         });
         Ok(App {
             gate,
+            desk,
             stop,
             feed,
             store,
@@ -232,6 +241,16 @@ impl App {
     /// 실제로 연 주소.
     pub fn local_addr(&self) -> SocketAddr {
         self.gate.local_addr()
+    }
+
+    /// (6차) 고른 AI 연결로 만든 공급자(나중에 에이전트 실행기가 쓴다).
+    ///
+    /// API 키를 골랐으면 `pi_ai::AnthropicProvider`(자격은 [`crate::AiKeys`]), CLI를 골랐으면
+    /// `pi_ai::ClaudeCliProvider`([`crate::cli_config`]: 동시 실행 2, 시간 제한은 AI 요청 시간 제한과 같다,
+    /// 환경은 [`Settings::cli_env`], 작업 폴더는 [`crate::prepare_cli_work_dir`]). 고른 것이 바뀌면 새로 만든다.
+    /// 고르지 않은 쪽으로 넘어가지 않는다.
+    pub fn ai_provider(&self) -> Arc<dyn pi_ai::AiProvider> {
+        self.desk.ai_provider()
     }
 
     /// 이벤트를 내보내는 손잡이(다른 모듈이 쓴다).

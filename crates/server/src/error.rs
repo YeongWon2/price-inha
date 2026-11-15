@@ -77,6 +77,21 @@ pub enum SetupRefusal {
     /// (5차, 원본 Hermes api_server의 `body_too_large` · 413)
     #[error("본문이 너무 큽니다")]
     BodyTooLarge,
+    /// (6차) CLI가 설치돼 있지 않다: 그 경로에 실행 파일이 없다.
+    #[error("Claude Code CLI가 설치돼 있지 않습니다")]
+    CliNotInstalled,
+    /// (6차) 설치된 CLI의 버전이 너무 낮다(`pi_ai::CLI_MIN_VERSION`).
+    #[error("Claude Code CLI 버전이 너무 낮습니다")]
+    CliTooOld,
+    /// (6차) CLI에 로그인돼 있지 않다. 터미널에서 `claude auth login`.
+    #[error("Claude Code CLI에 로그인돼 있지 않습니다. 터미널에서 claude auth login")]
+    CliNotLoggedIn,
+    /// (6차) CLI가 구독이 아니라 API 키로 로그인돼 있다.
+    #[error("Claude Code CLI가 구독이 아닌 API 키로 로그인돼 있습니다")]
+    CliNotSubscription,
+    /// (6차) CLI를 확인하지 못했다(시간 초과 · 읽지 못함).
+    #[error("Claude Code CLI를 확인하지 못했습니다")]
+    CliUnchecked,
 }
 
 impl SetupRefusal {
@@ -90,6 +105,11 @@ impl SetupRefusal {
             SetupRefusal::FixedByArgument => "fixed_by_argument",
             SetupRefusal::SaveFailed => "save_failed",
             SetupRefusal::BodyTooLarge => "body_too_large",
+            SetupRefusal::CliNotInstalled => "cli_not_installed",
+            SetupRefusal::CliTooOld => "cli_too_old",
+            SetupRefusal::CliNotLoggedIn => "cli_not_logged_in",
+            SetupRefusal::CliNotSubscription => "cli_not_subscription",
+            SetupRefusal::CliUnchecked => "cli_unchecked",
         }
     }
 
@@ -103,6 +123,11 @@ impl SetupRefusal {
             SetupRefusal::FixedByArgument => 409,
             SetupRefusal::SaveFailed => 500,
             SetupRefusal::BodyTooLarge => 413,
+            SetupRefusal::CliNotInstalled
+            | SetupRefusal::CliTooOld
+            | SetupRefusal::CliNotLoggedIn
+            | SetupRefusal::CliNotSubscription => 422,
+            SetupRefusal::CliUnchecked => 502,
         }
     }
 }

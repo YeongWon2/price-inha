@@ -10,6 +10,7 @@
 //! | `GET` [`SETUP_PATH`] | 세션 | 설정 상태([`SetupStatus`])를 JSON으로 준다 |
 //! | `POST` [`SETUP_KEYS_PATH`] | 세션 + 같은 출처 + 그 컴퓨터(`pi_gate::local_only`) | 키를 확인하고 등록한다(C3 · C16) |
 //! | `POST` [`SETUP_SYMBOLS_PATH`] | 세션 + 같은 출처 + 그 컴퓨터 | 지켜볼 종목을 저장한다 |
+//! | `POST` [`crate::SETUP_AI_PATH`] | 세션 + 같은 출처 + 그 컴퓨터 | (6차) AI 연결을 고르고 CLI면 확인한다([`crate::ai_link`]) |
 //!
 //! # 설정 상태 (`GET` [`SETUP_PATH`], 200)
 //!
@@ -25,19 +26,24 @@
 //!   "started": false,
 //!   "demo": false,
 //!   "symbols": ["005930", "000660"],
-//!   "symbols_source": "argument"
+//!   "symbols_source": "argument",
+//!   "ai": {"method": "api_key", "command": null, "config_dir": null, "cli": null,
+//!          "cli_version": null, "subscription": null, "legacy_auth_file": false}
 //! }
 //! ```
 //!
 //! - 칸은 위의 것이 전부다. 키의 값 · 일부 · 길이는 없다(V46). 종목은 비밀이 아니라서 보여 준다.
-//! - `items`는 [`SETUP_ITEMS`]의 순서다. `ai`는 API 키와 구독 OAuth 토큰 가운데 하나라도 있으면 등록된 것이다.
+//! - `items`는 [`SETUP_ITEMS`]의 순서다. (6차) `ai`는 사용자가 고른 연결이 갖춰졌을 때만 등록된 것이다:
+//!   API 키를 골랐으면 API 키가 등록됐을 때, CLI를 골랐으면 마지막 확인이 로그인된 구독일 때.
+//!   둘 다 있어도 고르지 않은 쪽으로 넘어가지 않는다. 고른 것이 없으면 API 키를 고른 것으로 본다.
+//! - (6차) `ai` 칸: 고른 연결 · CLI 경로 · 확인 상태 · 옛 `auth.json` 알림. 모양은 [`crate::ai_link`] 문서.
 //! - `ready`: 필수 항목이 모두 등록됐는가. `started`: 시세 받기를 시작했는가(`ready`이거나 시연).
 //! - `symbols_source`: [`SymbolsSource::as_str`].
 //!
 //! # 키 등록 (`POST` [`SETUP_KEYS_PATH`])
 //!
 //! 본문(JSON): `{"item": "broker", "fields": {"client_id": "...", "client_secret": "..."}}`.
-//! `item`은 [`KEY_BROKER`] · [`KEY_AI_API_KEY`] · [`KEY_AI_OAUTH`] · [`KEY_DATA`] 가운데 하나이고,
+//! `item`은 [`KEY_BROKER`] · [`KEY_AI_API_KEY`] · [`KEY_DATA`] 가운데 하나이고(6차: 구독 토큰 항목은 없다),
 //! `fields`의 칸은 `pi_secrets::KeyKind::fields`와 꼭 같아야 한다(값은 글자).
 //!
 //! - 성공: 200 `{"registered": true}`. 그 밖의 칸은 없다.
@@ -83,7 +89,7 @@ use pi_secrets::{Credentials, KeyKind, MIN_SECRET_CHARS};
 use serde_json::{Value, json};
 use zeroize::Zeroize;
 
-use crate::{AppError, SetupRefusal};
+use crate::{AiStatus, AppError, SetupRefusal};
 
 /// 설정 상태를 읽는 경로(`GET`). 세션이 있어야 한다.
 pub const SETUP_PATH: &str = "/api/setup";
@@ -94,7 +100,7 @@ pub const SETUP_SYMBOLS_PATH: &str = "/api/setup/symbols";
 
 /// 설정 항목 이름: 증권사 키.
 pub const ITEM_BROKER: &str = "broker";
-/// 설정 항목 이름: AI 키(API 키 또는 구독 OAuth 토큰 가운데 하나).
+/// 설정 항목 이름: AI 연결(API 키 또는 Claude Code CLI 가운데 사용자가 고른 하나, 6차).
 pub const ITEM_AI: &str = "ai";
 /// 설정 항목 이름: 지켜볼 종목.
 pub const ITEM_SYMBOLS: &str = "symbols";
@@ -105,8 +111,6 @@ pub const ITEM_DATA: &str = "data";
 pub const KEY_BROKER: &str = "broker";
 /// 키 등록의 `item`: AI API 키(`KeyKind::AiApiKey`).
 pub const KEY_AI_API_KEY: &str = "ai_api_key";
-/// 키 등록의 `item`: AI 구독 OAuth 토큰(`KeyKind::AiOAuth`).
-pub const KEY_AI_OAUTH: &str = "ai_oauth";
 /// 키 등록의 `item`: 자료 키(`KeyKind::Data`).
 pub const KEY_DATA: &str = "data";
 
@@ -199,6 +203,8 @@ pub struct SetupStatus {
     pub symbols: Vec<Symbol>,
     /// 그 종목이 어디서 왔는가.
     pub symbols_source: SymbolsSource,
+    /// (6차) AI 연결: 고른 방식 · CLI 경로 · 확인 상태 · 옛 `auth.json` 알림.
+    pub ai: AiStatus,
 }
 
 impl SetupStatus {
@@ -303,7 +309,6 @@ fn key_request_parts(request: &Value) -> Option<(KeyKind, &serde_json::Map<Strin
     let kind = match request.get("item")?.as_str()? {
         KEY_BROKER => KeyKind::Broker,
         KEY_AI_API_KEY => KeyKind::AiApiKey,
-        KEY_AI_OAUTH => KeyKind::AiOAuth,
         KEY_DATA => KeyKind::Data,
         _ => return None,
     };

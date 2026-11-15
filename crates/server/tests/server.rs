@@ -5,10 +5,12 @@
 //! 3차 작업(시작 전 필수 설정 · 시세 흐름)의 테스트는 `setup/` · `flow/`에 있고 이 파일의 도우미를 함께 쓴다.
 //! 4차 작업(보안 응답 헤더 · 이벤트 종류 이름 · 3차 검토의 참고)의 테스트는 `round4/`에 있다.
 //! 5차 작업 4번(본문이 너무 크면 413)의 테스트는 `round5/`에 있다.
+//! 6차 작업(AI 연결: API 키 또는 Claude Code CLI · 옛 auth.json 알림)의 테스트는 `round6/`에 있다.
 
 mod flow;
 mod round4;
 mod round5;
+mod round6;
 mod setup;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -50,8 +52,6 @@ const INTERVAL_MS: &str = "20";
 const CLIENT_ID: &str = "test-client-id-0001";
 const CLIENT_SECRET: &str = "test-client-secret-not-real";
 const AI_KEY: &str = "test-ai-key-not-real-0001";
-const OAUTH_ACCESS: &str = "test-oauth-access-not-real";
-const OAUTH_REFRESH: &str = "test-oauth-refresh-not-real";
 const TOSS_TOKEN: &str = "test-toss-token-not-real";
 /// 토스증권 경로(공식 명세, `docs/dev/toss-api-notes.md`).
 const TOKEN_PATH: &str = "/oauth2/token";
@@ -292,7 +292,7 @@ fn asked_symbols(request: &Request) -> Vec<String> {
         .collect()
 }
 
-/// 가짜 Anthropic. 모델 목록 경로만 있다: 시험용 API 키나 접근 토큰이면 200, 아니면 401.
+/// 가짜 Anthropic. 모델 목록 경로만 있다: 시험용 API 키면 200, 아니면 401(6차: 구독 토큰 길은 없다).
 struct FakeAi {
     server: MockServer,
 }
@@ -307,12 +307,7 @@ impl FakeAi {
                     .headers
                     .get("x-api-key")
                     .is_some_and(|v| v.as_bytes() == AI_KEY.as_bytes());
-                let bearer = format!("Bearer {OAUTH_ACCESS}");
-                let token_ok = req
-                    .headers
-                    .get("authorization")
-                    .is_some_and(|v| v.as_bytes() == bearer.as_bytes());
-                if key_ok || token_ok {
+                if key_ok {
                     ResponseTemplate::new(200).set_body_json(json!({
                         "data": [], "has_more": false, "first_id": null, "last_id": null
                     }))
@@ -341,10 +336,13 @@ fn dead_base_url() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// 토스증권 설정. market 2차의 "인증 실패 뒤 발급 쉬기"(`token_failure_cooldown`, 기본 60초)는 끈다:
+/// 테스트 시계가 멈춰 있어 쉬기가 끝나지 않으므로, 켜 두면 이 서버의 물러서기 대신 그 쉬기를 재게 된다.
 fn toss_config(base_url: &str) -> TossConfig {
     TossConfig {
         base_url: base_url.to_string(),
         timeout: Duration::from_secs(3),
+        token_failure_cooldown: Duration::ZERO,
         ..TossConfig::default()
     }
 }
@@ -440,6 +438,7 @@ fn wiring(toss: Option<&FakeToss>, clock: Arc<TestClock>) -> Wiring {
         upstreams: upstreams(uri.as_deref(), None),
         clock,
         peer_override: None,
+        cli_locations: Vec::new(),
     }
 }
 
@@ -449,6 +448,7 @@ fn wiring_both(toss: &FakeToss, ai: &FakeAi, clock: Arc<TestClock>) -> Wiring {
         upstreams: upstreams(Some(&toss.server.uri()), Some(&ai.server.uri())),
         clock,
         peer_override: None,
+        cli_locations: Vec::new(),
     }
 }
 
@@ -893,12 +893,7 @@ async fn ai_키는_공급자에_닿을_때만_등록되고_자격_자리로_나�
                 .headers
                 .get("x-api-key")
                 .is_some_and(|v| v.as_bytes() == AI_KEY.as_bytes());
-            let bearer = format!("Bearer {OAUTH_ACCESS}");
-            let token_ok = req
-                .headers
-                .get("authorization")
-                .is_some_and(|v| v.as_bytes() == bearer.as_bytes());
-            if key_ok || token_ok {
+            if key_ok {
                 ResponseTemplate::new(200).set_body_json(json!({
                     "data": [], "has_more": false, "first_id": null, "last_id": null
                 }))
@@ -939,22 +934,6 @@ async fn ai_키는_공급자에_닿을_때만_등록되고_자격_자리로_나�
     assert_eq!(
         pi_ai::CredentialSource::current(&source).await,
         Some(Credential::ApiKey(Secret::new(AI_KEY)))
-    );
-
-    // 구독 OAuth 토큰.
-    let dir = tempfile::tempdir().unwrap();
-    let secrets = Arc::new(SecretStore::open(dir.path()).unwrap());
-    let source = AiKeys::new(Arc::clone(&secrets));
-    let tokens = Credentials::new()
-        .with("access_token", OAUTH_ACCESS)
-        .with("refresh_token", OAUTH_REFRESH);
-    secrets
-        .register(KeyKind::AiOAuth, tokens, &verifier)
-        .await
-        .expect("접근 토큰으로 닿으면 등록된다");
-    assert_eq!(
-        pi_ai::CredentialSource::current(&source).await,
-        Some(Credential::OAuthToken(Secret::new(OAUTH_ACCESS)))
     );
 
     // 닿지 않으면 저장하지 않는다.

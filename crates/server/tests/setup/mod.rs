@@ -14,8 +14,8 @@ use super::*;
 use price_inha::{
     DEFAULT_CALENDAR_RETRY, DEFAULT_REGISTER_ATTEMPTS, DEFAULT_REGISTER_WINDOW,
     ENV_CALENDAR_RETRY_MS, ENV_REGISTER_ATTEMPTS, ENV_REGISTER_WINDOW_MS, FEED_REQUEST_REJECTED,
-    ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KEY_AI_API_KEY, KEY_AI_OAUTH, KEY_BROKER,
-    KIND_SETUP, KIND_SYMBOLS_REJECTED, SETUP_KEYS_PATH, SETUP_PATH, SETUP_REQUIRED, SETUP_STARTED,
+    ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KEY_AI_API_KEY, KEY_BROKER, KIND_SETUP,
+    KIND_SYMBOLS_REJECTED, SETUP_KEYS_PATH, SETUP_PATH, SETUP_REQUIRED, SETUP_STARTED,
     SETUP_SYMBOLS_PATH, WATCHLIST_FILE,
 };
 
@@ -28,6 +28,8 @@ const WRONG_AI_KEY: &str = "test-ai-key-wrong-0002";
 /// 다시 등록할 때 쓰는 다른 증권사 키.
 const OTHER_ID: &str = "test-client-id-0002";
 const OTHER_SECRET: &str = "test-client-secret-other-2";
+/// 칸 이름이 틀린 요청에 담는 시험용 값.
+const STRAY_VALUE: &str = "test-stray-field-not-real";
 /// 마지막 항목을 등록한 뒤 "시작함"이 와야 하는 시간("바로").
 const SOON: Duration = Duration::from_secs(1);
 
@@ -367,30 +369,35 @@ async fn 필수_항목이_모두_있으면_시작하고_갖춰졌다고_알린�
 
 // 검증: V31
 #[tokio::test]
-async fn 구독_토큰만_있어도_ai_키가_있는_것이다() {
+async fn 옛_구독_토큰_파일만_있으면_ai_연결이_갖춰진_것이_아니다() {
+    // 6차: 구독 토큰은 더 쓰지 않는다. 보관 폴더에 옛 auth.json이 남아 있어도 AI 연결이 아니다.
     let toss = FakeToss::start().await;
     let ai = FakeAi::start().await;
     let dir = tempfile::tempdir().unwrap();
     register_broker(dir.path(), &toss).await;
-    let secrets = SecretStore::open(dir.path()).unwrap();
-    let tokens = Credentials::new()
-        .with("access_token", OAUTH_ACCESS)
-        .with("refresh_token", OAUTH_REFRESH);
-    let verifier = KeyVerifier::new(upstreams(None, Some(&ai.server.uri())));
-    secrets
-        .register(KeyKind::AiOAuth, tokens, &verifier)
-        .await
-        .unwrap();
+    std::fs::write(
+        dir.path().join("auth.json"),
+        r#"{"access_token":"test-legacy-access-not-real"}"#,
+    )
+    .unwrap();
+    let before = (toss.total_requests().await, ai.total_requests().await);
     let app = start_app(
         settings(dir.path(), &[]),
         wiring_both(&toss, &ai, TestClock::at(kst(10, 0, 0))),
     )
     .await;
-    let mut ws = connect(app.local_addr(), 0).await;
-    wait_price(&mut ws, "005930", "72000").await;
-    let status = setup_status(app.local_addr()).await;
-    assert!(registered(&status, ITEM_AI));
-    assert_eq!(status["ready"], json!(true));
+    let addr = app.local_addr();
+    let notice = latest(addr, KIND_SETUP).await;
+    assert_eq!(notice["state"], json!(SETUP_REQUIRED), "{notice}");
+    assert_eq!(notice["missing"], json!([ITEM_AI]));
+    let status = setup_status(addr).await;
+    assert!(!registered(&status, ITEM_AI), "{status}");
+    assert_eq!(status["ready"], json!(false));
+    assert_eq!(
+        (toss.total_requests().await, ai.total_requests().await),
+        before,
+        "시작하지 않았으니 바깥으로 요청을 보내지 않는다"
+    );
     stop(app).await;
 }
 
@@ -438,6 +445,7 @@ async fn 설정_상태는_등록_여부만_알려_주고_키_값은_어디에도
     assert_eq!(
         keys_of(&status),
         [
+            "ai",
             "demo",
             "items",
             "ready",
@@ -445,7 +453,20 @@ async fn 설정_상태는_등록_여부만_알려_주고_키_값은_어디에도
             "symbols",
             "symbols_source"
         ],
-        "정한 칸만 있다"
+        "정한 칸만 있다(6차: AI 연결 칸 ai가 더해졌다)"
+    );
+    assert_eq!(
+        keys_of(&status["ai"]),
+        [
+            "cli",
+            "cli_version",
+            "command",
+            "config_dir",
+            "legacy_auth_file",
+            "method",
+            "subscription"
+        ],
+        "AI 연결 칸에는 고른 방식 · 경로 · 확인 상태 · 옛 파일 알림만 있다(키 값 없음)"
     );
     let items = status["items"].as_array().unwrap();
     let names: Vec<&Value> = items.iter().map(|item| &item["name"]).collect();
@@ -544,7 +565,7 @@ async fn 증권사_키를_등록하면_확인하고_등록됨만_돌려준다() 
 
 // 검증: C3, V46
 #[tokio::test]
-async fn ai_키는_api_키로도_구독_토큰으로도_등록한다() {
+async fn ai_api_키를_등록하고_구독_토큰_항목은_받지_않는다() {
     let toss = FakeToss::start().await;
     let ai = FakeAi::start().await;
 
@@ -563,7 +584,7 @@ async fn ai_키는_api_키로도_구독_토큰으로도_등록한다() {
     assert!(registered(&setup_status(addr).await, ITEM_AI));
     stop(app).await;
 
-    // 구독 OAuth 토큰.
+    // 6차: 구독 OAuth 토큰을 등록하는 길은 없다. 확인하러 가기 전에 잘못된 입력으로 거부한다.
     let dir = tempfile::tempdir().unwrap();
     let app = start_app(
         settings(dir.path(), &[]),
@@ -572,17 +593,29 @@ async fn ai_키는_api_키로도_구독_토큰으로도_등록한다() {
     .await;
     let addr = app.local_addr();
     let body = key_body(
-        KEY_AI_OAUTH,
+        "ai_oauth",
         &[
-            ("access_token", OAUTH_ACCESS),
-            ("refresh_token", OAUTH_REFRESH),
+            ("access_token", "test-oauth-access-not-real"),
+            ("refresh_token", "test-oauth-refresh-not-real"),
         ],
     );
     let reply = post_json(addr, SETUP_KEYS_PATH, &body).await;
-    assert_registered(&reply);
-    assert_no_values(&reply, &[OAUTH_ACCESS, OAUTH_REFRESH]);
-    assert_eq!(ai.total_requests().await, 2);
-    assert!(registered(&setup_status(addr).await, ITEM_AI));
+    assert_refused(&reply, 400, "invalid_input");
+    assert_no_values(
+        &reply,
+        &["test-oauth-access-not-real", "test-oauth-refresh-not-real"],
+    );
+    assert_eq!(
+        ai.total_requests().await,
+        1,
+        "구독 토큰으로 확인하러 가지 않는다"
+    );
+    assert!(!registered(&setup_status(addr).await, ITEM_AI));
+    assert!(nothing_registered(dir.path()));
+    assert!(
+        !dir.path().join("auth.json").exists(),
+        "구독 토큰 파일을 만들지 않는다"
+    );
     assert_eq!(
         toss.total_requests().await,
         0,
@@ -829,7 +862,7 @@ async fn 잘못된_입력은_확인하러_가기_전에_거부한다() {
             ],
         )
         .to_string(),
-        key_body(KEY_AI_API_KEY, &[("access_token", OAUTH_ACCESS)]).to_string(),
+        key_body(KEY_AI_API_KEY, &[("access_token", STRAY_VALUE)]).to_string(),
         // 빈 값 · 공백뿐 · 너무 짧은 값 · 글자가 아닌 값 · 줄바꿈이 든 값.
         broker_body(CLIENT_ID, "").to_string(),
         broker_body("", CLIENT_SECRET).to_string(),
@@ -851,7 +884,7 @@ async fn 잘못된_입력은_확인하러_가기_전에_거부한다() {
         .await;
         assert_eq!(reply.status, 400, "거부해야 하는 입력: {body}");
         assert_eq!(reply.json(), json!({ "error": "invalid_input" }), "{body}");
-        assert_no_values(&reply, &[CLIENT_ID, CLIENT_SECRET, AI_KEY, OAUTH_ACCESS]);
+        assert_no_values(&reply, &[CLIENT_ID, CLIENT_SECRET, AI_KEY, STRAY_VALUE]);
     }
     assert_eq!(
         (toss.total_requests().await, ai.total_requests().await),
@@ -1298,7 +1331,13 @@ async fn 종목을_등록하면_보관_폴더에_저장되고_다시_켜도_남�
         json!({ "symbols": ["000660"] })
     );
     stop(app).await;
-    let known = [pi_secrets::ENV_FILE, pi_secrets::AUTH_FILE, WATCHLIST_FILE];
+    // 6차: 옛 auth.json은 더 만들지 않는다. CLI 작업 폴더 · 고른 AI 연결 파일은 있을 수 있다.
+    let known = [
+        pi_secrets::ENV_FILE,
+        WATCHLIST_FILE,
+        price_inha::CLI_WORK_DIR,
+        price_inha::AI_CHOICE_FILE,
+    ];
     for name in home_files(dir.path()) {
         assert!(
             known.contains(&name.as_str()) || name.starts_with(price_inha::DB_FILE),
@@ -1426,20 +1465,17 @@ fn 화면에_설정_화면이_있다() {
     for name in [
         KEY_BROKER,
         KEY_AI_API_KEY,
-        KEY_AI_OAUTH,
         "client_id",
         "client_secret",
         "api_key",
-        "access_token",
-        "refresh_token",
         "symbols",
     ] {
         assert!(page.contains(name), "화면이 {name} 칸을 알아야 한다");
     }
-    // 키 입력 칸은 가려진 칸이다(증권사 둘, AI API 키 하나, 구독 토큰 둘).
+    // 키 입력 칸은 가려진 칸이다(증권사 둘, AI API 키 하나). 6차: 구독 토큰 칸은 없다(`round6/`).
     let hidden_inputs = page.matches("type=\"password\"").count();
     assert!(
-        hidden_inputs >= 5,
+        hidden_inputs >= 3,
         "키 입력 칸은 모두 가려진 칸이어야 한다: {hidden_inputs}개"
     );
     // 키 칸이 브라우저에 저장되지 않게 하는 속성은 4차(참고 5)에서 `autocomplete="new-password"`로

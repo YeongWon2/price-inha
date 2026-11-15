@@ -17,7 +17,7 @@ use crate::setup::{
     AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KeyRequest, SETUP_ITEMS,
     SetupItem, SetupStatus, SymbolsSource, parse_symbols, save_watchlist,
 };
-use crate::{KeyVerifier, SetupRefusal};
+use crate::{AiMethod, AiStatus, KeyVerifier, SetupRefusal};
 
 /// 키 확인 하나가 끝나기를 기다리는 가장 긴 시간. 넘으면 "닿지 않음"이고 저장하지 않는다.
 /// (`pi-ai` · `pi-market`의 요청마다 시간 제한이 따로 있다. 이것은 그 바깥의 끝이다.)
@@ -91,9 +91,9 @@ impl Desk {
         self.watching().symbols.clone()
     }
 
-    /// AI 키는 API 키와 구독 토큰 가운데 하나라도 있으면 등록된 것이다.
+    /// AI 연결이 갖춰졌는가. (6차 뼈대) 아직 API 키만 본다. 고른 연결(API 키 또는 CLI)만 보는 것은 구현 단계에서 한다.
     fn has_ai(&self) -> bool {
-        self.presence.has(KeyKind::AiApiKey) || self.presence.has(KeyKind::AiOAuth)
+        self.presence.has(KeyKind::AiApiKey)
     }
 
     /// 그 항목이 등록됐는가. 모르는 이름은 등록되지 않은 것이다.
@@ -137,6 +137,14 @@ impl Desk {
             demo: self.demo,
             symbols,
             symbols_source,
+            // (6차 뼈대) 고른 연결 · CLI 상태 · 옛 auth.json은 구현 단계에서 채운다.
+            ai: AiStatus {
+                method: AiMethod::ApiKey,
+                command: None,
+                config_dir: None,
+                cli: None,
+                legacy_auth_file: false,
+            },
         }
     }
 
@@ -181,6 +189,19 @@ impl Desk {
             Err(why) => tracing::warn!(?kind, %why, "키를 등록하지 못했습니다"),
         }
         outcome
+    }
+
+    /// (6차) AI 연결을 고른다: 입력 검사 → (CLI면) 시도 횟수 → 저장 → (CLI면) 확인(모델을 부르지 않는다).
+    /// 갖춰졌으면 `Ok(true)`, API 키를 골랐는데 키가 아직 없으면 `Ok(false)`, CLI 확인이 로그인된 구독이
+    /// 아니면 그 까닭([`crate::cli_refusal`]). 갖춰졌으면 시세 흐름을 깨우고, 고른 연결로 공급자를 다시 만든다.
+    pub(crate) async fn choose_ai(&self, body: &[u8]) -> Result<bool, SetupRefusal> {
+        let _ = body;
+        todo!("6차: AI 연결 고르기")
+    }
+
+    /// (6차) 고른 연결로 만든 공급자.
+    pub(crate) fn ai_provider(&self) -> Arc<dyn pi_ai::AiProvider> {
+        todo!("6차: 고른 연결의 공급자")
     }
 
     /// 지켜볼 종목을 등록한다: 입력 검사 → 시도 횟수 → 저장하고, 쓰는 종목을 바꾸고,

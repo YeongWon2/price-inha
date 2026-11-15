@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use zeroize::Zeroize;
 
 use crate::desk::Desk;
-use crate::{SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal};
+use crate::{SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal};
 
 /// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 더 읽지 않고
 /// 413 `body_too_large`로 거부한다(5차, 원본 Hermes api_server).
@@ -35,6 +35,7 @@ pub(crate) fn register_routes(desk: Arc<Desk>) -> Router {
     Router::new()
         .route(SETUP_KEYS_PATH, post(register_key))
         .route(SETUP_SYMBOLS_PATH, post(register_symbols))
+        .route(SETUP_AI_PATH, post(choose_ai))
         .with_state(desk)
 }
 
@@ -112,4 +113,16 @@ async fn register_symbols(State(desk): State<Arc<Desk>>, request: Request) -> Re
         Err(why) => Err(why),
     };
     registered(outcome)
+}
+
+/// (6차) AI 연결 고르기. 갖춰졌는지(`{"registered": bool}`)나 까닭만 돌려준다.
+async fn choose_ai(State(desk): State<Arc<Desk>>, request: Request) -> Response {
+    let outcome = match body_of(request).await {
+        Ok(body) => desk.choose_ai(&body).await,
+        Err(why) => Err(why),
+    };
+    match outcome {
+        Ok(registered) => reply(StatusCode::OK, json!({ "registered": registered })),
+        Err(why) => registered(Err(why)),
+    }
 }

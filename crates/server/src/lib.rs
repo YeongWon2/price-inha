@@ -3,6 +3,7 @@
 //! 조립 로직은 여기에 있고 `main.rs`는 얇다: 설정을 읽고([`Settings::from_process`]),
 //! 띄우고([`App::start`]), Ctrl+C를 기다렸다가 끈다([`App::shutdown`]).
 
+mod ai_link;
 mod app;
 mod demo;
 mod desk;
@@ -15,6 +16,13 @@ mod settings;
 mod setup;
 mod setup_http;
 
+pub use ai_link::{
+    AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_COMMON_LOCATIONS, CLI_CONCURRENCY,
+    CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED, CLI_NOT_LOGGED_IN, CLI_NOT_SUBSCRIPTION,
+    CLI_TERMS_NOTICE, CLI_TOO_OLD, CLI_UNCHECKED, CLI_USER_LOCATION, CLI_WORK_DIR,
+    LEGACY_AUTH_FILE, LEGACY_AUTH_NOTICE, SETUP_AI_PATH, cli_base_env, cli_config, cli_refusal,
+    cli_state, find_claude, legacy_auth_file, load_ai_choice, prepare_cli_work_dir, save_ai_choice,
+};
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,
     FEED_LIVE, FEED_NO_BROKER_KEY, FEED_REQUEST_REJECTED, FEED_SETUP_REQUIRED, KIND_FEED_STATUS,
@@ -30,8 +38,8 @@ pub use settings::{
     ENV_RETRY_MAX_MS, ENV_SYMBOLS, ENV_SYMBOLS_ATTEMPTS, ENV_SYMBOLS_WINDOW_MS, Settings,
 };
 pub use setup::{
-    AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KEY_AI_API_KEY, KEY_AI_OAUTH,
-    KEY_BROKER, KEY_DATA, KIND_SETUP, KeyRequest, MAX_WATCH_SYMBOLS, SETUP_ITEMS, SETUP_KEYS_PATH,
-    SETUP_PATH, SETUP_REQUIRED, SETUP_STARTED, SETUP_SYMBOLS_PATH, SetupItem, SetupItemSpec,
-    SetupStatus, SymbolsSource, WATCHLIST_FILE, load_watchlist, parse_symbols, save_watchlist,
+    AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KEY_AI_API_KEY, KEY_BROKER,
+    KEY_DATA, KIND_SETUP, KeyRequest, MAX_WATCH_SYMBOLS, SETUP_ITEMS, SETUP_KEYS_PATH, SETUP_PATH,
+    SETUP_REQUIRED, SETUP_STARTED, SETUP_SYMBOLS_PATH, SetupItem, SetupItemSpec, SetupStatus,
+    SymbolsSource, WATCHLIST_FILE, load_watchlist, parse_symbols, save_watchlist,
 };

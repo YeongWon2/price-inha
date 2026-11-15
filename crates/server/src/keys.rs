@@ -115,7 +115,7 @@ fn broker_credentials(values: &Credentials) -> Option<pi_market::Credentials> {
 pub(crate) struct KeyPresence {
     store: Arc<SecretStore>,
     /// 읽지 못했다는 경고를 종류마다 묶는다([`KeyKind::ALL`] 순서).
-    quiet: [Quiet; 4],
+    quiet: [Quiet; KeyKind::ALL.len()],
 }
 
 impl KeyPresence {
@@ -138,22 +138,17 @@ impl KeyPresence {
         read_kind(&self.store, kind, quiet).is_some_and(|values| match kind {
             KeyKind::Broker => broker_credentials(&values).is_some(),
             KeyKind::AiApiKey | KeyKind::Data => field(&values, "api_key").is_some(),
-            KeyKind::AiOAuth => field(&values, "access_token").is_some(),
         })
     }
 }
 
-/// AI 자격 자리: [`KeyKind::AiApiKey`]는 `Credential::ApiKey`로,
-/// [`KeyKind::AiOAuth`]는 `access_token`을 `Credential::OAuthToken`으로 준다.
+/// AI 자격 자리: [`KeyKind::AiApiKey`]를 `Credential::ApiKey`로 준다(6차: 구독은 자격이 아니라 CLI다).
 ///
-/// 부를 때마다 보관소를 읽는다. 둘 다 없으면 `None`(V31).
-///
-/// 둘 다 있으면 API 키를 쓴다.
+/// 부를 때마다 보관소를 읽는다. 없으면 `None`(V31).
 pub struct AiKeys {
     store: Arc<SecretStore>,
-    /// 읽지 못했다는 경고를 종류마다 묶는다.
+    /// 읽지 못했다는 경고를 묶는다.
     quiet_api_key: Quiet,
-    quiet_oauth: Quiet,
 }
 
 impl AiKeys {
@@ -162,7 +157,6 @@ impl AiKeys {
         Self {
             store,
             quiet_api_key: Quiet::default(),
-            quiet_oauth: Quiet::default(),
         }
     }
 }
@@ -170,14 +164,9 @@ impl AiKeys {
 #[async_trait]
 impl pi_ai::CredentialSource for AiKeys {
     async fn current(&self) -> Option<pi_ai::Credential> {
-        let api_key = read_kind(&self.store, KeyKind::AiApiKey, &self.quiet_api_key)
-            .and_then(|values| field(&values, "api_key").map(pi_ai::Secret::new));
-        if let Some(key) = api_key {
-            return Some(pi_ai::Credential::ApiKey(key));
-        }
-        read_kind(&self.store, KeyKind::AiOAuth, &self.quiet_oauth)
-            .and_then(|values| field(&values, "access_token").map(pi_ai::Secret::new))
-            .map(pi_ai::Credential::OAuthToken)
+        read_kind(&self.store, KeyKind::AiApiKey, &self.quiet_api_key)
+            .and_then(|values| field(&values, "api_key").map(pi_ai::Secret::new))
+            .map(pi_ai::Credential::ApiKey)
     }
 }
 
@@ -197,7 +186,6 @@ impl pi_ai::CredentialSource for NoKeys {
 /// |---|---|---|
 /// | [`KeyKind::Broker`] | `pi_market::verify`(토큰 발급 한 번) | 연결 실패는 [`VerifyFailure::Unreachable`], 인증 실패는 [`VerifyFailure::Rejected`] |
 /// | [`KeyKind::AiApiKey`] | `AnthropicProvider::verify`(`ApiKey`) | 연결 실패 · 시간 초과는 `Unreachable`, 인증 실패는 `Rejected` |
-/// | [`KeyKind::AiOAuth`] | `AnthropicProvider::verify`(`OAuthToken`, `access_token`) | 위와 같다 |
 /// | [`KeyKind::Data`] | 확인할 곳이 아직 없다 | 언제나 실패(저장하지 않는다) |
 ///
 /// 그 밖의 실패(한도 초과 · 장애 등)도 `Ok`가 아니다(확인하지 못한 키는 저장하지 않는다, E4).
@@ -247,10 +235,6 @@ impl Verifier for KeyVerifier {
             KeyKind::Broker => self.verify_broker(values).await,
             KeyKind::AiApiKey => {
                 let credential = secret("api_key").map(pi_ai::Credential::ApiKey);
-                self.verify_ai(credential).await
-            }
-            KeyKind::AiOAuth => {
-                let credential = secret("access_token").map(pi_ai::Credential::OAuthToken);
                 self.verify_ai(credential).await
             }
             // 자료 키는 확인할 곳이 아직 없다. 확인하지 못한 키는 저장하지 않는다(E4).

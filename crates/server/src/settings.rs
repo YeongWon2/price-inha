@@ -74,6 +74,9 @@ pub const DEFAULT_SYMBOLS_WINDOW: Duration = Duration::from_secs(60);
 /// | 시연 | `--demo` | 없음 | 끔 |
 ///
 /// 인자가 환경 변수를 이긴다. 비밀 값(키 · 토큰)을 받는 인자와 환경 변수는 없다.
+///
+/// (6차) CLI에 넘길 환경([`Settings::cli_env`])은 받은 환경에서 `crate::CLI_ENV_ALLOWLIST`의 이름만 고른 것이고,
+/// [`Settings::user_home`]은 받은 사용자 홈 폴더다(CLI 실행 파일을 찾을 때 쓴다).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// 보관 폴더. 키 파일(`pi-secrets`)과 저장소 파일([`crate::DB_FILE`])이 여기에 있다.
@@ -110,6 +113,11 @@ pub struct Settings {
     pub symbols_window: Duration,
     /// 시연 모드: 가짜 어댑터로 시세를 흘린다. 필수 설정 없이 바로 시작한다.
     pub demo: bool,
+    /// (6차) 사용자 홈 폴더. CLI 실행 파일을 `~/.local/bin/claude`에서 찾을 때 쓴다.
+    pub user_home: Option<PathBuf>,
+    /// (6차) CLI 자식에게 줄 환경: 받은 환경에서 `crate::CLI_ENV_ALLOWLIST`의 이름만 그 순서로 고른 것.
+    /// 서버의 다른 환경 변수(비밀이 있을 수 있는 것)는 들어가지 않는다.
+    pub cli_env: Vec<(String, String)>,
 }
 
 impl Settings {
@@ -185,6 +193,9 @@ impl Settings {
             symbols_attempts: limits.symbols_attempts,
             symbols_window: limits.symbols_window,
             demo: given.demo,
+            // (6차 뼈대) 구현 단계에서 받은 값으로 채운다.
+            user_home: None,
+            cli_env: Vec::new(),
         })
     }
 
