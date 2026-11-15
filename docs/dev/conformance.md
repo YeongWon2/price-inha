@@ -47,11 +47,11 @@
 | A12 | 자격 증명 풀(키 여러 개 순환, 모델별 쿨다운) | hermes 4.3 (`H:agent/credential_pool.py:118-124`), openclaw 2.4 쿨다운 표 | 자격 한 개 | 미구현 (**작업 번호 없음**) | "가져옴(단순화)" 판정인데 받을 작업이 없다. T9에 넣거나 "안 가져옴"으로 바꾼다 |
 | A13 | 큰 오류 구분: 401 · 403 인증, 429 한도, 5xx · 529 장애, 400 잘못된 요청, 시간 초과 | hermes 3.2 표. `H:agent/error_classifier.py:555-556, 1245-1286, 1461-1463` | `ai/src/wire.rs:129-139`, `ai/src/anthropic.rs:176-182` | 같음 | — |
 | A14 | 세부 오류 구분: 402 과금, 404 없는 모델, 413 너무 큼, 400 안의 컨텍스트 초과, 429 안의 과금 문구 | `H:agent/error_classifier.py:35-68, 1231-1242, 1363-1442` | 4xx를 모두 "잘못된 요청"으로 묶는다. `ai/src/wire.rs:133-136` | 미구현 (T9) | 컨텍스트 초과 → 압축, 과금 → 멈춤은 턴 루프가 구분해야 한다 |
-| A15 | 시간 초과 · 연결 실패도 다시 시도한다 | `H:agent/error_classifier.py:489-497, 1063-1097` (`retryable=True`) | 다시 시도하지 않는다. `ai/src/retry.rs:17-18, 35` | **모름** | 근거가 코드 주석("이미 처리됐을 수 있다")뿐이다. 원본대로 다시 시도하거나, 지시서에 결정으로 적는다 |
+| A15 | 시간 초과 · 연결 실패도 다시 시도한다 | `H:agent/error_classifier.py:489-497, 1063-1097` (`retryable=True`) | 다시 시도하지 않는다. `ai/src/retry.rs:17-18, 35` | 같음 (ai 3차) | 2026-11-15 원본대로 고침 |
 | A16 | 다시 시도 횟수: 시도 총 3번(= 다시 시도 2번) | `H:hermes_cli/config_defaults.py:121`, `H:agent/conversation_loop.py:1583` | 다시 시도 2번. `ai/src/lib.rs:31` | 같음 | — |
-| A17 | 간격: `min(2초 × 2^(n-1), 60초)` + 균등 jitter `[0, 간격의 절반]` | `H:agent/turn_recovery.py:1489`, `H:agent/retry_utils.py:121-134` | 1초부터 두 배, 상한 60초, jitter 없음. `ai/src/anthropic.rs:19`, `ai/src/retry.rs:9, 40-43` | **모름** | 첫 간격 2초, jitter 추가 |
-| A18 | `Retry-After`: 초와 HTTP 날짜 둘 다 읽고, 다시 시도하는 모든 오류에 쓰고, 상한 600초, 헤더가 없으면 본문 `retry_after` | `H:agent/retry_utils.py:30-64, 179-195`, `H:agent/turn_recovery.py:1482-1489` | 초만 읽는다(`ai/src/wire.rs:116-118`). 429에만 쓴다(`ai/src/retry.rs:29-34`). 30초를 넘으면 기다리지 않고 오류를 돌려준다(`ai/src/retry.rs:13, 31`) | **모름** | 날짜 모양 읽기, 5xx에도 적용. 30초 상한을 둘지는 호출하는 쪽(T9)과 같이 정한다 |
-| A19 | 시간 제한: 읽기 900초, 연결 10초 | `H:agent/anthropic_adapter.py:378-382` | 요청 전체 600초, 연결 제한은 따로 없음. `ai/src/anthropic.rs:16, 93` | **모름** | 연결 제한(10초)을 따로 둔다 |
+| A17 | 간격: `min(2초 × 2^(n-1), 60초)` + 균등 jitter `[0, 간격의 절반]` | `H:agent/turn_recovery.py:1489`, `H:agent/retry_utils.py:121-134` | 1초부터 두 배, 상한 60초, jitter 없음. `ai/src/anthropic.rs:19`, `ai/src/retry.rs:9, 40-43` | 같음 (ai 3차) | 2026-11-15 원본대로 고침 |
+| A18 | `Retry-After`: 초와 HTTP 날짜 둘 다 읽고, 다시 시도하는 모든 오류에 쓰고, 상한 600초, 헤더가 없으면 본문 `retry_after` | `H:agent/retry_utils.py:30-64, 179-195`, `H:agent/turn_recovery.py:1482-1489` | 초만 읽는다(`ai/src/wire.rs:116-118`). 429에만 쓴다(`ai/src/retry.rs:29-34`). 30초를 넘으면 기다리지 않고 오류를 돌려준다(`ai/src/retry.rs:13, 31`) | 같음 (ai 3차) | 2026-11-15 원본대로 고침. 30초 상한은 지움 |
+| A19 | 시간 제한: 읽기 900초, 연결 10초 | `H:agent/anthropic_adapter.py:378-382` | 요청 전체 600초, 연결 제한은 따로 없음. `ai/src/anthropic.rs:16, 93` | 같음 (ai 3차) | 2026-11-15 원본대로 고침 |
 | A20 | 스트리밍 호출이 기본 | `H:agent/anthropic_adapter.py:871-885` | 한 번에 받는다. `ai/src/anthropic.rs:128-151` | 미구현 (T9) | `ai.md` "하지 않는 것" |
 | A21 | 다 실패한 뒤: 폴백 공급자 → 자동 복구 5주기 | hermes 3.2 표. `H:agent/turn_api_error.py:377-418` | 없음 | 미구현 (T9) | — |
 | A22 | 기본 주소 `https://api.anthropic.com` | `H:hermes_cli/auth.py:208` | `ai/src/lib.rs:25` | 같음 | — |
