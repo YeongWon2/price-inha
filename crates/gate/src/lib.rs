@@ -157,7 +157,13 @@ pub const SECURITY_HEADERS: [(&str, &str); 3] = [
 ///
 /// 규칙은 저장소와 같다: `^[a-z][a-z0-9_.-]*$`이고 `pi_store::EVENT_KIND_MAX_CHARS`자 이하.
 /// 받은 글자 그대로 본다(앞뒤 공백을 떼지 않는다). 지나가는 이벤트도 이 검사를 거치고,
-/// 맞지 않으면 보내지도 기억하지도 않는다.
+/// 맞지 않으면 보내지도 기억하지도 않는다. (5차) 지나가는 이벤트는 앞뒤 공백을 먼저 뗀 이름으로 거친다.
+/// ```
+/// # use pi_gate::valid_event_kind;
+/// assert!(valid_event_kind("feed_status") && !valid_event_kind("Feed") && !valid_event_kind(""));
+/// assert!(!valid_event_kind(" feed_status ")); // 이 검사 자체는 떼지 않는다
+/// assert!(valid_event_kind(" feed_status ".trim()) && !valid_event_kind(" feed status ".trim()));
+/// ```
 pub fn valid_event_kind(kind: &str) -> bool {
     frame::kind_follows_rule(kind)
 }

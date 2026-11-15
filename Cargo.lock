@@ -1260,6 +1260,7 @@ dependencies = [
  "pi-secrets",
  "pi-store",
  "reqwest",
+ "rusqlite",
  "rust_decimal",
  "serde_json",
  "tempfile",

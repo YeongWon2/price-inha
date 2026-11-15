@@ -17,11 +17,12 @@ mod setup;
 mod setup_http;
 
 pub use ai_link::{
-    AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_COMMON_LOCATIONS, CLI_CONCURRENCY,
-    CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED, CLI_NOT_LOGGED_IN, CLI_NOT_SUBSCRIPTION,
-    CLI_TERMS_NOTICE, CLI_TOO_OLD, CLI_UNCHECKED, CLI_USER_LOCATION, CLI_WORK_DIR,
-    LEGACY_AUTH_FILE, LEGACY_AUTH_NOTICE, SETUP_AI_PATH, cli_base_env, cli_config, cli_refusal,
-    cli_state, find_claude, legacy_auth_file, load_ai_choice, prepare_cli_work_dir, save_ai_choice,
+    AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_CHECKING, CLI_COMMON_LOCATIONS,
+    CLI_CONCURRENCY, CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED, CLI_NOT_LOGGED_IN,
+    CLI_NOT_SUBSCRIPTION, CLI_TERMS_NOTICE, CLI_TOO_OLD, CLI_UNCHECKED, CLI_USER_LOCATION,
+    CLI_WORK_DIR, CLI_WORK_NOT_EMPTY, LEGACY_AUTH_FILE, LEGACY_AUTH_NOTICE, SETUP_AI_PATH,
+    cli_base_env, cli_config, cli_refusal, cli_state, find_claude, legacy_auth_file,
+    load_ai_choice, prepare_cli_work_dir, save_ai_choice,
 };
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,

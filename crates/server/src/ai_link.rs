@@ -110,6 +110,12 @@ pub const CLI_NOT_LOGGED_IN: &str = "not_logged_in";
 pub const CLI_NOT_SUBSCRIPTION: &str = "not_subscription";
 /// 설정 상태 `ai.cli`: 확인하지 못했다(시간 초과 · 읽지 못함).
 pub const CLI_UNCHECKED: &str = "unchecked";
+/// (7차 11번) 설정 상태 `ai.cli`: CLI 확인이 아직 끝나지 않았다(확인 중).
+/// 서버는 CLI 확인을 기다리지 않고 먼저 연결을 받는다. 확인은 뒤에서 하고, 끝나기 전에는 이 상태다.
+pub const CLI_CHECKING: &str = "checking";
+/// (7차 10번) 설정 상태 `ai.cli`: 이미 있는 작업 폴더([`CLI_WORK_DIR`])가 비어 있지 않아 CLI를 쓰지 않는다.
+/// 그 폴더 안의 것은 지우지 않는다.
+pub const CLI_WORK_NOT_EMPTY: &str = "work_dir_not_empty";
 
 /// AI 연결 방식.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
