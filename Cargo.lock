@@ -1142,6 +1142,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-approval"
+version = "0.1.0"
+dependencies = [
+ "pi-store",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-data"
 version = "0.1.0"
 dependencies = [
@@ -1195,6 +1203,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-office"
+version = "0.1.0"
+dependencies = [
+ "pi-store",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-paper"
 version = "0.1.0"
 dependencies = [
@@ -1207,6 +1223,16 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "pi-rules"
+version = "0.1.0"
+dependencies = [
+ "pi-market",
+ "pi-paper",
+ "pi-template",
+ "thiserror",
 ]
 
 [[package]]

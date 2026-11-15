@@ -1,0 +1,17 @@
+[package]
+name = "pi-rules"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pi-market = { path = "../market" }
+pi-paper = { path = "../paper" }
+pi-template = { path = "../template" }
+thiserror = "2.0.21"
+
+[dev-dependencies]

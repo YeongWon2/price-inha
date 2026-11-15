@@ -37,6 +37,7 @@ PATTERN_SAMPLES = {
     "ARCH-RULES-PURE": ("crates/template/src/lib.rs", "/// 값.\npub fn p() { let _ = std::fs::read(\"x\"); }"),
     "ARCH-CLOCK-2": ("crates/trigger/src/lib.rs", "/// 값.\npub fn t() -> std::time::Instant { std::time::Instant::now() }"),
     "ARCH-NET-IN-CORE": ("crates/trigger/src/lib.rs", "/// 값.\npub fn n() { let _ = std::net::TcpStream::connect(\"127.0.0.1:1\"); }"),
+    "ARCH-REAL-BROKER": ("crates/rules/src/lib.rs", "/// 값.\npub struct R;\nimpl pi_paper::Broker for R {}"),
     "CONV-BIND-ALL": ("crates/gate/src/lib.rs", '/// 값.\npub const B: &str = "0.0.0.0:8080";'),
 }
 
