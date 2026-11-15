@@ -166,6 +166,7 @@ rowid를 명시한 `INSERT OR REPLACE (rowid, …)`는 선언 키만 보는 트�
 
 ## 다음 차수 후보
 
+2. `promote_template_live`가 같은 묶음 안에서 전체 정지와 템플릿 판을 확인한다(approval 2차 검토: 지금은 approval 쪽 확인과 store 승격 사이에 짧은 틈).
 1. 잠긴 픽스처 폴더에 실수로 커밋된 `tests/fixtures/v5.db-shm` · `v5.db-wal`(빈 SQLite 부속 파일)을 지운다(다음 N1 때).
 
 ## 모양
