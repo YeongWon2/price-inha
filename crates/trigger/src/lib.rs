@@ -28,8 +28,8 @@ pub use condition::{
     ConditionKind, ConditionMemory, Direction, Observation, default_rearm_percent, observe,
 };
 pub use engine::{
-    ConditionJob, DEFAULT_QUOTE_INTERVAL, Finished, Ports, ScheduleJob, SettleReport, StartReport,
-    TickOutcome, TickReport, Trigger, TriggerConfig,
+    ConditionJob, DEFAULT_QUOTE_INTERVAL, Drained, Finished, Ports, ScheduleJob, SettleReport,
+    StartReport, TickOutcome, TickReport, Trigger, TriggerConfig,
 };
 pub use error::{Error, StoreError, WakeError};
 pub use model::{Alert, AlertReason, JobId, ScheduleKind, Target, TriggerEvent, Wake, WakeReason};

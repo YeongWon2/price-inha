@@ -15,6 +15,10 @@
 //! - `unit_write`: 2차 1 상태 옮기기 + 영수증 열기를 한 단위로(포트)
 //! - `inflight`: 2차 1 · 2 중간에 실패하는 저장소, 깨우기를 띄워 두고 tick 잠금을 놓기(N6 계속)
 //! - `revive`: 2차 3 다시 켤 때 영수증 없는 옮겨진 회차 되살리기
+//!
+//! 3차(2차 검토의 참고):
+//! - `round3`: 3차 1~6 패닉한 깨우기 · 기다리지 않는 가져가기와 run의 비우기 · 중간에 빠진 tick의 되살릴 회차 ·
+//!   실행 중인 작업의 대기 계산 · 되살린 회차의 `pending_slot` · 시세를 받는 동안 쓰기 잠금
 
 mod support;
 
@@ -26,6 +30,7 @@ mod price;
 mod queue;
 mod restart;
 mod revive;
+mod round3;
 mod schedule;
 mod store;
 mod timer;

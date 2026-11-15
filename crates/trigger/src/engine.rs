@@ -160,6 +160,15 @@ pub struct SettleReport {
     pub alerts: Vec<Alert>,
 }
 
+/// [`Trigger::drain_finished`]의 결과(3차 2번).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Drained {
+    /// 지난 가져가기(`drain_finished` · `settle`) 뒤로 끝난 깨우기들(끝난 순). 한 번 낸 것은 다시 내지 않는다.
+    pub finished: Vec<Finished>,
+    /// 끝난 결과를 반영하다 생긴 저장소 오류들(생긴 순). 한 번 낸 것은 다시 내지 않는다.
+    pub errors: Vec<crate::StoreError>,
+}
+
 /// 깨우기 엔진.
 pub struct Trigger {
     pub(crate) config: TriggerConfig,
@@ -314,6 +323,14 @@ impl Trigger {
     /// 지금 띄워 두고 아직 끝나지 않은 깨우기 수.
     pub fn in_flight(&self) -> usize {
         self.inflight.count()
+    }
+
+    /// 띄운 깨우기를 **기다리지 않고**, 지금까지 끝난 결과와 반영하다 생긴 저장소 오류를 가져간다(3차 2번).
+    /// 가져간 것은 비운다(다음 `drain_finished` · [`Trigger::settle`]에 다시 나오지 않는다).
+    /// 알림 요구는 가져가지 않는다(`tick` · `settle`이 낸다). [`Trigger::run`]은 되풀이마다 이것으로 비워
+    /// 끝난 결과가 끝없이 쌓이지 않게 한다.
+    pub fn drain_finished(&self) -> Drained {
+        todo!()
     }
 
     /// `start`를 부른 뒤 `tick` → `clock.sleep(next_delay)`를 되풀이한다. `stop`이 참이 되면 끝난다.
