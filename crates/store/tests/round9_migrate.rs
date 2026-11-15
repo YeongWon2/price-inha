@@ -52,12 +52,40 @@ fn tables(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// `rowid`로 읽을 수 있는 표인가. WITHOUT ROWID 표와 가상 표(FTS5)의 보조 표
+/// (`<가상 표 이름>_data` · `_idx` · `_docsize` · `_config` · `_content`)는 거른다.
+fn has_rowid(conn: &rusqlite::Connection, name: &str) -> bool {
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if sql.to_uppercase().contains("WITHOUT ROWID") {
+        return false;
+    }
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")
+        .unwrap();
+    let virtuals: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    !virtuals.iter().any(|v| {
+        name.strip_prefix(v.as_str())
+            .is_some_and(|rest| rest.starts_with('_'))
+    })
+}
+
 /// 표들의 모든 줄(칸 값 그대로).
 fn dump(path: &Path, names: &[String]) -> Vec<(String, Vec<Vec<SqlValue>>)> {
     let conn = rusqlite::Connection::open(path).unwrap();
     names
         .iter()
         .filter(|name| name.as_str() != "sqlite_sequence")
+        .filter(|name| has_rowid(&conn, name))
         .map(|name| {
             let mut stmt = conn
                 .prepare(&format!("SELECT * FROM \"{name}\" ORDER BY rowid"))

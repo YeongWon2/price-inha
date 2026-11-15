@@ -26,7 +26,7 @@ use serde_json::json;
 // ───────────── 도우미 ─────────────
 
 /// 보호한다고 적은 표. 지우기를 막는 표는 모두 여기 있어야 한다(아래 테스트가 스키마에서 확인한다).
-const PROTECTED: [&str; 20] = [
+const PROTECTED: [&str; 21] = [
     "team_history",
     "events",
     "access_log",
@@ -47,6 +47,7 @@ const PROTECTED: [&str; 20] = [
     "trigger_receipts",
     "facts",
     "trade_facts",
+    "restore_marks",
 ];
 
 const VERBS: [&str; 2] = ["INSERT OR REPLACE INTO", "REPLACE INTO"];
@@ -185,6 +186,8 @@ fn fill(store: &Store) -> TradeId {
     store
         .attach_trade_facts(judged, &[facts[0].id, facts[1].id])
         .unwrap();
+    // 되살리기 표시 하나(쌓기만 하는 표가 줄을 가지게).
+    store.mark_restored(t(60)).unwrap();
     judged
 }
 
