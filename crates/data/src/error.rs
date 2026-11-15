@@ -74,4 +74,18 @@ pub enum DataError {
         /// 출처.
         origin: SourceName,
     },
+    /// 출처에 받을 양의 상한(ECOS 10000행, DART 20쪽)보다 많은 자료가 있어 다 받지 못했다.
+    /// 잘린 결과를 완전한 것처럼 돌려주지 않는다(2차 1번).
+    #[error("{origin} 자료가 받을 수 있는 양보다 많아 잘렸습니다")]
+    Truncated {
+        /// 출처.
+        origin: SourceName,
+    },
+    /// 키 보관소를 읽지 못했다(입출력 · 손상). 키가 없는 것([`DataError::NoKey`])과 다르다(2차 2번).
+    /// 이때는 바깥으로 요청을 보내지 않는다.
+    #[error("{origin} 자료 키를 보관소에서 읽을 수 없습니다")]
+    KeyUnreadable {
+        /// 출처.
+        origin: SourceName,
+    },
 }

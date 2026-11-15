@@ -69,7 +69,7 @@ fn facts(fetched: Fetched) -> Vec<pi_data::Fact> {
 
 // 검증: C11 V34 P10
 #[tokio::test]
-async fn 미국_금리는_요청_인자를_보내고_관측일마다_수와_공표일을_돌려준다() {
+async fn 미국_금리는_요청_인자를_보내고_관측일마다_수를_돌려준다() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(OBS_PATH))
@@ -96,7 +96,8 @@ async fn 미국_금리는_요청_인자를_보내고_관측일마다_수와_공�
     assert_eq!(list[0].value, FactValue::Number(dec("4.12")));
     assert_eq!(list[1].period.as_deref(), Some("2026-11-13"));
     assert_eq!(list[1].value, FactValue::Number(dec("4.09")));
-    assert_eq!(list[0].published_on, Some(day("2026-11-14")));
+    // realtime_start는 실제 공표일이 아니다(2차 4번): 공표일 칸은 비운다.
+    assert_eq!(list[0].published_on, None);
     assert_eq!(list[0].source.name, SourceName::Fred);
     assert!(list[0].source.url.starts_with(&server.uri()));
     assert!(list[0].source.url.contains(OBS_PATH));

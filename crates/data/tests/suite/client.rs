@@ -323,7 +323,7 @@ fn 공식_설정은_https_기본_주소와_기본_시간_한도를_쓴다() {
 }
 
 /// 칸 확인을 언제나 받아들이는 확인기(보관소에 칸을 등록하려고).
-struct AcceptAll;
+pub(crate) struct AcceptAll;
 
 impl Verifier for AcceptAll {
     async fn verify(&self, _kind: KeyKind, _values: &Credentials) -> Result<(), VerifyFailure> {

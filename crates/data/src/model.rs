@@ -284,7 +284,8 @@ pub struct Fact {
     pub reference: Option<String>,
     /// 출처와 주소.
     pub source: Source,
-    /// 공표일. DART 공시는 접수일자, FRED는 그 값의 real-time 시작일. 출처가 주지 않으면 없다.
+    /// 공표일. DART 공시는 접수일자. 출처가 주지 않으면 없다.
+    /// FRED는 없다: 관측값의 `realtime_start`는 요청한 real-time 기간의 시작이지 실제 공표일이 아니다(2차 4번).
     pub published_on: Option<NaiveDate>,
     /// 알게 된 시각: 응답을 받은 시각(주입한 시계, P10).
     pub known_at: DateTime<Utc>,

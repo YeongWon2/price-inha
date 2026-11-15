@@ -16,6 +16,9 @@ use crate::{DataConfig, DataError, SourceName, dart, ecos, fred};
 /// - FRED: 계열 `DGS10`의 정보. 잘못된 키는 HTTP 400([`DataError::Rejected`]).
 ///
 /// 기본 주소 규칙 · 시간 한도 · 오류 구분은 [`crate::DataClient`]와 같다.
+/// 다만 404 · 3xx 같은 비정상 HTTP 상태는 키 거절([`DataError::KeyRejected`] · [`DataError::Rejected`])이
+/// 아니라 닿지 않음 · 주소 오류로 낸다([`verify_slot`]에서 `VerifyFailure::Unreachable`, 2차 3번).
+/// 리다이렉트는 따라가지 않는다.
 pub async fn verify_key(
     config: &DataConfig,
     source: SourceName,

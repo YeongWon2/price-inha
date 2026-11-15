@@ -1146,6 +1146,11 @@ name = "pi-approval"
 version = "0.1.0"
 dependencies = [
  "pi-store",
+ "rand 0.9.5",
+ "rust_decimal",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
 ]
 
@@ -1206,8 +1211,12 @@ dependencies = [
 name = "pi-office"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "pi-store",
+ "serde_json",
+ "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1229,9 +1238,11 @@ dependencies = [
 name = "pi-rules"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "pi-market",
  "pi-paper",
  "pi-template",
+ "rust_decimal",
  "thiserror",
 ]
 
