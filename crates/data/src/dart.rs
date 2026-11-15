@@ -119,7 +119,11 @@ pub(crate) async fn disclosures(
             .map_err(|_| format_error(ORIGIN, "공시 목록 모양이 다릅니다"))?;
         items.extend(parsed.list);
         first_target.get_or_insert(target);
-        if page >= parsed.total_page.unwrap_or(1).min(MAX_PAGES) {
+        let total_page = parsed.total_page.unwrap_or(1);
+        if page >= total_page.min(MAX_PAGES) {
+            if total_page > MAX_PAGES {
+                return Err(DataError::Truncated { origin: ORIGIN });
+            }
             break;
         }
         page += 1;

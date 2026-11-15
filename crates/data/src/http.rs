@@ -185,7 +185,8 @@ fn status_error(origin: SourceName, target: &Target, status: StatusCode) -> Data
     if status == StatusCode::TOO_MANY_REQUESTS {
         return DataError::RateLimited { origin };
     }
-    if status.is_server_error() {
+    // 5xx · 404 · 3xx(따라가지 않는다)는 키 거절이 아니라 닿지 않음 · 주소 오류다.
+    if status.is_server_error() || status.is_redirection() || status == StatusCode::NOT_FOUND {
         return unreachable_error(origin, target, &format!("HTTP {}", status.as_u16()));
     }
     DataError::Rejected {

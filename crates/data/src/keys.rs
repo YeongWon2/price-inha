@@ -31,7 +31,13 @@ impl KeySource for SecretStore {
     }
 
     /// 읽기 오류(입출력 · 손상)는 [`DataError::KeyUnreadable`]이다. 오류에 값 · 경로를 싣지 않는다.
-    fn read_key(&self, _source: SourceName) -> Result<Option<SecretString>, DataError> {
-        todo!()
+    fn read_key(&self, source: SourceName) -> Result<Option<SecretString>, DataError> {
+        let Some(field) = source.slot().fields().first() else {
+            return Ok(None);
+        };
+        let values = self
+            .read_slot(source.slot())
+            .map_err(|_| DataError::KeyUnreadable { origin: source })?;
+        Ok(values.and_then(|values| values.get(field).cloned()))
     }
 }

@@ -18,6 +18,8 @@ use crate::{Clock, DataError, EcosSeries, Fact, FactKind, FactValue, Fetched, So
 const ORIGIN: SourceName = SourceName::Ecos;
 /// 한 번에 받는 최대 행 수.
 const END_ROW: &str = "10000";
+/// [`END_ROW`]의 숫자.
+const MAX_ROWS: u64 = 10_000;
 
 /// 경로 조각(키 자리 포함)으로 보낼 주소와 가린 주소를 만든다. `key_at`은 키 조각의 자리.
 fn path_target(endpoint: &Endpoint, segments: &[&str], key_at: usize, key: &str) -> Target {
@@ -133,6 +135,13 @@ pub(crate) async fn series(
     if let Some(result) = body.get("RESULT") {
         check_result(result, &target)?;
         return Ok(Fetched::Missing(kind));
+    }
+    let total = body
+        .get("StatisticSearch")
+        .and_then(|table| table.get("list_total_count"))
+        .and_then(Value::as_u64);
+    if total.is_some_and(|total| total > MAX_ROWS) {
+        return Err(DataError::Truncated { origin: ORIGIN });
     }
     let rows = body
         .get("StatisticSearch")

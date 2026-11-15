@@ -23,8 +23,6 @@ struct Body {
 
 #[derive(Deserialize)]
 struct Observation {
-    #[serde(default)]
-    realtime_start: Option<String>,
     date: String,
     value: String,
 }
@@ -96,14 +94,6 @@ fn observation_fact(
     }
     let value =
         Decimal::from_str(text).map_err(|_| format_error(ORIGIN, "관측값이 수가 아닙니다"))?;
-    let published_on = match observation.realtime_start.as_deref() {
-        Some(start) => Some(
-            start
-                .parse::<NaiveDate>()
-                .map_err(|_| format_error(ORIGIN, "realtime_start가 날짜가 아닙니다"))?,
-        ),
-        None => None,
-    };
     Ok(Some(Fact {
         kind: FactKind::UsRate,
         subject: series_id.to_owned(),
@@ -116,7 +106,8 @@ fn observation_fact(
             name: ORIGIN,
             url: target.shown.clone(),
         },
-        published_on,
+        // realtime_start는 값이 시스템에서 유효해진 기간의 시작이지 실제 공표일이 아니다.
+        published_on: None,
         known_at,
     }))
 }

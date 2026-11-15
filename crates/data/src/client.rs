@@ -116,7 +116,7 @@ impl DataClient {
     /// 그 출처의 키. 없으면 [`DataError::NoKey`](바깥으로 보내지 않는다).
     fn key_for(&self, source: SourceName) -> Result<SecretString, DataError> {
         self.keys
-            .key(source)
+            .read_key(source)?
             .ok_or(DataError::NoKey { origin: source })
     }
 }
