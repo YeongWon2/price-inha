@@ -64,8 +64,9 @@ pub struct TossConfig {
     /// 2면 요청은 많아야 3번 나간다.
     pub rate_limit_retries: u32,
     /// 토큰 발급이 인증 실패([`MarketError::AuthFailed`]) · 허용 IP 아님
-    /// ([`MarketError::IpNotAllowed`])으로 끝나면, 이 시간 동안 발급을 다시 보내지 않고
-    /// 같은 오류를 돌려준다. 다른 실패(장애 · 연결 · 응답 모양)에는 쉬지 않는다.
+    /// ([`MarketError::IpNotAllowed`]) · 유효 시간이 `token_refresh_margin` 이하인 토큰으로
+    /// 끝나면, 이 시간 동안 발급을 다시 보내지 않고 같은 오류를 돌려준다. 다른 실패
+    /// (장애 · 연결 · 그 밖의 응답 모양)에는 쉬지 않는다.
     pub token_failure_cooldown: Duration,
     /// 응답 본문을 이 크기(바이트)까지만 읽는다. 넘으면 읽지 않고
     /// [`MarketError::UnexpectedResponse`]로 끝낸다(딱 이 크기는 읽는다).
@@ -103,7 +104,7 @@ impl Default for TossConfig {
 ///   [`MarketError::NoCredentials`]를 돌려준다(V31).
 /// - 토큰 유효 시간(`expires_in`)이 `token_refresh_margin` 이하이면 받지 않고
 ///   [`MarketError::UnexpectedResponse`]로 끝낸다(요청마다 다시 발급해 토큰을 깨지 않게).
-/// - 발급이 인증 실패 · 허용 IP 아님이면 `token_failure_cooldown` 동안 발급을 다시 보내지
+/// - 발급이 인증 실패 · 허용 IP 아님 · 유효 시간이 여유 이하인 토큰이면 `token_failure_cooldown` 동안 발급을 다시 보내지
 ///   않고 같은 오류를 돌려준다(국내 · 미국 어댑터가 함께 쉰다).
 /// - 기본 주소가 `https`가 아니면(루프백 주소 `127.0.0.0/8` · `::1`만 예외) 요청을 보내지
 ///   않고 [`MarketError::InsecureBaseUrl`]을 돌려준다. 응답 본문은 `max_response_bytes`까지만 읽는다.
@@ -120,7 +121,7 @@ struct CachedToken {
     owner: Credentials,
 }
 
-/// 발급이 인증 실패 · 허용 IP 아님으로 끝난 기록. 쉬는 동안 같은 오류를 돌려준다.
+/// 발급이 인증 실패 · 허용 IP 아님 · 유효 시간이 여유 이하인 토큰으로 끝난 기록. 쉬는 동안 같은 오류를 돌려준다.
 struct IssueFailure {
     error: MarketError,
     /// 이 시각부터 다시 발급한다.
@@ -170,13 +171,23 @@ impl Inner {
             return Err(failure.error.clone());
         }
         slot.failure = None;
-        let issued = match http::issue_token(http, &self.config, credentials).await {
-            Ok(issued) => issued,
+        // 쉬는 실패: 인증 실패 · 허용 IP 아님 · 유효 시간이 여유 이하인 토큰.
+        let outcome = match http::request_token(http, &self.config, credentials).await {
+            Ok(issued) => {
+                http::accept_lifetime(issued, &self.config).map_err(|error| (error, true))
+            }
             Err(error) => {
-                if matches!(
+                let cool = matches!(
                     error,
                     MarketError::AuthFailed { .. } | MarketError::IpNotAllowed
-                ) {
+                );
+                Err((error, cool))
+            }
+        };
+        let issued = match outcome {
+            Ok(issued) => issued,
+            Err((error, cool)) => {
+                if cool {
                     slot.failure = Some(IssueFailure {
                         error: error.clone(),
                         until: cooldown_end(now, self.config.token_failure_cooldown),
@@ -301,7 +312,8 @@ impl MarketAdapter for TossAdapter {
     ///
     /// 부르기 전에 모든 종목을 [`Symbol::parse`]의 규칙으로 확인한다. 틀린 종목이 하나라도
     /// 있으면 아무 요청(토큰 발급 포함)도 보내지 않고 [`MarketError::InvalidSymbol`]이다.
-    /// 0 이하의 가격은 [`MarketError::UnexpectedResponse`]다. 요청하지 않은 종목은 버린다.
+    /// 요청하지 않은 종목은 버린다(0 이하 가격이어도 오류가 아니다). 요청한 종목의 0 이하
+    /// 가격은 [`MarketError::UnexpectedResponse`]다.
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
         // 틀린 종목이 하나라도 있으면 아무것도 보내지 않는다(쿼리에 다른 글자가 섞이지 않게).
         for symbol in symbols {
@@ -316,12 +328,10 @@ impl MarketAdapter for TossAdapter {
                 .collect::<Vec<_>>()
                 .join(",");
             let body = self.inner.get(PRICES_PATH, &[("symbols", &joined)]).await?;
-            let parsed = wire::parse_quotes(&body, self.inner.clock.now())?;
-            quotes.extend(
-                parsed
-                    .into_iter()
-                    .filter(|quote| requested.contains(quote.symbol.as_str())),
-            );
+            let parsed = wire::parse_quotes(&body, self.inner.clock.now(), |symbol| {
+                requested.contains(symbol)
+            })?;
+            quotes.extend(parsed);
         }
         Ok(quotes)
     }

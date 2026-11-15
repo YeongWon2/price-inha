@@ -76,8 +76,17 @@ struct TokenResponse {
     expires_in: u64,
 }
 
-/// `POST /oauth2/token`(form). 자격은 본문에만 담는다.
+/// `POST /oauth2/token`(form)으로 발급받고 유효 시간 규칙([`accept_lifetime`])까지 본다.
 pub(super) async fn issue_token(
+    http: &Client,
+    config: &TossConfig,
+    credentials: &Credentials,
+) -> Result<IssuedToken, MarketError> {
+    accept_lifetime(request_token(http, config, credentials).await?, config)
+}
+
+/// `POST /oauth2/token`(form). 자격은 본문에만 담는다. 유효 시간 규칙은 보지 않는다.
+pub(super) async fn request_token(
     http: &Client,
     config: &TossConfig,
     credentials: &Credentials,
@@ -93,14 +102,22 @@ pub(super) async fn issue_token(
     if parsed.access_token.is_empty() {
         return Err(unexpected("토큰"));
     }
-    // 유효 시간이 다시 발급 여유 이하이면 받자마자 다시 발급하게 된다(요청마다 서로 토큰을 깬다).
-    if Duration::from_secs(parsed.expires_in) <= config.token_refresh_margin {
-        return Err(unexpected("토큰"));
-    }
     Ok(IssuedToken {
         value: parsed.access_token,
         expires_in: parsed.expires_in,
     })
+}
+
+/// 유효 시간이 다시 발급 여유 이하이면 받지 않는다(받자마자 다시 발급하게 되어 요청마다
+/// 서로 토큰을 깬다).
+pub(super) fn accept_lifetime(
+    issued: IssuedToken,
+    config: &TossConfig,
+) -> Result<IssuedToken, MarketError> {
+    if Duration::from_secs(issued.expires_in) <= config.token_refresh_margin {
+        return Err(unexpected("토큰"));
+    }
+    Ok(issued)
 }
 
 /// 응답 모양이 명세와 다르다는 오류. 본문이나 파서의 말(받은 값이 섞일 수 있다)은 담지 않는다.

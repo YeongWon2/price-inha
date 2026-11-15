@@ -26,36 +26,39 @@ struct PriceItem {
 }
 
 /// 현재가 응답을 시세들로 읽는다. 받은 시각은 넘겨받은 `received_at`이다.
+/// `wanted`가 거르는 종목(요청하지 않은 종목)은 버린다. 가격이 십진수로 읽히지 않으면
+/// 어느 종목이든 응답 모양 오류지만, 0 이하 검사는 버리기 뒤에 해서 요청한 종목에만 한다.
 pub(super) fn parse_quotes(
     body: &str,
     received_at: DateTime<Utc>,
+    wanted: impl Fn(&str) -> bool,
 ) -> Result<Vec<Quote>, MarketError> {
     let parsed: PricesResponse = serde_json::from_str(body).map_err(|_| unexpected("현재가"))?;
-    parsed
-        .result
-        .into_iter()
-        .map(|item| {
-            // 문자열에서 바로 십진수로 읽는다. 자리가 넘쳐 값이 바뀔 것 같으면 받지 않는다.
-            let price =
-                Decimal::from_str_exact(&item.last_price).map_err(|_| unexpected("현재가"))?;
-            // 0 이하의 가격은 있을 수 없는 값이다(-0도 0이다).
-            if price <= Decimal::ZERO {
-                return Err(unexpected("현재가"));
-            }
-            let exchange_time = item
-                .timestamp
-                .as_deref()
-                .map(|text| parse_time(text, "현재가"))
-                .transpose()?;
-            Ok(Quote {
-                symbol: Symbol::new(item.symbol),
-                price,
-                currency: parse_currency(item.currency),
-                exchange_time,
-                received_at,
-            })
-        })
-        .collect()
+    let mut quotes = Vec::with_capacity(parsed.result.len());
+    for item in parsed.result {
+        // 문자열에서 바로 십진수로 읽는다. 자리가 넘쳐 값이 바뀔 것 같으면 받지 않는다.
+        let price = Decimal::from_str_exact(&item.last_price).map_err(|_| unexpected("현재가"))?;
+        if !wanted(&item.symbol) {
+            continue;
+        }
+        // 0 이하의 가격은 있을 수 없는 값이다(-0도 0이다).
+        if price <= Decimal::ZERO {
+            return Err(unexpected("현재가"));
+        }
+        let exchange_time = item
+            .timestamp
+            .as_deref()
+            .map(|text| parse_time(text, "현재가"))
+            .transpose()?;
+        quotes.push(Quote {
+            symbol: Symbol::new(item.symbol),
+            price,
+            currency: parse_currency(item.currency),
+            exchange_time,
+            received_at,
+        });
+    }
+    Ok(quotes)
 }
 
 fn parse_currency(code: String) -> Currency {
@@ -167,7 +170,7 @@ mod tests {
     #[test]
     fn 자리가_넘치는_가격은_반올림하지_않고_거절한다() {
         let body = r#"{"result":[{"symbol":"X","lastPrice":"0.12345678901234567890123456789012","currency":"USD"}]}"#;
-        let err = parse_quotes(body, at("2026-03-25T01:00:00Z")).unwrap_err();
+        let err = parse_quotes(body, at("2026-03-25T01:00:00Z"), |_| true).unwrap_err();
         assert!(matches!(err, MarketError::UnexpectedResponse { .. }));
     }
 
@@ -175,14 +178,14 @@ mod tests {
     fn 가격이_숫자_타입이면_거절한다() {
         // 명세는 문자열이다. JSON 숫자는 부동소수점을 거칠 수 있어 받지 않는다.
         let body = r#"{"result":[{"symbol":"X","lastPrice":185.7,"currency":"USD"}]}"#;
-        let err = parse_quotes(body, at("2026-03-25T01:00:00Z")).unwrap_err();
+        let err = parse_quotes(body, at("2026-03-25T01:00:00Z"), |_| true).unwrap_err();
         assert!(matches!(err, MarketError::UnexpectedResponse { .. }));
     }
 
     #[test]
     fn 응답_모양_오류에_받은_값이_담기지_않는다() {
         let body = r#"{"result":[{"symbol":"X","lastPrice":"비밀-글자","currency":"USD"}]}"#;
-        let err = parse_quotes(body, at("2026-03-25T01:00:00Z")).unwrap_err();
+        let err = parse_quotes(body, at("2026-03-25T01:00:00Z"), |_| true).unwrap_err();
         assert!(!format!("{err} {err:?}").contains("비밀-글자"));
     }
 
