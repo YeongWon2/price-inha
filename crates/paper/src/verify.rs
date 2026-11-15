@@ -144,7 +144,8 @@ fn check_sells(ledger: &Ledger) -> Result<(), SnapshotReason> {
 }
 
 /// 마지막 시세: 값이 0 이하이거나, 받은 시각이 내보낸 시각(`last_now`)보다 뒤면 말이 안 된다.
-/// 내보낸 시각이 없는데(아무 호출도 받지 않음) 시세가 있는 것도 같다.
+/// 내보낸 시각이 없는데(아무 호출도 받지 않음) 시세가 있는 것도 같다. 종목마다 기억한 거래의
+/// 값이 0 이하인 것도 같다(4차 규칙 2).
 fn check_quotes(ledger: &Ledger) -> Result<(), SnapshotReason> {
     let bad = ledger.last_quotes.iter().any(|quote| {
         quote.price <= Decimal::ZERO
@@ -152,7 +153,11 @@ fn check_quotes(ledger: &Ledger) -> Result<(), SnapshotReason> {
                 .last_now
                 .is_none_or(|exported| quote.received_at > exported)
     });
-    if bad {
+    let bad_mark = ledger
+        .trade_marks
+        .iter()
+        .any(|mark| mark.prices.iter().any(|price| *price <= Decimal::ZERO));
+    if bad || bad_mark {
         return Err(SnapshotReason::BadLastQuote);
     }
     Ok(())

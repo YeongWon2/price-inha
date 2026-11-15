@@ -1,5 +1,29 @@
 //! 모의계좌. [`Broker`]의 구현이다.
 //!
+//! # 4차 규칙 (3차 · 2차 · 1차 설명보다 앞선다)
+//!
+//! 아래 3차 · 2차 · 1차 설명과 다르면 이 절이 맞다.
+//!
+//! 1. **옛 시세는 종목마다 가장 늦은 거래소 시각에 견준다**: 계좌는 종목마다 지금까지 본 가장 늦은
+//!    거래소 시각을 따로 기억한다(마지막 시세와 따로다). 거래소 시각이 그보다 **앞**인 시세는
+//!    체결도 기억도 하지 않는다. 거래소 시각이 없는 시세는 이 기억을 바꾸지 않으니, 그런 시세가
+//!    사이에 끼어도 옛 시세가 막힌다(3차 규칙 2를 바꾼다).
+//! 2. **같은 거래소 시각의 거래는 한 번씩만 쓴다**: 가장 늦은 거래소 시각에 이미 쓴 거래(값)를
+//!    기억한다. 같은 시각 · 같은 값의 시세가 다시 오면(받은 시각이 달라도, 사이에 다른 값이나 시각
+//!    없는 시세가 끼어도) 마지막 시세로 기억만 하고 어떤 주문도 체결하지 않는다. 같은 시각의
+//!    서로 다른 값은 저마다 한 번씩 쓴다. 이 기억은 상태 값에 담겨 되살린 뒤에도 남는다.
+//! 3. **받은 시각도 주문 뒤여야 한다**: 거래소 시각이 있어도 받은 시각이 주문 접수 시각보다 뒤가
+//!    아니면 그 주문의 체결에 쓰지 않는다(거래소 시계가 앞선 경우. 3차 규칙 1을 바꾼다).
+//!    거래소 시각이 있으면 그것도 접수 시각보다 뒤여야 한다.
+//! 4. **옛 모양의 상태 값을 올려 되살린다**: [`Snapshot`]의 모양 2 · 3은 지금 모양(4)으로 올린 뒤
+//!    검사해 되살린다. 2 → 3: 내보낸 시각이 없으니 장부에 적힌 가장 늦은 시각(마지막 시세의 받은
+//!    시각, 주문의 접수 · 체결 · 취소 시각, 체결 기록의 시각, 멱등성 키의 접수 시각)으로 채운다.
+//!    3 → 4: 종목마다의 가장 늦은 거래소 시각과 쓴 거래를 마지막 시세(거래소 시각이 있는 것)에서
+//!    채운다. 올린 뒤 말이 안 되면 되살리지 않는다. 그 밖의 모양 번호는 되살리지 않는다.
+//! 5. **정정의 1원**: 같은 값 · 남은 수량 그대로의 정정이 1원 때문에 거부되지 않는 것은 원 미만
+//!    **버림**일 때뿐이다(3차 규칙 4의 목표를 좁힌다, `docs/dev/decisions.md` 2026-11-15 (가)).
+//!    정정한 새 주문의 수수료는 따로 셈하므로 올림 · 반올림에서는 1원이 더 필요할 수 있다.
+//!
 //! # 3차 규칙 (2차 · 1차 설명보다 앞선다)
 //!
 //! 아래 2차 · 1차 설명과 다르면 이 절이 맞다.
@@ -147,7 +171,35 @@ pub const IDEMPOTENCY_WINDOW: Duration = Duration::from_secs(600);
 
 /// 지금 내보내는 [`Snapshot`]의 모양 번호. 2: 마지막 시세에 거래소 시각 · 받은 시각이 들어갔다.
 /// 3: 내보낸 시각(이 계좌가 마지막으로 받은 `now`, `ledger.last_now`)이 들어갔다.
-const SNAPSHOT_VERSION: u32 = 3;
+/// 4: 종목마다의 가장 늦은 거래소 시각과 그 시각에 쓴 거래(`ledger.trade_marks`)가 들어갔다.
+const SNAPSHOT_VERSION: u32 = 4;
+
+/// 옛 모양의 장부를 지금 모양으로 올린다(4차 규칙 4). 모르는 모양 번호면 `None`.
+fn upgrade(version: u32, mut ledger: Ledger) -> Option<Ledger> {
+    if !(2..=SNAPSHOT_VERSION).contains(&version) {
+        return None;
+    }
+    if version < 3 {
+        // 모양 2에는 내보낸 시각이 없다.
+        ledger.last_now = ledger.latest_recorded();
+    }
+    if version < 4 {
+        // 모양 3까지는 거래소 시각을 마지막 시세에만 기억했다.
+        ledger.trade_marks.clear();
+        let timed: Vec<(String, CashCode, DateTime<Utc>, Decimal)> = ledger
+            .last_quotes
+            .iter()
+            .filter_map(|quote| {
+                let traded_at = quote.exchange_time?;
+                Some((quote.symbol.clone(), quote.currency, traded_at, quote.price))
+            })
+            .collect();
+        for (symbol, currency, traded_at, price) in timed {
+            ledger.check_trade(&symbol, currency, traded_at, price);
+        }
+    }
+    Some(ledger)
+}
 
 /// 장애 흉내 (E13 · E30). 테스트와 시연에서 증권사 장애를 일으킨다.
 ///
@@ -182,6 +234,9 @@ pub enum Fault {
 /// **내보낸 시각**: 상태 값에는 이 계좌가 마지막으로 받은 `now`(어느 호출이든)가 함께 들어가고,
 /// 그것을 내보낸 시각으로 본다. 마지막 시세의 받은 시각이 이보다 뒤인 상태 값은 되살리지 않는다
 /// ([`SnapshotReason::BadLastQuote`]).
+///
+/// 4차에 더한 이름: `ledger.trade_marks`(종목마다 가장 늦은 거래소 시각 `traded_at`과 그 시각에 쓴
+/// 거래의 값 `prices`). 모양 2 · 3에는 없고, 읽을 때 채운다(4차 규칙 4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     /// 값의 모양 번호.
@@ -266,19 +321,21 @@ impl PaperBroker {
     /// 0 이하, 열린 사는 주문이 남은 수량 몫보다 많이 묶음, 뗀 수수료 · 세금 · 누적 체결 금액이
     /// 말이 안 됨, 체결 수량이 정수가 아님, 상태와 체결 수량이 어긋남, 주문 통화가 시장과 다름,
     /// 평균 산 값이 0 이하, 마지막 시세의 값이 0 이하이거나 받은 시각이 내보낸 시각보다 뒤 — 모두
-    /// 거부한다(3차 규칙 3).
+    /// 거부한다(3차 규칙 3). 종목마다 기억한 거래의 값이 0 이하인 것도 같다
+    /// ([`SnapshotReason::BadLastQuote`]). 모양 2 · 3의 상태 값은 지금 모양으로 올린 뒤 검사한다
+    /// (4차 규칙 4).
     pub fn restore(
         config: PaperConfig,
         snapshot: Snapshot,
     ) -> Result<(Self, CheckAuthority), BrokerError> {
         config.validate_rules()?;
-        if snapshot.version != SNAPSHOT_VERSION {
+        let Some(ledger) = upgrade(snapshot.version, snapshot.ledger) else {
             return Err(BrokerError::InvalidSnapshot(
                 SnapshotReason::UnknownVersion(snapshot.version),
             ));
-        }
-        verify::check_ledger(&snapshot.ledger, &config)?;
-        Ok(Self::assemble(config, snapshot.ledger))
+        };
+        verify::check_ledger(&ledger, &config)?;
+        Ok(Self::assemble(config, ledger))
     }
 
     /// 계좌 전체를 값 하나로 내보낸다. 같은 상태는 같은 값(`==`)이다.

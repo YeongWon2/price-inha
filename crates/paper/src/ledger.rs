@@ -253,6 +253,9 @@ pub(crate) struct Ledger {
     /// 이 계좌가 받은 가장 늦은 `now`(어느 호출이든). 상태 값의 내보낸 시각이다.
     /// 아직 아무 호출도 받지 않았으면 없다.
     pub last_now: Option<DateTime<Utc>>,
+    /// 종목마다 가장 늦은 거래소 시각과 그 시각에 쓴 거래(종목 글자 · 통화 순서). 모양 4에서 더했다.
+    #[serde(default)]
+    pub trade_marks: Vec<crate::marks::TradeMark>,
 }
 
 impl Ledger {
@@ -272,6 +275,7 @@ impl Ledger {
             last_quotes: Vec::new(),
             next_id: 1,
             last_now: None,
+            trade_marks: Vec::new(),
         }
     }
 

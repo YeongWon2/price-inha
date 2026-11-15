@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use crate::book::Book;
 use crate::calendar::settlement_date;
 use crate::ledger::{CashCode, FillRecord, OrderRecord, QuoteRecord};
+use crate::marks::TradeCheck;
 use crate::money;
 use crate::{
     CloseReason, LimitFillPrice, MarketRules, MaxFill, OrderEvent, OrderEventKind, OrderStatus,
@@ -113,10 +114,14 @@ fn fill_quantity(
     (affordable, order.order_type == OrderType::Market)
 }
 
-/// 이 시세가 이 주문을 접수한 **뒤의** 것인가 (3차 규칙 1, `docs/dev/decisions.md` 2026-11-15):
-/// 거래소 시각이 있으면 그 시각이, 없으면 받은 시각이 접수 시각보다 뒤여야 한다.
+/// 이 시세가 이 주문을 접수한 **뒤의** 것인가 (4차 규칙 3): 받은 시각이 접수 시각보다 뒤여야
+/// 하고, 거래소 시각이 있으면 그것도 접수 시각보다 뒤여야 한다(거래소 시계가 앞서 거래소 시각만
+/// 뒤인 시세는 쓰지 않는다).
 fn after_order(order: &OrderRecord, quote: &Quote) -> bool {
-    quote.exchange_time.unwrap_or(quote.received_at) > order.ordered_at
+    quote.received_at > order.ordered_at
+        && quote
+            .exchange_time
+            .is_none_or(|traded_at| traded_at > order.ordered_at)
 }
 
 /// 체결할 수 있으면 그 계획. 주문 전의 시세 · 낡은 달력 · 늦은 시세 · 닫힌 장 · 못 쓰는 유형 ·
@@ -295,16 +300,6 @@ fn remember(book: &mut Book, quote: &Quote, currency: CashCode) -> bool {
     seen
 }
 
-/// 거래소 시각이 그 종목의 마지막으로 기억한 시세의 거래소 시각보다 앞인가. 둘 중 하나라도
-/// 거래소 시각이 없으면 견주지 않는다.
-fn older_than_remembered(book: &Book, quote: &Quote, currency: CashCode) -> bool {
-    let last = book
-        .ledger
-        .last_quote(quote.symbol.as_str(), currency)
-        .and_then(|last| last.exchange_time);
-    matches!((quote.exchange_time, last), (Some(traded_at), Some(last)) if traded_at < last)
-}
-
 /// 시세 하나를 처리한다: 마감이 된 주문을 취소하고, 쓸 수 있는 시세면 기억하고, 처음 보는
 /// 시세면 그 종목의 열린 주문을 접수한 순서대로 체결해 본다.
 pub(crate) fn on_quote(
@@ -326,14 +321,25 @@ pub(crate) fn on_quote(
     if quote.received_at > now || too_old(quote.received_at, now, &config.stale) {
         return out;
     }
-    // 거래소 시각이 마지막으로 기억한 시세보다 앞인 옛 시세는 체결도 기억도 하지 않는다(3차 규칙 2).
-    if older_than_remembered(book, quote, currency) {
-        return out;
-    }
-    if remember(book, quote, currency) {
-        return out;
-    }
     let symbol = quote.symbol.as_str();
+    // 거래소 시각이 있으면 그 종목의 가장 늦은 거래소 시각에 견준다(4차 규칙 1 · 2). 옛 시세는
+    // 체결도 기억도 하지 않는다. 그 시각에 이미 쓴 거래는 기억만 하고 체결하지 않는다.
+    let used = match quote.exchange_time {
+        Some(traded_at) => {
+            match book
+                .ledger
+                .check_trade(symbol, currency, traded_at, quote.price)
+            {
+                TradeCheck::Older => return out,
+                TradeCheck::Used => true,
+                TradeCheck::Fresh => false,
+            }
+        }
+        None => false,
+    };
+    if remember(book, quote, currency) || used {
+        return out;
+    }
     let candidates: Vec<usize> = book
         .ledger
         .orders
