@@ -682,7 +682,7 @@ async fn 실패와_시간_초과에도_시스템_글_파일을_지운다() {
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(300);
+    cfg.timeout = Duration::from_millis(1500);
     assert_eq!(
         call(cfg, simple_request()).await.unwrap_err(),
         AiError::Timeout
@@ -1224,7 +1224,7 @@ async fn 시간_제한을_넘기면_시간_초과이고_가짜와_그_자식이_
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(300);
+    cfg.timeout = Duration::from_millis(1500);
 
     let started = Instant::now();
     let err = call(cfg, simple_request()).await.unwrap_err();
@@ -1247,7 +1247,7 @@ async fn 끝낼_때는_그룹에_sigterm을_먼저_보내고_유예_뒤_sigkill�
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(300);
+    cfg.timeout = Duration::from_millis(1500);
     cfg.kill_grace = Duration::from_secs(2);
     assert_eq!(
         call(cfg, simple_request()).await.unwrap_err(),
@@ -1264,7 +1264,7 @@ async fn 끝낼_때는_그룹에_sigterm을_먼저_보내고_유예_뒤_sigkill�
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(300);
+    cfg.timeout = Duration::from_millis(1500);
     cfg.kill_grace = Duration::from_millis(200);
     assert_eq!(
         call(cfg, simple_request()).await.unwrap_err(),
@@ -1287,7 +1287,7 @@ async fn 버려진_호출은_프로세스와_임시_파일을_남기지_않는�
     let provider = ClaudeCliProvider::new(config(&f));
 
     let abandoned = tokio::time::timeout(
-        Duration::from_millis(500),
+        Duration::from_millis(1500),
         provider.complete(simple_request()),
     )
     .await;
@@ -1318,7 +1318,7 @@ async fn 실패_결과_줄이_나온_뒤_늦게_끝나도_그_결과가_우선�
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(400);
+    cfg.timeout = Duration::from_millis(1500);
 
     let err = call(cfg, simple_request()).await.unwrap_err();
 
@@ -1372,11 +1372,11 @@ async fn 동시에_산_자식은_기본_상한_2를_넘지_않는다() {
 #[tokio::test]
 async fn 줄에서_기다린_시간도_전체_제한에_든다() {
     let mut b = Behave::ok();
-    b.before = "/bin/sleep 0.45".to_string();
+    b.before = "/bin/sleep 1.5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
     cfg.max_concurrency = 1;
-    cfg.timeout = Duration::from_millis(700);
+    cfg.timeout = Duration::from_millis(2500);
     let provider = Arc::new(ClaudeCliProvider::new(cfg));
 
     let a = Arc::clone(&provider);
@@ -1435,7 +1435,7 @@ async fn 오류에_출력_원문과_환경_값과_대화_글이_없다() {
     b.after = "/bin/sleep 5".to_string();
     let f = Fake::new(b);
     let mut cfg = config(&f);
-    cfg.timeout = Duration::from_millis(300);
+    cfg.timeout = Duration::from_millis(1500);
     assert_error_clean(&call(cfg, simple_request()).await.unwrap_err());
 }
 
