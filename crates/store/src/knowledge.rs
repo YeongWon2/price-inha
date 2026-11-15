@@ -118,9 +118,10 @@ pub struct KnowledgeQuery {
 pub struct KnowledgeHit {
     /// 적중한 조각.
     pub chunk: KnowledgeChunk,
-    /// 0 초과 1 이하의 점수. 클수록 잘 맞는다(`relevance = -rank`, `점수 = relevance / (1 + relevance)`).
+    /// 0 초과 1_000_000 이하의 점수(백만분의 1 단위 정수). 클수록 잘 맞는다
+    /// (`relevance = -rank`, `점수 = relevance / (1 + relevance)`를 정수로 셈한다). store 안에서는 실수를 쓰지 않는다.
     /// 모든 낱말이 3글자 미만이어서 부분 문자열(LIKE)로만 찾은 적중은 순위가 없어 `None`이다.
-    pub score: Option<f64>,
+    pub score_micros: Option<i64>,
 }
 
 /// 조각의 임베딩.
@@ -128,8 +129,10 @@ pub struct KnowledgeHit {
 pub struct ChunkEmbedding {
     /// 만든 모델 이름.
     pub model: String,
-    /// 벡터. BLOB에는 `f32` 리틀 엔디언으로 둔다(바이트 수 = 차원 × 4).
-    pub vector: Vec<f32>,
+    /// 차원 수.
+    pub dims: u32,
+    /// 벡터의 바이트. 받은 그대로 BLOB에 둔다(리틀 엔디언 부동소수 묶음은 knowledge 모듈이 만든다). 길이 = 차원 × 4.
+    pub bytes: Vec<u8>,
 }
 
 impl Store {
@@ -162,15 +165,16 @@ impl Store {
         todo!("11차 구현")
     }
 
-    /// 조각의 임베딩을 두거나 바꾼다. 벡터가 비었거나 유한하지 않은 값(NaN · 무한)이 있으면
-    /// [`StoreError::InvalidEmbedding`]. 조각이 없으면 [`StoreError::ChunkNotFound`].
+    /// 조각의 임베딩을 두거나 바꾼다. 바이트는 해석하지 않고 그대로 둔다. `dims`가 0이거나
+    /// 바이트 길이가 `dims × 4`가 아니면 [`StoreError::InvalidEmbedding`]. 조각이 없으면 [`StoreError::ChunkNotFound`].
     pub fn set_chunk_embedding(
         &self,
         id: ChunkId,
         model: &str,
-        vector: &[f32],
+        dims: u32,
+        bytes: &[u8],
     ) -> Result<(), StoreError> {
-        let _ = (id, model, vector);
+        let _ = (id, model, dims, bytes);
         todo!("11차 구현")
     }
 

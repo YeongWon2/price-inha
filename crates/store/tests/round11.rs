@@ -324,13 +324,13 @@ fn 세_글자_이상_낱말은_trigram으로_찾아_점수가_있고_두_글자_
     let long = store.search_knowledge(query("삼성전")).unwrap();
     assert_eq!(long.len(), 1);
     assert_eq!(long[0].chunk.text, "삼성전자 손절 기록");
-    let score = long[0].score.expect("trigram 적중은 점수가 있다");
-    assert!(score > 0.0 && score <= 1.0, "{score}");
+    let score = long[0].score_micros.expect("trigram 적중은 점수가 있다");
+    assert!(score > 0 && score <= 1_000_000, "{score}");
 
     let short = store.search_knowledge(query("매수")).unwrap();
     assert_eq!(short.len(), 1);
     assert_eq!(short[0].chunk.text, "하이닉스 매수 신호");
-    assert_eq!(short[0].score, None);
+    assert_eq!(short[0].score_micros, None);
 }
 
 // 검증: D10 M7
@@ -484,21 +484,18 @@ fn 임베딩은_비트까지_그대로_왕복하고_블롭에_리틀_엔디언�
         .index_record(mine("매매-1", &["삼성전자 손절 기록"]))
         .unwrap();
     assert_eq!(store.chunk_embedding(ids[0]).unwrap(), None);
-    let vector = [
-        0.1_f32,
-        -0.0,
-        1.5e-30,
-        f32::MIN_POSITIVE,
-        -123.456,
-        f32::MAX,
+    // 바이트는 해석하지 않는다: 숫자로 보면 NaN인 모양이어도 그대로 돌아온다.
+    let bytes: Vec<u8> = vec![
+        0xCD, 0xCC, 0xCC, 0x3D, 0x00, 0x00, 0x00, 0x80, 0xFF, 0xFF, 0xFF, 0x7F, 0x01, 0x00, 0x80,
+        0x00, 0x79, 0xE9, 0xF6, 0xC2, 0xFF, 0xFF, 0x7F, 0x7F,
     ];
     store
-        .set_chunk_embedding(ids[0], "시험-모델", &vector)
+        .set_chunk_embedding(ids[0], "시험-모델", 6, &bytes)
         .unwrap();
     let got = store.chunk_embedding(ids[0]).unwrap().unwrap();
     assert_eq!(got.model, "시험-모델");
-    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(&got.vector), bits(&vector));
+    assert_eq!(got.dims, 6);
+    assert_eq!(got.bytes, bytes);
     let blob: Vec<u8> = raw(&path)
         .query_row(
             "SELECT embedding FROM knowledge_embeddings WHERE chunk_id = ?1",
@@ -506,16 +503,16 @@ fn 임베딩은_비트까지_그대로_왕복하고_블롭에_리틀_엔디언�
             |row| row.get(0),
         )
         .unwrap();
-    let expected: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
-    assert_eq!(blob, expected);
+    assert_eq!(blob, bytes);
     assert_eq!(count(&path, "SELECT dims FROM knowledge_embeddings"), 6);
+    let second = [0, 0, 128, 63, 0, 0, 0, 64];
     store
-        .set_chunk_embedding(ids[0], "다른-모델", &[1.0, 2.0])
+        .set_chunk_embedding(ids[0], "다른-모델", 2, &second)
         .unwrap();
     let again = store.chunk_embedding(ids[0]).unwrap().unwrap();
     assert_eq!(
-        (again.model.as_str(), again.vector.as_slice()),
-        ("다른-모델", &[1.0, 2.0][..])
+        (again.model.as_str(), again.dims, again.bytes.as_slice()),
+        ("다른-모델", 2, &second[..])
     );
     assert_eq!(count(&path, "SELECT count(*) FROM knowledge_embeddings"), 1);
 }
@@ -527,18 +524,23 @@ fn 잘못된_임베딩은_거부하고_없는_조각의_임베딩은_오류다()
     let ids = store
         .index_record(mine("매매-1", &["삼성전자 손절 기록"]))
         .unwrap();
-    for bad in [
-        vec![],
-        vec![1.0, f32::NAN],
-        vec![f32::INFINITY],
-        vec![f32::NEG_INFINITY, 0.0],
-    ] {
-        let err = store.set_chunk_embedding(ids[0], "모델", &bad).unwrap_err();
+    // (차원, 바이트): 빈 바이트 · 차원 0 · 길이가 차원 × 4가 아님
+    let cases: [(u32, &[u8]); 5] = [
+        (0, &[]),
+        (1, &[]),
+        (0, &[0, 0, 128, 63]),
+        (2, &[0, 0, 128, 63]),
+        (1, &[0, 0, 128, 63, 0]),
+    ];
+    for (dims, bytes) in cases {
+        let err = store
+            .set_chunk_embedding(ids[0], "모델", dims, bytes)
+            .unwrap_err();
         assert!(matches!(err, StoreError::InvalidEmbedding), "{err:?}");
     }
     assert_eq!(store.chunk_embedding(ids[0]).unwrap(), None);
     let err = store
-        .set_chunk_embedding(ChunkId(99), "모델", &[1.0])
+        .set_chunk_embedding(ChunkId(99), "모델", 1, &[0, 0, 128, 63])
         .unwrap_err();
     assert!(
         matches!(err, StoreError::ChunkNotFound(ChunkId(99))),
@@ -558,7 +560,9 @@ fn 기록이_바뀌면_임베딩이_사라져_다시_만들_목록에_나온다(
         .index_record(mine("매매-2", &["사아자 조각"]))
         .unwrap();
     for id in first.iter().chain(&other) {
-        store.set_chunk_embedding(*id, "m1", &[0.5, 0.25]).unwrap();
+        store
+            .set_chunk_embedding(*id, "m1", 2, &[0, 0, 0, 63, 0, 0, 128, 62])
+            .unwrap();
     }
     assert!(store.chunks_missing_embedding("m1", 10).unwrap().is_empty());
     assert_eq!(
@@ -608,15 +612,15 @@ fn 다시_열어도_조각_임베딩_메타가_그대로이고_검색이_된다(
         .index_record(mine("매매-1", &["삼성전자 손절 기록"]))
         .unwrap();
     store
-        .set_chunk_embedding(ids[0], "m1", &[1.0, 2.0, 3.0])
+        .set_chunk_embedding(ids[0], "m1", 3, &[0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64])
         .unwrap();
     store.set_knowledge_meta("model", "m1").unwrap();
     drop(store);
     let reopened = Store::open(&path).unwrap();
     assert_eq!(found(&reopened, "삼성전자"), vec!["삼성전자 손절 기록"]);
     assert_eq!(
-        reopened.chunk_embedding(ids[0]).unwrap().unwrap().vector,
-        vec![1.0, 2.0, 3.0]
+        reopened.chunk_embedding(ids[0]).unwrap().unwrap().bytes,
+        vec![0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64]
     );
     assert_eq!(
         reopened.knowledge_meta("model").unwrap().as_deref(),
@@ -675,8 +679,12 @@ fn 조각표를_sql로_고치거나_지워도_검색_색인과_임베딩이_어�
             &["삼성전자 손절 기록", "하이닉스 매수 신호"],
         ))
         .unwrap();
-    store.set_chunk_embedding(ids[0], "m1", &[1.0]).unwrap();
-    store.set_chunk_embedding(ids[1], "m1", &[2.0]).unwrap();
+    store
+        .set_chunk_embedding(ids[0], "m1", 1, &[0, 0, 128, 63])
+        .unwrap();
+    store
+        .set_chunk_embedding(ids[1], "m1", 1, &[0, 0, 0, 64])
+        .unwrap();
     let conn = raw(&path);
     conn.execute(
         "UPDATE knowledge_chunks SET text = '네이버 실적 발표' WHERE id = 1",
