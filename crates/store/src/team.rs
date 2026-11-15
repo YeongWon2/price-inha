@@ -5,6 +5,7 @@ use rusqlite::{Connection, Row, params};
 use crate::codec::{self, insert_returning_seq};
 use crate::error::{DenyReason, StoreError, Transition};
 use crate::model::{TeamCause, TeamChange, TeamState, TeamStateRecord, UnixMillis};
+use crate::template;
 
 /// 허용 표의 한 줄에 붙은 조건.
 #[derive(Clone, Copy)]
@@ -96,6 +97,10 @@ pub(crate) fn change(conn: &Connection, change: TeamChange) -> Result<TeamStateR
             change.owner_approved,
         ],
     )?;
+    // 전체 정지가 되면 실전중 템플릿은 같은 묶음 안에서 멈춤이 된다(M3).
+    if change.to == TeamState::FullStop {
+        template::stop_all_live(conn, change.at)?;
+    }
     Ok(TeamStateRecord {
         seq,
         at: change.at,

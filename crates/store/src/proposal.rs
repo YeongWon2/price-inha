@@ -3,7 +3,10 @@
 //! 무엇을 고치자는지와 그 변경이 위험을 키우는지는 복기(`pi-journal`)가 정한다. 저장소는 상태표에 없는
 //! 전이를 막고, 반영은 승인을 소비한 뒤에만 되게 한다.
 
-use crate::approval::{ApprovalId, ApprovalUse};
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
+use crate::approval::{self, ApprovalId, ApprovalUse};
+use crate::error::{DenyReason, Transition};
 use crate::model::{TradeId, UnixMillis};
 use crate::{Store, StoreError};
 
@@ -89,20 +92,17 @@ impl Store {
     /// - 없는 매매 번호가 있으면 [`StoreError::TradeNotFound`].
     /// - 거부되면 아무것도 만들지 않는다(번호도 쓰지 않는다).
     pub fn create_proposal(&self, new: NewProposal) -> Result<Proposal, StoreError> {
-        let _ = new;
-        todo!()
+        self.write(|conn| create(conn, new))
     }
 
     /// 규칙 개선안 한 건. 없으면 [`StoreError::ProposalNotFound`].
     pub fn get_proposal(&self, id: ProposalId) -> Result<Proposal, StoreError> {
-        let _ = id;
-        todo!()
+        self.read(|conn| get(conn, id))
     }
 
     /// 그 상태에 있는 규칙 개선안들. 번호 순서다.
     pub fn proposals_in_state(&self, state: ProposalState) -> Result<Vec<Proposal>, StoreError> {
-        let _ = state;
-        todo!()
+        self.read(|conn| in_state(conn, state))
     }
 
     /// 내가 승인한 개선안을 넘긴다: 위험을 키우지 않으면 반영됨(`applied_at = at`), 키우면 냉각중.
@@ -119,14 +119,12 @@ impl Store {
         approval: ApprovalUse,
         at: UnixMillis,
     ) -> Result<Proposal, StoreError> {
-        let _ = (id, approval, at);
-        todo!()
+        self.write(|conn| approve(conn, id, &approval, at))
     }
 
     /// 제안됨 → 거절됨. 제안됨이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.
     pub fn reject_proposal(&self, id: ProposalId, at: UnixMillis) -> Result<Proposal, StoreError> {
-        let _ = (id, at);
-        todo!()
+        self.write(|conn| reject(conn, id, at))
     }
 
     /// 냉각중 → 반영됨(`applied_at = at`). 냉각중이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.
@@ -137,7 +135,182 @@ impl Store {
         id: ProposalId,
         at: UnixMillis,
     ) -> Result<Proposal, StoreError> {
-        let _ = (id, at);
-        todo!()
+        self.write(|conn| apply_cooled(conn, id, at))
     }
+}
+
+// ───────────── 안에서만 쓰는 것 ─────────────
+
+const COLUMNS: &str =
+    "id, state, content, increases_risk, approval_id, created_at, updated_at, applied_at";
+
+fn state_code(state: ProposalState) -> &'static str {
+    match state {
+        ProposalState::Proposed => "proposed",
+        ProposalState::Cooling => "cooling",
+        ProposalState::Applied => "applied",
+        ProposalState::Rejected => "rejected",
+    }
+}
+
+fn state_from(code: &str) -> Result<ProposalState, StoreError> {
+    ProposalState::ALL
+        .into_iter()
+        .find(|state| state_code(*state) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 개선안 상태 값: {code}")))
+}
+
+fn proposal_from(conn: &Connection, row: &Row<'_>) -> Result<Proposal, StoreError> {
+    let id = ProposalId(row.get(0)?);
+    Ok(Proposal {
+        id,
+        state: state_from(&row.get::<_, String>(1)?)?,
+        content: serde_json::from_str(&row.get::<_, String>(2)?)?,
+        evidence: evidence(conn, id)?,
+        increases_risk: row.get(3)?,
+        approval: row.get::<_, Option<i64>>(4)?.map(ApprovalId),
+        created_at: UnixMillis(row.get(5)?),
+        updated_at: UnixMillis(row.get(6)?),
+        applied_at: row.get::<_, Option<i64>>(7)?.map(UnixMillis),
+    })
+}
+
+fn evidence(conn: &Connection, id: ProposalId) -> Result<Vec<TradeId>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT trade_id FROM proposal_evidence WHERE proposal_id = ?1 ORDER BY pos")?;
+    let ids = stmt
+        .query_map([id.0], |row| row.get(0).map(TradeId))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
+/// 겹친 번호를 빼고 처음 나온 순서대로 둔다.
+fn distinct(evidence: &[TradeId]) -> Vec<TradeId> {
+    let mut out: Vec<TradeId> = Vec::with_capacity(evidence.len());
+    for id in evidence {
+        if !out.contains(id) {
+            out.push(*id);
+        }
+    }
+    out
+}
+
+fn create(conn: &Connection, new: NewProposal) -> Result<Proposal, StoreError> {
+    let evidence = distinct(&new.evidence);
+    if evidence.len() < PROPOSAL_MIN_EVIDENCE {
+        return Err(StoreError::ProposalEvidenceTooFew {
+            count: evidence.len(),
+        });
+    }
+    for trade in &evidence {
+        let exists = conn
+            .query_row("SELECT 1 FROM trades WHERE id = ?1", [trade.0], |_| Ok(()))
+            .optional()?;
+        if exists.is_none() {
+            return Err(StoreError::TradeNotFound(*trade));
+        }
+    }
+    conn.execute(
+        "INSERT INTO proposals (state, content, increases_risk, created_at, updated_at)
+         VALUES ('proposed', ?1, ?2, ?3, ?3)",
+        params![
+            serde_json::to_string(&new.content)?,
+            new.increases_risk,
+            new.at.0
+        ],
+    )?;
+    let id = ProposalId(conn.last_insert_rowid());
+    for (pos, trade) in (0_i64..).zip(evidence.iter()) {
+        conn.execute(
+            "INSERT INTO proposal_evidence (proposal_id, pos, trade_id) VALUES (?1, ?2, ?3)",
+            params![id.0, pos, trade.0],
+        )?;
+    }
+    get(conn, id)
+}
+
+fn get(conn: &Connection, id: ProposalId) -> Result<Proposal, StoreError> {
+    let sql = format!("SELECT {COLUMNS} FROM proposals WHERE id = ?1");
+    let found = conn
+        .query_row(&sql, [id.0], |row| Ok(proposal_from(conn, row)))
+        .optional()?;
+    found.ok_or(StoreError::ProposalNotFound(id))?
+}
+
+fn in_state(conn: &Connection, state: ProposalState) -> Result<Vec<Proposal>, StoreError> {
+    let sql = format!("SELECT {COLUMNS} FROM proposals WHERE state = ?1 ORDER BY id");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([state_code(state)])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(proposal_from(conn, row)?);
+    }
+    Ok(out)
+}
+
+/// 개선안을 읽고, 지금 상태가 `from`이 아니면 `to`로 가는 전이를 거부한다.
+fn expect(
+    conn: &Connection,
+    id: ProposalId,
+    from: ProposalState,
+    to: impl FnOnce(&Proposal) -> ProposalState,
+) -> Result<Proposal, StoreError> {
+    let now = get(conn, id)?;
+    if now.state != from {
+        return Err(StoreError::TransitionDenied {
+            transition: Transition::Proposal {
+                from: now.state,
+                to: to(&now),
+            },
+            reason: DenyReason::NotAllowed,
+        });
+    }
+    Ok(now)
+}
+
+/// 승인하면 가는 상태: 위험을 키우면 냉각중, 아니면 반영됨.
+fn approved_state(proposal: &Proposal) -> ProposalState {
+    if proposal.increases_risk {
+        ProposalState::Cooling
+    } else {
+        ProposalState::Applied
+    }
+}
+
+fn approve(
+    conn: &Connection,
+    id: ProposalId,
+    approval: &ApprovalUse,
+    at: UnixMillis,
+) -> Result<Proposal, StoreError> {
+    let now = expect(conn, id, ProposalState::Proposed, approved_state)?;
+    approval::consume(conn, approval, at)?;
+    let to = approved_state(&now);
+    let applied_at = (to == ProposalState::Applied).then_some(at.0);
+    conn.execute(
+        "UPDATE proposals SET state = ?2, approval_id = ?3, updated_at = ?4, applied_at = ?5
+         WHERE id = ?1",
+        params![id.0, state_code(to), approval.id.0, at.0, applied_at],
+    )?;
+    get(conn, id)
+}
+
+fn reject(conn: &Connection, id: ProposalId, at: UnixMillis) -> Result<Proposal, StoreError> {
+    expect(conn, id, ProposalState::Proposed, |_| {
+        ProposalState::Rejected
+    })?;
+    conn.execute(
+        "UPDATE proposals SET state = 'rejected', updated_at = ?2 WHERE id = ?1",
+        params![id.0, at.0],
+    )?;
+    get(conn, id)
+}
+
+fn apply_cooled(conn: &Connection, id: ProposalId, at: UnixMillis) -> Result<Proposal, StoreError> {
+    expect(conn, id, ProposalState::Cooling, |_| ProposalState::Applied)?;
+    conn.execute(
+        "UPDATE proposals SET state = 'applied', updated_at = ?2, applied_at = ?2 WHERE id = ?1",
+        params![id.0, at.0],
+    )?;
+    get(conn, id)
 }

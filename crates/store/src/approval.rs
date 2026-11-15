@@ -1,6 +1,9 @@
 //! 승인 표 (9차 2번, M5). 원본: OpenClaw `operator_approvals`
 //! (`docs/research/triggers-approval-memory-deep.md` 3.2 · 3.4).
 
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
+use crate::error::{DenyReason, Transition};
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
@@ -82,14 +85,12 @@ pub struct ApprovalUse {
 impl Store {
     /// 승인 요청을 기다림으로 만든다. 번호는 1부터 빠짐없이 커지고 다시 쓰지 않는다.
     pub fn create_approval(&self, new: NewApprovalRequest) -> Result<ApprovalRequest, StoreError> {
-        let _ = new;
-        todo!()
+        self.write(|conn| create(conn, new))
     }
 
     /// 승인 요청 한 건. 없으면 [`StoreError::ApprovalNotFound`].
     pub fn get_approval(&self, id: ApprovalId) -> Result<ApprovalRequest, StoreError> {
-        let _ = id;
-        todo!()
+        self.read(|conn| get(conn, id))
     }
 
     /// 그 결과인 승인 요청들. 번호 순서다.
@@ -97,8 +98,7 @@ impl Store {
         &self,
         status: ApprovalStatus,
     ) -> Result<Vec<ApprovalRequest>, StoreError> {
-        let _ = status;
-        todo!()
+        self.read(|conn| in_status(conn, status))
     }
 
     /// 기다림인 승인 요청의 결과를 정한다. 기다림에서 **한 번만** 바뀐다.
@@ -116,8 +116,7 @@ impl Store {
         to: ApprovalStatus,
         at: UnixMillis,
     ) -> Result<ApprovalRequest, StoreError> {
-        let _ = (id, to, at);
-        todo!()
+        self.write(|conn| resolve(conn, id, to, at))
     }
 
     /// 승인을 실행에 쓴다(한 번만). `consumed_at`을 `at`으로 적는다.
@@ -137,7 +136,141 @@ impl Store {
         approval: ApprovalUse,
         at: UnixMillis,
     ) -> Result<ApprovalRequest, StoreError> {
-        let _ = (approval, at);
-        todo!()
+        self.write(|conn| consume(conn, &approval, at))
     }
+}
+
+// ───────────── 안에서만 쓰는 것 ─────────────
+
+const COLUMNS: &str =
+    "id, fingerprint, summary, status, created_at, expires_at, resolved_at, consumed_at";
+
+fn status_code(status: ApprovalStatus) -> &'static str {
+    match status {
+        ApprovalStatus::Pending => "pending",
+        ApprovalStatus::Approved => "approved",
+        ApprovalStatus::Rejected => "rejected",
+        ApprovalStatus::NoAnswer => "no_answer",
+        ApprovalStatus::Expired => "expired",
+    }
+}
+
+fn status_from(code: &str) -> Result<ApprovalStatus, StoreError> {
+    ApprovalStatus::ALL
+        .into_iter()
+        .find(|status| status_code(*status) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 승인 결과 값: {code}")))
+}
+
+fn request_from(row: &Row<'_>) -> Result<ApprovalRequest, StoreError> {
+    Ok(ApprovalRequest {
+        id: ApprovalId(row.get(0)?),
+        fingerprint: row.get(1)?,
+        summary: serde_json::from_str(&row.get::<_, String>(2)?)?,
+        status: status_from(&row.get::<_, String>(3)?)?,
+        created_at: UnixMillis(row.get(4)?),
+        expires_at: UnixMillis(row.get(5)?),
+        resolved_at: row.get::<_, Option<i64>>(6)?.map(UnixMillis),
+        consumed_at: row.get::<_, Option<i64>>(7)?.map(UnixMillis),
+    })
+}
+
+fn create(conn: &Connection, new: NewApprovalRequest) -> Result<ApprovalRequest, StoreError> {
+    let summary = serde_json::to_string(&new.summary)?;
+    conn.execute(
+        "INSERT INTO approvals (fingerprint, summary, status, created_at, expires_at)
+         VALUES (?1, ?2, 'pending', ?3, ?4)",
+        params![new.fingerprint, summary, new.created_at.0, new.expires_at.0],
+    )?;
+    get(conn, ApprovalId(conn.last_insert_rowid()))
+}
+
+/// 승인 요청 한 건. 없으면 [`StoreError::ApprovalNotFound`].
+pub(crate) fn get(conn: &Connection, id: ApprovalId) -> Result<ApprovalRequest, StoreError> {
+    let sql = format!("SELECT {COLUMNS} FROM approvals WHERE id = ?1");
+    let mut stmt = conn.prepare(&sql)?;
+    let found = stmt
+        .query_row([id.0], |row| Ok(request_from(row)))
+        .optional()?;
+    found.ok_or(StoreError::ApprovalNotFound(id))?
+}
+
+fn in_status(
+    conn: &Connection,
+    status: ApprovalStatus,
+) -> Result<Vec<ApprovalRequest>, StoreError> {
+    let sql = format!("SELECT {COLUMNS} FROM approvals WHERE status = ?1 ORDER BY id");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([status_code(status)])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(request_from(row)?);
+    }
+    Ok(out)
+}
+
+fn resolve(
+    conn: &Connection,
+    id: ApprovalId,
+    to: ApprovalStatus,
+    at: UnixMillis,
+) -> Result<ApprovalRequest, StoreError> {
+    let now = get(conn, id)?;
+    if now.status != ApprovalStatus::Pending || to == ApprovalStatus::Pending {
+        return Err(StoreError::TransitionDenied {
+            transition: Transition::Approval {
+                from: now.status,
+                to,
+            },
+            reason: DenyReason::NotAllowed,
+        });
+    }
+    // 답하려는 순간 효력이 끝났으면 어떤 답이든 만료로 닫는다(원본과 같다).
+    let status = if at.0 >= now.expires_at.0 {
+        ApprovalStatus::Expired
+    } else {
+        to
+    };
+    conn.execute(
+        "UPDATE approvals SET status = ?2, resolved_at = ?3
+         WHERE id = ?1 AND status = 'pending'",
+        params![id.0, status_code(status), at.0],
+    )?;
+    get(conn, id)
+}
+
+/// 승인을 실행에 쓴다. 부르는 쪽의 묶음 안에서 돈다: 뒤에서 실패하면 소비도 함께 되돌려진다.
+/// 순서와 오류는 [`Store::consume_approval`]과 같다.
+pub(crate) fn consume(
+    conn: &Connection,
+    approval: &ApprovalUse,
+    at: UnixMillis,
+) -> Result<ApprovalRequest, StoreError> {
+    let id = approval.id;
+    let now = get(conn, id)?;
+    if now.status != ApprovalStatus::Approved {
+        return Err(StoreError::ApprovalNotUsable {
+            id,
+            status: now.status,
+        });
+    }
+    if now.consumed_at.is_some() {
+        return Err(StoreError::ApprovalAlreadyConsumed { id });
+    }
+    if at.0 >= now.expires_at.0 {
+        return Err(StoreError::ApprovalExpired { id });
+    }
+    if now.fingerprint != approval.fingerprint {
+        return Err(StoreError::ApprovalFingerprintMismatch { id });
+    }
+    // 조건을 다시 걸어 한 번만 적힌다(트리거도 막는다).
+    let changed = conn.execute(
+        "UPDATE approvals SET consumed_at = ?2
+         WHERE id = ?1 AND status = 'approved' AND consumed_at IS NULL",
+        params![id.0, at.0],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::ApprovalAlreadyConsumed { id });
+    }
+    get(conn, id)
 }
