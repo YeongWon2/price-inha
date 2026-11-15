@@ -3,7 +3,8 @@
 //! tick 순서(원본: Hermes 1.1): 잠금 → 전체 정지 확인 → 저장소에서 작업 상태 다시 읽기 →
 //! 기한 판정 → 작업 상태를 **먼저 옮겨 저장하고** → 영수증을 열고 → 깨운다 → 영수증을 닫는다.
 
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -11,9 +12,11 @@ use pi_market::{Market, MarketAdapter, StalePolicy, Symbol};
 use rust_decimal::Decimal;
 use tokio::sync::watch;
 
+use crate::watch::QuoteWatch;
 use crate::{
-    Alert, Clock, ConditionKind, Error, JobId, Monotonic, Receipt, ScheduleKind, ScheduleTimes,
-    StopSignal, Target, TriggerStore, Wake, Waker,
+    Alert, CLOCK_JUMP_TOLERANCE, Clock, ConditionKind, ERROR_BACKOFF, Error, JobId, Monotonic,
+    Receipt, ReceiptStatus, ScheduleKind, ScheduleTimes, StopSignal, Target, TriggerStore, Wake,
+    Waker,
 };
 
 /// 시세를 받는 간격의 기본값(10초). 시세 조건이 있고 장이 열려 있을 때 쓴다.
@@ -136,8 +139,14 @@ pub struct StartReport {
 
 /// 깨우기 엔진.
 pub struct Trigger {
-    config: TriggerConfig,
-    ports: Ports,
+    pub(crate) config: TriggerConfig,
+    pub(crate) ports: Ports,
+    /// tick 하나만 돈다(원본: Hermes tick 잠금). 잡지 못하면 기다리지 않고 바쁨으로 끝난다.
+    pub(crate) running: tokio::sync::Mutex<()>,
+    /// 지난 tick의 벽시계 · 단조 시계.
+    last_seen: Mutex<Option<(DateTime<Utc>, Duration)>>,
+    /// 종목마다의 늦은 시세 감시.
+    pub(crate) watches: Mutex<HashMap<(Market, Symbol), QuoteWatch>>,
 }
 
 impl Trigger {
@@ -145,8 +154,41 @@ impl Trigger {
     /// 없으면 [`Error::MissingMarket`], 시세 조건 값이 잘못되면 [`Error::InvalidCondition`],
     /// 다시 걸기 간격이 음수이면 [`Error::InvalidConfig`].
     pub fn new(config: TriggerConfig, ports: Ports) -> Result<Self, Error> {
-        let _ = (&config, &ports);
-        todo!()
+        let has_market = |market: Market| ports.markets.iter().any(|m| m.market() == market);
+        let mut seen = HashSet::new();
+        let jobs = config
+            .schedules
+            .iter()
+            .map(|job| (&job.id, job.market))
+            .chain(config.conditions.iter().map(|job| (&job.id, job.market)));
+        for (id, market) in jobs {
+            if !seen.insert(id) {
+                return Err(Error::DuplicateJob(id.clone()));
+            }
+            if !has_market(market) {
+                return Err(Error::MissingMarket(id.clone()));
+            }
+        }
+        if let Some(job) = config
+            .conditions
+            .iter()
+            .find(|job| !crate::condition::is_valid(&job.kind))
+        {
+            return Err(Error::InvalidCondition(job.id.clone()));
+        }
+        if config.rearm_percent.is_sign_negative() {
+            return Err(Error::InvalidConfig("다시 걸기 간격은 0 이상이어야 한다"));
+        }
+        if config.quote_interval.is_zero() {
+            return Err(Error::InvalidConfig("시세 간격은 0보다 커야 한다"));
+        }
+        Ok(Self {
+            config,
+            ports,
+            running: tokio::sync::Mutex::new(()),
+            last_seen: Mutex::new(None),
+            watches: Mutex::new(HashMap::new()),
+        })
     }
 
     /// 다시 켠 뒤 처리(E16). `tick` 전에 한 번 부른다.
@@ -154,8 +196,25 @@ impl Trigger {
     /// 실행 중으로 남은 영수증을 모두 중단됨(`Interrupted`, 닫은 시각 = 지금)으로 닫고 **다시 돌리지 않는다**.
     /// 놓친 회차는 다음 `tick`이 다룬다.
     pub async fn start(&self) -> Result<StartReport, Error> {
-        let _ = (&self.config, &self.ports);
-        todo!()
+        let now = self.now();
+        let mut interrupted = Vec::new();
+        for receipt in self.ports.store.receipts().await? {
+            if receipt.status != ReceiptStatus::Running {
+                continue;
+            }
+            self.ports
+                .store
+                .close_receipt(&receipt.key, ReceiptStatus::Interrupted, now)
+                .await?;
+            tracing::warn!(
+                job = %receipt.key.job,
+                slot = %receipt.key.slot,
+                delivery = ?receipt.delivery,
+                "실행 중으로 남은 영수증을 중단됨으로 닫았다(다시 돌리지 않는다)"
+            );
+            interrupted.push(receipt);
+        }
+        Ok(StartReport { interrupted })
     }
 
     /// tick 하나.
@@ -174,18 +233,71 @@ impl Trigger {
     /// 실패하면 연속 실패 수를 올리고 `retry_at` = 끝난 시각 + [`crate::error_backoff`]로 물러서며,
     /// [`crate::AUTO_DISABLE_AFTER`]번이면 끄고 알림 요구를 낸다. 저장소에 쓰지 못하면 깨우지 않고 오류다.
     pub async fn tick(&self) -> Result<TickReport, Error> {
-        todo!()
+        crate::tick::tick(self).await
     }
 
     /// `start`를 부른 뒤 `tick` → `clock.sleep(next_delay)`를 되풀이한다. `stop`이 참이 되면 끝난다.
     /// tick의 오류는 기록하고 계속한다.
-    pub async fn run(&self, stop: watch::Receiver<bool>) -> Result<(), Error> {
-        let _ = stop;
-        todo!()
+    pub async fn run(&self, mut stop: watch::Receiver<bool>) -> Result<(), Error> {
+        self.start().await?;
+        loop {
+            if *stop.borrow() {
+                return Ok(());
+            }
+            let delay = match self.tick().await {
+                Ok(report) => report.next_delay,
+                Err(error) => {
+                    tracing::warn!(%error, "tick이 실패했다. 잠시 뒤 다시 본다");
+                    ERROR_BACKOFF[0]
+                }
+            };
+            if *stop.borrow() {
+                return Ok(());
+            }
+            let sleep = self.ports.clock.sleep(delay);
+            tokio::pin!(sleep);
+            tokio::select! {
+                () = &mut sleep => {}
+                changed = stop.changed() => {
+                    if changed.is_err() {
+                        // 멈추라고 할 쪽이 사라졌다. 기다림은 마저 채운다.
+                        sleep.await;
+                    }
+                }
+            }
+        }
     }
 
     /// 지금 시각(벽시계). 시험과 기록용.
     pub fn now(&self) -> DateTime<Utc> {
-        todo!()
+        self.ports.clock.now()
     }
+
+    /// 지난 tick 뒤로 벽시계 경과와 단조 시계 경과가 허용치보다 크게 달랐나(원본: OpenClaw tick 1단계).
+    pub(crate) fn clock_jumped(&self, wall: DateTime<Utc>, mono: Duration) -> bool {
+        let mut last = lock(&self.last_seen);
+        let jumped = last.is_some_and(|(last_wall, last_mono)| {
+            let wall_elapsed = wall.signed_duration_since(last_wall);
+            let mono_elapsed = chrono::Duration::from_std(mono.saturating_sub(last_mono))
+                .unwrap_or(chrono::TimeDelta::MAX);
+            let tolerance =
+                chrono::Duration::from_std(CLOCK_JUMP_TOLERANCE).unwrap_or(chrono::TimeDelta::MAX);
+            (wall_elapsed - mono_elapsed).abs() > tolerance
+        });
+        *last = Some((wall, mono));
+        if jumped {
+            tracing::warn!(%wall, "벽시계가 단조 시계와 다르게 움직였다(시계 맞춤 · 절전에서 깸)");
+        }
+        jumped
+    }
+
+    /// 그 시장의 어댑터.
+    pub(crate) fn adapter(&self, market: Market) -> Option<&Arc<dyn MarketAdapter>> {
+        self.ports.markets.iter().find(|m| m.market() == market)
+    }
+}
+
+/// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도 그대로 이어 쓴다.
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

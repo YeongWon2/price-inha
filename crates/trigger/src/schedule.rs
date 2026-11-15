@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use pi_market::MarketCalendar;
+use pi_market::{MarketCalendar, SessionKind};
 
 use crate::ScheduleKind;
 
@@ -34,16 +34,42 @@ pub fn schedule_slots(
     kind: ScheduleKind,
     times: &ScheduleTimes,
 ) -> Vec<DateTime<Utc>> {
-    let _ = (calendar, kind, times);
-    todo!()
+    let mut slots: Vec<DateTime<Utc>> = [
+        &calendar.previous_business_day,
+        &calendar.today,
+        &calendar.next_business_day,
+    ]
+    .into_iter()
+    .filter_map(|day| day.session(SessionKind::Regular))
+    .filter_map(|session| slot_of(session.start, session.end, kind, times))
+    .collect();
+    slots.sort();
+    slots.dedup();
+    slots
+}
+
+/// 정규장 하나에서 그 일정의 시각.
+fn slot_of(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    kind: ScheduleKind,
+    times: &ScheduleTimes,
+) -> Option<DateTime<Utc>> {
+    let lead = chrono::Duration::from_std(times.briefing_lead).ok()?;
+    let delay = chrono::Duration::from_std(times.after_close_delay).ok()?;
+    match kind {
+        ScheduleKind::PreOpenBriefing => start.checked_sub_signed(lead),
+        ScheduleKind::MarketOpen => Some(start),
+        ScheduleKind::MarketClose => Some(end),
+        ScheduleKind::AfterClose => end.checked_add_signed(delay),
+    }
 }
 
 /// 유예: 주기의 절반을 120초~7200초로 자른 값(원본: Hermes).
 ///
 /// 늦은 정도가 유예 이하면 그냥 지금 발사하고, 넘으면 놓친 것으로 다룬다.
 pub fn grace_for(period: Duration) -> Duration {
-    let _ = period;
-    todo!()
+    (period / 2).clamp(MIN_GRACE, MAX_GRACE)
 }
 
 /// 유예의 아래 끝(120초).
@@ -66,6 +92,11 @@ pub const AUTO_DISABLE_AFTER: u32 = 10;
 
 /// 연속 실패 수에 맞는 오류 지연. 0이면 지연 없음(0초), 1이면 30초, … 5 이상이면 60분.
 pub fn error_backoff(consecutive_errors: u32) -> Duration {
-    let _ = consecutive_errors;
-    todo!()
+    if consecutive_errors == 0 {
+        return Duration::ZERO;
+    }
+    let index = usize::try_from(consecutive_errors - 1)
+        .unwrap_or(usize::MAX)
+        .min(ERROR_BACKOFF.len() - 1);
+    ERROR_BACKOFF[index]
 }

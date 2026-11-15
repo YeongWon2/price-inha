@@ -1,6 +1,6 @@
 //! 작업 상태와 영수증의 저장소 포트(조립에서 store를 끼운다)와 메모리 구현.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -155,20 +155,37 @@ impl MemoryStore {
 
     /// 영수증을 그대로 넣는다(다시 켠 뒤를 시험할 때 "꺼지기 전" 상태를 만든다). 규칙을 보지 않는다.
     pub fn insert_receipt(&self, receipt: Receipt) {
-        let _ = (&self.state, receipt);
-        todo!()
+        self.lock().receipts.push(receipt);
+    }
+
+    /// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도 그대로 이어 쓴다.
+    fn lock(&self) -> MutexGuard<'_, MemoryState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl MemoryState {
+    fn receipt_mut(&mut self, key: &ReceiptKey) -> Result<&mut Receipt, StoreError> {
+        self.receipts
+            .iter_mut()
+            .find(|receipt| &receipt.key == key)
+            .ok_or_else(|| StoreError(format!("영수증이 없다: {}", key.job)))
     }
 }
 
 #[async_trait]
 impl TriggerStore for MemoryStore {
     async fn jobs(&self) -> Result<Vec<JobState>, StoreError> {
-        todo!()
+        Ok(self.lock().jobs.clone())
     }
 
     async fn save_job(&self, job: &JobState) -> Result<(), StoreError> {
-        let _ = job;
-        todo!()
+        let mut state = self.lock();
+        match state.jobs.iter_mut().find(|saved| saved.id == job.id) {
+            Some(saved) => *saved = job.clone(),
+            None => state.jobs.push(job.clone()),
+        }
+        Ok(())
     }
 
     async fn open_receipt(
@@ -176,13 +193,30 @@ impl TriggerStore for MemoryStore {
         key: &ReceiptKey,
         started_at: DateTime<Utc>,
     ) -> Result<OpenReceipt, StoreError> {
-        let _ = (key, started_at);
-        todo!()
+        let mut state = self.lock();
+        if state.receipts.iter().any(|receipt| &receipt.key == key) {
+            return Ok(OpenReceipt::Duplicate);
+        }
+        if let Some(running) = state
+            .receipts
+            .iter()
+            .find(|receipt| receipt.key.job == key.job && receipt.status == ReceiptStatus::Running)
+        {
+            return Ok(OpenReceipt::AlreadyRunning(running.key.clone()));
+        }
+        state.receipts.push(Receipt {
+            key: key.clone(),
+            status: ReceiptStatus::Running,
+            delivery: DeliveryState::NotStarted,
+            started_at,
+            finished_at: None,
+        });
+        Ok(OpenReceipt::Opened)
     }
 
     async fn mark_delivery_started(&self, key: &ReceiptKey) -> Result<(), StoreError> {
-        let _ = key;
-        todo!()
+        self.lock().receipt_mut(key)?.delivery = DeliveryState::Started;
+        Ok(())
     }
 
     async fn close_receipt(
@@ -191,11 +225,17 @@ impl TriggerStore for MemoryStore {
         status: ReceiptStatus,
         finished_at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
-        let _ = (key, status, finished_at);
-        todo!()
+        if status == ReceiptStatus::Running {
+            return Err(StoreError("실행 중으로는 닫을 수 없다".to_string()));
+        }
+        let mut state = self.lock();
+        let receipt = state.receipt_mut(key)?;
+        receipt.status = status;
+        receipt.finished_at = Some(finished_at);
+        Ok(())
     }
 
     async fn receipts(&self) -> Result<Vec<Receipt>, StoreError> {
-        todo!()
+        Ok(self.lock().receipts.clone())
     }
 }

@@ -71,6 +71,59 @@ pub fn observe(
     price: Decimal,
     rearm_percent: Decimal,
 ) -> Observation {
-    let _ = (kind, memory, price, rearm_percent);
-    todo!()
+    match memory {
+        ConditionMemory::Armed => match matched(kind, price) {
+            Some(direction) => Observation::Fire(direction),
+            None => Observation::Nothing,
+        },
+        ConditionMemory::Fired {
+            notified,
+            direction,
+        } => {
+            let band = *notified * rearm_percent / Decimal::ONE_HUNDRED;
+            let back = match direction {
+                Direction::Up => price <= *notified - band,
+                Direction::Down => price >= *notified + band,
+            };
+            if back {
+                Observation::Rearm
+            } else {
+                Observation::Nothing
+            }
+        }
+    }
+}
+
+/// 조건이 맞으면 그 방향.
+fn matched(kind: &ConditionKind, price: Decimal) -> Option<Direction> {
+    match kind {
+        ConditionKind::Above(level) => (price >= *level).then_some(Direction::Up),
+        ConditionKind::Below(level) => (price <= *level).then_some(Direction::Down),
+        ConditionKind::Change { reference, percent } => {
+            if reference.is_zero() {
+                return None;
+            }
+            let change = (price - *reference).abs() / *reference * Decimal::ONE_HUNDRED;
+            if change < *percent {
+                return None;
+            }
+            if price > *reference {
+                Some(Direction::Up)
+            } else if price < *reference {
+                Some(Direction::Down)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// 조건 값이 쓸 수 있는가: 기준값 · 기준가 · 변동률이 0보다 크다.
+pub(crate) fn is_valid(kind: &ConditionKind) -> bool {
+    match kind {
+        ConditionKind::Above(level) | ConditionKind::Below(level) => *level > Decimal::ZERO,
+        ConditionKind::Change { reference, percent } => {
+            *reference > Decimal::ZERO && *percent > Decimal::ZERO
+        }
+    }
 }

@@ -14,10 +14,13 @@ mod condition;
 mod engine;
 pub mod error;
 mod model;
+mod plan;
 mod queue;
 mod schedule;
 mod store;
+mod tick;
 mod waker;
+mod watch;
 
 pub use clock::{CLOCK_JUMP_TOLERANCE, Clock, MAX_TIMER, MIN_REFIRE_GAP, Monotonic, StopSignal};
 pub use condition::{
