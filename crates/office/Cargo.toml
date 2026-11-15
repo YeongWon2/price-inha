@@ -11,5 +11,9 @@ workspace = true
 [dependencies]
 pi-store = { path = "../store" }
 thiserror = "2.0.21"
+async-trait = "0.1.92"
+serde_json = "1.0.154"
 
 [dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["rt", "macros"] }
