@@ -105,6 +105,10 @@ pub enum SetupRefusal {
     /// 그 폴더 안의 것은 지우지 않는다.
     #[error("CLI 작업 폴더가 비어 있지 않습니다")]
     CliWorkDirNotEmpty,
+    /// (8차 3번) 서버가 꺼지는 중이다: 꺼지기 시작한 뒤의 AI 연결 고르기. 아무것도 저장하지 않고
+    /// CLI를 띄우지 않는다.
+    #[error("서버가 꺼지는 중입니다")]
+    ShuttingDown,
 }
 
 impl SetupRefusal {
@@ -124,6 +128,7 @@ impl SetupRefusal {
             SetupRefusal::CliNotSubscription => "cli_not_subscription",
             SetupRefusal::CliUnchecked => "cli_unchecked",
             SetupRefusal::CliWorkDirNotEmpty => "cli_work_dir_not_empty",
+            SetupRefusal::ShuttingDown => "shutting_down",
         }
     }
 
@@ -143,6 +148,7 @@ impl SetupRefusal {
             | SetupRefusal::CliNotSubscription => 422,
             SetupRefusal::CliUnchecked => 502,
             SetupRefusal::CliWorkDirNotEmpty => 409,
+            SetupRefusal::ShuttingDown => 503,
         }
     }
 }

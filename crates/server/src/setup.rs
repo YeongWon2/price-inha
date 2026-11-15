@@ -369,16 +369,22 @@ fn home_error(error: &std::io::Error) -> AppError {
 }
 
 /// 보관 폴더의 [`WATCHLIST_FILE`]에서 저장된 종목을 읽는다. 파일이 없으면 빈 목록이다.
+///
+/// (8차 2번) 읽지 못하거나, 읽을 수 없는 모양이거나, 지금 등록 규칙([`parse_symbols`]:
+/// `pi_market::Symbol::parse` 등)에 맞지 않는 종목이 있으면(`InvalidData`) [`AppError::BadFile`]이고,
+/// 오류에는 파일 이름([`WATCHLIST_FILE`])만 있다(종목 값은 넣지 않는다). 파일은 고치지 않는다.
 pub fn load_watchlist(home: &Path) -> Result<Vec<Symbol>, AppError> {
+    let bad = |kind| AppError::BadFile {
+        file: WATCHLIST_FILE,
+        kind,
+    };
     let bytes = match std::fs::read(home.join(WATCHLIST_FILE)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(home_error(&error)),
+        Err(error) => return Err(bad(error.kind())),
     };
     // 읽을 수 없는 모양이면 말없이 비우지 않고 알린다(부른 쪽이 정한다).
-    parse_symbols(&bytes).map_err(|_| AppError::Home {
-        kind: ErrorKind::InvalidData,
-    })
+    parse_symbols(&bytes).map_err(|_| bad(ErrorKind::InvalidData))
 }
 
 /// 종목을 보관 폴더의 [`WATCHLIST_FILE`]에 원자 쓰기로 둔다

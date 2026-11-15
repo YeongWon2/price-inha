@@ -32,6 +32,10 @@
 //! - (7차 9번) 작업 폴더 준비와 [`AI_CHOICE_FILE`] 쓰기는 막는 작업 자리(`spawn_blocking`)에서 한다.
 //! - (7차 10번) 이미 있는 작업 폴더가 비어 있지 않으면 지우지 않고 CLI를 쓰지 않는다
 //!   ([`SetupRefusal::CliWorkDirNotEmpty`], 상태는 [`CLI_WORK_NOT_EMPTY`]).
+//!   (8차 1번) `pi_ai::is_own_work_file`이 참인 자기 임시 파일만 있으면 비어 있는 것으로 본다.
+//!   서버가 시작할 때(호출이 하나도 돌지 않을 때)는 그 남은 파일을 지우고, 호출이 돌 수 있는 다시 고르기에서는
+//!   지우지 않는다. 다른 항목이 하나라도 있으면 아무것도 지우지 않고 막는다.
+//! - (8차 3번) 서버가 꺼지기 시작한 뒤의 고르기는 [`SetupRefusal::ShuttingDown`]으로 거부한다.
 //! - (7차 13번) API 키를 고르는 것도 등록 시도 횟수 제한에 든다.
 //! - 확인 결과는 마지막 것을 쥔다. 설정 상태를 읽는 것은 CLI를 띄우지 않는다.
 //!
@@ -369,8 +373,24 @@ fn executable(path: &Path) -> bool {
 ///
 /// (7차 10번) 이미 있는 폴더는 비어 있어야 한다. 안에 무엇이 있으면 지우지 않고
 /// [`AppError::Home`](`DirectoryNotEmpty`)로 거부한다(권한도 바꾸지 않는다).
+/// (8차 1번) 다만 `pi-ai`의 자기 임시 파일(`pi_ai::is_own_work_file`이 참인 보통 파일)만 있으면
+/// 비어 있는 것으로 본다. 이 함수는 그 파일을 지우지 않는다(도는 호출의 것일 수 있다).
 /// 막히는 파일 작업이므로 비동기 자리에서는 `spawn_blocking`으로 부른다.
 pub fn prepare_cli_work_dir(home: &Path) -> Result<PathBuf, AppError> {
+    prepare_work_dir(home, Leftovers::Keep)
+}
+
+/// (8차 1번) 작업 폴더에 남은 `pi-ai` 자기 임시 파일을 어떻게 하는가.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Leftovers {
+    /// 그대로 둔다(호출이 돌 수 있을 때: 다시 고르기).
+    Keep,
+    /// 지운다(호출이 하나도 돌지 않을 때: 서버가 시작할 때). 다른 항목이 있으면 아무것도 지우지 않는다.
+    Remove,
+}
+
+/// [`prepare_cli_work_dir`]와 같고, 자기 임시 파일만 있을 때 `leftovers`대로 한다.
+pub(crate) fn prepare_work_dir(home: &Path, leftovers: Leftovers) -> Result<PathBuf, AppError> {
     let work = home.join(CLI_WORK_DIR);
     let fail = |error: std::io::Error| AppError::Home { kind: error.kind() };
     let existed = match std::fs::DirBuilder::new().mode(0o700).create(&work) {
@@ -385,15 +405,39 @@ pub fn prepare_cli_work_dir(home: &Path) -> Result<PathBuf, AppError> {
             kind: ErrorKind::InvalidData,
         });
     }
-    if existed && std::fs::read_dir(&work).map_err(fail)?.next().is_some() {
-        return Err(AppError::Home {
+    if existed {
+        let own = own_files_only(&work).map_err(fail)?.ok_or(AppError::Home {
             kind: ErrorKind::DirectoryNotEmpty,
-        });
+        })?;
+        if leftovers == Leftovers::Remove {
+            for path in own {
+                // 지우지 못한 남은 파일은 이름이 겹치지 않으므로 다음 호출을 막지 않는다.
+                if let Err(error) = std::fs::remove_file(&path)
+                    && error.kind() != ErrorKind::NotFound
+                {
+                    tracing::warn!(kind = %error.kind(), "작업 폴더의 남은 임시 파일을 지우지 못했습니다");
+                }
+            }
+        }
     }
     if meta.permissions().mode() & 0o777 != 0o700 {
         std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o700)).map_err(fail)?;
     }
     Ok(work)
+}
+
+/// 폴더 안의 항목이 모두 `pi-ai` 자기 임시 파일(이름이 맞는 보통 파일, 링크 · 폴더는 아니다)이면
+/// 그 경로들, 다른 항목이 하나라도 있으면 `None`. 아무것도 지우지 않는다.
+fn own_files_only(work: &Path) -> std::io::Result<Option<Vec<PathBuf>>> {
+    let mut own = Vec::new();
+    for entry in std::fs::read_dir(work)? {
+        let entry = entry?;
+        if !(entry.file_type()?.is_file() && pi_ai::is_own_work_file(&entry.file_name())) {
+            return Ok(None);
+        }
+        own.push(entry.path());
+    }
+    Ok(Some(own))
 }
 
 /// 고른 CLI 연결로 공급자 설정을 만든다: 동시 실행 [`CLI_CONCURRENCY`],
@@ -448,4 +492,43 @@ pub fn cli_refusal(status: &CliStatus) -> Option<SetupRefusal> {
 pub fn legacy_auth_file(home: &Path) -> bool {
     // 이름의 자리만 본다(링크를 따라가지 않는다). 파일을 열지 않는다.
     pi_secrets::legacy_auth_file_present(home)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OWN: &str = ".pi-ai-system-1-0.txt";
+
+    fn work_with(entries: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join(CLI_WORK_DIR);
+        std::fs::create_dir(&work).unwrap();
+        for name in entries {
+            std::fs::write(work.join(name), "x").unwrap();
+        }
+        (dir, work)
+    }
+
+    #[test]
+    fn 자기_임시_파일만_있으면_비어_있음이고_지우기는_고른_대로다() {
+        let (dir, work) = work_with(&[OWN]);
+        prepare_work_dir(dir.path(), Leftovers::Keep).unwrap();
+        assert!(work.join(OWN).exists(), "두기면 지우지 않는다");
+        prepare_work_dir(dir.path(), Leftovers::Remove).unwrap();
+        assert!(!work.join(OWN).exists(), "지우기면 지운다");
+    }
+
+    #[test]
+    fn 이름이_맞아도_폴더나_링크면_다른_항목이다() {
+        let (dir, work) = work_with(&[]);
+        std::fs::create_dir(work.join(OWN)).unwrap();
+        assert!(prepare_work_dir(dir.path(), Leftovers::Remove).is_err());
+        assert!(work.join(OWN).is_dir(), "아무것도 지우지 않는다");
+
+        let (dir, work) = work_with(&[]);
+        std::os::unix::fs::symlink(dir.path(), work.join(OWN)).unwrap();
+        assert!(prepare_work_dir(dir.path(), Leftovers::Remove).is_err());
+        assert!(std::fs::symlink_metadata(work.join(OWN)).is_ok());
+    }
 }

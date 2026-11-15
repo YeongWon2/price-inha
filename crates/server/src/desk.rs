@@ -15,6 +15,7 @@ use tokio::sync::Notify;
 
 mod ai;
 
+use crate::ai_link::Leftovers;
 use crate::keys::KeyPresence;
 use crate::setup::{
     AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KeyRequest, SETUP_ITEMS,
@@ -77,6 +78,8 @@ pub(crate) struct Desk {
     /// (7차 5번) 다시 고르기로 물러난 CLI 공급자. 아직 도는 호출이 있을 수 있어 바로 끝내지 않고,
     /// 서버가 꺼질 때 함께 끝낸다.
     retired: Mutex<Vec<Arc<ClaudeCliProvider>>>,
+    /// (8차 3번) 서버가 꺼지기 시작했다. 고르기 잠금을 기다리기 전에 세운다. 선 뒤의 고르기는 거부한다.
+    closing: AtomicBool,
 }
 
 impl Desk {
@@ -113,6 +116,7 @@ impl Desk {
             ai: Mutex::new(ai),
             choosing: tokio::sync::Mutex::new(()),
             retired: Mutex::new(Vec::new()),
+            closing: AtomicBool::new(false),
         };
         // 띄우자마자 읽는 설정 상태도 사실과 같게 한다(시세 흐름이 곧 이어서 적는다).
         desk.set_started(desk.demo || desk.ready());
@@ -126,7 +130,7 @@ impl Desk {
         let _turn = self.choosing.lock().await;
         let held = {
             let now = self.ai_now();
-            if now.work_blocked {
+            if now.work_blocked || self.closing.load(Ordering::SeqCst) {
                 return;
             }
             now.held.clone()
@@ -144,8 +148,18 @@ impl Desk {
         self.wake.notify_one();
     }
 
+    /// (8차 3번) 꺼지기 시작했다고 표시한다. 이 뒤에 고르기 잠금을 얻은 고르기는 거부된다.
+    /// 잠금을 기다리지 않는다(잠금을 기다리던 고르기도 표시를 본다).
+    pub(crate) fn begin_closing(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
     /// (7차 5번) 서버가 꺼질 때: 쥔 CLI 공급자와 물러난 CLI 공급자를 모두 끝내고 자식이 거둬질 때까지 기다린다.
+    /// (8차 3번) 먼저 꺼지기 시작 표시를 세우고, 고르기와 같은 잠금을 잡은 뒤에 끝낸다: 도는 고르기가
+    /// 공급자를 바꿔 끼운 뒤에 끝내므로 끝내지 않은 공급자가 남지 않는다.
     pub(crate) async fn shutdown_ai(&self) {
+        self.begin_closing();
+        let _turn = self.choosing.lock().await;
         let mut all =
             std::mem::take(&mut *self.retired.lock().unwrap_or_else(PoisonError::into_inner));
         if let Held::Cli(cli) = self.ai_now().held.clone() {
@@ -314,11 +328,17 @@ impl Desk {
     /// (막히는 작업 자리에서) → (CLI면) 확인(모델을 부르지 않는다).
     /// 갖춰졌으면 `Ok(true)`, API 키를 골랐는데 키가 아직 없으면 `Ok(false)`, CLI 확인이 로그인된 구독이
     /// 아니면 그 까닭([`crate::cli_refusal`]), 작업 폴더가 비어 있지 않으면
-    /// [`SetupRefusal::CliWorkDirNotEmpty`](고른 것은 저장되고 CLI를 띄우지 않는다).
+    /// [`SetupRefusal::CliWorkDirNotEmpty`](고른 것은 저장되고 CLI를 띄우지 않는다),
+    /// 꺼지기 시작한 뒤에 잠금을 얻었으면 [`SetupRefusal::ShuttingDown`](아무것도 저장하지 않는다, 8차 3번).
+    /// (8차 1번) 호출이 돌 수 있으므로 작업 폴더의 자기 임시 파일은 지우지 않고 비어 있음으로 본다.
     /// 고른 연결로 공급자를 다시 만들고 시세 흐름을 깨운다.
     pub(crate) async fn choose_ai(&self, body: &[u8]) -> Result<bool, SetupRefusal> {
         let choice = AiChoice::parse(body)?;
         let _turn = self.choosing.lock().await;
+        if self.closing.load(Ordering::SeqCst) {
+            tracing::warn!("서버가 꺼지는 중이라 AI 연결 고르기를 거부합니다");
+            return Err(SetupRefusal::ShuttingDown);
+        }
         if !allow(&self.limit) {
             tracing::warn!("AI 연결 고르기 시도가 너무 많아 거부합니다");
             return Err(SetupRefusal::TooManyAttempts);
@@ -366,7 +386,7 @@ impl Desk {
     async fn prepare_and_save(&self, choice: &AiChoice) -> Result<Work, SetupRefusal> {
         let (home, choice) = (self.home.clone(), choice.clone());
         let done = tokio::task::spawn_blocking(move || {
-            let work = prepare_work(&home, &choice)?;
+            let work = prepare_work(&home, &choice, Leftovers::Keep)?;
             save_ai_choice(&home, &choice)?;
             Ok::<Work, AppError>(work)
         })

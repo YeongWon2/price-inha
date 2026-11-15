@@ -7,7 +7,8 @@ use std::sync::Arc;
 use pi_ai::{AiProvider, AnthropicConfig, AnthropicProvider, ClaudeCliProvider, CliStatus};
 use pi_secrets::SecretStore;
 
-use crate::{AiChoice, AiKeys, AiMethod, AppError, CLI_WORK_DIR, cli_config, prepare_cli_work_dir};
+use crate::ai_link::{Leftovers, prepare_work_dir};
+use crate::{AiChoice, AiKeys, AiMethod, AppError, CLI_WORK_DIR, cli_config};
 
 /// 고른 연결의 작업 폴더 준비 결과. (7차 9번 · 10번)
 pub(crate) enum Work {
@@ -20,11 +21,16 @@ pub(crate) enum Work {
 }
 
 /// 고른 연결의 작업 폴더를 준비한다. 막히는 파일 작업이므로 `spawn_blocking`에서 부른다.
-pub(crate) fn prepare_work(home: &Path, choice: &AiChoice) -> Result<Work, AppError> {
+/// (8차 1번) 자기 임시 파일만 남아 있으면 비어 있는 것이고, `leftovers`대로 지우거나 둔다.
+pub(crate) fn prepare_work(
+    home: &Path,
+    choice: &AiChoice,
+    leftovers: Leftovers,
+) -> Result<Work, AppError> {
     if choice.method != AiMethod::Cli {
         return Ok(Work::Unneeded);
     }
-    match prepare_cli_work_dir(home) {
+    match prepare_work_dir(home, leftovers) {
         Ok(work) => Ok(Work::Ready(work)),
         Err(AppError::Home {
             kind: ErrorKind::DirectoryNotEmpty,

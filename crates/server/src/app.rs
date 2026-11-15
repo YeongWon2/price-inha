@@ -11,6 +11,7 @@ use pi_store::{Store, UnixMillis};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::ai_link::Leftovers;
 use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
 use crate::feed::{Feed, Pace, Source};
@@ -23,6 +24,16 @@ use crate::{
 /// (7차 11번) 띄울 때 CLI 확인을 기다려 주는 가장 긴 시간. 접속 관문은 이미 연결을 받고 있다.
 /// 보통의 확인(수십 밀리초)은 이 안에 끝나 띄우자마자 결과가 보이고, 넘으면 기다리지 않고
 /// 뒤에서 이어 간다(그동안 상태는 [`crate::CLI_CHECKING`]).
+///
+/// (8차 5번) 까닭 — 두 요구의 절충이다:
+/// - 잠긴 6차 재시작 테스트는 다시 띄운 **바로 뒤** 설정 상태에서 CLI 확인 결과(등록됨)를 본다.
+///   확인을 전혀 기다리지 않으면 그 순간 상태가 늘 "확인 중"이라 그 테스트가 깨진다.
+/// - 7차 11번은 CLI 확인이 서버 시작을 막지 않기를 요구한다(느리거나 멈춘 CLI라도 연결은 받는다).
+///   끝까지 기다리면 확인의 시간 제한(최대 수십 초)만큼 시작이 늦어진다.
+///
+/// 그래서 관문을 먼저 연 뒤 보통의 확인이 넉넉히 끝나는 짧은 시간만 기다리고, 넘으면 뒤에서 이어 간다.
+/// 800ms는 가짜 셸 스크립트 CLI의 확인(버전 → 로그인, 두 번 띄움)이 느린 기계에서도 들어오고,
+/// 사람이 시작이 늦다고 느끼지 않는 값이다.
 const CLI_CHECK_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// 저장소 파일 이름(보관 폴더 안).
@@ -115,33 +126,37 @@ pub fn announce_addr(local: SocketAddr) -> SocketAddr {
 /// 이 실행에서 지켜볼 종목과 그 출처.
 ///
 /// 인자 · 환경 변수로 줬으면 그것이 먼저다(저장된 것을 읽지도 덮지도 않는다). 아니면 보관 폴더에
-/// 저장된 것을 쓴다. 저장된 파일을 읽지 못하면 없는 것으로 보고 알린다(화면에서 다시 등록하면 고쳐진다).
-fn watched_symbols(settings: &Settings) -> (Vec<Symbol>, SymbolsSource) {
+/// 저장된 것을 쓴다.
+///
+/// (8차 2번) 저장된 파일을 읽지 못하거나 지금 규칙(`pi_market::Symbol::parse` 등 등록 규칙)에 맞지 않는
+/// 종목이 있으면 띄우지 않는다: [`AppError::BadFile`]이고 오류에는 파일 이름([`crate::WATCHLIST_FILE`])만
+/// 있다(종목 값은 넣지 않는다). 파일은 고치거나 지우지 않는다.
+fn watched_symbols(settings: &Settings) -> Result<(Vec<Symbol>, SymbolsSource), AppError> {
     if !settings.symbols.is_empty() {
-        return (settings.symbols.clone(), SymbolsSource::Argument);
+        return Ok((settings.symbols.clone(), SymbolsSource::Argument));
     }
-    match load_watchlist(&settings.home) {
-        Ok(saved) if !saved.is_empty() => (saved, SymbolsSource::Saved),
-        Ok(_) => (Vec::new(), SymbolsSource::None),
-        Err(error) => {
-            tracing::warn!(%error, "저장된 종목을 읽지 못해 없는 것으로 봅니다. 화면에서 다시 등록하세요");
-            (Vec::new(), SymbolsSource::None)
-        }
-    }
+    let saved = load_watchlist(&settings.home)?;
+    let source = if saved.is_empty() {
+        SymbolsSource::None
+    } else {
+        SymbolsSource::Saved
+    };
+    Ok((saved, source))
 }
 
 /// 설정 책상을 연다: 지켜볼 종목과 고른 AI 연결을 정하고, 고른 것이 CLI면 작업 폴더를 준비한다
 /// (막히는 작업 자리에서). CLI 확인은 여기서 하지 않는다(7차 11번, [`App::start`]가 뒤에서 돌린다).
+/// (8차 1번) 아직 호출이 하나도 돌지 않으므로 작업 폴더에 남은 `pi-ai` 자기 임시 파일은 지운다.
 async fn open_desk(
     settings: &Settings,
     wiring: &Wiring,
     secrets: &Arc<SecretStore>,
 ) -> Result<Arc<Desk>, AppError> {
-    let (symbols, source) = watched_symbols(settings);
+    let (symbols, source) = watched_symbols(settings)?;
     // 고른 것이 없으면 API 키다. 읽을 수 없으면 고르지 않은 쪽으로 넘어가지 않고 띄우지 않는다.
     let choice = load_ai_choice(&settings.home)?.unwrap_or_else(AiChoice::api_key);
     let (home, chosen) = (settings.home.clone(), choice.clone());
-    let work = tokio::task::spawn_blocking(move || prepare_work(&home, &chosen))
+    let work = tokio::task::spawn_blocking(move || prepare_work(&home, &chosen, Leftovers::Remove))
         .await
         .map_err(|_| AppError::Task)??;
     let desk = Arc::new(Desk::new(DeskParts {
@@ -306,7 +321,11 @@ impl App {
     /// 끈다(Ctrl+C): 시세 받기를 멈추고, CLI 공급자를 끝내고(남은 자식을 끝내 거둘 때까지 기다린다,
     /// 7차 5번), 연결을 정리하고, 저장소를 닫는다.
     /// 같은 보관 폴더로 다시 띄우면 이벤트 번호가 이어진다(V6).
+    ///
+    /// (8차 3번) 맨 먼저 꺼지기 시작 표시를 세운다(고르기 잠금을 기다리기 전에). 그 뒤에 고르기 잠금을
+    /// 얻은 AI 고르기는 거부되고, 공급자 끝내기는 고르기와 같은 잠금을 잡고 한다.
     pub async fn shutdown(self) -> Result<(), AppError> {
+        self.desk.begin_closing();
         self.stop.send_replace(true);
         let feed = self.feed.await.map_err(|_| AppError::Task);
         // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),

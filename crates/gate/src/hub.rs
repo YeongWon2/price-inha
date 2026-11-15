@@ -50,10 +50,10 @@ pub(crate) struct Hub {
 
 /// 읽은 쪽(`after` 뒤의 `events`, 번호 순서) 가운데 저장소가 **옛 봉투 줄**로 판정한 번호(7차 6번).
 ///
-/// 판정은 저장소가 원래 글자로 한다(`Store::legacy_envelope_seqs`): 관문은 읽힌 JSON 값만 받아
-/// 맨 위 칸 이름이 겹친 줄을 옛 봉투와 가를 수 없다. 범위는 읽은 쪽과 같게 맞춘다: 옛 봉투 줄은
-/// 저장된 줄이므로 `(after, 마지막 번호]` 안에서 읽은 줄 수보다 많을 수 없다.
-/// 막히는 일이라 `spawn_blocking` 안에서 부른다.
+/// 판정은 저장소가 원래 글자로 한다(`Store::legacy_envelope_seqs_upto`): 관문은 읽힌 JSON 값만 받아
+/// 맨 위 칸 이름이 겹친 줄을 옛 봉투와 가를 수 없다. 범위는 읽은 쪽과 같게 맞춘다(8차 4번):
+/// `(after, 읽은 쪽의 마지막 번호]`만 훑는다. 옛 봉투 줄은 저장된 줄이므로 그 안에서 읽은 줄 수보다
+/// 많을 수 없다. 막히는 일이라 `spawn_blocking` 안에서 부른다.
 fn legacy_seqs(
     store: &Store,
     after: u64,
@@ -63,9 +63,8 @@ fn legacy_seqs(
         return Ok(BTreeSet::new());
     };
     Ok(store
-        .legacy_envelope_seqs(after, events.len())?
+        .legacy_envelope_seqs_upto(after, last, events.len())?
         .into_iter()
-        .filter(|seq| *seq <= last)
         .collect())
 }
 
