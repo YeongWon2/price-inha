@@ -34,6 +34,9 @@ PATTERN_SAMPLES = {
     "ARCH-NET-IN-STORE": ("crates/store/src/lib.rs", "/// 값.\npub fn n() { let _ = std::net::TcpStream::connect(\"127.0.0.1:1\"); }"),
     "CONV-BOX-ERROR": ("crates/ai/src/lib.rs", "/// 값.\npub fn b() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }"),
     "CONV-SECRET-LOG": ("crates/ai/src/lib.rs", "/// 값.\npub fn l(api_key: &str) { tracing::info!(\"{}\", api_key); }"),
+    "ARCH-RULES-PURE": ("crates/template/src/lib.rs", "/// 값.\npub fn p() { let _ = std::fs::read(\"x\"); }"),
+    "ARCH-CLOCK-2": ("crates/trigger/src/lib.rs", "/// 값.\npub fn t() -> std::time::Instant { std::time::Instant::now() }"),
+    "ARCH-NET-IN-CORE": ("crates/trigger/src/lib.rs", "/// 값.\npub fn n() { let _ = std::net::TcpStream::connect(\"127.0.0.1:1\"); }"),
     "CONV-BIND-ALL": ("crates/gate/src/lib.rs", '/// 값.\npub const B: &str = "0.0.0.0:8080";'),
 }
 

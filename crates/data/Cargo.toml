@@ -1,0 +1,15 @@
+[package]
+name = "pi-data"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pi-secrets = { path = "../secrets" }
+thiserror = "2.0.21"
+
+[dev-dependencies]

@@ -1142,6 +1142,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-data"
+version = "0.1.0"
+dependencies = [
+ "pi-secrets",
+ "thiserror",
+]
+
+[[package]]
 name = "pi-gate"
 version = "0.1.0"
 dependencies = [
@@ -1213,6 +1221,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "pi-template"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "pi-trigger"
+version = "0.1.0"
+dependencies = [
+ "pi-market",
  "thiserror",
 ]
 
