@@ -336,7 +336,7 @@ impl Store {
         upto: u64,
         max: usize,
     ) -> Result<Vec<u64>, StoreError> {
-        todo!()
+        self.read(|conn| schema::legacy_envelope_seqs_upto(conn, after, upto, max))
     }
 
     // ───────────── 접속 기록 (M6) ─────────────
