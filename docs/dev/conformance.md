@@ -55,6 +55,8 @@
 | A20 | 스트리밍 호출이 기본 | `H:agent/anthropic_adapter.py:871-885` | 한 번에 받는다. `ai/src/anthropic.rs:128-151` | 미구현 (T9) | `ai.md` "하지 않는 것" |
 | A21 | 다 실패한 뒤: 폴백 공급자 → 자동 복구 5주기 | hermes 3.2 표. `H:agent/turn_api_error.py:377-418` | 없음 | 미구현 (T9) | — |
 | A22 | 기본 주소 `https://api.anthropic.com` | `H:hermes_cli/auth.py:208` | `ai/src/lib.rs:25` | 같음 | — |
+| A23 | 429에 `Retry-After`가 없을 때 적응형 물러서기(`adaptive_rate_limit_backoff`) | `docs/research/agent-runtime-deep.md` "확인하지 못한 것" 4 | A17의 지수 물러서기만 쓴다. `ai/src/retry.rs` | 모름 (원본 식 확인 못 함) | ai 4차 3번. 원본 식을 확인하면 맞춘다 |
+| A24 | CLI `auth status`는 도중에 죽이지 않는다 | `docs/research/cli-backend.md` 2.6 · 5.6 정리 5 | 시간 제한 뒤 3초 더 출력을 읽어 버리며 기다리고, 그래도 안 끝나면 묶음째 끝낸다. `ai/src/cli/check.rs` | 의도해서 다름 | `decisions.md` 2026-11-15 "CLI 확인 프로세스가 끝나지 않을 때" |
 
 ## 2. 비밀 보관 (`pi-secrets`)
 
