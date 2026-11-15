@@ -8,6 +8,9 @@
 //!   저장하고(persist-before-execute), 저장이 실패하면 도구를 돌리지 않는다. 묶음 안에 하나라도
 //!   거부되면 아무것도 쓰지 않는다.
 
+use rusqlite::{Connection, OptionalExtension, Row, params};
+use serde_json::{Value, json};
+
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
@@ -131,17 +134,40 @@ impl Store {
         title: &str,
         at: UnixMillis,
     ) -> Result<AgentSession, StoreError> {
-        todo!()
+        self.write(|conn| {
+            let found = conn
+                .query_row(
+                    &format!(
+                        "{SESSION_SELECT} WHERE agent = ?1 AND title = ?2 AND ended_at IS NULL"
+                    ),
+                    params![agent, title],
+                    session_from,
+                )
+                .optional()?;
+            if let Some(session) = found {
+                return session;
+            }
+            conn.execute(
+                "INSERT INTO agent_sessions (agent, title, started_at) VALUES (?1, ?2, ?3)",
+                params![agent, title, at.0],
+            )?;
+            load_session(conn, SessionId(conn.last_insert_rowid()))
+        })
     }
 
     /// 세션 한 건. 없으면 [`StoreError::SessionNotFound`].
     pub fn get_session(&self, id: SessionId) -> Result<AgentSession, StoreError> {
-        todo!()
+        self.read(|conn| load_session(conn, id))
     }
 
     /// 그 담당의 세션 전체(끝낸 것 포함). 번호 순서다.
     pub fn sessions_of(&self, agent: &str) -> Result<Vec<AgentSession>, StoreError> {
-        todo!()
+        self.read(|conn| {
+            let mut stmt =
+                conn.prepare(&format!("{SESSION_SELECT} WHERE agent = ?1 ORDER BY id"))?;
+            let rows = stmt.query_map([agent], session_from)?;
+            rows.map(|row| row?).collect()
+        })
     }
 
     /// 세션을 끝낸다(끝낸 시각과 이유를 남긴다).
@@ -154,7 +180,17 @@ impl Store {
         reason: &str,
         at: UnixMillis,
     ) -> Result<AgentSession, StoreError> {
-        todo!()
+        self.write(|conn| {
+            let session = load_session(conn, id)?;
+            if session.ended_at.is_some() {
+                return Err(StoreError::SessionEnded(id));
+            }
+            conn.execute(
+                "UPDATE agent_sessions SET ended_at = ?2, end_reason = ?3 WHERE id = ?1",
+                params![id.0, at.0, reason],
+            )?;
+            load_session(conn, id)
+        })
     }
 
     /// 메시지 여러 개를 **한 묶음으로** 쓰고 저장된 모양을 준 순서대로 돌려준다.
@@ -172,11 +208,190 @@ impl Store {
         session: SessionId,
         messages: &[NewMessage],
     ) -> Result<Vec<AgentMessage>, StoreError> {
-        todo!()
+        self.write(|conn| {
+            let current = load_session(conn, session)?;
+            if current.ended_at.is_some() {
+                return Err(StoreError::SessionEnded(session));
+            }
+            if let Some(index) = messages.iter().position(|m| !is_valid(m)) {
+                return Err(StoreError::InvalidMessage { index });
+            }
+            let mut written = Vec::with_capacity(messages.len());
+            let mut tool_calls: i64 = 0;
+            for message in messages {
+                written.push(insert_message(conn, session, message)?);
+                tool_calls += i64::try_from(message.tool_calls.len()).unwrap_or(i64::MAX);
+            }
+            let count = i64::try_from(messages.len()).unwrap_or(i64::MAX);
+            conn.execute(
+                "UPDATE agent_sessions SET message_count = message_count + ?2, \
+                 tool_call_count = tool_call_count + ?3 WHERE id = ?1",
+                params![session.0, count, tool_calls],
+            )?;
+            Ok(written)
+        })
     }
 
     /// 세션의 메시지 전체. 번호 순서(쓴 순서)다. 세션이 없으면 [`StoreError::SessionNotFound`].
     pub fn session_messages(&self, session: SessionId) -> Result<Vec<AgentMessage>, StoreError> {
-        todo!()
+        self.read(|conn| {
+            load_session(conn, session)?;
+            let mut stmt = conn.prepare(&format!(
+                "{MESSAGE_SELECT} WHERE session_id = ?1 ORDER BY id"
+            ))?;
+            let rows = stmt.query_map([session.0], message_from)?;
+            rows.map(|row| row?).collect()
+        })
     }
+}
+
+const SESSION_SELECT: &str = "SELECT id, agent, title, started_at, ended_at, end_reason, \
+     message_count, tool_call_count FROM agent_sessions";
+
+const MESSAGE_SELECT: &str = "SELECT id, session_id, role, content, api_content, tool_calls, \
+     tool_call_id, tool_name, finish_reason, reasoning, at FROM agent_messages";
+
+fn count(row: &Row<'_>, idx: usize) -> Result<u64, StoreError> {
+    let raw: i64 = row.get(idx)?;
+    u64::try_from(raw).map_err(|_| StoreError::Incompatible(format!("세기 값이 이상하다: {raw}")))
+}
+
+fn session_from(row: &Row<'_>) -> rusqlite::Result<Result<AgentSession, StoreError>> {
+    let build = || -> Result<AgentSession, StoreError> {
+        Ok(AgentSession {
+            id: SessionId(row.get(0)?),
+            agent: row.get(1)?,
+            title: row.get(2)?,
+            started_at: UnixMillis(row.get(3)?),
+            ended_at: row.get::<_, Option<i64>>(4)?.map(UnixMillis),
+            end_reason: row.get(5)?,
+            message_count: count(row, 6)?,
+            tool_call_count: count(row, 7)?,
+        })
+    };
+    Ok(build())
+}
+
+fn load_session(conn: &Connection, id: SessionId) -> Result<AgentSession, StoreError> {
+    conn.query_row(
+        &format!("{SESSION_SELECT} WHERE id = ?1"),
+        [id.0],
+        session_from,
+    )
+    .optional()?
+    .ok_or(StoreError::SessionNotFound(id))?
+}
+
+fn is_valid(message: &NewMessage) -> bool {
+    let tool_needs_id = message.role != MessageRole::Tool || message.tool_call_id.is_some();
+    let calls_only_assistant =
+        message.role == MessageRole::Assistant || message.tool_calls.is_empty();
+    tool_needs_id && calls_only_assistant
+}
+
+fn role_code(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::System => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
+    }
+}
+
+fn role_from(code: &str) -> Result<MessageRole, StoreError> {
+    match code {
+        "system" => Ok(MessageRole::System),
+        "user" => Ok(MessageRole::User),
+        "assistant" => Ok(MessageRole::Assistant),
+        "tool" => Ok(MessageRole::Tool),
+        other => Err(StoreError::Incompatible(format!(
+            "모르는 메시지 role 값: {other}"
+        ))),
+    }
+}
+
+/// 도구 호출들을 JSON 글자로 적는다. 없으면 칸을 비운다.
+fn tool_calls_text(calls: &[ToolCall]) -> Option<String> {
+    if calls.is_empty() {
+        return None;
+    }
+    let list: Vec<Value> = calls
+        .iter()
+        .map(|c| json!({ "id": c.id, "name": c.name, "arguments": c.arguments }))
+        .collect();
+    Some(Value::Array(list).to_string())
+}
+
+fn tool_calls_from(text: Option<String>) -> Result<Vec<ToolCall>, StoreError> {
+    let Some(text) = text else {
+        return Ok(Vec::new());
+    };
+    let bad = || StoreError::Incompatible("도구 호출 칸이 이상하다".to_string());
+    let list: Vec<Value> = serde_json::from_str(&text)?;
+    list.iter()
+        .map(|item| {
+            let field = |name: &str| item.get(name).and_then(Value::as_str).map(str::to_string);
+            Ok(ToolCall {
+                id: field("id").ok_or_else(bad)?,
+                name: field("name").ok_or_else(bad)?,
+                arguments: field("arguments").ok_or_else(bad)?,
+            })
+        })
+        .collect()
+}
+
+fn message_from(row: &Row<'_>) -> rusqlite::Result<Result<AgentMessage, StoreError>> {
+    let build = || -> Result<AgentMessage, StoreError> {
+        Ok(AgentMessage {
+            id: MessageId(row.get(0)?),
+            session: SessionId(row.get(1)?),
+            role: role_from(&row.get::<_, String>(2)?)?,
+            content: row.get(3)?,
+            api_content: row.get(4)?,
+            tool_calls: tool_calls_from(row.get(5)?)?,
+            tool_call_id: row.get(6)?,
+            tool_name: row.get(7)?,
+            finish_reason: row.get(8)?,
+            reasoning: row.get(9)?,
+            at: UnixMillis(row.get(10)?),
+        })
+    };
+    Ok(build())
+}
+
+fn insert_message(
+    conn: &Connection,
+    session: SessionId,
+    m: &NewMessage,
+) -> Result<AgentMessage, StoreError> {
+    conn.execute(
+        "INSERT INTO agent_messages (session_id, role, content, api_content, tool_calls, \
+         tool_call_id, tool_name, finish_reason, reasoning, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            session.0,
+            role_code(m.role),
+            m.content,
+            m.api_content,
+            tool_calls_text(&m.tool_calls),
+            m.tool_call_id,
+            m.tool_name,
+            m.finish_reason,
+            m.reasoning,
+            m.at.0,
+        ],
+    )?;
+    Ok(AgentMessage {
+        id: MessageId(conn.last_insert_rowid()),
+        session,
+        role: m.role,
+        content: m.content.clone(),
+        api_content: m.api_content.clone(),
+        tool_calls: m.tool_calls.clone(),
+        tool_call_id: m.tool_call_id.clone(),
+        tool_name: m.tool_name.clone(),
+        finish_reason: m.finish_reason.clone(),
+        reasoning: m.reasoning.clone(),
+        at: m.at,
+    })
 }

@@ -6,6 +6,9 @@
 //! - 누가(쓴 쪽의 종류) 어떤 종류의 이벤트를 쓸 수 있는지가 고정돼 있다([`RoomActorKind`]).
 //! - 쌓기만 한다. 지우거나 고치는 API는 없다.
 
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
+use crate::codec::seq;
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
@@ -91,7 +94,39 @@ impl Store {
     /// - 다른 방의 같은 `event_id`는 겹치지 않는다.
     /// - 여러 스레드가 함께 써도 방 안의 번호가 겹치거나 비지 않는다. 다시 열어도 이어진다.
     pub fn append_room_event(&self, event: NewRoomEvent) -> Result<RoomAppend, StoreError> {
-        todo!()
+        self.write(|conn| {
+            let actor = actor_code(event.actor_kind);
+            let allowed: bool = conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM room_event_kinds WHERE actor_kind = ?1 AND kind = ?2)",
+                params![actor, event.kind],
+                |row| row.get(0),
+            )?;
+            if !allowed {
+                return Err(StoreError::RoomEventNotAllowed {
+                    actor_kind: event.actor_kind,
+                    kind: event.kind,
+                });
+            }
+            let existing = conn
+                .query_row(
+                    &format!("{EVENT_SELECT} WHERE room = ?1 AND event_id = ?2"),
+                    params![event.room, event.event_id],
+                    event_from,
+                )
+                .optional()?
+                .transpose()?;
+            if let Some(found) = existing {
+                return if same_content(&found, &event) {
+                    Ok(RoomAppend::AlreadyExists(found))
+                } else {
+                    Err(StoreError::RoomEventConflict {
+                        room: event.room,
+                        event_id: event.event_id,
+                    })
+                };
+            }
+            insert_event(conn, event).map(RoomAppend::Appended)
+        })
     }
 
     /// 방의 이벤트 가운데 번호가 `after`보다 큰 것을 번호 순서로 `max`개까지 준다.
@@ -102,6 +137,100 @@ impl Store {
         after: u64,
         max: usize,
     ) -> Result<Vec<RoomEvent>, StoreError> {
-        todo!()
+        if max == 0 {
+            return Ok(Vec::new());
+        }
+        let after = i64::try_from(after).unwrap_or(i64::MAX);
+        let max = i64::try_from(max).unwrap_or(i64::MAX);
+        self.read(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "{EVENT_SELECT} WHERE room = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+            ))?;
+            let rows = stmt.query_map(params![room, after, max], event_from)?;
+            rows.map(|row| row?).collect()
+        })
     }
+}
+
+const EVENT_SELECT: &str =
+    "SELECT room, seq, event_id, kind, actor_kind, actor_id, payload, at FROM room_events";
+
+fn actor_code(kind: RoomActorKind) -> &'static str {
+    match kind {
+        RoomActorKind::User => "user",
+        RoomActorKind::Member => "member",
+        RoomActorKind::Gateway => "gateway",
+        RoomActorKind::System => "system",
+    }
+}
+
+fn actor_from(code: &str) -> Result<RoomActorKind, StoreError> {
+    match code {
+        "user" => Ok(RoomActorKind::User),
+        "member" => Ok(RoomActorKind::Member),
+        "gateway" => Ok(RoomActorKind::Gateway),
+        "system" => Ok(RoomActorKind::System),
+        other => Err(StoreError::Incompatible(format!(
+            "모르는 방 actor 값: {other}"
+        ))),
+    }
+}
+
+fn event_from(row: &Row<'_>) -> rusqlite::Result<Result<RoomEvent, StoreError>> {
+    let build = || -> Result<RoomEvent, StoreError> {
+        Ok(RoomEvent {
+            room: row.get(0)?,
+            seq: seq(row, 1)?,
+            event_id: row.get(2)?,
+            kind: row.get(3)?,
+            actor_kind: actor_from(&row.get::<_, String>(4)?)?,
+            actor_id: row.get(5)?,
+            payload: serde_json::from_str(&row.get::<_, String>(6)?)?,
+            at: UnixMillis(row.get(7)?),
+        })
+    };
+    Ok(build())
+}
+
+/// 멱등 비교: 종류 · 쓴 쪽(종류와 id) · 내용. 시각은 보지 않는다.
+fn same_content(found: &RoomEvent, event: &NewRoomEvent) -> bool {
+    found.kind == event.kind
+        && found.actor_kind == event.actor_kind
+        && found.actor_id == event.actor_id
+        && found.payload == event.payload
+}
+
+/// 방의 다음 번호로 쓴다(쓰기 잠금 안에서 부르므로 번호가 겹치거나 비지 않는다).
+fn insert_event(conn: &Connection, event: NewRoomEvent) -> Result<RoomEvent, StoreError> {
+    let last: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(seq), 0) FROM room_events WHERE room = ?1",
+        [&event.room],
+        |row| row.get(0),
+    )?;
+    let next = last + 1;
+    conn.execute(
+        "INSERT INTO room_events (room, seq, event_id, kind, actor_kind, actor_id, payload, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            event.room,
+            next,
+            event.event_id,
+            event.kind,
+            actor_code(event.actor_kind),
+            event.actor_id,
+            event.payload.to_string(),
+            event.at.0,
+        ],
+    )?;
+    Ok(RoomEvent {
+        room: event.room,
+        seq: u64::try_from(next)
+            .map_err(|_| StoreError::Incompatible(format!("방 번호가 이상하다: {next}")))?,
+        event_id: event.event_id,
+        kind: event.kind,
+        actor_kind: event.actor_kind,
+        actor_id: event.actor_id,
+        payload: event.payload,
+        at: event.at,
+    })
 }
