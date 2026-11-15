@@ -14,6 +14,9 @@
 //! `knowledge_meta(key, value)`. 조각표를 SQL로 고치거나 지워도 FTS 색인이 어긋나지 않는다.
 //! 이 표들에는 지우기를 막는 `BEFORE DELETE` 트리거를 두지 않는다(조각은 다시 색인하며 지워진다).
 
+use rusqlite::types::Value;
+use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
+
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
@@ -143,8 +146,15 @@ impl Store {
     /// - `record_ref`가 비었거나 조각 글이 빈 글자이면 [`StoreError::InvalidKnowledge`]이고 아무것도 바꾸지 않는다.
     /// - 돌려주는 번호는 조각 순서대로다.
     pub fn index_record(&self, record: NewKnowledgeRecord) -> Result<Vec<ChunkId>, StoreError> {
-        let _ = record;
-        todo!("11차 구현")
+        if record.record_ref.is_empty() {
+            return Err(StoreError::InvalidKnowledge("기록 키가 비었다".to_string()));
+        }
+        if let Some(index) = record.chunks.iter().position(|text| text.trim().is_empty()) {
+            return Err(StoreError::InvalidKnowledge(format!(
+                "{index}번째 조각이 비었다"
+            )));
+        }
+        self.write(|conn| index(conn, &record))
     }
 
     /// 한 기록의 조각들. 조각 순서다. 없으면 빈 목록.
@@ -153,16 +163,29 @@ impl Store {
         kind: KnowledgeKind,
         record_ref: &str,
     ) -> Result<Vec<KnowledgeChunk>, StoreError> {
-        let _ = (kind, record_ref);
-        todo!("11차 구현")
+        self.read(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {CHUNK_COLUMNS} FROM knowledge_chunks c
+                 WHERE c.kind = ?1 AND c.record_ref = ?2 ORDER BY c.ordinal"
+            ))?;
+            let mut rows = stmt.query(params![kind_code(kind), record_ref])?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next()? {
+                out.push(chunk_from(row)?);
+            }
+            Ok(out)
+        })
     }
 
     /// 키워드 검색. 3글자(글자 단위) 이상 낱말은 trigram `MATCH`로, 3글자 미만 낱말(한글 두 글자
     /// "매수" · "손절")은 부분 문자열로 찾는다. 모든 낱말이 맞아야 한다. 영문은 대소문자를 가리지 않는다.
     /// 순서는 점수가 높은 것부터이고, 점수가 없는 것은 그 뒤에 조각 번호 순이다.
     pub fn search_knowledge(&self, query: KnowledgeQuery) -> Result<Vec<KnowledgeHit>, StoreError> {
-        let _ = query;
-        todo!("11차 구현")
+        let words: Vec<&str> = query.text.split_whitespace().collect();
+        if words.is_empty() || query.max == 0 {
+            return Ok(Vec::new());
+        }
+        self.read(|conn| search(conn, &words, &query))
     }
 
     /// 조각의 임베딩을 두거나 바꾼다. 바이트는 해석하지 않고 그대로 둔다. `dims`가 0이거나
@@ -174,14 +197,50 @@ impl Store {
         dims: u32,
         bytes: &[u8],
     ) -> Result<(), StoreError> {
-        let _ = (id, model, dims, bytes);
-        todo!("11차 구현")
+        let expected = usize::try_from(dims)
+            .ok()
+            .and_then(|d| d.checked_mul(4))
+            .filter(|len| dims > 0 && *len == bytes.len());
+        if expected.is_none() {
+            return Err(StoreError::InvalidEmbedding);
+        }
+        let dims = i64::from(dims);
+        self.write(|conn| {
+            let known: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM knowledge_chunks WHERE id = ?1",
+                    [id.0],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if known.is_none() {
+                return Err(StoreError::ChunkNotFound(id));
+            }
+            conn.execute(
+                "INSERT INTO knowledge_embeddings (chunk_id, model, dims, embedding)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (chunk_id) DO UPDATE
+                 SET model = excluded.model, dims = excluded.dims, embedding = excluded.embedding",
+                params![id.0, model, dims, bytes],
+            )?;
+            Ok(())
+        })
     }
 
     /// 조각의 임베딩. 없으면 `None`이다. 둔 그대로(비트까지) 나온다.
     pub fn chunk_embedding(&self, id: ChunkId) -> Result<Option<ChunkEmbedding>, StoreError> {
-        let _ = id;
-        todo!("11차 구현")
+        self.read(|conn| {
+            let found: Option<(String, i64, Vec<u8>)> = conn
+                .query_row(
+                    "SELECT model, dims, embedding FROM knowledge_embeddings WHERE chunk_id = ?1",
+                    [id.0],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            found
+                .map(|(model, dims, bytes)| decode(model, dims, bytes))
+                .transpose()
+        })
     }
 
     /// 그 모델의 임베딩이 없는 조각의 번호를 번호 순서로 `max`개까지(다시 만들 것의 목록).
@@ -190,19 +249,218 @@ impl Store {
         model: &str,
         max: usize,
     ) -> Result<Vec<ChunkId>, StoreError> {
-        let _ = (model, max);
-        todo!("11차 구현")
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT c.id FROM knowledge_chunks c
+                 WHERE NOT EXISTS (SELECT 1 FROM knowledge_embeddings e
+                                   WHERE e.chunk_id = c.id AND e.model = ?1)
+                 ORDER BY c.id LIMIT ?2",
+            )?;
+            let ids = stmt
+                .query_map(params![model, limit_of(max)], |row| row.get(0).map(ChunkId))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ids)
+        })
     }
 
     /// 색인의 메타(공급자 · 모델 · 조각 설정 따위)를 두거나 바꾼다. 키가 비면 [`StoreError::InvalidKnowledge`].
     pub fn set_knowledge_meta(&self, key: &str, value: &str) -> Result<(), StoreError> {
-        let _ = (key, value);
-        todo!("11차 구현")
+        if key.is_empty() {
+            return Err(StoreError::InvalidKnowledge("메타 키가 비었다".to_string()));
+        }
+        self.write(|conn| {
+            conn.execute(
+                "INSERT INTO knowledge_meta (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
+        })
     }
 
     /// 색인의 메타 한 값. 없으면 `None`.
     pub fn knowledge_meta(&self, key: &str) -> Result<Option<String>, StoreError> {
-        let _ = key;
-        todo!("11차 구현")
+        self.read(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT value FROM knowledge_meta WHERE key = ?1",
+                    [key],
+                    |r| r.get(0),
+                )
+                .optional()?)
+        })
     }
+}
+
+// ───────────── 안에서만 쓰는 것 ─────────────
+
+const CHUNK_COLUMNS: &str = "c.id, c.kind, c.source, c.record_ref, c.ordinal, c.text, c.updated_at";
+
+fn kind_code(kind: KnowledgeKind) -> &'static str {
+    match kind {
+        KnowledgeKind::Trade => "trade",
+        KnowledgeKind::Review => "review",
+        KnowledgeKind::Mistake => "mistake",
+        KnowledgeKind::MarketNote => "market_note",
+    }
+}
+
+fn source_code(source: KnowledgeSource) -> &'static str {
+    match source {
+        KnowledgeSource::Mine => "mine",
+        KnowledgeSource::Team => "team",
+        KnowledgeSource::External => "external",
+    }
+}
+
+fn kind_from(code: &str) -> Result<KnowledgeKind, StoreError> {
+    KnowledgeKind::ALL
+        .into_iter()
+        .find(|kind| kind_code(*kind) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 지식 종류 값: {code}")))
+}
+
+fn source_from(code: &str) -> Result<KnowledgeSource, StoreError> {
+    KnowledgeSource::ALL
+        .into_iter()
+        .find(|source| source_code(*source) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 지식 등급 값: {code}")))
+}
+
+fn limit_of(max: usize) -> i64 {
+    i64::try_from(max).unwrap_or(i64::MAX)
+}
+
+/// `CHUNK_COLUMNS` 순서의 줄을 조각으로 읽는다.
+fn chunk_from(row: &Row<'_>) -> Result<KnowledgeChunk, StoreError> {
+    let ordinal: i64 = row.get(4)?;
+    Ok(KnowledgeChunk {
+        id: ChunkId(row.get(0)?),
+        kind: kind_from(&row.get::<_, String>(1)?)?,
+        source: source_from(&row.get::<_, String>(2)?)?,
+        record_ref: row.get(3)?,
+        ordinal: u32::try_from(ordinal)
+            .map_err(|_| StoreError::Incompatible(format!("조각 순서 값이 이상하다: {ordinal}")))?,
+        text: row.get(5)?,
+        updated_at: UnixMillis(row.get(6)?),
+    })
+}
+
+fn index(conn: &Connection, record: &NewKnowledgeRecord) -> Result<Vec<ChunkId>, StoreError> {
+    let kind = kind_code(record.kind);
+    // 지우기 트리거가 색인과 임베딩도 함께 지운다.
+    conn.execute(
+        "DELETE FROM knowledge_chunks WHERE kind = ?1 AND record_ref = ?2",
+        params![kind, record.record_ref],
+    )?;
+    let mut ids = Vec::with_capacity(record.chunks.len());
+    for (ordinal, text) in record.chunks.iter().enumerate() {
+        let ordinal = i64::try_from(ordinal)
+            .map_err(|_| StoreError::InvalidKnowledge("조각이 너무 많다".to_string()))?;
+        conn.execute(
+            "INSERT INTO knowledge_chunks (kind, source, record_ref, ordinal, text, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                kind,
+                source_code(record.source),
+                record.record_ref,
+                ordinal,
+                text,
+                record.at.0
+            ],
+        )?;
+        ids.push(ChunkId(conn.last_insert_rowid()));
+    }
+    Ok(ids)
+}
+
+/// 검색 문법 글자를 글자 그대로 찾도록 낱말을 한 구절(`"..."`)로 감싼다.
+fn phrase(word: &str) -> String {
+    format!("\"{}\"", word.replace('"', "\"\""))
+}
+
+fn search(
+    conn: &Connection,
+    words: &[&str],
+    query: &KnowledgeQuery,
+) -> Result<Vec<KnowledgeHit>, StoreError> {
+    let (long, short): (Vec<&str>, Vec<&str>) =
+        words.iter().partition(|word| word.chars().count() >= 3);
+    let mut args: Vec<Value> = Vec::new();
+    let mut conditions: Vec<String> = Vec::new();
+    let from = if long.is_empty() {
+        "knowledge_chunks c".to_string()
+    } else {
+        args.push(Value::Text(
+            long.iter().map(|w| phrase(w)).collect::<Vec<_>>().join(" "),
+        ));
+        conditions.push("knowledge_fts MATCH ?1".to_string());
+        "knowledge_fts JOIN knowledge_chunks c ON c.id = knowledge_fts.rowid".to_string()
+    };
+    for word in short {
+        args.push(Value::Text((*word).to_string()));
+        conditions.push(format!("instr(lower(c.text), lower(?{})) > 0", args.len()));
+    }
+    if !query.kinds.is_empty() {
+        let codes = query.kinds.iter().map(|k| kind_code(*k).to_string());
+        conditions.push(in_list("c.kind", codes, &mut args));
+    }
+    if !query.sources.is_empty() {
+        let codes = query.sources.iter().map(|s| source_code(*s).to_string());
+        conditions.push(in_list("c.source", codes, &mut args));
+    }
+    if query.auto_recall {
+        conditions.push("c.source <> 'external'".to_string());
+    }
+    args.push(Value::Integer(limit_of(query.max)));
+    // 순서는 점수를 1e-4 단위로 맞춰 본다: 작은 문서 모음에서 글 길이만으로 생기는 아주 작은 차이는 같은 점수로 보고 조각 번호 순이다.
+    let (rank, order) = if long.is_empty() {
+        ("NULL", "c.id")
+    } else {
+        (
+            "CAST(-knowledge_fts.rank * 1000000 AS INTEGER)",
+            "round(knowledge_fts.rank, 4), c.id",
+        )
+    };
+    let sql = format!(
+        "SELECT {CHUNK_COLUMNS}, {rank} FROM {from} WHERE {} ORDER BY {order} LIMIT ?{}",
+        conditions.join(" AND "),
+        args.len()
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_from_iter(args.iter()))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let score = row.get::<_, Option<i64>>(7)?.map(score_of);
+        out.push(KnowledgeHit {
+            chunk: chunk_from(row)?,
+            score_micros: score,
+        });
+    }
+    Ok(out)
+}
+
+/// `c.col IN (?n, ...)` 조각을 만들고 값을 `args`에 더한다.
+fn in_list(column: &str, codes: impl Iterator<Item = String>, args: &mut Vec<Value>) -> String {
+    let mut marks = Vec::new();
+    for code in codes {
+        args.push(Value::Text(code));
+        marks.push(format!("?{}", args.len()));
+    }
+    format!("{column} IN ({})", marks.join(", "))
+}
+
+/// FTS5의 `rank`(작을수록 잘 맞는 음수)를 정수로 옮긴 관련도(`-rank`의 백만 배)를
+/// `관련도 / (1 + 관련도)`의 백만분의 1 단위 점수(0 초과 1_000_000 이하)로 바꾼다.
+fn score_of(relevance_micros: i64) -> i64 {
+    let relevance = i128::from(relevance_micros.max(1));
+    let one = 1_000_000_i128;
+    let score = relevance * one / (one + relevance);
+    i64::try_from(score.max(1)).unwrap_or(1_000_000)
+}
+
+fn decode(model: String, dims: i64, bytes: Vec<u8>) -> Result<ChunkEmbedding, StoreError> {
+    let dims = u32::try_from(dims)
+        .map_err(|_| StoreError::Incompatible(format!("임베딩 차원 값이 이상하다: {dims}")))?;
+    Ok(ChunkEmbedding { model, dims, bytes })
 }

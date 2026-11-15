@@ -83,6 +83,35 @@ pub(crate) fn change(conn: &Connection, change: TeamChange) -> Result<TeamStateR
         },
         reason,
     })?;
+    record(conn, from, change)
+}
+
+/// 되살리기 표시([`crate::Store::mark_restored`])용: 지금 상태가 무엇이든 전체 정지로 하고 사유 `Restored`
+/// 기록을 남긴다. 허용 표를 거치지 않는 길은 이것 하나다. 이미 전체 정지이면 아무것도 쓰지 않고 `None`.
+pub(crate) fn restore_full_stop(
+    conn: &Connection,
+    at: UnixMillis,
+) -> Result<Option<TeamStateRecord>, StoreError> {
+    let from = current(conn)?;
+    if from == TeamState::FullStop {
+        return Ok(None);
+    }
+    let change = TeamChange {
+        to: TeamState::FullStop,
+        at,
+        cause: TeamCause::Restored,
+        detail: "백업을 되살렸다".to_string(),
+        owner_approved: false,
+    };
+    record(conn, from, change).map(Some)
+}
+
+/// 기록 한 줄을 쓰고, 전체 정지가 되면 실전중 템플릿을 같은 묶음 안에서 멈춤으로 한다.
+fn record(
+    conn: &Connection,
+    from: TeamState,
+    change: TeamChange,
+) -> Result<TeamStateRecord, StoreError> {
     let seq = insert_returning_seq(
         conn,
         "INSERT INTO team_history (seq, at, from_state, to_state, cause, detail, owner_approved)

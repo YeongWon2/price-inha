@@ -1,5 +1,7 @@
 //! 웹 푸시 구독(11차 4번). 폰 알림을 받을 구독을 둔다. 표: `push_subscriptions`.
 
+use rusqlite::{Row, params};
+
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
@@ -45,18 +47,58 @@ impl Store {
         &self,
         new: NewPushSubscription,
     ) -> Result<PushSubscription, StoreError> {
-        let _ = new;
-        todo!("11차 구현")
+        if !new.endpoint.starts_with("https://") || new.p256dh.is_empty() || new.auth.is_empty() {
+            return Err(StoreError::InvalidPushSubscription);
+        }
+        self.write(|conn| {
+            conn.execute(
+                "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                 ON CONFLICT (endpoint) DO UPDATE
+                 SET p256dh = excluded.p256dh, auth = excluded.auth,
+                     device = excluded.device, updated_at = excluded.updated_at",
+                params![new.endpoint, new.p256dh, new.auth, new.device, new.at.0],
+            )?;
+            Ok(conn.query_row(
+                &format!("SELECT {COLUMNS} FROM push_subscriptions WHERE endpoint = ?1"),
+                [&new.endpoint],
+                subscription_from,
+            )?)
+        })
     }
 
     /// 모든 구독. 처음 둔 순서(같으면 주소 순서)다.
     pub fn push_subscriptions(&self) -> Result<Vec<PushSubscription>, StoreError> {
-        todo!("11차 구현")
+        self.read(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {COLUMNS} FROM push_subscriptions ORDER BY created_at, endpoint"
+            ))?;
+            let rows = stmt.query_map([], subscription_from)?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
     }
 
     /// 구독을 지운다. 있어서 지웠으면 `true`, 없었으면 `false`(오류가 아니다).
     pub fn remove_push_subscription(&self, endpoint: &str) -> Result<bool, StoreError> {
-        let _ = endpoint;
-        todo!("11차 구현")
+        self.write(|conn| {
+            let removed = conn.execute(
+                "DELETE FROM push_subscriptions WHERE endpoint = ?1",
+                [endpoint],
+            )?;
+            Ok(removed > 0)
+        })
     }
+}
+
+const COLUMNS: &str = "endpoint, p256dh, auth, device, created_at, updated_at";
+
+fn subscription_from(row: &Row<'_>) -> rusqlite::Result<PushSubscription> {
+    Ok(PushSubscription {
+        endpoint: row.get(0)?,
+        p256dh: row.get(1)?,
+        auth: row.get(2)?,
+        device: row.get(3)?,
+        created_at: UnixMillis(row.get(4)?),
+        updated_at: UnixMillis(row.get(5)?),
+    })
 }

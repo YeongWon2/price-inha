@@ -129,6 +129,10 @@ impl Store {
     /// 4. `at`이 `expires_at` 이상이면 [`StoreError::ApprovalExpired`].
     /// 5. 지문이 다르면 [`StoreError::ApprovalFingerprintMismatch`](승인 뒤 바뀐 내용은 실행하지 않는다).
     ///
+    /// (11차) 4번과 5번 사이에서 하나 더 본다: 가장 최근 되살리기 표시([`Store::mark_restored`])의
+    /// 시각과 같거나 그보다 먼저 만든(`created_at`) 승인은 승인됨이어도 [`StoreError::ApprovalExpired`]다
+    /// (되살리면 전부 만료, M5 · V51).
+    ///
     /// 표에서도 지킨다: `approvals`의 CHECK와 트리거가 승인이 아닌 줄의 소비 칸, 한 번 적힌 소비 칸의
     /// 고치기, 기다림이 아닌 줄의 결과 바꾸기, 줄 지우기를 어떤 SQL로도 막는다.
     pub fn consume_approval(
@@ -239,6 +243,16 @@ fn resolve(
     get(conn, id)
 }
 
+/// 가장 최근 되살리기 표시([`Store::mark_restored`]의 `restore_marks`)와 같거나 그보다 먼저 만든 승인인지.
+/// 승인의 결과는 한 번 정해지면 바꿀 수 없으므로(승인됨이어도) 되살린 뒤에는 그 전에 만든 승인을
+/// 쓸 수 없게 하는 길은 소비 때 거르는 것이다(M5 "되살리면 전부 만료", 조정자 결정 2026-11-16).
+/// 표시는 팀 상태와 상관없이 늘 남으므로 이미 전체 정지였던 파일에서도 기준점이 있다. 같은 밀리초도 거부한다.
+fn made_before_restore(conn: &Connection, created_at: UnixMillis) -> Result<bool, StoreError> {
+    let restored_at: Option<i64> =
+        conn.query_row("SELECT MAX(at) FROM restore_marks", [], |row| row.get(0))?;
+    Ok(restored_at.is_some_and(|at| created_at.0 <= at))
+}
+
 /// 승인을 실행에 쓴다. 부르는 쪽의 묶음 안에서 돈다: 뒤에서 실패하면 소비도 함께 되돌려진다.
 /// 순서와 오류는 [`Store::consume_approval`]과 같다.
 pub(crate) fn consume(
@@ -260,6 +274,9 @@ pub(crate) fn consume(
     if at.0 >= now.expires_at.0 {
         return Err(StoreError::ApprovalExpired { id });
     }
+    if made_before_restore(conn, now.created_at)? {
+        return Err(StoreError::ApprovalExpired { id });
+    }
     if now.fingerprint != approval.fingerprint {
         return Err(StoreError::ApprovalFingerprintMismatch { id });
     }
@@ -273,4 +290,21 @@ pub(crate) fn consume(
         return Err(StoreError::ApprovalAlreadyConsumed { id });
     }
     get(conn, id)
+}
+
+/// 기다림인 승인을 모두 만료로 닫는다(`resolved_at = at`). 닫은 번호를 번호 순서로 준다.
+/// 이미 답이 난 승인은 건드리지 않는다. 되살리기 표시([`Store::mark_restored`])가 쓴다.
+pub(crate) fn expire_pending(
+    conn: &Connection,
+    at: UnixMillis,
+) -> Result<Vec<ApprovalId>, StoreError> {
+    let mut stmt = conn.prepare(
+        "UPDATE approvals SET status = 'expired', resolved_at = ?1
+         WHERE status = 'pending' RETURNING id",
+    )?;
+    let mut ids = stmt
+        .query_map([at.0], |row| row.get(0).map(ApprovalId))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.sort();
+    Ok(ids)
 }
