@@ -110,6 +110,42 @@
 1. **칸 이름에 이스케이프가 든 줄**(예: `{"\u0061t":1,"payload":2}`, `{"a\u0074":…}`)도 옛 봉투 판정이 접속 관문의 `serde_json`이 읽는 이름과 같다: 이스케이프를 푼 이름이 `at` · `payload`이면 그 이름으로 본다. 겹침 판정도 푼 이름으로 한다. 경계(`legacy_envelope_until`)와 목록(`legacy_envelope_seqs`)이 함께 따른다(규칙은 한 벌).
 2. **훑는 범위에 위 끝을 준다**: `Store::legacy_envelope_seqs_upto(after: u64, upto: u64, max: usize)` — `after`보다 크고 `upto` 이하인 옛 봉투 줄 번호만 본다(경계 뒤는 늘 빠진다). 경계 앞에 옛 봉투가 아닌 줄이 많아도 한 쪽을 읽을 때 경계까지 훑지 않는다. 기존 `legacy_envelope_seqs`는 그대로 둔다.
 
+## 9차 작업: 템플릿 · 승인 · 개선안 · 모의계좌 스냅샷 · 접속 키 표 (로드맵 W1, 2026-11-16 결정)
+
+근거: `dev.md` E36 · M3 · M4 · M5 · M6 · V6 · V29 · V30, `docs/dev/roadmap.md`. 원본 근거: 승인 상태 기계 `docs/research/triggers-approval-memory-deep.md` 3.2 · 3.4, 접속 기록 `docs/research/remote-access-security.md` 4.5.
+아래를 **테스트로 먼저 쓰고** 구현한다. 공개 API는 더하기만 한다. 스키마는 새 버전으로 올린다(옛 파일을 지우지 않고 올린다).
+
+1. **템플릿 표와 전이 강제** (M3 · E36 · V29 · V30): 템플릿 값(판 번호 붙은 JSON)과 상태(모의중 · 승격대기 · 실전중 · 멈춤). 실전중은 승인 번호와 기준 통과 기록이 함께 있어야 한다. 전체 정지가 되면 실전중 템플릿은 멈춤으로.
+2. **승인 표** (M5): 상태 CHECK, 기다림에서 한 번만 바뀜, 한 번만 소비(`consumed_at`).
+3. **개선안 표** (M4): 제안 · 냉각중 · 반영 · 거절과 반영 시각.
+4. **모의계좌 스냅샷 칸** (V6): `pi-paper`의 상태 값을 그대로 넣고 꺼내기.
+5. **접속 키 해시 · 소금 · 세대** (M6): 값이 아닌 해시만 둔다.
+
+이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): E36 M3 M4 V29 V30
+
+## 10차 작업: 에이전트 세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료 (로드맵 W2)
+
+근거: `dev.md` C11 · V36 · M2, 원본 근거 `docs/research/agent-runtime-deep.md` 1 · 7장, `docs/research/triggers-approval-memory-deep.md` 1.2.
+아래를 **테스트로 먼저 쓰고** 구현한다.
+
+1. 세션 · 메시지 · 팀 논의 방 로그(메시지는 도구를 부르기 전에 먼저 저장할 수 있게 한 번에 쓴다).
+2. 트리거 영수증 `(작업, 예정 시각)`과 실행 중 표시(하나만).
+3. 자료 Fact와 알게 된 시각(C11 · V36).
+
+이 차수의 필수 번호: C11 V36
+
+## 11차 작업: 지식 · 스냅샷 · 되살리기 표시 · 웹 푸시 구독 (로드맵 W3)
+
+근거: `dev.md` D10 · M7 · V51, 원본 근거 `docs/research/triggers-approval-memory-deep.md` 4.1 · 6.1.
+아래를 **테스트로 먼저 쓰고** 구현한다.
+
+1. FTS5 trigram 조각 · 임베딩 BLOB · 메타(먼저 rusqlite bundled 빌드에 FTS5가 켜져 있는지 확인한다).
+2. `snapshot_to(path)`: SQLite 백업 API로 한 파일에 뜬다.
+3. `mark_restored(at)`: 팀을 멈추고 기다리던 승인을 만료한다(V51).
+4. 웹 푸시 구독 표.
+
+이 차수의 필수 번호: D10 M7 V51
+
 ## 모양
 
 - `Store`는 `Clone + Send + Sync`이고 동기 API다(호출하는 쪽이 필요하면 `spawn_blocking`).

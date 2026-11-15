@@ -1,0 +1,37 @@
+# backup 모듈 (T19)
+
+크레이트 `pi-backup`, 폴더 `crates/backup/`. 구성 요소 A14. `pi-store`(11차의 스냅샷 API · `mark_restored`)와 `pi-secrets`(6차의 바이트 검사 · GitHub 토큰)를 쓴다.
+근거: `dev.md` D7 · C13 · E15 · E39 · N8 · V48 · V49 · V51 · V50, `spec.md` F9, `principles.md` P22.
+
+## 원본 동작 근거
+
+- SQLite 백업 API(WAL · SHM 빼기), manifest와 검증(경로 탈출 · 빠진 것 · 온전함), 깨지면 아무것도 쓰지 않음, 보존 일 7 · 주 4 · 월 12, 올리기 순서, 빈 폴더에만 되살리기: `docs/research/triggers-approval-memory-deep.md` 6.1 · 6.2 · 6.3, `docs/research/hermes-agent.md` 7.1 · 7.5, `docs/research/deskrpg.md` 5-1 · 5-2.
+- 의도해서 다름: age 암호화와 비밀 빼기(D7 · `docs/research/remote-access-security.md` 6.3), 되살린 뒤 멈춘 상태(F9).
+
+## 만드는 것 (1차)
+
+1. 스냅샷을 임시 폴더에 뜬다.
+2. manifest(판 번호 · 파일 · SHA-256)를 만든다.
+3. 등록된 비밀 값(그대로 · URL · Base64)이 들어 있으면 올리지 않는다(E39). 키 파일은 처음부터 대상이 아니다.
+4. age 수신자 공개키로 암호화한다.
+5. GitHub contents API로 올린다(기본 주소는 인자) → 크기를 확인한다 → 임시 파일을 지운다. 비공개 저장소 이름과 fine-grained 토큰은 사용자가 화면에서 등록한다(결정 2026-11-16 23번).
+6. 보존 규칙을 적용한다(로컬과 원격 같게 7 · 4 · 12).
+7. 실패하면 기록하고, 다음 마감에 다시 하고, 알림 요구를 낸다(E15).
+8. 되살리기(V51)
+   - 빈 폴더에만 한다.
+   - 쓰기 전에 검증한다.
+   - 비밀키 identity는 인자로만 받고 남기지 않는다.
+   - 끝나면 `mark_restored`를 불러 팀을 멈추고 기다리던 승인을 만료한다.
+9. 마지막 성공 시각을 기록한다.
+
+## 하지 않는 것
+
+일정(trigger), 키 다시 등록 화면(server), git CLI.
+
+## 테스트 주의
+
+GitHub는 로컬 가짜 서버로만 한다. age 키는 테스트 안에서 만든다. 시험용 키 글자를 DB에 일부러 넣어 거부되는지 본다(V49 · E39).
+
+## 필수 번호
+
+D7 C13 E15 E39 N8 V48 V49 V51 P22

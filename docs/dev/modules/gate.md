@@ -2,6 +2,8 @@
 
 크레이트 `pi-gate`(폴더 `crates/gate/`)와 실행 파일 `price-inha`(폴더 `crates/server/`).
 구성 요소 A2 접속 관문과 실시간 연결, 그리고 조립. `pi-gate`는 `pi-store`만 쓸 수 있고, `price-inha`는 모든 모듈을 쓸 수 있다.
+
+**2026-11-16부터 조립(`crates/server`, 패키지 `price-inha`)은 server 모듈(`docs/dev/modules/server.md`)로 옮겼다(사용자 승인).** 아래 1~8차의 `price-inha` 작업 기록은 그대로 둔다. 9차부터 이 모듈은 `crates/gate/`만 맡는다. 필수 번호도 `crates/gate/tests`가 확인하는 것으로 좁혔고, 조립의 번호는 server.md로 옮겼다.
 근거: `dev.md`의 D2 · D11 · C2 · C15 · E3 · M6, `spec.md`의 F8 기본 흐름과 F7 1 · 1b.
 
 store · secrets · ai · market 모듈이 끝난 뒤에 한다. 그 모듈들의 공개 API를 읽고 그대로 쓴다(고치지 않는다).
@@ -162,11 +164,21 @@ store · secrets · ai · market 모듈이 끝난 뒤에 한다. 그 모듈들�
 4. **다시 보내기는 store 8차의 `legacy_envelope_seqs_upto`로 읽은 쪽의 마지막 번호까지만 훑는다.**
 5. 시작 때 CLI 확인을 기다리는 `CLI_CHECK_GRACE`(800ms)의 까닭(잠긴 6차 재시작 테스트와 7차 11번의 절충)을 문서 주석에 적는다.
 
-## 9차 후보 (8차 검토의 참고 — 아직 시작하지 않음)
+## 9차 작업: T17 접속 키 · 잠금 · 접속 기록 (2026-11-16 결정, store 9차 뒤에 시작)
 
-1. `App::shutdown` 문서 주석에 "도는 AI 고르기의 CLI 확인(최대 30초)만큼 끄기가 늦어질 수 있다"는 상한을 적는다.
-2. 다시 보내기의 `legacy_envelope_seqs_upto` 범위 맞춤을 관문 쪽 테스트로도 확인한다.
-3. 8차부터 종목 파일을 읽지 못하거나 모양이 틀리면(손으로 만든 빈 목록 포함) 시작을 막는다 — 화면 · API로는 빈 목록을 저장할 수 없으므로 손으로 고친 경우만 해당. README에 한 줄 알린다.
+근거: `dev.md` C1 · M6 · E1 · E2 · N3 · V37~V41, 대조표 `docs/dev/conformance.md` D6 · D17 · D21 · D22. 원본 근거: `docs/research/triggers-approval-memory-deep.md` 5.1~5.4, `docs/research/remote-access-security.md` 4.5 · 4.6, `docs/research/deskrpg.md` 7-1, `docs/research/hermes-agent.md` 5.2.
+아래를 **테스트로 먼저 쓰고** 구현한다. `crates/gate/`만 고친다(조립 쪽 연결은 server 차수가 한다).
+
+1. **루프백 밖은 접속 키로 세션을 만든다** (C1 · V37 · V38): 접속 키는 프로그램이 높은 엔트로피(약 100비트)로 만들어 한 번만 보여 주고, 소금을 친 SHA-256으로 store 9차의 칸에 둔다(결정 2026-11-16 8번). 루프백은 지금처럼 키 없이 받는다. 프록시를 거친 요청(전달 헤더가 있는 요청)은 루프백으로 치지 않는다.
+2. **5번 틀리면 15분 그 기기를 막는다** (N3 · V39, 결정 9번): 잠금은 메모리에만 두고, 이미 들어온 세션은 유지한다. 루프백은 막지 않고 늦춘다. 그 컴퓨터에서 풀 수 있다.
+3. **잠금 알림 포트** (E2): 잠기면 알림 요구를 포트로 낸다(보내기는 notify).
+4. **키를 바꾸면 세대가 올라 다른 세션이 끊긴다** (V41).
+5. **접속 기록에 기기 · 시각을 남긴다** (V40).
+6. **원격 세션은 Max-Age 30일**, SameSite=Strict 그대로(결정 10번, 대조표 D6).
+7. **대조표의 모르고 다름**: D17(10초 ping), D21(보안 응답 헤더), D22.
+8. **8차 검토의 참고**: 다시 보내기의 `legacy_envelope_seqs_upto` 범위 맞춤을 관문 쪽 테스트로 확인한다. (`App::shutdown`의 끄기 상한 문서 주석은 server 1차가 한다.)
+
+이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): C1 E1 E2 N3 V37 V38 V39 V40 V41
 
 ## 하지 않는 것
 
@@ -178,4 +190,4 @@ store · secrets · ai · market 모듈이 끝난 뒤에 한다. 그 모듈들�
 
 ## 필수 번호
 
-D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
+D2 D11 C2 C15 E3 M6 V6 N8 E38 C3 C16
