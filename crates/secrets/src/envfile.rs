@@ -10,7 +10,8 @@
 
 use zeroize::Zeroizing;
 
-use crate::{Credentials, ENV_FILE, KeyKind, SecretString, SecretsError};
+use crate::kind::Entry;
+use crate::{Credentials, ENV_FILE, SecretString, SecretsError};
 
 /// 줄의 이름(`=` 앞)과 값 자리(`=` 뒤). 빈 줄 · 설명 줄 · `=`가 없는 줄은 `None`.
 fn split_line(line: &str) -> Option<(&str, &str)> {
@@ -97,12 +98,16 @@ fn encode_value(value: &str) -> Zeroizing<String> {
     out
 }
 
-/// `.env` 글에서 한 종류의 값을 읽는다.
+/// `.env` 글에서 한 묶음(종류 · 칸 · VAPID)의 값을 읽는다.
 ///
 /// - 그 종류의 칸이 하나라도 없거나 비었으면 등록되지 않은 것이다(`Ok(None)`).
 /// - 그 종류의 줄이 깨졌으면 [`SecretsError::Corrupt`]. 다른 종류의 줄은 보지 않는다.
 /// - 같은 이름이 여러 번 나오면 마지막 줄이 남는다.
-pub(crate) fn read_kind(text: &str, kind: KeyKind) -> Result<Option<Credentials>, SecretsError> {
+pub(crate) fn read_kind(
+    text: &str,
+    entry: impl Into<Entry>,
+) -> Result<Option<Credentials>, SecretsError> {
+    let kind = entry.into();
     let mut found = Credentials::new();
     let mut complete = true;
     for (&field, &env_name) in kind.fields().iter().zip(kind.env_names()) {
@@ -127,7 +132,12 @@ pub(crate) fn read_kind(text: &str, kind: KeyKind) -> Result<Option<Credentials>
 /// `.env` 글에서 한 종류의 줄을 새 값으로 바꾼 글을 만든다.
 /// 다른 줄(다른 종류 · 설명 · 모르는 이름)은 글자 그대로 둔다.
 /// `values`는 그 종류의 칸을 모두 가진 것이어야 한다(없는 칸은 쓰지 않는다).
-pub(crate) fn replace_kind(text: &str, kind: KeyKind, values: &Credentials) -> Zeroizing<String> {
+pub(crate) fn replace_kind(
+    text: &str,
+    entry: impl Into<Entry>,
+    values: &Credentials,
+) -> Zeroizing<String> {
+    let kind = entry.into();
     let names = kind.env_names();
     let mut out = Zeroizing::new(String::with_capacity(text.len() + 256));
     for line in text.lines() {
@@ -151,6 +161,7 @@ pub(crate) fn replace_kind(text: &str, kind: KeyKind, values: &Credentials) -> Z
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::KeyKind;
 
     fn round_trip(value: &str) -> String {
         parse_value(&encode_value(value)).unwrap().to_string()

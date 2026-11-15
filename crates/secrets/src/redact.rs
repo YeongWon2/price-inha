@@ -128,6 +128,15 @@ impl Pattern {
         self.raw.as_slice() == value.as_bytes()
     }
 
+    /// 바이트 안에 이 값이 그대로 · URL 인코딩 · Base64로 들어 있는가. 바이트는 UTF-8이 아니어도 된다.
+    pub(crate) fn occurs_in(&self, bytes: &[u8]) -> bool {
+        let raw = (0..bytes.len()).any(|start| match_at(bytes, start, &self.raw).is_some());
+        raw || self.b64.iter().any(|core| {
+            let needle = core.text.as_bytes();
+            bytes.windows(needle.len()).any(|window| window == needle)
+        })
+    }
+
     /// 이 값이 든 자리들을 `spans`에 더한다.
     fn find_in(&self, text: &str, spans: &mut Vec<(usize, usize)>) {
         let bytes = text.as_bytes();

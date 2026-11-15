@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use crate::kind::Entry;
 use crate::{Credentials, KeyKind, KeySlot, MIN_SECRET_CHARS, SecretsError, VerifyFailure};
 
 /// 그 키로 실제로 닿는지 확인한다 (C3 · E4).
@@ -25,10 +26,10 @@ pub trait Verifier: Send + Sync {
     /// 확인기 구현은 그대로 컴파일된다.
     fn verify_slot(
         &self,
-        slot: KeySlot,
-        values: &Credentials,
+        _slot: KeySlot,
+        _values: &Credentials,
     ) -> impl Future<Output = Result<(), VerifyFailure>> + Send {
-        async { todo!() }
+        async { Err(VerifyFailure::Unreachable) }
     }
 }
 
@@ -39,10 +40,13 @@ fn is_forbidden(c: char) -> bool {
 
 /// 등록 전 칸 검사. 확인기를 부르기 전에 한다.
 ///
-/// 순서: 그 종류에 없는 칸 → (칸마다, [`KeyKind::fields`] 순서로) 빠진 칸 → 못 쓰는 글자 → 짧은 값.
+/// 순서: 그 묶음에 없는 칸 → (칸마다, [`KeyKind::fields`] · [`KeySlot::fields`] 순서로) 빠진 칸 → 못 쓰는 글자 → 짧은 값.
 /// 오류에는 `&'static str` 칸 이름만 싣는다.
-pub(crate) fn check_fields(kind: KeyKind, values: &Credentials) -> Result<(), SecretsError> {
-    let fields = kind.fields();
+pub(crate) fn check_fields(
+    entry: impl Into<Entry>,
+    values: &Credentials,
+) -> Result<(), SecretsError> {
+    let fields = entry.into().fields();
     if values
         .field_names()
         .iter()

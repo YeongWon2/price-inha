@@ -5,6 +5,7 @@
 //! `match`하므로 변형을 더하면 깨진다. 그래서 새 칸은 따로 [`KeySlot`]으로 두고, 등록 · 읽기 ·
 //! 상태 보기도 따로 둔다. 확인 규칙은 다른 키와 같다(칸 검사 → 가리기 대상에 넣기 → 확인 → 원자 쓰기).
 
+use crate::kind::Entry;
 use crate::{Credentials, SecretStore, SecretString, SecretsError, Verifier};
 
 /// 6차에 더한 칸 (D9 · D7).
@@ -74,7 +75,13 @@ impl SecretStore {
         values: Credentials,
         verifier: &V,
     ) -> Result<SlotRegistered, SecretsError> {
-        todo!()
+        let pending = self.begin_entry(slot.into(), values)?;
+        verifier
+            .verify_slot(slot, pending.values())
+            .await
+            .map_err(SecretsError::VerifyFailed)?;
+        self.finish_entry(pending)?;
+        Ok(SlotRegistered { slot })
     }
 
     /// 등록된 칸을 읽는다. 없으면 `None`. 값은 [`SecretString`]에 담겨 나온다.
@@ -82,12 +89,19 @@ impl SecretStore {
     /// 쓰는 곳: 자료 어댑터(출처별 키), 백업기(GitHub 토큰). 키 파일에 손으로 적힌
     /// [`MIN_SECRET_CHARS`](crate::MIN_SECRET_CHARS) 미만 값은 등록되지 않은 것으로 본다.
     pub fn read_slot(&self, slot: KeySlot) -> Result<Option<Credentials>, SecretsError> {
-        todo!()
+        let _guard = self.lock_files();
+        self.read_entry_locked(slot.into())
     }
 
     /// 칸별 등록 여부([`KeySlot::ALL`] 순서). 값 · 값의 일부 · 길이는 없다.
     pub fn slot_status(&self) -> Result<Vec<SlotStatus>, SecretsError> {
-        todo!()
+        KeySlot::ALL
+            .into_iter()
+            .map(|slot| {
+                let registered = self.is_registered(slot.into())?;
+                Ok(SlotStatus { slot, registered })
+            })
+            .collect()
     }
 
     /// 웹 푸시 VAPID 비밀키 (결정 2026-11-16 24번).
@@ -103,7 +117,21 @@ impl SecretStore {
         &self,
         generate: impl FnOnce() -> SecretString,
     ) -> Result<SecretString, SecretsError> {
-        todo!()
+        let field = Entry::VAPID_FIELD;
+        // 읽기 · 만들기 · 저장을 한 잠금 안에서 한다(함께 처음 켜져도 값이 둘이 되지 않게).
+        let _guard = self.lock_files();
+        if let Some(found) = self.read_entry_locked(Entry::Vapid)?
+            && let Some(value) = found.get(field)
+        {
+            return Ok(value.clone());
+        }
+        let value = generate();
+        let mut values = Credentials::new();
+        values.set(field, value.clone());
+        // 칸 검사(짧은 값 · 못 쓰는 글자)에 걸리면 저장하지 않는다.
+        let pending = self.begin_entry(Entry::Vapid, values)?;
+        self.finish_entry_locked(pending)?;
+        Ok(value)
     }
 
     /// 바이트 안에 등록된 비밀 값이 들어 있는가 (E39 · N8). 값은 돌려주지 않는다.
@@ -112,6 +140,6 @@ impl SecretStore {
     /// VAPID 비밀키)를 그대로 · URL 인코딩 · Base64 모양으로 찾는다. 바이트가 UTF-8이 아니어도 된다
     /// (예: SQLite 스냅샷). 백업기는 이것이 `true`면 올리지 않는다.
     pub fn contains_registered(&self, bytes: &[u8]) -> bool {
-        todo!()
+        self.targets_found_in(bytes)
     }
 }

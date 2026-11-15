@@ -1,6 +1,6 @@
 //! 가리기 대상: [`SecretStore::redact`](crate::SecretStore::redact)가 가릴 값들을 칸마다 쥔다 (N8 · N1).
 //!
-//! 칸(종류 + 칸 이름)마다 네 가지를 쥔다.
+//! 칸(묶음 + 칸 이름)마다 네 가지를 쥔다.
 //! - 지금 값: 이 보관소가 마지막으로 저장했거나 키 파일에서 읽은 값. 언제나 가려진다.
 //! - 앞 값: 지금 값이 되기 전의 값들. 새것부터 [`REDACT_PREVIOUS_KEPT`]개까지.
 //! - 확인 중인 값: 확인기가 돌고 있거나 저장하고 있는 값. 끝날 때까지 언제나 가려진다.
@@ -11,8 +11,9 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use crate::kind::Entry;
 use crate::redact::{Pattern, redact_all};
-use crate::{Credentials, KeyKind, REDACT_PREVIOUS_KEPT};
+use crate::{Credentials, REDACT_PREVIOUS_KEPT};
 
 /// 칸마다 가리기 대상에 남겨 두는 **확인 · 저장에 실패한 값**의 개수.
 ///
@@ -116,17 +117,18 @@ impl Slot {
 /// 보관소 하나의 가리기 대상 전부.
 #[derive(Default)]
 pub(crate) struct Targets {
-    slots: HashMap<(KeyKind, &'static str), Slot>,
+    slots: HashMap<(Entry, &'static str), Slot>,
 }
 
 impl Targets {
-    /// `values`에 든 `kind`의 칸마다 `apply`를 부른다. 그 종류에 없는 칸은 건너뛴다.
+    /// `values`에 든 `entry`의 칸마다 `apply`를 부른다. 그 종류에 없는 칸은 건너뛴다.
     fn each(
         &mut self,
-        kind: KeyKind,
+        entry: impl Into<Entry>,
         values: &Credentials,
         mut apply: impl FnMut(&mut Slot, &str),
     ) {
+        let kind = entry.into();
         for &field in kind.fields() {
             if let Some(value) = values.get(field) {
                 apply(self.slots.entry((kind, field)).or_default(), value.expose());
@@ -135,19 +137,24 @@ impl Targets {
     }
 
     /// 키 파일에 있는 값(열 때 읽었거나, 읽어서 내준 값)을 그 칸의 지금 값으로 삼는다.
-    pub(crate) fn set_current(&mut self, kind: KeyKind, values: &Credentials) {
+    pub(crate) fn set_current(&mut self, kind: impl Into<Entry>, values: &Credentials) {
         self.each(kind, values, Slot::set_current);
     }
 
     /// 확인을 시작하는 값을 가리기 대상에 넣는다. 확인기를 부르기 **전에** 부른다.
-    pub(crate) fn begin(&mut self, kind: KeyKind, values: &Credentials) {
+    pub(crate) fn begin(&mut self, kind: impl Into<Entry>, values: &Credentials) {
         self.each(kind, values, |slot, value| {
             slot.pending.extend(Pattern::new(value));
         });
     }
 
     /// [`Targets::begin`]으로 넣은 값을 결과에 맞는 자리로 옮긴다.
-    pub(crate) fn settle(&mut self, kind: KeyKind, values: &Credentials, outcome: Outcome) {
+    pub(crate) fn settle(
+        &mut self,
+        kind: impl Into<Entry>,
+        values: &Credentials,
+        outcome: Outcome,
+    ) {
         self.each(kind, values, |slot, value| slot.settle(value, outcome));
     }
 
@@ -155,12 +162,20 @@ impl Targets {
     pub(crate) fn redact(&self, text: &str) -> String {
         redact_all(self.slots.values().flat_map(Slot::items), text)
     }
+
+    /// 바이트 안에 가리기 대상 값이 하나라도 든가.
+    pub(crate) fn found_in(&self, bytes: &[u8]) -> bool {
+        self.slots
+            .values()
+            .flat_map(Slot::items)
+            .any(|item| item.occurs_in(bytes))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::REDACTED;
+    use crate::{KeyKind, REDACTED};
 
     fn data(value: &str) -> Credentials {
         Credentials::new().with("api_key", value)

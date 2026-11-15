@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock};
 
+use crate::kind::Entry;
 use crate::targets::{Outcome, Targets};
 use crate::verify::check_fields;
 use crate::{
@@ -40,11 +41,12 @@ pub struct SecretStore {
     targets: RwLock<Targets>,
 }
 
-/// 키 파일에서 한 종류를 읽는다. 읽기 전에 파일 권한을 좁힌다.
+/// 키 파일에서 한 묶음(종류 · 칸 · VAPID)을 읽는다. 읽기 전에 파일 권한을 좁힌다.
 ///
 /// 칸 하나라도 [`MIN_SECRET_CHARS`]보다 짧으면(손으로 고친 파일) 등록되지 않은 것으로 본다(`Ok(None)`):
 /// 가릴 수 없는 값을 내주지 않는다.
-fn load_kind(dir: &Path, kind: KeyKind) -> Result<Option<Credentials>, SecretsError> {
+fn load_kind(dir: &Path, entry: impl Into<Entry>) -> Result<Option<Credentials>, SecretsError> {
+    let kind = entry.into();
     let file = kind.file_name();
     let Some(text) = fsio::read_private(&dir.join(file), file)? else {
         return Ok(None);
@@ -61,15 +63,15 @@ fn load_kind(dir: &Path, kind: KeyKind) -> Result<Option<Credentials>, SecretsEr
 ///
 /// 저장까지 마친 것만 [`Pending::saved`]로 끝낸다. 그 밖의 길(확인 실패 · 저장 실패 ·
 /// 등록이 도중에 버려짐)은 모두 실패한 값으로 남아 계속 가려진다.
-struct Pending<'a> {
+pub(crate) struct Pending<'a> {
     store: &'a SecretStore,
-    kind: KeyKind,
+    kind: Entry,
     values: Credentials,
     outcome: Outcome,
 }
 
 impl<'a> Pending<'a> {
-    fn begin(store: &'a SecretStore, kind: KeyKind, values: Credentials) -> Self {
+    fn begin(store: &'a SecretStore, kind: Entry, values: Credentials) -> Self {
         store.targets_mut(|targets| targets.begin(kind, &values));
         Self {
             store,
@@ -77,6 +79,11 @@ impl<'a> Pending<'a> {
             values,
             outcome: Outcome::Failed,
         }
+    }
+
+    /// 확인 중인 값.
+    pub(crate) fn values(&self) -> &Credentials {
+        &self.values
     }
 
     /// 저장을 마쳤다: 값을 그 칸의 지금 값으로 올린다.
@@ -111,9 +118,9 @@ impl SecretStore {
         // 그 파일은 읽히지도 · 등록된 것으로 보이지도 · 고쳐지지도 않고, 깨져 있어도 상관없다.
         fsio::prepare_dir(&dir)?;
         let mut targets = Targets::default();
-        for kind in KeyKind::ALL {
-            match load_kind(&dir, kind) {
-                Ok(Some(values)) => targets.set_current(kind, &values),
+        for entry in Entry::all() {
+            match load_kind(&dir, entry) {
+                Ok(Some(values)) => targets.set_current(entry, &values),
                 Ok(None) | Err(SecretsError::Corrupt { .. }) => {}
                 Err(other) => return Err(other),
             }
@@ -157,17 +164,37 @@ impl SecretStore {
         values: Credentials,
         verifier: &V,
     ) -> Result<Registered, SecretsError> {
-        check_fields(kind, &values)?;
-        let pending = Pending::begin(self, kind, values);
+        let pending = self.begin_entry(kind.into(), values)?;
         verifier
-            .verify(kind, &pending.values)
+            .verify(kind, pending.values())
             .await
             .map_err(SecretsError::VerifyFailed)?;
+        self.finish_entry(pending)?;
+        Ok(Registered { kind })
+    }
+
+    /// 등록 앞부분: 칸 검사를 하고, 지나면 값을 가리기 대상에 넣는다(확인기를 부르기 전에).
+    pub(crate) fn begin_entry(
+        &self,
+        entry: Entry,
+        values: Credentials,
+    ) -> Result<Pending<'_>, SecretsError> {
+        check_fields(entry, &values)?;
+        Ok(Pending::begin(self, entry, values))
+    }
+
+    /// 등록 뒷부분: 확인을 지난 값을 원자 쓰기로 저장하고 그 칸의 지금 값으로 올린다.
+    pub(crate) fn finish_entry(&self, pending: Pending<'_>) -> Result<(), SecretsError> {
         // 저장과 "지금 값" 올리기를 한 잠금 안에서 한다(함께 도는 등록 · 읽기와 순서가 어긋나지 않게).
         let _guard = self.lock_files();
-        self.save(kind, &pending.values)?;
+        self.finish_entry_locked(pending)
+    }
+
+    /// [`SecretStore::finish_entry`]와 같다. [`SecretStore::lock_files`]를 잡고 부른다.
+    pub(crate) fn finish_entry_locked(&self, pending: Pending<'_>) -> Result<(), SecretsError> {
+        self.save(pending.kind, &pending.values)?;
         pending.saved();
-        Ok(Registered { kind })
+        Ok(())
     }
 
     /// 등록된 값을 읽는다. 등록되지 않았으면 `Ok(None)`.
@@ -178,6 +205,15 @@ impl SecretStore {
     /// `pi-ai` · `pi-market`이 자격을 읽을 때만 쓴다. 화면 · 응답으로 가는 길에서는 부르지 않는다.
     pub fn read(&self, kind: KeyKind) -> Result<Option<Credentials>, SecretsError> {
         let _guard = self.lock_files();
+        self.read_entry_locked(kind.into())
+    }
+
+    /// 묶음 하나를 읽고, 내준 값을 지금 값으로 가리기 대상에 올린다.
+    /// [`SecretStore::lock_files`]를 잡고 부른다.
+    pub(crate) fn read_entry_locked(
+        &self,
+        kind: Entry,
+    ) -> Result<Option<Credentials>, SecretsError> {
         let found = load_kind(&self.dir, kind)?;
         if let Some(values) = &found {
             // 파일이 바깥에서 바뀌었더라도, 내준 값은 그 칸의 지금 값으로 가릴 대상이 된다.
@@ -193,7 +229,7 @@ impl SecretStore {
         KeyKind::ALL
             .into_iter()
             .map(|kind| {
-                let registered = load_kind(&self.dir, kind)?.is_some();
+                let registered = self.is_registered(kind.into())?;
                 Ok(KeyStatus { kind, registered })
             })
             .collect()
@@ -218,8 +254,21 @@ impl SecretStore {
             .redact(text)
     }
 
+    /// 묶음 하나가 등록됐는가([`SecretStore::read`]가 값을 내주는가).
+    pub(crate) fn is_registered(&self, entry: Entry) -> Result<bool, SecretsError> {
+        Ok(load_kind(&self.dir, entry)?.is_some())
+    }
+
+    /// 바이트 안에 가리기 대상 값이 든가.
+    pub(crate) fn targets_found_in(&self, bytes: &[u8]) -> bool {
+        self.targets
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .found_in(bytes)
+    }
+
     /// 키 파일 잠금을 잡는다.
-    fn lock_files(&self) -> MutexGuard<'_, ()> {
+    pub(crate) fn lock_files(&self) -> MutexGuard<'_, ()> {
         self.write_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -232,7 +281,7 @@ impl SecretStore {
 
     /// 한 종류를 키 파일에 바꿔 쓴다. 같은 파일의 다른 내용은 그대로 둔다.
     /// [`SecretStore::lock_files`]를 잡고 부른다.
-    fn save(&self, kind: KeyKind, values: &Credentials) -> Result<(), SecretsError> {
+    fn save(&self, kind: Entry, values: &Credentials) -> Result<(), SecretsError> {
         fsio::prepare_dir(&self.dir)?;
         let file = kind.file_name();
         let path = self.dir.join(file);
