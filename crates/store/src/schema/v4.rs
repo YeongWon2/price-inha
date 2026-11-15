@@ -11,6 +11,7 @@
 //! 트랜잭션 안이라 중간에 실패하면 파일은 이전 전 그대로이고, 고친 뒤 다시 열면 같은 값을 정한다.
 //! 이미 나간 버전 1 ~ 3의 SQL은 고치지 않는다.
 
+use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::StoreError;
@@ -46,11 +47,15 @@ BEGIN SELECT RAISE(ABORT, 'legacy_boundary is fixed'); END;
 /// 꺼낸다)와, 적힌 글자(`->`가 원래 글자를 돌려준다)가 `-0`이 아닌지를 더 본다. 맨 위 칸의 이름이
 /// 겹친 객체는 `json_each`가 겹친 칸도 하나씩 세므로 두 칸 조건에서 이미 빠진다.
 /// (이 SQL도 버전 3 → 4로 올리는 순간에만 돈다. 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
+///
+/// 6차에서 좁힘(2026-11-15): SQLite `json_valid`는 짝 없는 서로게이트 이스케이프(`"\ud800"`)가
+/// 든 글자도 JSON으로 받지만 `serde_json`(접속 관문)은 거부한다. 그래서 이 SQL은 후보 줄만 번호가
+/// 큰 순서로 내고, [`boundary_before`]가 `serde_json`으로 읽히는 첫 줄을 경계로 고른다(관문과 같게).
 /// (바로잡음 2026-11-14: 처음 SQL은 시각 칸이 채워진 줄만 보고 칸 수를 세지 않았다. 버전 4는 이번
 /// 차수 안에서 아직 어느 실제 파일에도 쓰이지 않았으므로 버전 5를 따로 두지 않고 이 단계를 고친다.
 /// 이 SQL은 버전 3 → 4로 올리는 순간에만 돌고, 이미 버전 4인 파일의 경계는 바뀌지 않는다.)
 const V3_FILLED_ENVELOPES: &str = "
-SELECT MAX(seq) FROM events
+SELECT seq, payload FROM events
 WHERE CASE WHEN json_valid(payload) THEN
       json_type(payload) = 'object'
       AND (SELECT COUNT(*) FROM json_each(payload)) = 2
@@ -60,6 +65,7 @@ WHERE CASE WHEN json_valid(payload) THEN
       AND json_type(payload, '$.payload') IS NOT NULL
       AND (at IS NULL OR json_extract(payload, '$.at') = at)
   ELSE 0 END
+ORDER BY seq DESC
 ";
 
 /// 이전을 시작하기 전(아무 단계도 돌리기 전)에 경계 번호를 정한다. 규칙은
@@ -75,8 +81,28 @@ pub(super) fn boundary_before(conn: &Connection, version: u32) -> Result<Option<
             Ok(Some(last))
         }
         // 4차 이전에 버전 3이 된 파일.
-        _ => Ok(conn.query_row(V3_FILLED_ENVELOPES, [], |r| r.get(0))?),
+        _ => v3_last_envelope(conn),
     }
+}
+
+/// 이미 버전 3인 파일의 옛 봉투 줄 가운데 가장 큰 번호. SQL이 고른 후보 가운데 `serde_json`이
+/// 읽지 못하는 줄(짝 없는 서로게이트 이스케이프 등)은 접속 관문이 옛 봉투로 풀 수 없으므로 뺀다.
+fn v3_last_envelope(conn: &Connection) -> Result<Option<i64>, StoreError> {
+    let mut stmt = conn.prepare(V3_FILLED_ENVELOPES)?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let seq: i64 = row.get(0)?;
+        let readable = match row.get_ref(1)? {
+            ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+                .ok()
+                .is_some_and(|text| serde_json::from_str::<serde_json::Value>(text).is_ok()),
+            _ => false,
+        };
+        if readable {
+            return Ok(Some(seq));
+        }
+    }
+    Ok(None)
 }
 
 /// 모든 단계를 돌린 뒤: 경계 줄을 넣고 더 넣지 못하게 막는다.
