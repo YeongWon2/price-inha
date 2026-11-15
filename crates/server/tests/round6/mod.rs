@@ -413,7 +413,7 @@ async fn cli를_고르면_방식과_경로와_로그인_폴더를_종목처럼_�
         json!({ "method": "cli", "command": fake.bin_str(), "config_dir": login_dir }),
         "고른 방식 · 경로 · 로그인 폴더를 비밀이 아닌 파일에 둔다"
     );
-    let env_file = home.join(".env");
+    let env_file = home.join(pi_secrets::ENV_FILE);
     if env_file.exists() {
         let env_text = std::fs::read_to_string(&env_file).unwrap();
         assert!(!env_text.contains(fake.bin_str()), "키 파일에 넣지 않는다");

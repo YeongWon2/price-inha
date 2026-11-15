@@ -376,7 +376,7 @@ async fn 옛_구독_토큰_파일만_있으면_ai_연결이_갖춰진_것이_아
     let dir = tempfile::tempdir().unwrap();
     register_broker(dir.path(), &toss).await;
     std::fs::write(
-        dir.path().join("auth.json"),
+        dir.path().join(pi_secrets::LEGACY_AUTH_FILE),
         r#"{"access_token":"test-legacy-access-not-real"}"#,
     )
     .unwrap();
@@ -613,7 +613,7 @@ async fn ai_api_키를_등록하고_구독_토큰_항목은_받지_않는다() {
     assert!(!registered(&setup_status(addr).await, ITEM_AI));
     assert!(nothing_registered(dir.path()));
     assert!(
-        !dir.path().join("auth.json").exists(),
+        !dir.path().join(pi_secrets::LEGACY_AUTH_FILE).exists(),
         "구독 토큰 파일을 만들지 않는다"
     );
     assert_eq!(

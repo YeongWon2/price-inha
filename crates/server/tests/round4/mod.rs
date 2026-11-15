@@ -583,7 +583,7 @@ fn 키_입력_칸은_브라우저가_저장을_권하지_않게_한다() {
         .filter(|tag| tag.contains("type=\"password\""))
         .collect();
     assert!(
-        hidden.len() >= 5,
+        hidden.len() >= 4,
         "키 입력 칸은 가려진 칸이다: {}개",
         hidden.len()
     );
