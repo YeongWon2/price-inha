@@ -4,11 +4,18 @@
 //! 구독 토큰을 직접 다루지 않는다. 로그인은 CLI가 쥔다. 세션 이어 가기 · 오래 사는 프로세스 ·
 //! MCP 도구 넘기기는 하지 않는다.
 
+mod check;
+mod command;
+mod output;
+mod process;
+
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::sync::Semaphore;
 
 use crate::error::AiError;
 use crate::types::{AiProvider, CompletionRequest, CompletionResponse};
@@ -79,16 +86,37 @@ impl ClaudeCliConfig {
         base_env: Vec<(String, String)>,
         timeout: Duration,
     ) -> Self {
-        let _ = (command, work_dir, base_env, timeout);
-        todo!()
+        Self {
+            command,
+            config_dir: None,
+            work_dir,
+            base_env,
+            timeout,
+            max_concurrency: CLI_DEFAULT_MAX_CONCURRENCY,
+            max_output_bytes: CLI_DEFAULT_MAX_OUTPUT_BYTES,
+            kill_grace: CLI_DEFAULT_KILL_GRACE,
+            version_timeout: CLI_VERSION_TIMEOUT,
+            auth_timeout: CLI_AUTH_TIMEOUT,
+        }
     }
 }
 
 impl fmt::Debug for ClaudeCliConfig {
     /// `base_env`는 이름만 찍고 값은 찍지 않는다.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!()
+        let env_names: Vec<&str> = self.base_env.iter().map(|(k, _)| k.as_str()).collect();
+        f.debug_struct("ClaudeCliConfig")
+            .field("command", &self.command)
+            .field("config_dir", &self.config_dir)
+            .field("work_dir", &self.work_dir)
+            .field("base_env", &env_names)
+            .field("timeout", &self.timeout)
+            .field("max_concurrency", &self.max_concurrency)
+            .field("max_output_bytes", &self.max_output_bytes)
+            .field("kill_grace", &self.kill_grace)
+            .field("version_timeout", &self.version_timeout)
+            .field("auth_timeout", &self.auth_timeout)
+            .finish()
     }
 }
 
@@ -138,20 +166,21 @@ pub enum CliStatus {
 /// 공식 Claude Code CLI를 부르는 공급자. 구독은 이것으로 쓴다(D4).
 pub struct ClaudeCliProvider {
     config: ClaudeCliConfig,
+    /// 동시에 산 자식 수를 묶는 자리표.
+    slots: Arc<Semaphore>,
 }
 
 impl ClaudeCliProvider {
     /// 설정으로 공급자를 만든다. 아무것도 띄우지 않는다.
     pub fn new(config: ClaudeCliConfig) -> Self {
-        let _ = config;
-        todo!()
+        let slots = Arc::new(Semaphore::new(config.max_concurrency.max(1)));
+        Self { config, slots }
     }
 
     /// 설치(`--version`, 5초)와 로그인(`auth status --json`, 10초)을 차례로 확인한다.
     /// 모델을 부르지 않는다. 로그인 확인이 제한을 넘겨도 그 프로세스를 죽이지 않는다.
     pub async fn check(&self) -> CliStatus {
-        let _ = &self.config;
-        todo!()
+        check::check(&self.config).await
     }
 }
 
@@ -159,7 +188,19 @@ impl ClaudeCliProvider {
 impl AiProvider for ClaudeCliProvider {
     /// CLI를 한 번 띄워 응답을 받는다. 어떤 오류도 다시 부르지 않는다.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AiError> {
-        let _ = (&self.config, request);
-        todo!()
+        let Some(program) = self.config.command.clone() else {
+            return Err(AiError::NotConfigured);
+        };
+        let input = command::stdin_text(&request.messages);
+        if input.len() > CLI_MAX_STDIN_BYTES {
+            return Err(AiError::InvalidRequest {
+                message: format!("대화 글이 {CLI_MAX_STDIN_BYTES}바이트를 넘습니다"),
+            });
+        }
+        let deadline = tokio::time::Instant::now() + self.config.timeout;
+        let call = process::run_once(&self.config, &self.slots, &program, &request, input);
+        tokio::time::timeout_at(deadline, call)
+            .await
+            .unwrap_or(Err(AiError::Timeout))
     }
 }

@@ -99,7 +99,7 @@ pub(crate) fn parse_completion(body: &[u8]) -> Result<CompletionResponse, AiErro
     })
 }
 
-fn stop_reason(wire: String) -> StopReason {
+pub(crate) fn stop_reason(wire: String) -> StopReason {
     match wire.as_str() {
         "end_turn" => StopReason::EndTurn,
         "max_tokens" => StopReason::MaxTokens,
