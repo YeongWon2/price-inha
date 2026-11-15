@@ -537,9 +537,10 @@ async fn 전달_헤더로_루프백인_척해도_거부한다() {
     assert!(enters(&h.store).is_empty());
 }
 
-// 검증: C15, M6
+// 검증: C15, M6, C1, V37
 #[tokio::test]
-async fn 전달_헤더가_있어도_실제_상대_주소로_판단하고_기록한다() {
+async fn 루프백이어도_전달_헤더가_있으면_키_없이는_401이고_기록은_실제_상대_주소다() {
+    // 9차(2026-11-16 결정): 프록시(Tailscale Serve 등)를 거친 요청은 루프백으로 치지 않는다.
     let h = start().await;
     let (host, origin) = (host_of(h.addr), origin_of(h.addr));
     let reply = http(
@@ -554,7 +555,54 @@ async fn 전달_헤더가_있어도_실제_상대_주소로_판단하고_기록�
         ],
     )
     .await;
-    assert_eq!(reply.status, 204, "실제 상대가 루프백이면 들어온다");
+    assert_eq!(
+        reply.status, 401,
+        "전달 헤더가 있으면 키 없이 들어오지 못한다"
+    );
+    assert!(reply.session_cookie().is_none(), "세션을 주지 않는다");
+    assert!(enters(&h.store).is_empty(), "들어옴 기록이 없다");
+    assert!(
+        h.store
+            .access_log()
+            .unwrap()
+            .iter()
+            .all(|record| record.origin == "127.0.0.1"),
+        "기록이 남는다면 헤더 값이 아니라 실제 상대 주소다"
+    );
+}
+
+// 검증: C15, M6, C1, V38
+#[tokio::test]
+async fn 루프백이어도_전달_헤더가_있으면_접속_키로_들어오고_실제_상대_주소로_기록한다() {
+    let h = start().await;
+    let issued = h.server.access_keys().issue().await.unwrap();
+    let (host, origin) = (host_of(h.addr), origin_of(h.addr));
+    let body = json!({ pi_gate::ACCESS_KEY_FIELD: issued.key }).to_string();
+    let length = body.len().to_string();
+    let work = async {
+        let mut stream = TcpStream::connect(h.addr).await.unwrap();
+        let request = format!(
+            "POST {SESSION_PATH} HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\n\
+             X-Forwarded-For: 203.0.113.9\r\nX-Real-IP: 203.0.113.9\r\n\
+             Content-Type: application/json\r\nContent-Length: {length}\r\n\
+             Connection: close\r\n\r\n{body}"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        String::from_utf8_lossy(&raw).into_owned()
+    };
+    let text = tokio::time::timeout(STEP, work).await.unwrap();
+    assert!(
+        text.starts_with("HTTP/1.1 204"),
+        "키가 맞으면 들어온다: {}",
+        text.lines().next().unwrap_or("")
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("set-cookie: pi_session="),
+        "세션 쿠키를 준다"
+    );
     let records = enters(&h.store);
     assert_eq!(records.len(), 1);
     assert_eq!(

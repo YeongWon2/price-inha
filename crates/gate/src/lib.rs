@@ -16,9 +16,10 @@
 //!
 //! 1. **Host**: `Host` 헤더가 `<허용 이름>:<연 포트>`가 아니면 거부한다(4xx, DNS rebinding 방지).
 //!    허용 이름은 [`GateConfig::allowed_hosts`]다. 포트가 다르거나 없어도 거부한다.
-//! 2. **상대 주소**: 연결의 실제 상대 주소가 루프백이 아니면 401이다(접속 키는 T17).
-//!    `X-Forwarded-For` · `Forwarded` · `X-Real-IP` 같은 헤더는 읽지 않는다.
-//!    공개 경로([`GateBuilder::public_routes`])도 같다.
+//! 2. **상대 주소**: 그 컴퓨터의 요청(실제 상대 주소가 루프백이고 전달 헤더가 없다)이 아니면
+//!    원격 세션이 있어야 하고, 없으면 401이다. 원격 세션은 접속 키로 만든다(9차, [`AccessKeys`]).
+//!    `X-Forwarded-For` · `Forwarded` · `X-Real-IP` 같은 헤더의 값은 읽지 않는다. 있기만 해도 루프백으로 치지 않는다.
+//!    공개 경로([`GateBuilder::public_routes`])도 같다(세션을 만드는 경로만 키를 받는다).
 //! 3. **Origin**: 상태를 바꾸는 요청(`POST` · `PUT` · `PATCH` · `DELETE`)과 웹소켓 연결은
 //!    `Origin` 헤더가 `http://<Host 헤더 값>`과 같아야 한다. 다르거나 **없으면** 거부한다(4xx).
 //! 4. **세션**: 보호된 경로와 웹소켓은 세션 쿠키([`SESSION_COOKIE`])가 살아 있는 세션이어야 한다.
@@ -87,6 +88,7 @@
 //! [`Publisher::publish`]는 [`GateError::FrameTooLarge`]로 거부한다. 저장하지 않고 번호도 쓰지 않는다.
 //! [`Publisher::publish_transient`]는 돌려줄 오류가 없으므로 보내지 않고 버린다(기억하지도 않는다).
 
+mod access;
 mod error;
 mod frame;
 mod guard;
@@ -110,6 +112,12 @@ use tokio::task::JoinHandle;
 use crate::guard::Shared;
 use crate::hub::Hub;
 
+pub use access::{
+    ACCESS_KEY_ALPHABET, ACCESS_KEY_CHANGED, ACCESS_KEY_FIELD, ACCESS_KEY_LEN,
+    ACCESS_KEY_SALT_BYTES, ACCESS_KEY_WRONG, ACCESS_LOCKED, AccessKeys, DEFAULT_LOOPBACK_DELAY_MAX,
+    DEFAULT_LOOPBACK_DELAY_START, FORWARDING_HEADERS, IssuedKey, LOCKED_STATUS, LOCKOUT, LockAlert,
+    LockNotice, LockedDevice, MAX_KEY_FAILURES, NoLockAlert, REMOTE_SESSION_MAX_AGE,
+};
 pub use error::GateError;
 pub use guard::{LOCAL_ONLY_STATUS, Peer, local_only};
 pub use port::{Clock, NoRedaction, Redactor, SystemClock};
@@ -195,6 +203,12 @@ pub struct GateConfig {
     /// (5차) 들어온 프레임(pong)은 기한 판단보다 먼저 읽는다: 보낼 것이 밀려 있거나 프레임 쓰기가
     /// 느려 기한이 지난 뒤에 돌아왔어도, 그사이 pong이 들어와 있었으면 끊지 않는다.
     pub pong_timeout: Duration,
+    /// (9차) 그 컴퓨터가 키를 틀렸을 때 응답을 늦추는 시간의 시작값. 틀릴 때마다 두 배가 되고
+    /// [`GateConfig::loopback_delay_max`]에서 멈춘다(원본 OpenClaw). 그 컴퓨터는 잠그지 않는다.
+    /// 기본은 [`DEFAULT_LOOPBACK_DELAY_START`].
+    pub loopback_delay_start: Duration,
+    /// (9차) 그 컴퓨터를 늦추는 시간의 상한. 기본은 [`DEFAULT_LOOPBACK_DELAY_MAX`].
+    pub loopback_delay_max: Duration,
 }
 
 impl Default for GateConfig {
@@ -218,6 +232,8 @@ impl GateConfig {
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
             keepalive_interval: DEFAULT_KEEPALIVE_INTERVAL,
             pong_timeout: DEFAULT_PONG_TIMEOUT,
+            loopback_delay_start: DEFAULT_LOOPBACK_DELAY_START,
+            loopback_delay_max: DEFAULT_LOOPBACK_DELAY_MAX,
         }
     }
 }
@@ -269,6 +285,11 @@ impl GateBuilder {
     /// 아니면 거부이고 어느 경우에도 핸들러는 불리지 않는다.
     pub fn local_routes(self, routes: axum::Router) -> Self {
         self.protected_routes(local_only(routes))
+    }
+
+    /// 잠금 알림 자리를 끼운다(9차, E2). 기본은 [`NoLockAlert`].
+    pub fn lock_alert(self, alert: Arc<dyn LockAlert>) -> Self {
+        todo!()
     }
 
     /// 상대 주소를 바꿔 본다. **테스트용이다.** 실행 파일은 부르지 않는다.
@@ -431,6 +452,11 @@ impl GateServer {
         Publisher {
             hub: Arc::clone(&self.hub),
         }
+    }
+
+    /// 접속 키와 잠금을 다루는 손잡이(9차). 그 컴퓨터에서만 쓰게 잇는 것은 조립하는 쪽이다.
+    pub fn access_keys(&self) -> AccessKeys {
+        todo!()
     }
 
     /// 끈다: 새 연결을 받지 않고, 열린 실시간 연결을 닫고, 돌던 작업이 끝나기를 기다린다.
