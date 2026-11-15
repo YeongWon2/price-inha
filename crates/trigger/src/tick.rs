@@ -32,10 +32,12 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
         let delay = stopped_delay(trigger, now).await;
         return Ok(report(TickOutcome::Stopped, clock_jumped, delay));
     }
+    let calendars = load_calendars(trigger, now).await?;
+    // 시세는 쓰기 잠금 밖에서 받는다(그동안 끝난 깨우기의 반영이 막히지 않게, 3차 6번).
+    let (quotes, anomalies) = fetch_quotes(trigger, &calendars, now).await;
     // 끝난 깨우기의 반영과 이번 tick의 쓰기가 서로 덮어쓰지 않게 한다(깨우기 자체는 기다리지 않는다).
     let _writes = trigger.inflight.writes.lock().await;
 
-    let calendars = load_calendars(trigger, now).await?;
     let mut states = load_states(trigger).await?;
     for id in job_ids(trigger) {
         if !states.contains_key(id) {
@@ -45,9 +47,9 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
     }
 
     let mut firings = Vec::new();
-    let revived = mem::take(&mut *lock(&trigger.revived));
+    // 되살릴 회차는 영수증을 열 때까지 남겨 둔다(tick이 중간에 빠져도 잃지 않게, 3차 3번).
+    let revived = lock(&trigger.revived).clone();
     plan_schedules(trigger, &calendars, &mut states, now, revived, &mut firings).await?;
-    let (quotes, anomalies) = fetch_quotes(trigger, &calendars, now).await;
     plan_conditions(trigger, &quotes, &mut states, now, &mut firings).await?;
 
     let mut errors = Vec::new();
@@ -84,9 +86,14 @@ async fn open_all(
     let store = &trigger.ports.store;
     let mut opened = Vec::new();
     for mut firing in firings {
-        firing.state.pending_slot = Some(firing.key.slot);
+        // 되살린 회차는 영수증과 함께 적으므로 더 기다리는 회차가 아니다(3차 5번).
+        firing.state.pending_slot = (!firing.revived).then_some(firing.key.slot);
         let (job, slot) = (&firing.key.job, firing.key.slot);
-        match store.save_and_open(&firing.state, &firing.key, now).await {
+        let result = store.save_and_open(&firing.state, &firing.key, now).await;
+        if firing.revived && matches!(result, Ok(OpenReceipt::Opened | OpenReceipt::Duplicate)) {
+            forget_revived(trigger, &firing.key);
+        }
+        match result {
             Ok(OpenReceipt::Opened) => {
                 states.insert(job.clone(), firing.state.clone());
                 match store.mark_delivery_started(&firing.key).await {
@@ -110,14 +117,16 @@ async fn open_all(
             }
             Err(error) => {
                 tracing::warn!(%job, %slot, %error, "상태와 영수증을 적지 못해 이번 발사에서 뺀다");
-                if firing.revived {
-                    lock(&trigger.revived).push(firing.key);
-                }
                 errors.push(error);
             }
         }
     }
     opened
+}
+
+/// 영수증을 연(또는 이미 있던) 되살린 회차를 목록에서 지운다.
+fn forget_revived(trigger: &Trigger, key: &ReceiptKey) {
+    lock(&trigger.revived).retain(|revived| revived != key);
 }
 
 fn report(outcome: TickOutcome, clock_jumped: bool, next_delay: Duration) -> TickReport {
@@ -193,6 +202,8 @@ async fn plan_schedules(
         for key in take_revived(&mut revived, &job.id) {
             if state.disabled.is_none() {
                 firings.push(revived_firing(job, state, key));
+            } else {
+                forget_revived(trigger, &key);
             }
         }
         let plan = plan_schedule(job, state, calendar, &trigger.config.times, now);
@@ -427,6 +438,10 @@ fn next_delay(
             }
         };
         if let Some(at) = schedule_wait(job, state, calendar, &trigger.config.times, now) {
+            // 같은 작업이 실행 중이라 기한으로 남은 회차는 끝난 뒤에 나가므로 대기 계산에서 뺀다(3차 4번).
+            if at <= now && trigger.inflight.is_running(&job.id) {
+                continue;
+            }
             let until = at.signed_duration_since(now).to_std().unwrap_or_default();
             delay = delay.min(until);
         }

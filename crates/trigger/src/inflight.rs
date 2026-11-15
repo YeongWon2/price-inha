@@ -3,6 +3,7 @@
 //! tick은 깨우기를 대상마다 따로 띄우고 끝나기를 기다리지 않는다. 띄운 쪽이 끝나면 작업 상태를 고치고
 //! (연속 실패 수 · 물러서기 · 끄기 · 다시 걸기 상태) 영수증을 닫는다. 실행 중 영수증이 같은 작업의 중복을 막는다.
 
+use std::collections::HashMap;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,9 +13,9 @@ use tokio::task::JoinHandle;
 
 use crate::engine::lock;
 use crate::{
-    AUTO_DISABLE_AFTER, Alert, AlertReason, ConditionMemory, DisableReason, Error, Finished,
-    JobState, Ports, ReceiptKey, ReceiptStatus, SettleReport, StoreError, Target, Trigger,
-    TriggerEvent, TriggerStore, Wake, error_backoff,
+    AUTO_DISABLE_AFTER, Alert, AlertReason, ConditionMemory, DisableReason, Drained, Error,
+    Finished, JobId, JobState, Ports, ReceiptKey, ReceiptStatus, SettleReport, StoreError, Target,
+    Trigger, TriggerEvent, TriggerStore, Wake, error_backoff,
 };
 
 /// 발사하기로 한 작업 하나.
@@ -36,6 +37,8 @@ pub(crate) struct InFlight {
     /// tick의 상태 쓰기와 끝난 결과의 반영을 하나씩만 한다(서로의 상태를 덮어쓰지 않게).
     pub(crate) writes: tokio::sync::Mutex<()>,
     count: AtomicUsize,
+    /// 띄운 깨우기에 묶여 아직 끝나지 않은 작업들(작업마다 묶인 깨우기 수).
+    jobs: Mutex<HashMap<JobId, usize>>,
     handles: Mutex<Vec<JoinHandle<()>>>,
     finished: Mutex<Vec<Finished>>,
     alerts: Mutex<Vec<Alert>>,
@@ -46,6 +49,43 @@ impl InFlight {
     /// 띄우고 아직 끝나지 않은 깨우기 수.
     pub(crate) fn count(&self) -> usize {
         self.count.load(Ordering::SeqCst)
+    }
+
+    /// 그 작업이 띄운 깨우기에 묶여 아직 실행 중인가.
+    pub(crate) fn is_running(&self, job: &JobId) -> bool {
+        lock(&self.jobs).contains_key(job)
+    }
+
+    /// 기다리지 않고 지금까지 끝난 결과와 반영하다 생긴 저장소 오류를 가져간다(한 번만 낸다).
+    pub(crate) fn drain(&self) -> Drained {
+        lock(&self.handles).retain(|handle| !handle.is_finished());
+        Drained {
+            finished: mem::take(&mut *lock(&self.finished)),
+            errors: mem::take(&mut *lock(&self.errors)),
+        }
+    }
+
+    fn enter(&self, members: &[Firing]) {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        let mut jobs = lock(&self.jobs);
+        for firing in members {
+            *jobs.entry(firing.key.job.clone()).or_default() += 1;
+        }
+    }
+
+    fn leave(&self, jobs_done: &[JobId]) {
+        {
+            let mut jobs = lock(&self.jobs);
+            for job in jobs_done {
+                if let Some(count) = jobs.get_mut(job) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        jobs.remove(job);
+                    }
+                }
+            }
+        }
+        self.count.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// 아직 내지 않은 알림 요구를 가져간다(한 번만 낸다).
@@ -81,21 +121,38 @@ impl InFlight {
 pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
     let ports = trigger.ports.clone();
     let inflight = Arc::clone(&trigger.inflight);
-    inflight.count.fetch_add(1, Ordering::SeqCst);
+    inflight.enter(&members);
     let task = Arc::clone(&inflight);
     let handle = tokio::spawn(async move {
-        let result = ports.waker.wake(wake.clone()).await;
-        if let Err(error) = &result {
-            tracing::warn!(target = ?wake.target, %error, "깨운 실행이 실패했다");
-        }
-        let ok = result.is_ok();
+        let ok = wake_guarded(&ports, &wake).await;
+        let jobs: Vec<JobId> = members
+            .iter()
+            .map(|firing| firing.key.job.clone())
+            .collect();
         settle_members(&ports, &task, members, ok).await;
         lock(&task.finished).push(Finished { wake, ok });
-        task.count.fetch_sub(1, Ordering::SeqCst);
+        task.leave(&jobs);
     });
     let mut handles = lock(&inflight.handles);
     handles.retain(|handle| !handle.is_finished());
     handles.push(handle);
+}
+
+/// 깨우기를 따로 띄워 돌린다. 실패하거나 패닉하면 거짓(실패로 센다, 3차 1번).
+async fn wake_guarded(ports: &Ports, wake: &Wake) -> bool {
+    let waker = Arc::clone(&ports.waker);
+    let sent = wake.clone();
+    match tokio::spawn(async move { waker.wake(sent).await }).await {
+        Ok(Ok(())) => true,
+        Ok(Err(error)) => {
+            tracing::warn!(target = ?wake.target, %error, "깨운 실행이 실패했다");
+            false
+        }
+        Err(error) => {
+            tracing::error!(target = ?wake.target, %error, "깨운 실행이 패닉했다. 실패로 닫는다");
+            false
+        }
+    }
 }
 
 async fn settle_members(ports: &Ports, inflight: &InFlight, members: Vec<Firing>, ok: bool) {

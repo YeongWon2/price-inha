@@ -330,7 +330,7 @@ impl Trigger {
     /// 알림 요구는 가져가지 않는다(`tick` · `settle`이 낸다). [`Trigger::run`]은 되풀이마다 이것으로 비워
     /// 끝난 결과가 끝없이 쌓이지 않게 한다.
     pub fn drain_finished(&self) -> Drained {
-        todo!()
+        self.inflight.drain()
     }
 
     /// `start`를 부른 뒤 `tick` → `clock.sleep(next_delay)`를 되풀이한다. `stop`이 참이 되면 끝난다.
@@ -338,6 +338,7 @@ impl Trigger {
     pub async fn run(&self, mut stop: watch::Receiver<bool>) -> Result<(), Error> {
         self.start().await?;
         loop {
+            self.drain_logged();
             if *stop.borrow() {
                 return Ok(());
             }
@@ -348,6 +349,7 @@ impl Trigger {
                     ERROR_BACKOFF[0]
                 }
             };
+            self.drain_logged();
             if *stop.borrow() {
                 return Ok(());
             }
@@ -362,6 +364,14 @@ impl Trigger {
                     }
                 }
             }
+        }
+    }
+
+    /// 끝난 결과를 비운다(`run`이 쌓아 두지 않게). 반영하다 생긴 저장소 오류는 기록한다.
+    fn drain_logged(&self) {
+        let drained = self.drain_finished();
+        for error in &drained.errors {
+            tracing::warn!(%error, "끝난 깨우기의 결과를 저장소에 적지 못했다");
         }
     }
 
