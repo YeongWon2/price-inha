@@ -1,7 +1,8 @@
 //! 규칙 개선안(M4 · V20 · V21 · E28 · E35).
 
 use pi_store::Proposal;
-use pi_template::RiskParams;
+use pi_template::{Change, RiskParams, adjust};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Mistake};
@@ -20,7 +21,8 @@ pub struct Improvement {
 impl Improvement {
     /// 저장소 개선안의 `content`를 읽는다. 모양이 다르면 [`Error::BadProposal`].
     pub fn from_proposal(proposal: &Proposal) -> Result<Improvement, Error> {
-        todo!()
+        serde_json::from_value(proposal.content.clone())
+            .map_err(|err| Error::BadProposal(err.to_string()))
     }
 }
 
@@ -30,7 +32,33 @@ impl Improvement {
 /// 손절 폭(고정 손실 위 끝)의 상향, 최대 동시 보유 수 · 일일 최대 매매 횟수의 상향.
 /// 좁히거나 같거나 다른 칸만 바뀌면 거짓이다.
 pub fn increases_risk(before: &RiskParams, after: &RiskParams) -> bool {
-    todo!()
+    let wider_opt =
+        |b: Option<Decimal>, a: Option<Decimal>| matches!((b, a), (Some(b), Some(a)) if a > b);
+    let stop_high = |p: &RiskParams| p.stop.fixed_loss_pct.map(|range| range.high);
+    after.risk_per_trade_pct > before.risk_per_trade_pct
+        || after.daily_loss_limit_pct > before.daily_loss_limit_pct
+        || after.max_drawdown_pct > before.max_drawdown_pct
+        || after.symbol_weight_pct > before.symbol_weight_pct
+        || wider_opt(before.conviction_weight_pct, after.conviction_weight_pct)
+        || after.sector_weight_pct > before.sector_weight_pct
+        || after.auto_order_limit_pct > before.auto_order_limit_pct
+        || wider_opt(stop_high(before), stop_high(after))
+        || after.max_positions.high > before.max_positions.high
+        || after.max_trades_per_day > before.max_trades_per_day
+}
+
+/// 반영할 값이 절대 상한 · 경계 안인지 다시 본다(M4 · E28). 상한이 있는 여섯 칸을 그대로 되넘겨 확인한다.
+pub(crate) fn check_caps(params: &RiskParams) -> Result<(), Error> {
+    let same = [
+        Change::RiskPerTradePct(params.risk_per_trade_pct),
+        Change::DailyLossLimitPct(params.daily_loss_limit_pct),
+        Change::MaxDrawdownPct(params.max_drawdown_pct),
+        Change::SymbolWeightPct(params.symbol_weight_pct),
+        Change::ConvictionWeightPct(params.conviction_weight_pct),
+        Change::SectorWeightPct(params.sector_weight_pct),
+    ];
+    adjust(params, &same)?;
+    Ok(())
 }
 
 /// 승인 · 거절 · 냉각 해제의 결과: 개선안의 지금 모습과 그 뒤 적용되는 규칙.
