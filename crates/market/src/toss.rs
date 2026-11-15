@@ -3,7 +3,7 @@
 //! 쓰는 것은 셋뿐이다: `POST /oauth2/token`, `GET /api/v1/prices`,
 //! `GET /api/v1/market-calendar/{KR|US}`. 주문 · 계좌 · 보유는 부르지 않는다.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -288,40 +288,6 @@ impl TossClient {
 }
 
 /// 쉬는 시간이 끝나는 시각. 너무 길어 셀 수 없으면 아주 먼 뒤로 본다.
-/// 겹친 종목을 빼고 처음 나온 순서로 한 번씩 남긴다.
-fn first_occurrences(symbols: &[Symbol]) -> Vec<&Symbol> {
-    let mut seen = HashSet::with_capacity(symbols.len());
-    symbols.iter().filter(|s| seen.insert(s.as_str())).collect()
-}
-
-/// 한 응답의 시세를 종목별로 모은다. 같은 종목이 같은 값으로 거듭 오면 하나로 줄이고,
-/// 다른 값으로 오면 [`MarketError::UnexpectedResponse`]다.
-fn collapse_duplicates(parsed: Vec<Quote>) -> Result<HashMap<String, Quote>, MarketError> {
-    let mut by_symbol: HashMap<String, Quote> = HashMap::with_capacity(parsed.len());
-    for quote in parsed {
-        match by_symbol.get(quote.symbol.as_str()) {
-            Some(seen) if same_value(seen, &quote) => {}
-            Some(_) => {
-                return Err(MarketError::UnexpectedResponse {
-                    detail: format!(
-                        "같은 종목 {}이 응답에 다른 값으로 두 번 왔다",
-                        quote.symbol.as_str()
-                    ),
-                });
-            }
-            None => {
-                by_symbol.insert(quote.symbol.as_str().to_string(), quote);
-            }
-        }
-    }
-    Ok(by_symbol)
-}
-
-/// 같은 값인가: 가격 · 통화 · 거래소 시각이 모두 같다.
-fn same_value(a: &Quote, b: &Quote) -> bool {
-    a.price == b.price && a.currency == b.currency && a.exchange_time == b.exchange_time
-}
-
 fn cooldown_end(now: DateTime<Utc>, cooldown: Duration) -> DateTime<Utc> {
     chrono::Duration::from_std(cooldown)
         .ok()
@@ -349,37 +315,26 @@ impl MarketAdapter for TossAdapter {
     /// 요청하지 않은 종목은 버린다(0 이하 가격이어도 오류가 아니다). 요청 여부는 묶음마다
     /// 따로 본다: 다른 묶음에서 요청한 종목이 섞여 와도 그 묶음에서는 버린다. 요청한 종목의 0 이하
     /// 가격은 [`MarketError::UnexpectedResponse`]다.
-    ///
-    /// 순서와 겹침(5차 작업, 2026-11-15 조정자 결정):
-    /// - 결과는 요청 순서다. 서버가 종목 순서를 바꿔 돌려줘도 응답 순서와 상관없이 호출한 쪽이
-    ///   넘긴 순서로 놓는다. 서버가 답하지 않은 종목은 결과에서 빠진다.
-    /// - 호출한 쪽이 같은 종목을 겹쳐 넘기면 처음 나온 순서로 한 번씩만 묻고, 결과도 그 순서로
-    ///   한 번씩이다. 묶음(200개) 나누기는 겹침을 뺀 뒤에 한다.
-    /// - 한 응답 안에 같은 종목이 같은 값(가격 · 통화 · 거래소 시각이 모두 같음)으로 두 번 오면
-    ///   한 번으로 줄인다. 다른 값이면 어느 쪽이 맞는지 알 수 없으므로 고르지 않고
-    ///   [`MarketError::UnexpectedResponse`]다.
     async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
         // 틀린 종목이 하나라도 있으면 아무것도 보내지 않는다(쿼리에 다른 글자가 섞이지 않게).
         for symbol in symbols {
             Symbol::parse(symbol.as_str())?;
         }
-        let unique = first_occurrences(symbols);
-        let mut quotes = Vec::with_capacity(unique.len());
-        for chunk in unique.chunks(MAX_SYMBOLS_PER_REQUEST) {
+        let mut quotes = Vec::with_capacity(symbols.len());
+        for chunk in symbols.chunks(MAX_SYMBOLS_PER_REQUEST) {
             // 요청 종목은 묶음마다 따로 둔다. 다른 묶음의 종목이 섞여 와도 그 묶음의 값은
             // 버리므로 한 종목이 결과에 두 번 들어가지 않는다.
-            let requested: HashSet<&str> = chunk.iter().map(|s| s.as_str()).collect();
+            let requested: HashSet<&str> = chunk.iter().map(Symbol::as_str).collect();
             let joined = chunk
                 .iter()
-                .map(|s| s.as_str())
+                .map(Symbol::as_str)
                 .collect::<Vec<_>>()
                 .join(",");
             let body = self.inner.get(PRICES_PATH, &[("symbols", &joined)]).await?;
             let parsed = wire::parse_quotes(&body, self.inner.clock.now(), |symbol| {
                 requested.contains(symbol)
             })?;
-            let mut by_symbol = collapse_duplicates(parsed)?;
-            quotes.extend(chunk.iter().filter_map(|s| by_symbol.remove(s.as_str())));
+            quotes.extend(parsed);
         }
         Ok(quotes)
     }
