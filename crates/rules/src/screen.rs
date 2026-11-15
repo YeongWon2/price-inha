@@ -9,7 +9,9 @@
 //! - 가격제한은 AI가 낸 지정가와 최종 주문 값 둘 다 본다. 상한가는 호가 단위 아래로, 하한가는 위로 맞춘다.
 //! - 손실 중 · 업종 · 비중의 평가 금액은 보유 종목의 지금 값(`last_price`)으로 센다.
 
-use pi_market::is_stale;
+use std::time::Duration;
+
+use pi_market::{StalePolicy, is_stale};
 use pi_paper::{OrderType, Side};
 use pi_template::AbsoluteCaps;
 use rust_decimal::Decimal;
@@ -20,9 +22,12 @@ use crate::sizing::{
     weight_quantity,
 };
 use crate::{
-    CheckContext, Funding, OrderDraft, ProductKind, Rationale, RationaleField, SizeRequest,
-    Violation, size,
+    CheckContext, Funding, OrderDraft, ProductKind, Purpose, Rationale, RationaleField,
+    SizeRequest, Violation, size,
 };
+
+/// 늦은 시세 기준의 상한(P11): 받은 설정이 더 길어도 30초로 막는다.
+const STALE_CAP: Duration = Duration::from_secs(30);
 
 /// 규칙 엔진이 셈한 주문의 수량 · 값 · 금액.
 pub(crate) struct Plan {
@@ -128,7 +133,9 @@ fn book_violations(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Vec<Violation>
         found.push(Violation::BannedSymbol);
     }
     let losing = ctx.book.positions.iter().any(|p| {
-        p.market == draft.market && p.symbol == draft.symbol && p.last_price < p.avg_price
+        p.market == draft.market
+            && p.symbol == draft.symbol
+            && p.last_price.min(ctx.quote.price) < p.avg_price
     });
     if losing {
         found.push(Violation::AveragingDown);
@@ -197,7 +204,10 @@ fn held_value(ctx: &CheckContext<'_>, pick: impl Fn(&crate::Position) -> bool) -
 /// P11 · N6: 자료와 연결의 상태.
 fn health_violations(ctx: &CheckContext<'_>) -> Vec<Violation> {
     let mut found = Vec::new();
-    if is_stale(ctx.quote, ctx.calendar, ctx.now, &ctx.stale) {
+    let policy = StalePolicy {
+        max_age: ctx.stale.max_age.min(STALE_CAP),
+    };
+    if is_stale(ctx.quote, ctx.calendar, ctx.now, &policy) {
         found.push(Violation::StaleQuote);
     }
     if !ctx.health.account_in_sync {
@@ -294,11 +304,17 @@ pub(crate) fn common_violations(
     if outside_price_limit(draft, ctx, plan) {
         found.push(Violation::OutsidePriceLimit);
     }
+    if ctx.quote.symbol != draft.symbol {
+        found.push(Violation::QuoteSymbolMismatch);
+    }
     let side: Side = draft.purpose.side();
-    let duplicate = ctx
-        .open_orders
-        .iter()
-        .any(|o| o.market == draft.market && o.symbol == draft.symbol && o.side == side);
+    // 손절 · 청산은 열린 익절 매도에 막히지 않는다(열린 주문 취소는 exec가 한다).
+    let exempt = matches!(draft.purpose, Purpose::StopLoss | Purpose::Liquidation);
+    let duplicate = !exempt
+        && ctx
+            .open_orders
+            .iter()
+            .any(|o| o.market == draft.market && o.symbol == draft.symbol && o.side == side);
     if duplicate {
         found.push(Violation::DuplicateOrder);
     }

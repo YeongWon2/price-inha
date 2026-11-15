@@ -345,6 +345,12 @@ impl Passed {
         }
     }
 
+    /// 승인 증표를 단다([`crate::approved`]).
+    pub(crate) fn with_approval(mut self, grant: ApprovalGrant) -> Self {
+        self.approval = Some(grant);
+        self
+    }
+
     /// 승인으로 지난 주문이면 그 승인 증표([`crate::approved`]). 한도 안이라 바로 지났으면 `None`.
     pub fn approval(&self) -> Option<&ApprovalGrant> {
         self.approval.as_ref()

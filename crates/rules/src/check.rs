@@ -1,6 +1,6 @@
 //! 주문 전 점검(C9 · FN1)과 점검 통과 표시(E33).
 
-use pi_paper::{AccountKind, ApprovedOrder, CheckAuthority, CheckPermit};
+use pi_paper::{AccountKind, ApprovedOrder, CheckAuthority, CheckPermit, OrderType};
 use rust_decimal::Decimal;
 
 use crate::screen::{common_violations, missing_fields, plan_buy, plan_sell};
@@ -41,16 +41,37 @@ use crate::{
 /// - 다른 위반 없이 셈한 수량이 0이면(AI 수량이 1 미만 등) [`Violation::RiskTooLarge`]로 막는다.
 /// - 자동 주문 금액 한도의 셈이 넘치면 승인을 기다리게 한다.
 pub fn check(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Outcome {
+    match evaluate(draft, ctx) {
+        Err(blocked) => Outcome::Blocked(blocked),
+        Ok(done) => match done.limit {
+            Some(limit) if done.amount > limit => {
+                Outcome::NeedsApproval(PendingApproval::new(done.order, done.amount, limit))
+            }
+            _ => Outcome::Pass(Passed::new(done.order, done.amount)),
+        },
+    }
+}
+
+/// 점검을 다 지난 주문. `limit`은 사는 주문의 자동 주문 금액 한도(넘으면 승인 대기, 셈이 넘치면 0).
+pub(crate) struct Evaluated {
+    pub(crate) order: ApprovedOrder,
+    pub(crate) amount: Decimal,
+    pub(crate) limit: Option<Decimal>,
+}
+
+/// [`check`]와 [`crate::approved`]가 함께 쓰는 점검. 금액 한도를 넘는지는 부른 쪽이 정한다.
+/// 시장가 사기가 한도를 넘으면 승인을 기다리지 않고 여기서 막는다(결정 7번).
+pub(crate) fn evaluate(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Result<Evaluated, Blocked> {
     if draft.stage != TradeStage::Judged {
-        return blocked(Reason::NotJudged(draft.stage));
+        return Err(blocked(Reason::NotJudged(draft.stage)));
     }
     let buy = draft.purpose.is_buy();
     if buy && ctx.team != TeamStatus::Operating {
-        return blocked(Reason::TeamNotOperating(ctx.team));
+        return Err(blocked(Reason::TeamNotOperating(ctx.team)));
     }
     let missing = missing_fields(&draft.rationale);
     if !missing.is_empty() {
-        return blocked(Reason::MissingRationale(missing));
+        return Err(blocked(Reason::MissingRationale(missing)));
     }
     let (plan, mut found) = if buy {
         plan_buy(draft, ctx)
@@ -61,8 +82,16 @@ pub fn check(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Outcome {
     if found.is_empty() && plan.quantity <= Decimal::ZERO {
         found.push(Violation::RiskTooLarge);
     }
+    // 자동 주문 금액 한도의 셈이 넘치면 한도 0으로 보아 승인을 기다리게 한다.
+    let limit = buy.then(|| {
+        percent_of(ctx.book.equity, ctx.params.auto_order_limit_pct).unwrap_or(Decimal::ZERO)
+    });
+    let over = limit.is_some_and(|l| plan.amount > l);
+    if over && draft.order_type == OrderType::Market {
+        found.push(Violation::MarketBuyOverAutoLimit);
+    }
     if !found.is_empty() {
-        return blocked(Reason::Violations(unique(found)));
+        return Err(blocked(Reason::Violations(unique(found))));
     }
     let order = ApprovedOrder {
         market: draft.market,
@@ -73,31 +102,19 @@ pub fn check(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Outcome {
         price: plan.price,
         account_kind: AccountKind::Paper,
     };
-    if buy {
-        let limit = percent_of(ctx.book.equity, ctx.params.auto_order_limit_pct);
-        match limit {
-            Some(limit) if plan.amount <= limit => {}
-            Some(limit) => {
-                return Outcome::NeedsApproval(PendingApproval::new(order, plan.amount, limit));
-            }
-            None => {
-                return Outcome::NeedsApproval(PendingApproval::new(
-                    order,
-                    plan.amount,
-                    Decimal::ZERO,
-                ));
-            }
-        }
-    }
-    Outcome::Pass(Passed::new(order, plan.amount))
+    Ok(Evaluated {
+        order,
+        amount: plan.amount,
+        limit,
+    })
 }
 
 /// 규칙 엔진의 막힘(언제나 원칙 · 근거 부족).
-fn blocked(reason: Reason) -> Outcome {
-    Outcome::Blocked(Blocked {
+fn blocked(reason: Reason) -> Blocked {
+    Blocked {
         kind: BlockKind::PrincipleOrRationale,
         reason,
-    })
+    }
 }
 
 /// 처음 나온 순서를 지키며 겹친 위반을 뺀다.

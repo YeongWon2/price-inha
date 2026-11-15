@@ -4,7 +4,8 @@
 //! 거쳐 [`Passed`]가 된다. 승인 소비(한 번만 · 지문 비교)는 approval 모듈이 하고, 여기서는
 //! 그 결과를 증표로 받아 다시 점검한다(이 모듈은 approval에 기대지 않는다).
 
-use crate::{Blocked, CheckContext, OrderDraft, Passed, PendingApproval};
+use crate::check::evaluate;
+use crate::{BlockKind, Blocked, CheckContext, OrderDraft, Passed, PendingApproval, Reason};
 
 /// 승인 소비 결과의 증표: 승인 번호 글자와 승인한 내용의 지문 글자.
 /// approval 모듈이 `consume`에 성공한 뒤 만든다. 글자는 비어 있으면 안 된다.
@@ -51,6 +52,16 @@ pub fn approved(
     draft: &OrderDraft,
     ctx: &CheckContext<'_>,
 ) -> Result<Passed, Blocked> {
-    let _ = (pending, grant, draft, ctx);
-    todo!()
+    let mismatch = || Blocked {
+        kind: BlockKind::ApprovalRejected,
+        reason: Reason::ApprovalMismatch,
+    };
+    if grant.id.trim().is_empty() || grant.fingerprint.trim().is_empty() {
+        return Err(mismatch());
+    }
+    let done = evaluate(draft, ctx)?;
+    if &done.order != pending.order() {
+        return Err(mismatch());
+    }
+    Ok(Passed::new(done.order, done.amount).with_approval(grant.clone()))
 }
