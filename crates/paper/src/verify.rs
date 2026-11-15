@@ -3,13 +3,14 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::ledger::{CashCode, Ledger, MarketCode, OrderRecord};
 use crate::money;
 use crate::{
-    BrokerError, MAX_SAME_TIME_PRICES, OrderId, OrderStatus, OrderType, PaperConfig, Side,
-    SnapshotReason,
+    BrokerError, MAX_EXCHANGE_LEAD, MAX_SAME_TIME_PRICES, OrderId, OrderStatus, OrderType,
+    PaperConfig, Side, SnapshotReason,
 };
 
 /// 음수인가(0은 아니다).
@@ -170,13 +171,22 @@ fn check_quotes(ledger: &Ledger) -> Result<(), SnapshotReason> {
 /// 값은 [`MAX_SAME_TIME_PRICES`]개까지, 기억한 시각은 그 종목 마지막 시세의 거래소 시각 이상.
 /// 마지막 시세에 거래소 시각이 없거나, 거래소 시각이 있는 마지막 시세에 기억이 없는 것은
 /// 받아들인다(기억이 없으면 그 시각부터 다시 기억할 뿐 옛 시세를 열지 않는다).
+/// 기억한 시각이 마지막 시각(`last_now`) + [`MAX_EXCHANGE_LEAD`]보다 늦으면(엄격한 초과) 먼 앞날
+/// 기억이라 거부한다(6차 규칙 1). `last_now`가 없으면 기준이 없으므로 이 검사는 하지 않는다(보수적).
 fn check_marks(ledger: &Ledger) -> Result<(), SnapshotReason> {
+    let lead = chrono::Duration::from_std(MAX_EXCHANGE_LEAD).unwrap_or(chrono::Duration::MAX);
+    let latest = ledger.last_now.map(|exported| {
+        exported
+            .checked_add_signed(lead)
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
+    });
     let sorted = ledger
         .trade_marks
         .windows(2)
         .all(|pair| (&pair[0].symbol, pair[0].currency) < (&pair[1].symbol, pair[1].currency));
     let bad = ledger.trade_marks.iter().any(|mark| {
         mark.prices.len() > MAX_SAME_TIME_PRICES
+            || latest.is_some_and(|limit| mark.traded_at > limit)
             || ledger
                 .last_quote(&mark.symbol, mark.currency)
                 .and_then(|quote| quote.exchange_time)
