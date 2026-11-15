@@ -10,6 +10,8 @@
 //!   4차(`crates/gate/src/frame.rs`의 `time_and_payload`)가 푸는 모양과 같다: 내용이 정확히 두 칸
 //!   (`at` · `payload`)인 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다.
 //!   (바로잡음 2026-11-14: 처음 규칙 "시각 칸이 채워진 봉투 줄"은 시각 칸이 빈 봉투 줄을 빠뜨렸다.)
+//!   5차(2026-11-15 사용자 "다 개선")에서 좁힘: `at`이 i64 범위 밖이거나 `-0`인 줄, 맨 위 칸의 이름이
+//!   겹친 JSON은 옛 봉투로 세지 않는다.
 //!
 //! 픽스처(모두 WAL을 체크포인트해 파일 하나로 두었다. 테스트는 임시 폴더에 복사해서 연다):
 //!
@@ -424,17 +426,63 @@ fn 경계는_저장소_파일에_직접_넣은_sql로도_바뀌지_않는다() {
 
 // ───────────── 옛 봉투 줄의 모양 (접속 관문 4차와 같은 규칙) ─────────────
 
-/// 접속 관문 4차(`crates/gate/src/frame.rs`의 `time_and_payload`)가 옛 봉투로 푸는 줄인지.
-/// `pi-gate`에 기대지 않고 규칙을 여기에 그대로 적는다: 내용이 정확히 두 칸(`at` · `payload`)인
-/// 객체이고, `at`이 정수이고, 시각 칸이 비었거나 내용의 `at`과 같다.
-fn gate_unwraps(column: Option<i64>, payload: &str) -> bool {
+/// 경계를 정할 때 옛 봉투 줄로 세는 줄인지(5차 규칙). `pi-gate`에 기대지 않고 규칙을 여기에 그대로 적는다:
+/// 내용이 정확히 두 칸(`at` · `payload`)인 객체이고, 맨 위 칸의 이름이 겹치지 않고, `at`이 i64 범위 안의
+/// 정수이고 `-0`이 아니고, 시각 칸이 비었거나 내용의 `at`과 같다.
+///
+/// (5차에서 바꿈: 4차의 이 함수는 접속 관문 4차가 푸는 모양 그대로였다. `serde_json`은 겹친 이름을 마지막
+/// 것으로 덮어 두 칸으로 보므로 `{"at":1,"payload":1,"payload":2}`도 풀었다. 5차는 그런 줄을 세지 않는다.)
+fn counts_as_legacy(column: Option<i64>, payload: &str) -> bool {
+    let Some(keys) = top_keys(payload) else {
+        return false;
+    };
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    if unique.len() != keys.len() {
+        return false;
+    }
     let Ok(Value::Object(map)) = serde_json::from_str::<Value>(payload) else {
         return false;
     };
+    let at = map.get("at");
+    // `serde_json`은 `-0`을 실수(-0.0)로, i64를 넘는 정수를 u64나 실수로 읽어 `is_i64`가 거짓이다.
+    // 그래도 규칙을 글로 남기려고 `-0`을 따로 본다.
+    let minus_zero =
+        at.is_some_and(|v| v.as_f64().is_some_and(|f| f == 0.0 && f.is_sign_negative()));
     map.len() == 2
         && map.contains_key("payload")
-        && map.get("at").is_some_and(Value::is_i64)
-        && column.is_none_or(|at| map.get("at") == Some(&Value::from(at)))
+        && at.is_some_and(Value::is_i64)
+        && !minus_zero
+        && column.is_none_or(|c| at == Some(&Value::from(c)))
+}
+
+/// 내용이 JSON 객체면 맨 위 칸의 이름을 적힌 순서대로(겹친 이름도 그대로) 돌려준다. 객체가 아니면 없음.
+fn top_keys(payload: &str) -> Option<Vec<String>> {
+    struct Keys(Vec<String>);
+    impl<'de> serde::Deserialize<'de> for Keys {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> serde::de::Visitor<'de> for V {
+                type Value = Keys;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("JSON 객체")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut m: A,
+                ) -> Result<Keys, A::Error> {
+                    let mut keys = Vec::new();
+                    while let Some((k, _)) = m.next_entry::<String, serde::de::IgnoredAny>()? {
+                        keys.push(k);
+                    }
+                    Ok(Keys(keys))
+                }
+            }
+            d.deserialize_map(V)
+        }
+    }
+    serde_json::from_str::<Keys>(payload).ok().map(|k| k.0)
 }
 
 /// 이벤트 줄을 저장소를 거치지 않고 넣는다. 버전 3 파일의 이벤트 표는 넣기를 막지 않는다
@@ -465,7 +513,7 @@ fn 버전_3_파일에_시각_칸이_빈_봉투_줄을_더하고_올리면_그_�
             (13, "chat", None, thirteenth),
         ],
     );
-    assert!(gate_unwraps(None, &twelfth));
+    assert!(counts_as_legacy(None, &twelfth));
     assert_eq!(raw_user_version(&path), 3);
 
     let store = Store::open(&path).unwrap();
@@ -496,8 +544,8 @@ fn 세_칸_이상인_객체는_옛_봉투가_아니라_경계를_키우지_않�
             (13, "feed_status", None, three.clone()),
         ],
     );
-    assert!(!gate_unwraps(Some(77), &three));
-    assert!(!gate_unwraps(None, &three));
+    assert!(!counts_as_legacy(Some(77), &three));
+    assert!(!counts_as_legacy(None, &three));
 
     let store = Store::open(&path).unwrap();
     // v3.db의 옛 봉투 줄은 2 · 3 · 7 · 10번이다.
@@ -571,12 +619,68 @@ impl Lcg {
     }
 }
 
+/// 손으로 만든 JSON 글자(5차)와, 시각 칸이 비었을 때 옛 봉투로 세는지.
+fn handmade_texts() -> Vec<(&'static str, bool)> {
+    vec![
+        // 맨 위 칸의 이름이 겹친다(SQL로 직접 넣을 때만 생긴다).
+        (r#"{"at":1,"payload":1,"payload":2}"#, false),
+        (r#"{"at":1,"at":2,"payload":1}"#, false),
+        (r#"{"at":5,"payload":1,"at":5}"#, false),
+        (r#"{"at":0,"at":0,"payload":null}"#, false),
+        // i64 범위 밖의 정수
+        (r#"{"at":9223372036854775808,"payload":1}"#, false),
+        (r#"{"at":-9223372036854775809,"payload":1}"#, false),
+        (r#"{"at":18446744073709551616,"payload":1}"#, false),
+        (
+            r#"{"at":100000000000000000000000000000,"payload":1}"#,
+            false,
+        ),
+        // `-0`
+        (r#"{"at":-0,"payload":1}"#, false),
+        (r#"{"payload":{"ok":true},"at":-0}"#, false),
+        // 실수 모양
+        (r#"{"at":1.0,"payload":1}"#, false),
+        (r#"{"at":0.0,"payload":1}"#, false),
+        (r#"{"at":-0.0,"payload":1}"#, false),
+        (r#"{"at":1e3,"payload":1}"#, false),
+        // 범위 끝과 0은 센다(시각 칸이 비었을 때).
+        (r#"{"at":9223372036854775807,"payload":1}"#, true),
+        (r#"{"at":-9223372036854775808,"payload":1}"#, true),
+        (r#"{"at":0,"payload":1}"#, true),
+        (r#"{ "payload" : [1, 2] , "at" : 42 }"#, true),
+    ]
+}
+
 /// 여러 모양의 줄 하나: (종류, 시각 칸, 내용 글자).
 fn random_row(rng: &mut Lcg) -> (&'static str, Option<i64>, String) {
     let at = t(rng.below(10_000) as i64).0;
     let other = at + 1 + rng.below(50) as i64;
     let empty_or = |rng: &mut Lcg, v: i64| if rng.below(2) == 0 { None } else { Some(v) };
-    match rng.below(12) {
+    match rng.below(14) {
+        // 손으로 만든 JSON 글자(5차): 겹친 이름 · 큰 수 · `-0` · `1.0`
+        12 => {
+            let texts = handmade_texts();
+            let (text, _) = texts[rng.below(texts.len() as u64) as usize];
+            let column = match rng.below(3) {
+                0 => None,
+                1 => Some(0),
+                _ => Some(at),
+            };
+            ("feed_status", column, text.to_string())
+        }
+        13 => {
+            // 범위 끝의 정수는 옛 봉투로 센다. 시각 칸은 비었거나 같다.
+            let edge = if rng.below(2) == 0 {
+                i64::MAX
+            } else {
+                i64::MIN
+            };
+            (
+                "feed_status",
+                empty_or(rng, edge),
+                format!("{{\"at\":{edge},\"payload\":1}}"),
+            )
+        }
         // 두 칸 · 시각 칸 비었음
         0 => (
             "feed_status",
@@ -645,7 +749,7 @@ fn random_row(rng: &mut Lcg) -> (&'static str, Option<i64>, String) {
 
 // 검증: D6, V6, C2, E3
 #[test]
-fn 버전_3_파일의_경계는_접속_관문_4차가_풀_줄_가운데_가장_큰_번호다() {
+fn 버전_3_파일의_경계는_옛_봉투로_세는_줄_가운데_가장_큰_번호다() {
     for seed in 0..40_u64 {
         let mut rng = Lcg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5);
         let (_dir, path) = empty_v3_file();
@@ -661,13 +765,13 @@ fn 버전_3_파일의_경계는_접속_관문_4차가_풀_줄_가운데_가장_�
 
         let unwrapped: Vec<u64> = raw_events(&path)
             .into_iter()
-            .filter(|(_, _, at, payload)| gate_unwraps(*at, payload))
+            .filter(|(_, _, at, payload)| counts_as_legacy(*at, payload))
             .map(|(seq, ..)| seq as u64)
             .collect();
 
         let store = Store::open(&path).unwrap();
         let got = store.legacy_envelope_until().unwrap();
-        // 접속 관문 4차가 풀 줄은 모두 경계 안에 든다.
+        // 옛 봉투로 세는 줄은 모두 경계 안에 든다.
         for seq in &unwrapped {
             assert!(
                 got.is_some_and(|until| *seq <= until),
@@ -680,5 +784,57 @@ fn 버전_3_파일의_경계는_접속_관문_4차가_풀_줄_가운데_가장_�
             unwrapped.iter().copied().max(),
             "씨앗 {seed}: 줄: {rows:?}"
         );
+    }
+}
+
+// 검증: D6, V6, C2, E3
+#[test]
+fn 손으로_만든_json_글자는_규칙과_같게_세고_이름이_겹치거나_범위_밖이거나_마이너스_0이면_세지_않는다()
+ {
+    for (text, counts) in handmade_texts() {
+        // 이 파일의 규칙 함수가 표와 같은지 먼저 본다.
+        assert_eq!(counts_as_legacy(None, text), counts, "규칙 함수: {text}");
+        // 시각 칸이 비었을 때 · 0일 때 · 내용과 다를 때 각각, 버전 3 파일(v3.db: 옛 봉투 줄 2 · 3 · 7 · 10번)의
+        // 12번에 넣고 연다.
+        for column in [None, Some(0_i64), Some(123_456)] {
+            let (_dir, path) = copy_of(FIXTURE_V3);
+            raw_insert(&path, &[(12, "feed_status", column, text.to_string())]);
+            let want_counted = counts_as_legacy(column, text);
+            let store = Store::open(&path).unwrap();
+            let got = store.legacy_envelope_until().unwrap();
+            let want = if want_counted { Some(12) } else { Some(10) };
+            assert_eq!(got, want, "시각 칸 {column:?}, 내용 {text}");
+            // 경계를 어떻게 정하든 내용은 적힌 그대로 읽힌다(JSON 값으로 같다).
+            let events = store.read_events(all(), 100).unwrap();
+            assert_eq!(events.len(), 12, "{text}");
+            assert_eq!(events[11].at.map(|a| a.0), column, "{text}");
+            drop(store);
+            assert_eq!(boundary(&path), want, "다시 열기: {column:?} {text}");
+        }
+    }
+}
+
+// 검증: D6, V6, C2, E3
+#[test]
+fn 마이너스_0이나_범위_밖의_at만_있는_빈_버전_3_파일은_경계가_없다() {
+    for text in [
+        r#"{"at":-0,"payload":1}"#,
+        r#"{"at":9223372036854775808,"payload":1}"#,
+        r#"{"at":-9223372036854775809,"payload":1}"#,
+        r#"{"at":1,"payload":1,"payload":2}"#,
+    ] {
+        let (_dir, path) = empty_v3_file();
+        raw_insert(
+            &path,
+            &[
+                (1, "feed_status", None, text.to_string()),
+                (2, "feed_status", Some(0), text.to_string()),
+            ],
+        );
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().schema_version, 4, "{text}");
+        assert_eq!(store.legacy_envelope_until().unwrap(), None, "{text}");
+        drop(store);
+        assert_eq!(boundary(&path), None, "다시 열기: {text}");
     }
 }
