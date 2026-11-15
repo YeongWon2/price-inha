@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use crate::book::Book;
 use crate::calendar::settlement_date;
 use crate::ledger::{CashCode, FillRecord, OrderRecord, QuoteRecord};
-use crate::marks::TradeCheck;
+use crate::marks::{self, TradeCheck};
 use crate::money;
 use crate::{
     CloseReason, LimitFillPrice, MarketRules, MaxFill, OrderEvent, OrderEventKind, OrderStatus,
@@ -302,6 +302,10 @@ fn remember(book: &mut Book, quote: &Quote, currency: CashCode) -> bool {
 
 /// 시세 하나를 처리한다: 마감이 된 주문을 취소하고, 쓸 수 있는 시세면 기억하고, 처음 보는
 /// 시세면 그 종목의 열린 주문을 접수한 순서대로 체결해 본다.
+///
+/// 받은 시각보다 [`crate::MAX_EXCHANGE_LEAD`] 넘게 앞선 거래소 시각은 버리고, 그 시세를 거래소
+/// 시각이 없는 시세로 다룬다(5차 규칙 1). 거래소 시각이 없는 시세는 4차 규칙 2의 기억에 들지
+/// 않아, 마지막 시세와 값이 다르면 같은 거래를 거듭 쓸 수 있다(5차 규칙 5, 결정 범위 안).
 pub(crate) fn on_quote(
     book: &mut Book,
     config: &PaperConfig,
@@ -310,6 +314,10 @@ pub(crate) fn on_quote(
 ) -> Vec<OrderEvent> {
     let mut out = Vec::new();
     book.advance(now, &mut out);
+    let quote = &Quote {
+        exchange_time: marks::trusted_exchange_time(quote.exchange_time, quote.received_at),
+        ..quote.clone()
+    };
     // 현금을 두지 않는 통화의 시세나 0 이하의 값으로는 아무것도 하지 않는다.
     let Some(currency) = CashCode::of(&quote.currency) else {
         return out;

@@ -7,7 +7,10 @@ use rust_decimal::Decimal;
 
 use crate::ledger::{CashCode, Ledger, MarketCode, OrderRecord};
 use crate::money;
-use crate::{BrokerError, OrderId, OrderStatus, OrderType, PaperConfig, Side, SnapshotReason};
+use crate::{
+    BrokerError, MAX_SAME_TIME_PRICES, OrderId, OrderStatus, OrderType, PaperConfig, Side,
+    SnapshotReason,
+};
 
 /// 음수인가(0은 아니다).
 fn negative(value: &Decimal) -> bool {
@@ -163,6 +166,28 @@ fn check_quotes(ledger: &Ledger) -> Result<(), SnapshotReason> {
     Ok(())
 }
 
+/// 종목마다의 거래 기억(5차 규칙 4): 종목 · 통화 순서로 엄격히 정렬(같은 것이 둘이 아님),
+/// 값은 [`MAX_SAME_TIME_PRICES`]개까지, 기억한 시각은 그 종목 마지막 시세의 거래소 시각 이상.
+/// 마지막 시세에 거래소 시각이 없거나, 거래소 시각이 있는 마지막 시세에 기억이 없는 것은
+/// 받아들인다(기억이 없으면 그 시각부터 다시 기억할 뿐 옛 시세를 열지 않는다).
+fn check_marks(ledger: &Ledger) -> Result<(), SnapshotReason> {
+    let sorted = ledger
+        .trade_marks
+        .windows(2)
+        .all(|pair| (&pair[0].symbol, pair[0].currency) < (&pair[1].symbol, pair[1].currency));
+    let bad = ledger.trade_marks.iter().any(|mark| {
+        mark.prices.len() > MAX_SAME_TIME_PRICES
+            || ledger
+                .last_quote(&mark.symbol, mark.currency)
+                .and_then(|quote| quote.exchange_time)
+                .is_some_and(|traded_at| mark.traded_at < traded_at)
+    });
+    if !sorted || bad {
+        return Err(SnapshotReason::BadTradeMark);
+    }
+    Ok(())
+}
+
 /// 이 계좌가 낸 식별자의 번호. 다른 모양의 글자면 `None`.
 fn id_number(order_id: &OrderId) -> Option<u64> {
     order_id.as_str().strip_prefix("PAPER-")?.parse().ok()
@@ -201,7 +226,53 @@ pub(crate) fn check_ledger(ledger: &Ledger, config: &PaperConfig) -> Result<(), 
         }
         check_sells(ledger)?;
         check_quotes(ledger)?;
+        check_marks(ledger)?;
         check_next_id(ledger)
     };
     check().map_err(BrokerError::InvalidSnapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_marks;
+    use crate::ledger::{CashCode, Ledger, QuoteRecord};
+    use crate::{MAX_SAME_TIME_PRICES, SnapshotReason};
+    use chrono::{DateTime, TimeZone, Utc};
+    use rust_decimal::Decimal;
+
+    fn at(seconds: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(1_800_000_000 + seconds, 0).unwrap()
+    }
+
+    /// 삼성 5초 시세 하나를 받은 장부(기억 목록 포함).
+    fn ledger() -> Ledger {
+        let mut ledger = Ledger::new(Decimal::ZERO, Decimal::ZERO);
+        ledger.remember_quote(QuoteRecord {
+            symbol: "005930".to_owned(),
+            currency: CashCode::Krw,
+            price: Decimal::from(70_000),
+            exchange_time: Some(at(5)),
+            received_at: at(5),
+        });
+        ledger.check_trade("005930", CashCode::Krw, at(5), Decimal::from(70_000));
+        ledger
+    }
+
+    #[test]
+    fn 거래소_시각이_있는_마지막_시세에_기억이_없어도_받아들인다() {
+        let mut ledger = ledger();
+        assert_eq!(check_marks(&ledger), Ok(()));
+        ledger.trade_marks.clear();
+        assert_eq!(check_marks(&ledger), Ok(()));
+    }
+
+    #[test]
+    fn 같은_시각_값이_상한을_넘는_기억은_거부한다() {
+        let mut ledger = ledger();
+        let prices = (0..MAX_SAME_TIME_PRICES).map(|i| Decimal::from(60_000 + i));
+        ledger.trade_marks[0].prices = prices.collect();
+        assert_eq!(check_marks(&ledger), Ok(()));
+        ledger.trade_marks[0].prices.push(Decimal::from(1));
+        assert_eq!(check_marks(&ledger), Err(SnapshotReason::BadTradeMark));
+    }
 }

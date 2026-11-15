@@ -1,5 +1,30 @@
 //! 모의계좌. [`Broker`]의 구현이다.
 //!
+//! 규칙 번호는 이 문서 어디서나 `N차 규칙 M`(N차 절의 M번째 규칙)으로 적는다.
+//!
+//! # 5차 규칙 (4차 · 3차 · 2차 · 1차 설명보다 앞선다)
+//!
+//! 아래 설명과 다르면 이 절이 맞다.
+//!
+//! 1. **먼 앞날 거래소 시각은 버린다**: 거래소 시각이 받은 시각보다 [`MAX_EXCHANGE_LEAD`](5분)
+//!    **넘게** 앞서면 그 시세의 거래소 시각으로 쓰지 않는다. 그 시세는 거래소 시각이 없는 시세와
+//!    똑같이 다룬다(체결에 쓰고, 마지막 시세로도 시각 없이 기억한다. 4차 규칙 1 · 2의 기억은
+//!    바꾸지 않는다). 그래서 한 번 잘못 온 시각이 그 종목의 체결을 계속 막지 않는다. 딱 5분 앞선
+//!    것은 거래소 시각으로 쓴다. 모양 3을 올릴 때도 같다(그런 마지막 시세로는 기억을 채우지 않는다).
+//! 2. **모양 3 → 4로 올린 계좌도 같은 시각의 쓴 거래를 다시 쓰지 않는다**(4차 규칙 4).
+//! 3. **같은 시각 값 목록의 상한**: 가장 늦은 거래소 시각에 쓴 거래의 값은 종목마다
+//!    [`MAX_SAME_TIME_PRICES`](64)개까지 기억한다. 넘으면 가장 오래 기억한 것부터 버린다. 버린
+//!    값은 다시 오면 처음 보는 거래가 된다(기억을 끝없이 키우지 않으려는 맞바꿈).
+//! 4. **되살릴 때 기억 목록을 검사한다**: `ledger.trade_marks`가 종목 · 통화 순서로 정렬돼 있고
+//!    (같은 종목 · 통화가 둘이 아님), 저마다 값이 [`MAX_SAME_TIME_PRICES`]개를 넘지 않고, 기억한
+//!    시각이 그 종목 마지막 시세의 거래소 시각 이상이어야 한다. 어긋나면 되살리지 않는다
+//!    ([`SnapshotReason::BadTradeMark`]). 마지막 시세에 거래소 시각이 없거나, 거래소 시각이 있는
+//!    마지막 시세에 기억이 없는 것은 받아들인다.
+//! 5. **시각 없는 시세는 같은 거래를 거듭 쓸 수 있다**: 거래소 시각이 없는 시세는 4차 규칙 2의
+//!    기억에 들지 않는다. 마지막 시세와 값이 같을 때만 같은 시세로 보므로(2차 규칙 2), 시각 없는
+//!    같은 값이 다른 값을 사이에 두고 다시 오면 다시 체결에 쓴다. 거래소 시각을 주지 않는 시세
+//!    출처에서 이것은 피할 수 없어 결정 범위 안으로 두고 동작은 바꾸지 않는다.
+//!
 //! # 4차 규칙 (3차 · 2차 · 1차 설명보다 앞선다)
 //!
 //! 아래 3차 · 2차 · 1차 설명과 다르면 이 절이 맞다.
@@ -163,52 +188,25 @@ use crate::{
     Archived, BrokerError, CashBalance, CheckAuthority, Fill, OrderEvent, PaperConfig,
     SnapshotReason,
 };
-use crate::{fill, verify};
+use crate::{fill, marks, verify};
 
 /// 멱등성 키가 살아 있는 시간: 10분 (토스 명세의 `clientOrderId` 설명).
 /// 접수한 지 딱 이 시간이 되면 같은 키도 새 주문으로 본다.
 pub const IDEMPOTENCY_WINDOW: Duration = Duration::from_secs(600);
 
-/// 거래소 시각이 받은 시각보다 앞서도 되는 가장 긴 시간: 5분 (5차 1번).
+/// 거래소 시각이 받은 시각보다 앞서도 되는 가장 긴 시간: 5분 (5차 규칙 1).
 /// 받은 시각보다 이보다 **넘게** 앞선 거래소 시각은 그 시세의 거래소 시각으로 쓰지 않는다
 /// (거래소 시각이 없는 시세와 같이 다룬다). 딱 이만큼 앞선 것은 쓴다.
 pub const MAX_EXCHANGE_LEAD: Duration = Duration::from_secs(300);
 
-/// 종목마다 가장 늦은 거래소 시각에 쓴 거래의 값을 기억하는 개수의 상한: 64 (5차 3번).
+/// 종목마다 가장 늦은 거래소 시각에 쓴 거래의 값을 기억하는 개수의 상한: 64 (5차 규칙 3).
 /// 넘으면 가장 오래 기억한 값부터 버린다.
 pub const MAX_SAME_TIME_PRICES: usize = 64;
 
 /// 지금 내보내는 [`Snapshot`]의 모양 번호. 2: 마지막 시세에 거래소 시각 · 받은 시각이 들어갔다.
 /// 3: 내보낸 시각(이 계좌가 마지막으로 받은 `now`, `ledger.last_now`)이 들어갔다.
 /// 4: 종목마다의 가장 늦은 거래소 시각과 그 시각에 쓴 거래(`ledger.trade_marks`)가 들어갔다.
-const SNAPSHOT_VERSION: u32 = 4;
-
-/// 옛 모양의 장부를 지금 모양으로 올린다(4차 규칙 4). 모르는 모양 번호면 `None`.
-fn upgrade(version: u32, mut ledger: Ledger) -> Option<Ledger> {
-    if !(2..=SNAPSHOT_VERSION).contains(&version) {
-        return None;
-    }
-    if version < 3 {
-        // 모양 2에는 내보낸 시각이 없다.
-        ledger.last_now = ledger.latest_recorded();
-    }
-    if version < 4 {
-        // 모양 3까지는 거래소 시각을 마지막 시세에만 기억했다.
-        ledger.trade_marks.clear();
-        let timed: Vec<(String, CashCode, DateTime<Utc>, Decimal)> = ledger
-            .last_quotes
-            .iter()
-            .filter_map(|quote| {
-                let traded_at = quote.exchange_time?;
-                Some((quote.symbol.clone(), quote.currency, traded_at, quote.price))
-            })
-            .collect();
-        for (symbol, currency, traded_at, price) in timed {
-            ledger.check_trade(&symbol, currency, traded_at, price);
-        }
-    }
-    Some(ledger)
-}
+pub(crate) const SNAPSHOT_VERSION: u32 = 4;
 
 /// 장애 흉내 (E13 · E30). 테스트와 시연에서 증권사 장애를 일으킨다.
 ///
@@ -331,14 +329,16 @@ impl PaperBroker {
     /// 말이 안 됨, 체결 수량이 정수가 아님, 상태와 체결 수량이 어긋남, 주문 통화가 시장과 다름,
     /// 평균 산 값이 0 이하, 마지막 시세의 값이 0 이하이거나 받은 시각이 내보낸 시각보다 뒤 — 모두
     /// 거부한다(3차 규칙 3). 종목마다 기억한 거래의 값이 0 이하인 것도 같다
-    /// ([`SnapshotReason::BadLastQuote`]). 모양 2 · 3의 상태 값은 지금 모양으로 올린 뒤 검사한다
-    /// (4차 규칙 4).
+    /// ([`SnapshotReason::BadLastQuote`]). 종목마다의 기억 목록이 정렬되지 않음 · 같은 종목 ·
+    /// 통화가 둘 · 값이 [`MAX_SAME_TIME_PRICES`]개 넘음 · 기억한 시각이 마지막 시세의 거래소
+    /// 시각보다 앞인 것도 거부한다([`SnapshotReason::BadTradeMark`], 5차 규칙 4). 모양 2 · 3의
+    /// 상태 값은 지금 모양으로 올린 뒤 검사한다(4차 규칙 4).
     pub fn restore(
         config: PaperConfig,
         snapshot: Snapshot,
     ) -> Result<(Self, CheckAuthority), BrokerError> {
         config.validate_rules()?;
-        let Some(ledger) = upgrade(snapshot.version, snapshot.ledger) else {
+        let Some(ledger) = marks::upgrade(snapshot.version, snapshot.ledger) else {
             return Err(BrokerError::InvalidSnapshot(
                 SnapshotReason::UnknownVersion(snapshot.version),
             ));
