@@ -46,6 +46,36 @@ impl Default for AnthropicConfig {
     }
 }
 
+/// 연결 시간 제한의 기본값(A19, Hermes 연결 10초). 전체 요청 제한과 따로 든다.
+pub const ANTHROPIC_DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 응답 크기 상한의 기본값(10MB = 10,000,000바이트).
+pub const ANTHROPIC_DEFAULT_MAX_RESPONSE_BYTES: usize = 10_000_000;
+
+/// Anthropic 공급자의 3차 설정. [`AnthropicConfig`]의 모양을 바꾸지 않으려고 따로 둔다.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnthropicLimits {
+    /// 연결 시간 제한(A19). 전체 요청 제한([`AnthropicConfig::timeout`])은 그대로다.
+    pub connect_timeout: Duration,
+    /// 응답 본문의 상한(바이트). 넘으면 끝까지 읽지 않고 [`AiError::InvalidResponse`].
+    pub max_response_bytes: usize,
+    /// 늘어나는 다시 시도 간격의 위 끝(A17). 첫 간격은 [`AnthropicConfig::retry_base_delay`].
+    pub max_retry_delay: Duration,
+    /// `Retry-After` 1초를 실제로 기다릴 시간. 기본 1초. 테스트는 줄여서 쓴다.
+    /// 상한([`crate::RETRY_AFTER_CAP`])은 줄이기 전의 초에 건다.
+    pub retry_after_unit: Duration,
+    /// jitter 무작위의 씨앗. `None`이면 공급자가 스스로 정한다.
+    pub jitter_seed: Option<u64>,
+}
+
+impl Default for AnthropicLimits {
+    /// 연결 [`ANTHROPIC_DEFAULT_CONNECT_TIMEOUT`], 응답 [`ANTHROPIC_DEFAULT_MAX_RESPONSE_BYTES`],
+    /// 간격 위 끝 [`crate::RETRY_MAX_DELAY`], `Retry-After` 단위 1초, 씨앗 없음.
+    fn default() -> Self {
+        todo!()
+    }
+}
+
 /// Anthropic Messages API를 직접 부르는 공급자.
 pub struct AnthropicProvider {
     config: AnthropicConfig,
@@ -55,7 +85,11 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// 설정과 자격을 주는 곳으로 공급자를 만든다.
+    /// 설정과 자격을 주는 곳으로 공급자를 만든다. 3차 설정은 [`AnthropicLimits::default`]다.
+    ///
+    /// 기본 주소가 `https`가 아니면(루프백 예외) 만든 공급자는 아무것도 보내지 않고
+    /// 모든 호출([`AiProvider::complete`] · [`AnthropicProvider::verify`])에
+    /// [`AiError::InsecureBaseUrl`]을 돌려준다. 만들 때 거부하려면 [`AnthropicProvider::with_limits`].
     pub fn new(config: AnthropicConfig, credentials: Arc<dyn CredentialSource>) -> Self {
         // 자격 헤더가 다른 주소로 따라가지 않게 리다이렉트를 끈다.
         let client = reqwest::Client::builder()
@@ -69,10 +103,24 @@ impl AnthropicProvider {
         }
     }
 
+    /// 설정 · 3차 설정 · 자격을 주는 곳으로 공급자를 만든다.
+    ///
+    /// 기본 주소가 `https`가 아니면 [`AiError::InsecureBaseUrl`]로 거부한다.
+    /// 루프백(`127.0.0.1` · `::1` · `localhost`)만 예외다. 만들 때 아무것도 보내지 않는다.
+    pub fn with_limits(
+        config: AnthropicConfig,
+        limits: AnthropicLimits,
+        credentials: Arc<dyn CredentialSource>,
+    ) -> Result<Self, AiError> {
+        todo!()
+    }
+
     /// 이 자격으로 공급자에 닿는지 확인한다.
     ///
     /// 돈이 들지 않는 요청(`GET /v1/models`) 한 번만 보낸다. 다시 시도하지 않는다.
     /// 만들 때 받은 자격 자리는 보지 않고, 넘겨받은 `credential`만 쓴다.
+    /// 2xx여도 본문이 공식 문서의 모델 목록 모양(`data` 배열)이 아니면
+    /// [`AiError::InvalidResponse`]다.
     pub async fn verify(&self, credential: &Credential) -> Result<(), AiError> {
         let builder = self.request(Method::GET, "/v1/models?limit=1", credential)?;
         self.send(builder, credential).await.map(|_| ())

@@ -41,4 +41,12 @@ pub enum AiError {
     /// 성공 응답인데 읽을 수 없는 모양이다.
     #[error("AI 공급자 응답을 읽지 못했습니다")]
     InvalidResponse,
+    /// 자격에 헤더로 보낼 수 없는 글자(줄바꿈 · 제어 문자)가 있다. 요청을 보내지 않았다.
+    /// 값은 담지 않는다(E38). 비어 있는 자격은 이것이 아니라 [`AiError::NotConfigured`]다.
+    #[error("AI 키의 모양이 잘못됐습니다 (줄바꿈이나 제어 문자가 들어 있습니다)")]
+    InvalidCredential,
+    /// 공급자 기본 주소가 `https`가 아니다(루프백 `127.0.0.1` · `::1` · `localhost`만 예외).
+    /// 요청을 보내지 않았다.
+    #[error("AI 공급자 주소가 https가 아닙니다")]
+    InsecureBaseUrl,
 }

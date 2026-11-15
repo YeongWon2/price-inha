@@ -1,6 +1,6 @@
 //! 다시 시도할지와 얼마나 기다릴지를 정한다.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::anthropic::AnthropicConfig;
 use crate::error::AiError;
@@ -40,6 +40,47 @@ pub(crate) fn wait_before_retry(
 fn backoff(base: Duration, attempt: u32) -> Duration {
     let factor = 1u32 << attempt.min(16);
     base.saturating_mul(factor).min(MAX_BACKOFF.max(base))
+}
+
+/// 늘어나는 다시 시도 간격의 위 끝 기본값(A17, Hermes `max_delay=60`).
+pub const RETRY_MAX_DELAY: Duration = Duration::from_secs(60);
+
+/// `Retry-After`로 기다리는 시간의 위 끝(A18, Hermes `RETRY_AFTER_CAP_S`).
+/// 이보다 길게 기다리라고 하면 이만큼만 기다린다.
+pub const RETRY_AFTER_CAP: Duration = Duration::from_secs(600);
+
+/// 다시 시도 간격 계산기(A17).
+///
+/// `n`번째(1부터) 다시 시도 전 간격은 `d = min(base × 2^(n-1), max)`에
+/// 균등 jitter `[0, d/2]`를 더한 값이다. 무작위는 씨앗으로 정해지므로
+/// 같은 씨앗이면 같은 차례의 간격이 나온다.
+#[derive(Clone, Debug)]
+pub struct RetryBackoff {
+    base: Duration,
+    max: Duration,
+    state: u64,
+}
+
+impl RetryBackoff {
+    /// 첫 간격 `base`, 위 끝 `max`, 무작위 씨앗 `seed`로 만든다.
+    pub fn new(base: Duration, max: Duration, seed: u64) -> Self {
+        todo!()
+    }
+
+    /// `retry`번째(1부터) 다시 시도 전에 기다릴 시간. 부를 때마다 무작위가 한 걸음 나아간다.
+    pub fn delay(&mut self, retry: u32) -> Duration {
+        todo!()
+    }
+}
+
+/// `Retry-After` 값을 기다릴 시간으로 읽는다(A18).
+///
+/// - 초 숫자(소수 허용)와 HTTP 날짜(`Wed, 21 Oct 2015 07:28:00 GMT`) 둘 다 읽는다.
+///   날짜는 `now`에서 그 시각까지 남은 시간이다.
+/// - [`RETRY_AFTER_CAP`]보다 길면 [`RETRY_AFTER_CAP`]이다.
+/// - 읽을 수 없는 값, 0, 이미 지난 시각은 `None`(기다릴 시간이 없는 것으로 본다).
+pub fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
+    todo!()
 }
 
 #[cfg(test)]

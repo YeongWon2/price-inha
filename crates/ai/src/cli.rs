@@ -182,6 +182,15 @@ impl ClaudeCliProvider {
     pub async fn check(&self) -> CliStatus {
         check::check(&self.config).await
     }
+
+    /// 공급자를 끝낸다. 서버가 꺼질 때 부른다.
+    ///
+    /// 새 호출을 받지 않게 하고(이후 [`AiProvider::complete`]는 띄우지 않고
+    /// [`AiError::Connection`]), 살아 있는 모든 자식 그룹에 표준 입력을 닫은 뒤
+    /// `SIGTERM` → 유예([`ClaudeCliConfig::kill_grace`]) → `SIGKILL`을 보내고, 자식이 거둬질 때까지 기다린다.
+    pub async fn shutdown(&self) {
+        todo!()
+    }
 }
 
 #[async_trait]

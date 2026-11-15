@@ -16,7 +16,10 @@ mod retry;
 mod types;
 mod wire;
 
-pub use anthropic::{AnthropicConfig, AnthropicProvider};
+pub use anthropic::{
+    ANTHROPIC_DEFAULT_CONNECT_TIMEOUT, ANTHROPIC_DEFAULT_MAX_RESPONSE_BYTES, AnthropicConfig,
+    AnthropicLimits, AnthropicProvider,
+};
 pub use cli::{
     CLI_AUTH_TIMEOUT, CLI_DEFAULT_KILL_GRACE, CLI_DEFAULT_MAX_CONCURRENCY,
     CLI_DEFAULT_MAX_OUTPUT_BYTES, CLI_MAX_STDIN_BYTES, CLI_MIN_VERSION, CLI_RESTRICTED_SETTINGS,
@@ -24,6 +27,7 @@ pub use cli::{
 };
 pub use credential::{Credential, CredentialSource, Secret};
 pub use error::AiError;
+pub use retry::{RETRY_AFTER_CAP, RETRY_MAX_DELAY, RetryBackoff, parse_retry_after};
 pub use types::{
     AiProvider, CompletionRequest, CompletionResponse, Message, Role, StopReason, Usage,
 };
