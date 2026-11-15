@@ -20,7 +20,7 @@ mod promotion;
 mod state;
 
 pub use caps::{AbsoluteCaps, CappedField, Change, adjust};
-pub use error::{Error, OverCap, Violation};
+pub use error::{Error, Invalid, InvalidReason, OverCap, ParamField, Violation};
 pub use json::{FORMAT_VERSION, Template};
 pub use params::{
     ApprovalWait, AtrBar, AtrStop, Cooldown, CountRange, EntrySignal, LossStreakStop, Market,

@@ -43,6 +43,8 @@ impl Template {
 
     /// JSON 글을 읽는다. 모르는 판 번호는 [`Error::UnsupportedVersion`], 모양이 틀리면
     /// [`Error::Json`], 상한을 넘는 값이 들어 있으면 [`Error::OverCap`] 이다.
+    /// 아래쪽 경계 · 모양을 어긴 값([`crate::adjust`] 와 같은 규칙)도 [`Error::OverCap`] 이며
+    /// [`crate::OverCap::invalid`] 에 담긴다.
     pub fn from_json(text: &str) -> Result<Self, Error> {
         let value: Value = serde_json::from_str(text).map_err(json_error)?;
         let version = value

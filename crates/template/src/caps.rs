@@ -111,6 +111,11 @@ pub enum Change {
 /// [`AbsoluteCaps::FIXED`] 를 넘으면(뒤에서 고쳐 넣었더라도) **전체를 거부**한다(E5).
 /// 확신 종목 비중은 종목 상한(25%)을 따른다. 상한과 같은 값은 받는다.
 /// 오류에는 넘은 칸 · 넣은 값 · 상한이 [`CappedField`] 순서로 모두 담긴다. `current` 는 바뀌지 않는다.
+///
+/// 아래쪽 경계도 거부한다(2차): 음수 · 0인 비율(R% · 일일 손실 · 최대 낙폭 · 종목 · 확신 종목 · 업종 비중),
+/// 100%를 넘는 비율, 아래 끝이 위 끝보다 큰 범위(`PctRange` · `CountRange`), 0 이하의 개수 · 시간,
+/// 적용한 결과에서 업종 비중이 종목 비중(확신 종목 비중 포함)보다 작은 것. 이 위반은
+/// [`OverCap::invalid`] 에 칸과 이유([`crate::InvalidReason`])로 담긴다.
 pub fn adjust(current: &RiskParams, changes: &[Change]) -> Result<RiskParams, OverCap> {
     let mut next = current.clone();
     let mut violations = Vec::new();
@@ -152,7 +157,10 @@ fn finish(mut violations: Vec<Violation>) -> Result<(), OverCap> {
         return Ok(());
     }
     violations.sort_by_key(|v| v.field.order());
-    Err(OverCap { violations })
+    Err(OverCap {
+        violations,
+        invalid: Vec::new(),
+    })
 }
 
 /// 상한을 넘으면 그 위반. 상한과 같은 값은 받는다.

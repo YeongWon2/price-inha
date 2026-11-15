@@ -275,6 +275,18 @@ pub struct RiskParams {
     pub promotion: PromotionCriteria,
 }
 
+impl RiskParams {
+    /// 이 템플릿의 승격 기준으로 모의 결과를 판정한다(E26 · P14).
+    ///
+    /// 최대 낙폭 기준은 [`PromotionCriteria::max_drawdown_pct`] 가 아니라 **지금 최대 낙폭 한도의 절반**
+    /// (`self.max_drawdown_pct / 2`, 결정 2026-11-16 30번)으로 센다. 한도를 바꾸면 기준도 따라간다(2차 2번).
+    /// 나머지 기준은 [`Self::promotion`] 을 쓴다.
+    pub fn evaluate_promotion(&self, stats: &crate::PromotionStats) -> crate::Verdict {
+        let _ = stats;
+        todo!()
+    }
+}
+
 /// 스타일의 기본값이 든 템플릿 값(C4). 부를 때마다 새 사본을 준다.
 pub fn preset(style: Style) -> RiskParams {
     match style {
