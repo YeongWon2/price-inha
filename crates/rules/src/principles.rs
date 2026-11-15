@@ -7,6 +7,9 @@ use crate::Violation;
 /// 보유 중 손절값 바꾸기(P2). 산 종목(롱)만 있으므로 손절은 올리거나 그대로 두기만 된다.
 /// 내리면(넓히면) [`Violation::StopWidened`].
 pub fn check_stop_change(current: Decimal, proposed: Decimal) -> Result<(), Violation> {
-    let _ = (current, proposed);
-    todo!()
+    if proposed < current {
+        Err(Violation::StopWidened)
+    } else {
+        Ok(())
+    }
 }

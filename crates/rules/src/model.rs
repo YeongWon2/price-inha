@@ -87,12 +87,12 @@ pub enum Purpose {
 impl Purpose {
     /// 이 목적의 주문 방향.
     pub fn side(self) -> Side {
-        todo!()
+        if self.is_buy() { Side::Buy } else { Side::Sell }
     }
 
     /// 사는 주문(새 진입 · 추가 매수)인가.
     pub fn is_buy(self) -> bool {
-        todo!()
+        matches!(self, Purpose::NewEntry | Purpose::AddOn)
     }
 }
 

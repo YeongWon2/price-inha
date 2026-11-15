@@ -39,7 +39,21 @@ pub enum Principle {
 impl Principle {
     /// 화면과 기록에 쓰는 번호 글자: `"P1"` ~ `"P13"`.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Principle::P1 => "P1",
+            Principle::P2 => "P2",
+            Principle::P3 => "P3",
+            Principle::P4 => "P4",
+            Principle::P5 => "P5",
+            Principle::P6 => "P6",
+            Principle::P7 => "P7",
+            Principle::P8 => "P8",
+            Principle::P9 => "P9",
+            Principle::P10 => "P10",
+            Principle::P11 => "P11",
+            Principle::P12 => "P12",
+            Principle::P13 => "P13",
+        }
     }
 }
 
@@ -111,7 +125,75 @@ pub enum Violation {
 impl Violation {
     /// 이 위반이 어긴 원칙.
     pub fn principle(&self) -> Principle {
-        todo!()
+        match self {
+            Violation::RiskTooLarge | Violation::CurrencyMismatch => Principle::P1,
+            Violation::StopNotBelowEntry | Violation::StopWidened => Principle::P2,
+            Violation::DailyLossLimitReached => Principle::P3,
+            Violation::DrawdownLimitReached => Principle::P4,
+            Violation::BannedSymbol
+            | Violation::BannedProduct(_)
+            | Violation::BannedFunding(_)
+            | Violation::ShortSale => Principle::P5,
+            Violation::AveragingDown => Principle::P6,
+            Violation::SymbolWeightFull
+            | Violation::SectorWeightFull
+            | Violation::UnknownSector => Principle::P8,
+            Violation::DataFromFuture => Principle::P10,
+            Violation::StaleQuote
+            | Violation::AccountMismatch
+            | Violation::ApiError
+            | Violation::DataAnomaly => Principle::P11,
+            Violation::MarketClosed
+            | Violation::OrderTypeNotAllowed
+            | Violation::OutsidePriceLimit
+            | Violation::ViActive
+            | Violation::TradingHalted
+            | Violation::StatusUnknown
+            | Violation::DuplicateOrder
+            | Violation::OverMaxOrderAmount
+            | Violation::TradeCountReached
+            | Violation::ApiLimitReached => Principle::P12,
+            Violation::NoPositiveEdge => Principle::P13,
+        }
+    }
+
+    /// 사람이 읽는 한 줄 설명(원칙 번호는 붙이지 않는다).
+    fn describe(&self) -> String {
+        let text = match self {
+            Violation::RiskTooLarge => "한 주도 1회 위험 한도 안에서 살 수 없다(셈한 수량이 0)",
+            Violation::CurrencyMismatch => "장부 · 규칙 · 시세의 통화가 서로 다르다",
+            Violation::StopNotBelowEntry => "손절값이 진입가보다 낮지 않다",
+            Violation::StopWidened => "보유 중 손절을 넓히려 한다",
+            Violation::DailyLossLimitReached => "그날 손실이 하루 손실 한도에 닿았다",
+            Violation::DrawdownLimitReached => "최고 평가액 대비 낙폭이 최대 낙폭 한도에 닿았다",
+            Violation::BannedSymbol => "설정의 금지 종목이다",
+            Violation::BannedProduct(kind) => return format!("금지 상품 종류다({kind:?})"),
+            Violation::BannedFunding(funding) => {
+                return format!("현금이 아닌 돈으로 사려 한다({funding:?})");
+            }
+            Violation::ShortSale => "가진 것이 없이 팔려 한다(공매도)",
+            Violation::AveragingDown => "손실 중인 종목을 더 사려 한다",
+            Violation::SymbolWeightFull => "종목 비중이 상한에 닿았다",
+            Violation::SectorWeightFull => "업종 비중이 상한에 닿았다",
+            Violation::UnknownSector => "업종표에 없는 종목이라 업종 비중을 셀 수 없다",
+            Violation::DataFromFuture => "판단 시각보다 늦게 알게 된 자료를 썼다",
+            Violation::StaleQuote => "시세가 늦었다",
+            Violation::AccountMismatch => "계좌가 기록과 어긋난다",
+            Violation::ApiError => "바깥 API 오류가 있다",
+            Violation::DataAnomaly => "자료 이상이 있다",
+            Violation::MarketClosed => "장이 열려 있지 않다",
+            Violation::OrderTypeNotAllowed => "지금 세션에서 받지 않는 호가 유형이다",
+            Violation::OutsidePriceLimit => "값이 가격제한폭 밖이다",
+            Violation::ViActive => "변동성 완화장치(VI)가 걸려 있다",
+            Violation::TradingHalted => "거래정지 종목이다",
+            Violation::StatusUnknown => "VI · 거래정지 여부를 알 수 없다",
+            Violation::DuplicateOrder => "같은 종목 · 같은 방향의 끝나지 않은 주문이 있다",
+            Violation::OverMaxOrderAmount => "1회 최대 주문 금액을 넘는다",
+            Violation::TradeCountReached => "일일 최대 매매 횟수에 닿았다",
+            Violation::ApiLimitReached => "API 요청 한도에 닿았다",
+            Violation::NoPositiveEdge => "비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다",
+        };
+        text.to_string()
     }
 }
 
@@ -153,7 +235,20 @@ impl Reason {
     /// 이 까닭이 어긴 원칙 번호들(작은 번호부터, 겹치지 않게).
     /// 근거가 빠지면 P9, 그 가운데 손절값이 있으면 P2도 들어간다. 판단 · 팀 상태 때문이면 비어 있다.
     pub fn principles(&self) -> Vec<Principle> {
-        todo!()
+        let mut found = match self {
+            Reason::NotJudged(_) | Reason::TeamNotOperating(_) => Vec::new(),
+            Reason::MissingRationale(fields) => {
+                let mut list = vec![Principle::P9];
+                if fields.contains(&RationaleField::Stop) {
+                    list.push(Principle::P2);
+                }
+                list
+            }
+            Reason::Violations(list) => list.iter().map(Violation::principle).collect(),
+        };
+        found.sort();
+        found.dedup();
+        found
     }
 }
 
@@ -169,7 +264,45 @@ pub struct Blocked {
 impl Blocked {
     /// 사람이 읽는 설명. 비어 있지 않고, 어긴 원칙이 있으면 그 번호 글자(`"P5"` 등)가 들어간다.
     pub fn detail(&self) -> String {
-        todo!()
+        match &self.reason {
+            Reason::NotJudged(stage) => {
+                format!("판단됨 상태가 아닌 매매의 주문 안은 받지 않는다(E20, 지금 {stage:?})")
+            }
+            Reason::TeamNotOperating(team) => {
+                format!("투자 팀이 운용 중이 아니라 사는 주문을 받지 않는다(E31, 지금 {team:?})")
+            }
+            Reason::MissingRationale(fields) => {
+                let codes: Vec<&str> = self
+                    .reason
+                    .principles()
+                    .into_iter()
+                    .map(Principle::code)
+                    .collect();
+                let names: Vec<&str> = fields.iter().map(|field| field_name(*field)).collect();
+                format!("근거가 빠졌다({}): {}", codes.join(" · "), names.join(", "))
+            }
+            Reason::Violations(list) => {
+                let lines: Vec<String> = list
+                    .iter()
+                    .map(|violation| {
+                        format!("{} {}", violation.principle().code(), violation.describe())
+                    })
+                    .collect();
+                format!("원칙을 어겼다: {}", lines.join("; "))
+            }
+        }
+    }
+}
+
+/// 근거 칸의 이름.
+fn field_name(field: RationaleField) -> &'static str {
+    match field {
+        RationaleField::Hypothesis => "가설",
+        RationaleField::Trigger => "계기",
+        RationaleField::Entry => "진입가",
+        RationaleField::Stop => "손절값",
+        RationaleField::Target => "목표값",
+        RationaleField::ExpectedValue => "기대값",
     }
 }
 
@@ -189,6 +322,11 @@ impl Passed {
     /// 규칙 엔진이 셈한 주문 내용.
     pub fn order(&self) -> &ApprovedOrder {
         &self.order
+    }
+
+    /// 주문 내용을 꺼낸다(점검 통과 표시를 낼 때).
+    pub(crate) fn into_order(self) -> ApprovedOrder {
+        self.order
     }
 
     /// 주문 금액(수량 × 값). 시장가 사기는 시세 × (1 + 미끄러짐), 시장가 팔기는 시세로 센다.
