@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
 use pi_store::{
-    AccessRecord, AccountKind, Approval, EventRange, NewAccess, NewTrade, Store, StoreError,
-    TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, TradeId,
+    AccessRecord, AccountKind, Approval, EventRange, NewAccess, NewTrade, SCHEMA_VERSION, Store,
+    StoreError, TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, TradeId,
 };
 use serde_json::json;
 
@@ -278,7 +278,7 @@ fn 버전_3에서_올린_파일의_기록_표도_update_or_와_on_conflict_do_up
     let free = add_numbers_one_two(&path);
     assert_eq!(
         Store::open(&path).unwrap().info().unwrap().schema_version,
-        4
+        SCHEMA_VERSION
     );
     assert_bypass_blocked(&path, free, &[1, 2, 41, 77]);
 }

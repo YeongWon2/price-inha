@@ -1,6 +1,7 @@
 //! pi-store: docs/dev/modules/store.md 를 따른다.
 //!
 //! SQLite 파일 하나에 투자 팀 상태 · 매매 · 이벤트 · 접속 기록을 둔다.
+//! (9차) 템플릿 · 승인 요청 · 규칙 개선안 · 모의계좌 상태 값 · 접속 키 해시도 둔다(스키마 버전 5).
 //!
 //! - 동기 API다. 비동기 코드에서는 호출하는 쪽이 `spawn_blocking`으로 감싼다.
 //! - 시각은 모두 호출하는 쪽이 넘긴다. 저장소 안에서 지금 시각을 읽지 않는다.
@@ -8,12 +9,16 @@
 //! - 비밀(키 · 토큰 · 비밀번호)을 받는 칸이나 API를 만들지 않는다.
 //! - 거부된 호출은 아무것도 바꾸지 않는다.
 
+mod approval;
 mod codec;
 mod error;
+mod keep;
 mod log;
 mod model;
+mod proposal;
 mod schema;
 mod team;
+mod template;
 mod trade;
 
 use std::path::Path;
@@ -21,16 +26,22 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, TransactionBehavior};
 
+pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, NewApprovalRequest};
 pub use error::{DenyReason, StoreError, Transition};
+pub use keep::{ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PaperSnapshot};
 pub use model::{
     AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
     Judgment, NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo,
     TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState,
     UnixMillis,
 };
+pub use proposal::{NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState};
+pub use template::{
+    CriteriaPass, NewTemplate, Template, TemplateId, TemplateRevision, TemplateState,
+};
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///
@@ -96,6 +107,8 @@ impl Store {
     /// - 하루 한도 멈춤에서 쉬는 중으로 나가는데 사유가 `NextTradingDayStart`가 아님: [`DenyReason::NextTradingDayOnly`]
     /// - 운용 중 · 하루 한도 멈춤 · 이상 감지 멈춤에서 전체 정지로 가는데 사유가 `MaxLoss`가 아님:
     ///   [`DenyReason::MaxLossOnly`] (2차)
+    /// - (9차) 전체 정지가 되면 실전중인 템플릿은 모두 같은 묶음 안에서 멈춤이 된다
+    ///   ([`Store::stop_template`] 참고). 거부되면 템플릿도 그대로다.
     pub fn change_team_state(&self, change: TeamChange) -> Result<TeamStateRecord, StoreError> {
         self.write(|conn| team::change(conn, change))
     }

@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
-use pi_store::{EventRange, Store};
+use pi_store::{EventRange, SCHEMA_VERSION, Store};
 use serde_json::{Value, json};
 
 const FIXTURE_V1: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.db");
@@ -427,7 +427,7 @@ fn v2_with_out_of_range_at() -> (tempfile::TempDir, PathBuf) {
 fn 시각_칸에_실수가_적힌_줄은_시각_없음으로_읽고_뒤의_이벤트도_읽힌다() {
     let (_dir, path) = v2_with_out_of_range_at();
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     // 버전 3으로 올라오며 범위 밖 정수는 시각 칸에 실수로 적혔다(SQLite가 정수로 담지 못한다).
     assert_eq!(raw_at_type(&path, 8), "real");
     assert_eq!(raw_at_type(&path, 9), "real");

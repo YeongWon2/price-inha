@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
-use pi_store::{EventRange, Store};
+use pi_store::{EventRange, SCHEMA_VERSION, Store};
 use serde_json::json;
 
 const FIXTURE_V1: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.db");
@@ -91,9 +91,9 @@ fn plan(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
 
 // 검증: D6, C2, E3
 #[test]
-fn 버전_4_파일의_이벤트_시각_칸에_색인이_있다() {
+fn 최신_버전_파일의_이벤트_시각_칸에_색인이_있다() {
     for (name, _dir, path) in upgraded_files() {
-        assert_eq!(raw_user_version(&path), 4, "{name}");
+        assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION), "{name}");
         let conn = rusqlite::Connection::open(&path).unwrap();
         assert!(
             !at_indexes(&conn).is_empty(),
@@ -227,7 +227,7 @@ fn 이전이_도중에_실패하면_버전과_보호_트리거가_그대로이�
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(store.legacy_envelope_until().unwrap(), Some(7));
     assert_eq!(store.read_after(0, 100).unwrap().len(), 7);
     drop(store);

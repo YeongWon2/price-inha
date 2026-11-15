@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
-use pi_store::Store;
+use pi_store::{SCHEMA_VERSION, Store};
 use serde_json::{Value, json};
 
 const FIXTURE_V3: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v3.db");
@@ -198,7 +198,11 @@ fn 짝_없는_서로게이트가_든_줄은_옛_봉투로_세지_않아_경계�
             assert_eq!(raw_user_version(&path), 3);
             let want = if counts { Some(12) } else { Some(10) };
             let store = Store::open(&path).unwrap();
-            assert_eq!(store.info().unwrap().schema_version, 4, "{text}");
+            assert_eq!(
+                store.info().unwrap().schema_version,
+                SCHEMA_VERSION,
+                "{text}"
+            );
             assert_eq!(
                 store.legacy_envelope_until().unwrap(),
                 want,

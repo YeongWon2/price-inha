@@ -33,7 +33,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
-use pi_store::{EventRange, Store, TeamState, TimedEvent, TradeId, TradeState, UnixMillis};
+use pi_store::{
+    EventRange, SCHEMA_VERSION, Store, TeamState, TimedEvent, TradeId, TradeState, UnixMillis,
+};
 use serde_json::{Value, json};
 
 const FIXTURE_V1: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.db");
@@ -239,16 +241,16 @@ fn 시각_칸이_빈_봉투_줄만_있는_버전_3_파일도_그_줄이_경계�
 
 // 검증: D6, V6, M1, M2, M5, C2, E3, M6
 #[test]
-fn 버전_3_파일을_4로_올려도_자료와_시각이_그대로다() {
+fn 버전_3_파일을_최신_버전으로_올려도_자료와_시각이_그대로다() {
     let (_dir, path) = copy_of(FIXTURE_V3);
     let before = raw_events(&path);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(store.read_events(all(), 100).unwrap(), v3_timed_events());
     // 내용 글자도 그대로다(저장소를 거치지 않고 견준다).
     drop(store);
     assert_eq!(raw_events(&path), before);
-    assert_eq!(raw_user_version(&path), 4);
+    assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION));
 
     let store = Store::open(&path).unwrap();
     assert_eq!(store.team_state().unwrap(), TeamState::Operating);
@@ -334,7 +336,11 @@ fn 경계는_다시_열거나_이벤트를_더_쌓아도_바뀌지_않는다() {
 
         for _ in 0..3 {
             let store = Store::open(&path).unwrap();
-            assert_eq!(store.info().unwrap().schema_version, 4, "{name}");
+            assert_eq!(
+                store.info().unwrap().schema_version,
+                SCHEMA_VERSION,
+                "{name}"
+            );
             assert_eq!(store.legacy_envelope_until().unwrap(), want, "{name}");
         }
     }
@@ -420,7 +426,7 @@ fn 경계는_저장소_파일에_직접_넣은_sql로도_바뀌지_않는다() {
         assert_eq!(boundary(&path), want, "{name}");
         tamper_every_table(&path);
         assert_eq!(boundary(&path), want, "{name}");
-        assert_eq!(raw_user_version(&path), 4, "{name}");
+        assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION), "{name}");
     }
 }
 
@@ -517,7 +523,7 @@ fn 버전_3_파일에_시각_칸이_빈_봉투_줄을_더하고_올리면_그_�
     assert_eq!(raw_user_version(&path), 3);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(store.legacy_envelope_until().unwrap(), Some(12));
     // 올려도 12번은 시각 칸이 빈 채 내용 그대로다.
     let events = store.read_events(all(), 100).unwrap();
@@ -832,7 +838,11 @@ fn 마이너스_0이나_범위_밖의_at만_있는_빈_버전_3_파일은_경계
             ],
         );
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 4, "{text}");
+        assert_eq!(
+            store.info().unwrap().schema_version,
+            SCHEMA_VERSION,
+            "{text}"
+        );
         assert_eq!(store.legacy_envelope_until().unwrap(), None, "{text}");
         drop(store);
         assert_eq!(boundary(&path), None, "다시 열기: {text}");

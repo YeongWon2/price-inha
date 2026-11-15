@@ -22,8 +22,9 @@ use std::path::{Path, PathBuf};
 use common::{t, temp_store};
 use pi_store::{
     AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
-    NewAccess, NewTrade, Rationale, RoleScore, SourceRef, Store, StoreError, TeamCause, TeamChange,
-    TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState, UnixMillis,
+    NewAccess, NewTrade, Rationale, RoleScore, SCHEMA_VERSION, SourceRef, Store, StoreError,
+    TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState,
+    UnixMillis,
 };
 use serde_json::{Value, json};
 
@@ -274,19 +275,19 @@ fn assert_v2_data(store: &Store) {
 
 // 검증: D6, V6, M1, M2, M5, C2, E3, M6
 #[test]
-fn 버전_2_파일을_열면_4로_올라가고_자료가_그대로다() {
+fn 버전_2_파일을_열면_최신_버전으로_올라가고_자료가_그대로다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     // 복사한 파일은 정말 버전 2다.
     assert_eq!(raw_user_version(&path), 2);
 
     let store = Store::open(&path).unwrap();
     let info = store.info().unwrap();
-    assert_eq!(info.schema_version, 4);
+    assert_eq!(info.schema_version, SCHEMA_VERSION);
     assert_eq!(info.journal_mode, "wal");
     assert!(info.foreign_keys);
     assert_v2_data(&store);
     drop(store);
-    assert_eq!(raw_user_version(&path), 4);
+    assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION));
 }
 
 // 검증: D6, V6, C2, E3
@@ -316,16 +317,16 @@ fn 봉투_모양이던_줄의_시각이_이벤트_시각으로_나오고_내용�
 
 // 검증: D6, V6, C2, E3
 #[test]
-fn 올린_버전_2_파일을_다시_열어도_버전_4이고_자료와_시각이_그대로다() {
+fn 올린_버전_2_파일을_다시_열어도_최신_버전이고_자료와_시각이_그대로다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     drop(Store::open(&path).unwrap());
     for _ in 0..3 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 4);
+        assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
         assert_v2_data(&store);
         assert_eq!(store.read_events(all(), 100).unwrap(), v2_timed_events());
         drop(store);
-        assert_eq!(raw_user_version(&path), 4);
+        assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION));
     }
 }
 
@@ -334,11 +335,11 @@ fn 올린_버전_2_파일을_다시_열어도_버전_4이고_자료와_시각이
 fn 버전_2_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     std::mem::forget(store);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     assert_v2_data(&store);
     assert_eq!(store.read_events(all(), 100).unwrap(), v2_timed_events());
 }
@@ -348,7 +349,7 @@ fn 버전_2_파일을_닫지_못하고_꺼져도_올린_것과_자료가_남는�
 fn 버전_2_파일을_올린_뒤에도_번호가_이어지고_새_이벤트에_시각이_남는다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
 
     assert_eq!(
         store.append("chat", &json!({ "text": "올린 뒤" })).unwrap(),
@@ -490,7 +491,7 @@ fn 옛_이름의_줄은_그대로_읽히지만_그_이름으로_새로_쌓을_�
 fn 버전_2_파일을_올린_뒤에도_쓴_승인_번호는_다시_쓰지_못한다() {
     let (_dir, path) = copy_of(FIXTURE_V2);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     for number in [41, 77] {
         match store.set_trade_approval(
             TradeId(1),
@@ -509,11 +510,11 @@ fn 버전_2_파일을_올린_뒤에도_쓴_승인_번호는_다시_쓰지_못한
 
 // 검증: D6, V6, C2, E3
 #[test]
-fn 버전_1_파일의_이벤트는_4로_올린_뒤_시각이_없음으로_읽힌다() {
+fn 버전_1_파일의_이벤트는_최신_버전으로_올린_뒤_시각이_없음으로_읽힌다() {
     let (_dir, path) = copy_of(FIXTURE_V1);
     assert_eq!(raw_user_version(&path), 1);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 4);
+    assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
 
     let plain = store.read_after(0, 100).unwrap();
     assert_eq!(plain.len(), 3);
@@ -536,7 +537,7 @@ fn 버전_1_파일의_이벤트는_4로_올린_뒤_시각이_없음으로_읽힌
         4
     );
     drop(store);
-    assert_eq!(raw_user_version(&path), 4);
+    assert_eq!(raw_user_version(&path), i64::from(SCHEMA_VERSION));
 }
 
 // ───────────── 3차 규칙 4: 기록 보호는 그대로다 ─────────────
@@ -604,7 +605,7 @@ fn assert_records_protected(path: &Path) {
     let before = read_records(path);
     assert!(before.events.len() >= 3);
     assert!(before.timed_events.iter().any(|e| e.at.is_some()));
-    assert_eq!(raw_user_version(path), 4);
+    assert_eq!(raw_user_version(path), i64::from(SCHEMA_VERSION));
 
     let mut sqls: Vec<String> = Vec::new();
     let tables = event_tables(path);
@@ -659,7 +660,7 @@ fn assert_records_protected(path: &Path) {
 
 // 검증: D6, C2, E3, M6, M1
 #[test]
-fn 새로_만든_버전_4_파일의_기록_표는_시각_칸까지_어떤_sql로도_바뀌지_않는다() {
+fn 새로_만든_최신_버전_파일의_기록_표는_시각_칸까지_어떤_sql로도_바뀌지_않는다() {
     let (_dir, path, store) = temp_store();
     for (to, cause) in [
         (TeamState::Operating, TeamCause::TradingStart),

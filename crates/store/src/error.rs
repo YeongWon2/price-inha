@@ -1,6 +1,9 @@
 //! 저장소 오류. 오류 타입은 [`StoreError`] 하나다.
 
+use crate::approval::{ApprovalId, ApprovalStatus};
 use crate::model::{Amount, RationaleField, TeamState, TradeId, TradeState, UnixMillis};
+use crate::proposal::{ProposalId, ProposalState};
+use crate::template::{TemplateId, TemplateState};
 
 /// 거부된 전이가 무엇이었는지.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +21,27 @@ pub enum Transition {
         from: TradeState,
         /// 가려던 상태.
         to: TradeState,
+    },
+    /// 템플릿 상태 전이. (9차)
+    Template {
+        /// 떠나려던 상태.
+        from: TemplateState,
+        /// 가려던 상태.
+        to: TemplateState,
+    },
+    /// 규칙 개선안 상태 전이. (9차)
+    Proposal {
+        /// 떠나려던 상태.
+        from: ProposalState,
+        /// 가려던 상태.
+        to: ProposalState,
+    },
+    /// 승인 요청 결과 전이(기다림에서 한 번만). (9차)
+    Approval {
+        /// 지금 결과.
+        from: ApprovalStatus,
+        /// 바꾸려던 결과.
+        to: ApprovalStatus,
     },
 }
 
@@ -110,6 +134,59 @@ pub enum StoreError {
         /// [`crate::REJECTED_KIND_KEEP_CHARS`]자 뒤에 `…`(U+2026) 한 글자를 붙여 담는다(글자 단위로
         /// 자르므로 여러 바이트 글자가 깨지지 않는다). 그 이하이면 그대로 담는다.
         kind: String,
+    },
+    /// 그 번호의 템플릿이 없다. (9차)
+    #[error("템플릿을 찾을 수 없다: {0:?}")]
+    TemplateNotFound(TemplateId),
+    /// 모의중이 아닌 템플릿의 값을 바꾸려 했다. (9차)
+    #[error("모의중이 아닌 템플릿의 값은 바꿀 수 없다: {state:?}")]
+    TemplateLocked {
+        /// 그 템플릿의 지금 상태.
+        state: TemplateState,
+    },
+    /// 그 번호의 규칙 개선안이 없다. (9차)
+    #[error("규칙 개선안을 찾을 수 없다: {0:?}")]
+    ProposalNotFound(ProposalId),
+    /// 규칙 개선안의 근거 매매가 모자란다(서로 다른 매매 [`crate::PROPOSAL_MIN_EVIDENCE`]건 이상). (9차)
+    #[error("규칙 개선안의 근거 매매가 {count}건뿐이다")]
+    ProposalEvidenceTooFew {
+        /// 받은 서로 다른 근거 매매의 수.
+        count: usize,
+    },
+    /// 그 번호의 승인 요청이 없다. (9차)
+    #[error("승인 요청을 찾을 수 없다: {0:?}")]
+    ApprovalNotFound(ApprovalId),
+    /// 승인이 아닌(기다림 · 거절 · 답 없음 · 만료) 요청을 실행에 쓰려 했다. (9차)
+    #[error("승인 {id:?}는 쓸 수 없다: {status:?}")]
+    ApprovalNotUsable {
+        /// 승인 번호.
+        id: ApprovalId,
+        /// 그 요청의 지금 결과.
+        status: ApprovalStatus,
+    },
+    /// 이미 실행에 쓴 승인을 또 쓰려 했다(한 번만 소비). (9차)
+    #[error("승인 {id:?}는 이미 썼다")]
+    ApprovalAlreadyConsumed {
+        /// 승인 번호.
+        id: ApprovalId,
+    },
+    /// 효력이 끝난(`expires_at` 이후) 승인을 쓰려 했다. (9차)
+    #[error("승인 {id:?}의 효력이 끝났다")]
+    ApprovalExpired {
+        /// 승인 번호.
+        id: ApprovalId,
+    },
+    /// 실행할 내용의 지문이 승인한 내용의 지문과 다르다. (9차)
+    #[error("승인 {id:?}의 내용 지문이 실행할 내용과 다르다")]
+    ApprovalFingerprintMismatch {
+        /// 승인 번호.
+        id: ApprovalId,
+    },
+    /// 접속 키 해시의 소금이 짧다([`crate::ACCESS_KEY_SALT_MIN_BYTES`]바이트 이상). (9차)
+    #[error("접속 키 소금이 {len}바이트뿐이다")]
+    AccessKeySaltTooShort {
+        /// 받은 소금의 길이(바이트).
+        len: usize,
     },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
