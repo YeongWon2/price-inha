@@ -1145,8 +1145,18 @@ dependencies = [
 name = "pi-data"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "pi-secrets",
+ "reqwest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
+ "tokio",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
