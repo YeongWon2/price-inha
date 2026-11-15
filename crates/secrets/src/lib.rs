@@ -51,6 +51,7 @@ mod envfile;
 mod error;
 mod fsio;
 mod kind;
+mod legacy;
 mod redact;
 mod secret;
 mod store;
@@ -60,6 +61,7 @@ mod verify;
 pub use error::{SecretsError, VerifyFailure};
 pub use fsio::resolve_dir;
 pub use kind::KeyKind;
+pub use legacy::legacy_auth_file_present;
 pub use secret::{Credentials, SecretString};
 pub use store::{KeyStatus, Registered, SecretStore};
 pub use verify::Verifier;
@@ -72,6 +74,12 @@ pub const DEFAULT_DIR_NAME: &str = ".price-inha";
 
 /// API 키 파일 이름. `이름=값` 줄로 쓴다. 권한 0600.
 pub const ENV_FILE: &str = ".env";
+
+/// 예전(1 · 2차)에 구독 토큰을 두던 파일 이름. 3차부터 쓰지도 읽지도 않는다.
+///
+/// 이 이름은 이 모듈만 안다(`ARCH-SECRET-FILES`). 화면이 "옛 파일이 남아 있다"고 알릴 때는
+/// [`legacy_auth_file_present`]로 있는지만 본다.
+pub const LEGACY_AUTH_FILE: &str = "auth.json";
 
 /// 비밀 값 자리에 대신 들어가는 글자.
 pub const REDACTED: &str = "[가려짐]";
