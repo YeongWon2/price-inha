@@ -81,12 +81,20 @@ impl TemplateState {
 
     /// 화면에 보이는 이름: "모의중" · "승격대기" · "실전중" · "멈춤".
     pub fn label(self) -> &'static str {
-        todo!()
+        match self {
+            TemplateState::Paper => "모의중",
+            TemplateState::PendingPromotion => "승격대기",
+            TemplateState::Live => "실전중",
+            TemplateState::Stopped => "멈춤",
+        }
     }
 
     /// `to` 로 가는 전이가 [`ALLOWED_TRANSITIONS`] 에 있으면 그 까닭을 준다(여럿이면 표 순서대로).
     pub fn reasons_to(self, to: TemplateState) -> Vec<TransitionReason> {
-        let _ = to;
-        todo!()
+        ALLOWED_TRANSITIONS
+            .iter()
+            .filter(|t| t.from == self && t.to == to)
+            .map(|t| t.reason)
+            .collect()
     }
 }

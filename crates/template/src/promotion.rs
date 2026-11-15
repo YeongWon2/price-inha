@@ -65,7 +65,30 @@ pub enum Verdict {
 impl PromotionCriteria {
     /// 모의 결과를 이 기준과 비교한다.
     pub fn evaluate(&self, stats: &PromotionStats) -> Verdict {
-        let _ = stats;
-        todo!()
+        let mut short = Vec::new();
+        if stats.trades < self.min_trades {
+            short.push(Criterion::Trades);
+        }
+        if stats.trading_days < self.min_trading_days {
+            short.push(Criterion::TradingDays);
+        }
+        if stats.net_pnl <= self.net_pnl_above {
+            short.push(Criterion::NetPnl);
+        }
+        if stats.max_drawdown_pct > self.max_drawdown_pct {
+            short.push(Criterion::MaxDrawdown);
+        }
+        if let Some(above) = self.out_of_sample_pnl_above {
+            // 표본 밖 성과가 아직 없으면 미달로 본다.
+            let passed = stats.out_of_sample_pnl.is_some_and(|pnl| pnl > above);
+            if !passed {
+                short.push(Criterion::OutOfSample);
+            }
+        }
+        if short.is_empty() {
+            Verdict::Passed
+        } else {
+            Verdict::Short(short)
+        }
     }
 }

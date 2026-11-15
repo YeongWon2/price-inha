@@ -28,7 +28,11 @@ impl Style {
 
     /// 화면에 보이는 이름: "단타" · "스윙" · "중장기".
     pub fn label(self) -> &'static str {
-        todo!()
+        match self {
+            Style::DayTrade => "단타",
+            Style::Swing => "스윙",
+            Style::LongTerm => "중장기",
+        }
     }
 }
 
@@ -273,6 +277,9 @@ pub struct RiskParams {
 
 /// 스타일의 기본값이 든 템플릿 값(C4). 부를 때마다 새 사본을 준다.
 pub fn preset(style: Style) -> RiskParams {
-    let _ = style;
-    todo!()
+    match style {
+        Style::DayTrade => crate::presets::day_trade(),
+        Style::Swing => crate::presets::swing(),
+        Style::LongTerm => crate::presets::long_term(),
+    }
 }

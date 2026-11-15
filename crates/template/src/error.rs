@@ -29,8 +29,20 @@ pub struct OverCap {
 
 impl fmt::Display for OverCap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!()
+        f.write_str("원칙 상한을 넘는 값이라 저장하지 않았습니다: ")?;
+        for (i, v) in self.violations.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(
+                f,
+                "{} {}% (상한 {}%)",
+                v.field.label(),
+                v.requested.normalize(),
+                v.cap.normalize()
+            )?;
+        }
+        Ok(())
     }
 }
 

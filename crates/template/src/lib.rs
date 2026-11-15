@@ -15,6 +15,7 @@ mod caps;
 pub mod error;
 mod json;
 mod params;
+mod presets;
 mod promotion;
 mod state;
 

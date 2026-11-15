@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::error::OverCap;
+use crate::error::{OverCap, Violation};
 use crate::params::{
     ApprovalWait, CountRange, EntrySignal, LossStreakStop, MaxHolding, Rebalance, RiskParams,
     StopRule, TakeProfitRule, TradingWindow, TriggerKind, UnfilledCancel, Universe,
@@ -112,6 +112,137 @@ pub enum Change {
 /// 확신 종목 비중은 종목 상한(25%)을 따른다. 상한과 같은 값은 받는다.
 /// 오류에는 넘은 칸 · 넣은 값 · 상한이 [`CappedField`] 순서로 모두 담긴다. `current` 는 바뀌지 않는다.
 pub fn adjust(current: &RiskParams, changes: &[Change]) -> Result<RiskParams, OverCap> {
-    let _ = (current, changes);
-    todo!()
+    let mut next = current.clone();
+    let mut violations = Vec::new();
+    for change in changes {
+        if let Some((field, requested)) = change.capped_value()
+            && let Some(v) = violation(field, requested)
+        {
+            violations.push(v);
+        }
+        change.apply_to(&mut next);
+    }
+    finish(violations)?;
+    Ok(next)
+}
+
+/// 값 전체가 상한 안인지 본다(읽어 들인 템플릿 점검용). 넘은 칸을 [`CappedField`] 순서로 모두 담는다.
+pub(crate) fn check(params: &RiskParams) -> Result<(), OverCap> {
+    let fields = [
+        (CappedField::RiskPerTrade, Some(params.risk_per_trade_pct)),
+        (
+            CappedField::DailyLossLimit,
+            Some(params.daily_loss_limit_pct),
+        ),
+        (CappedField::MaxDrawdown, Some(params.max_drawdown_pct)),
+        (CappedField::SymbolWeight, Some(params.symbol_weight_pct)),
+        (CappedField::ConvictionWeight, params.conviction_weight_pct),
+        (CappedField::SectorWeight, Some(params.sector_weight_pct)),
+    ];
+    let violations = fields
+        .into_iter()
+        .filter_map(|(field, value)| value.and_then(|v| violation(field, v)))
+        .collect();
+    finish(violations)
+}
+
+/// 넘은 칸이 있으면 [`CappedField`] 순서로 정렬해 오류로 낸다(같은 칸은 넣은 순서를 지킨다).
+fn finish(mut violations: Vec<Violation>) -> Result<(), OverCap> {
+    if violations.is_empty() {
+        return Ok(());
+    }
+    violations.sort_by_key(|v| v.field.order());
+    Err(OverCap { violations })
+}
+
+/// 상한을 넘으면 그 위반. 상한과 같은 값은 받는다.
+fn violation(field: CappedField, requested: Decimal) -> Option<Violation> {
+    let cap = field.cap();
+    (requested > cap).then_some(Violation {
+        field,
+        requested,
+        cap,
+    })
+}
+
+impl CappedField {
+    /// 이 칸의 절대 상한. 확신 종목 비중은 종목 상한을 따른다.
+    pub(crate) fn cap(self) -> Decimal {
+        let caps = AbsoluteCaps::FIXED;
+        match self {
+            CappedField::RiskPerTrade => caps.risk_per_trade_pct,
+            CappedField::DailyLossLimit => caps.daily_loss_pct,
+            CappedField::MaxDrawdown => caps.max_drawdown_pct,
+            CappedField::SymbolWeight | CappedField::ConvictionWeight => caps.symbol_weight_pct,
+            CappedField::SectorWeight => caps.sector_weight_pct,
+        }
+    }
+
+    /// 화면에 보이는 칸 이름.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            CappedField::RiskPerTrade => "1회 위험 비율",
+            CappedField::DailyLossLimit => "일일 손실 한도",
+            CappedField::MaxDrawdown => "최대 낙폭 한도",
+            CappedField::SymbolWeight => "종목당 최대 비중",
+            CappedField::ConvictionWeight => "확신 종목 최대 비중",
+            CappedField::SectorWeight => "업종당 최대 비중",
+        }
+    }
+
+    /// 선언 순서.
+    fn order(self) -> u8 {
+        match self {
+            CappedField::RiskPerTrade => 0,
+            CappedField::DailyLossLimit => 1,
+            CappedField::MaxDrawdown => 2,
+            CappedField::SymbolWeight => 3,
+            CappedField::ConvictionWeight => 4,
+            CappedField::SectorWeight => 5,
+        }
+    }
+}
+
+impl Change {
+    /// 상한이 걸린 칸이면 그 칸과 넣으려는 값.
+    fn capped_value(&self) -> Option<(CappedField, Decimal)> {
+        match self {
+            Change::RiskPerTradePct(v) => Some((CappedField::RiskPerTrade, *v)),
+            Change::DailyLossLimitPct(v) => Some((CappedField::DailyLossLimit, *v)),
+            Change::MaxDrawdownPct(v) => Some((CappedField::MaxDrawdown, *v)),
+            Change::SymbolWeightPct(v) => Some((CappedField::SymbolWeight, *v)),
+            Change::ConvictionWeightPct(v) => v.map(|v| (CappedField::ConvictionWeight, v)),
+            Change::SectorWeightPct(v) => Some((CappedField::SectorWeight, *v)),
+            _ => None,
+        }
+    }
+
+    /// 이 칸을 `p` 에 적용한다.
+    fn apply_to(&self, p: &mut RiskParams) {
+        match self.clone() {
+            Change::RiskPerTradePct(v) => p.risk_per_trade_pct = v,
+            Change::DailyLossLimitPct(v) => p.daily_loss_limit_pct = v,
+            Change::MaxDrawdownPct(v) => p.max_drawdown_pct = v,
+            Change::LossStreak(v) => p.loss_streak = v,
+            Change::MaxPositions(v) => p.max_positions = v,
+            Change::SymbolWeightPct(v) => p.symbol_weight_pct = v,
+            Change::ConvictionWeightPct(v) => p.conviction_weight_pct = v,
+            Change::SectorWeightPct(v) => p.sector_weight_pct = v,
+            Change::MinCashPct(v) => p.min_cash_pct = v,
+            Change::Stop(v) => p.stop = v,
+            Change::TakeProfit(v) => p.take_profit = v,
+            Change::MaxHolding(v) => p.max_holding = v,
+            Change::EntrySignals(v) => p.entry_signals = v,
+            Change::Universe(v) => p.universe = v,
+            Change::AutoOrderLimitPct(v) => p.auto_order_limit_pct = v,
+            Change::TradingWindow(v) => p.trading_window = v,
+            Change::ChaseLimitPct(v) => p.chase_limit_pct = v,
+            Change::MaxTradesPerDay(v) => p.max_trades_per_day = v,
+            Change::Triggers(v) => p.triggers = v,
+            Change::Rebalance(v) => p.rebalance = v,
+            Change::ApprovalWait(v) => p.approval_wait = v,
+            Change::UnfilledCancel(v) => p.unfilled_cancel = v,
+            Change::Promotion(v) => p.promotion = v,
+        }
+    }
 }
