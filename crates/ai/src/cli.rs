@@ -35,6 +35,10 @@ pub const CLI_DEFAULT_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 /// 끝낼 때 `SIGTERM` 뒤 `SIGKILL`까지 기다리는 유예의 기본값.
 pub const CLI_DEFAULT_KILL_GRACE: Duration = Duration::from_secs(1);
 
+/// 끝낼 때 표준 입력을 닫은 뒤 `SIGTERM`을 보내기 전까지 스스로 끝나기를 기다리는 시간
+/// (원본 `cli-transport.ts`의 0.5초, `cli-backend.md` 2.7 — ai.md 4차 4).
+pub const CLI_STDIN_CLOSE_WAIT: Duration = Duration::from_millis(500);
+
 /// `--version` 확인의 제한.
 pub const CLI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -150,7 +154,8 @@ pub enum CliStatus {
     NotLoggedIn,
     /// 실행 파일이 없다(설정에 없거나 그 경로에 없다).
     NotInstalled,
-    /// 확인이 제한 안에 끝나지 않았다. 확인 프로세스는 죽이지 않았다.
+    /// 확인이 제한 안에 끝나지 않았다. 또는 앞 확인의 프로세스가 아직 살아 있어
+    /// 새로 띄우지 않았다(ai.md 4차 2). 서버는 "확인하지 못함"으로 보인다.
     TimedOut,
     /// 확인 결과를 읽지 못했다(JSON이 아님, 버전 모양이 아님 등).
     Unreadable,
@@ -190,10 +195,13 @@ impl ClaudeCliProvider {
     }
 
     /// 설치(`--version`, 5초)와 로그인(`auth status --json`, 10초)을 차례로 확인한다.
-    /// 모델을 부르지 않는다. 로그인 확인이 제한을 넘겨도 그 프로세스를 죽이지 않는다.
+    /// 모델을 부르지 않는다.
     ///
     /// 한 공급자에서 확인은 한 번에 하나만 돈다(두 번째는 첫 번째가 끝나기를 기다린다).
-    /// 제한을 넘긴 확인 명령의 표준 출력은 뒤에서 끝까지 읽어 버려 그 명령이 스스로 끝나게 한다.
+    /// 제한을 넘긴 확인 명령의 표준 출력은 뒤에서 끝까지 읽어 버려 그 명령이 스스로 끝날 수 있게 하되,
+    /// 끝나지 않으면 프로세스 묶음째 끝내고 거둔다(ai.md 4차 7). 앞 확인의 프로세스가 아직
+    /// 살아 있으면(이 함수를 부른 쪽이 기다리기를 그만둔 경우 등) 새로 띄우지 않고
+    /// [`CliStatus::TimedOut`]을 돌려준다(4차 2). 그래서 확인 프로세스는 쌓이지 않는다.
     pub async fn check(&self) -> CliStatus {
         let _turn = self.check_turn.lock().await;
         check::check(&self.config).await
@@ -202,8 +210,12 @@ impl ClaudeCliProvider {
     /// 공급자를 끝낸다. 서버가 꺼질 때 부른다.
     ///
     /// 새 호출을 받지 않게 하고(이후 [`AiProvider::complete`]는 띄우지 않고
-    /// [`AiError::Connection`]), 살아 있는 모든 자식 그룹에 표준 입력을 닫은 뒤
+    /// [`AiError::Connection`]), 살아 있는 모든 자식 그룹의 표준 입력을 닫고
+    /// [`CLI_STDIN_CLOSE_WAIT`] 동안 스스로 끝나기를 기다린 뒤, 남은 그룹에
     /// `SIGTERM` → 유예([`ClaudeCliConfig::kill_grace`]) → `SIGKILL`을 보내고, 자식이 거둬질 때까지 기다린다.
+    ///
+    /// 끝내기와 겹쳐 띄우는 중이던 호출도 남기지 않는다(ai.md 4차 1): 자리표를 받은 호출은
+    /// 명부에 세어 끝내기가 기다리거나, 띄운 뒤 등록이 거부되면 그 호출이 돌아가기 전에 자식을 끝내고 거둔다.
     pub async fn shutdown(&self) {
         // 자리를 기다리던 호출도 띄우지 않고 연결 실패로 끝난다.
         self.slots.close();

@@ -23,7 +23,8 @@ pub use anthropic::{
 pub use cli::{
     CLI_AUTH_TIMEOUT, CLI_DEFAULT_KILL_GRACE, CLI_DEFAULT_MAX_CONCURRENCY,
     CLI_DEFAULT_MAX_OUTPUT_BYTES, CLI_MAX_STDIN_BYTES, CLI_MIN_VERSION, CLI_RESTRICTED_SETTINGS,
-    CLI_VERSION_TIMEOUT, ClaudeCliConfig, ClaudeCliProvider, CliStatus, CliVersion,
+    CLI_STDIN_CLOSE_WAIT, CLI_VERSION_TIMEOUT, ClaudeCliConfig, ClaudeCliProvider, CliStatus,
+    CliVersion,
 };
 pub use credential::{Credential, CredentialSource, Secret};
 pub use error::AiError;

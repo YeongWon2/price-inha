@@ -31,6 +31,11 @@ pub struct AnthropicConfig {
     /// 요청 한 번의 시간 제한.
     pub timeout: Duration,
     /// 한도 초과 · 장애 · 시간 초과 · 연결 실패일 때 다시 시도하는 횟수(첫 요청은 세지 않는다).
+    ///
+    /// 부르는 쪽이 알 것: 시간 초과 · 연결 실패는 공급자가 요청을 이미 받아 처리했는지 알 수 없는데도
+    /// 다시 보낸다(원본 Hermes와 같다). 그래서 한 번의 [`AiProvider::complete`]가 공급자 쪽에서
+    /// 같은 요청으로 여러 번 처리되고 **여러 번 과금될 수 있다**(최대 `1 + max_retries`번).
+    /// 이것을 막으려면 0으로 둔다(ai.md 4차 6).
     pub max_retries: u32,
     /// 첫 다시 시도까지의 간격. 시도마다 늘어난다. 테스트는 0에 가깝게 준다.
     pub retry_base_delay: Duration,
