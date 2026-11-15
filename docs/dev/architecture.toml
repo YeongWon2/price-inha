@@ -102,6 +102,12 @@ component = "A3 알림 · A1 폰 (웹 푸시)"
 internal = ["pi-store"]
 external = ["serde", "serde_json", "thiserror", "tokio", "async-trait", "tracing", "chrono", "reqwest", "url", "p256", "aes-gcm", "hkdf", "sha2", "base64", "rand", "zeroize"]
 
+[crates.pi-knowledge]
+dir = "crates/knowledge"
+component = "M7 지식 (키워드 · 조건 검색, 뜻 검색 자리)"
+internal = ["pi-store"]
+external = ["serde", "serde_json", "thiserror", "async-trait", "rust_decimal", "tokio", "tracing", "chrono"]
+
 [crates.price-inha]
 dir = "crates/server"
 component = "실행 파일, 조립"
