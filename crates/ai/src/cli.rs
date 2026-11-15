@@ -189,8 +189,7 @@ pub enum CliCheck {
 /// 서버가 비정상으로 꺼진 뒤 남은 그 파일 때문에 작업 폴더가 "비어 있지 않음"이 되지 않게
 /// 조립(gate 8차)이 이 함수로 가른다. `name`은 경로가 아니라 파일 이름 하나다.
 pub fn is_own_work_file(name: &std::ffi::OsStr) -> bool {
-    let _ = name;
-    todo!("ai 5차 7")
+    name.to_str().is_some_and(command::is_system_file_name)
 }
 
 /// 공식 Claude Code CLI를 부르는 공급자. 구독은 이것으로 쓴다(D4).
@@ -228,8 +227,10 @@ impl ClaudeCliProvider {
     /// 살아 있으면(이 함수를 부른 쪽이 기다리기를 그만둔 경우 등) 새로 띄우지 않고
     /// [`CliStatus::TimedOut`]을 돌려준다(4차 2). 그래서 확인 프로세스는 쌓이지 않는다.
     pub async fn check(&self) -> CliStatus {
-        let _turn = self.check_turn.lock().await;
-        check::check(&self.config, &self.probe_alive).await
+        match self.check_detailed().await {
+            CliCheck::Status(status) => status,
+            CliCheck::PreviousProbeAlive => CliStatus::TimedOut,
+        }
     }
 
     /// [`Self::check`]와 같은 확인을 하되, "앞 확인의 프로세스가 아직 살아 있어 새로 띄우지 않음"을
@@ -239,7 +240,8 @@ impl ClaudeCliProvider {
     /// 제한 없음으로 다루며, 그 셈은 자식을 띄우기 전에 한다(5차 1).
     /// 확인이 정상으로 끝나도 그 프로세스 묶음에 남은 손주를 끝낸다(5차 4).
     pub async fn check_detailed(&self) -> CliCheck {
-        todo!("ai 5차 5")
+        let _turn = self.check_turn.lock().await;
+        check::check(&self.config, &self.probe_alive).await
     }
 
     /// 공급자를 끝낸다. 서버가 꺼질 때 부른다.
@@ -257,7 +259,10 @@ impl ClaudeCliProvider {
     pub async fn shutdown(&self) {
         // 자리를 기다리던 호출도 띄우지 않고 연결 실패로 끝난다.
         self.slots.close();
-        self.groups.shutdown(self.config.kill_grace).await;
+        tokio::join!(
+            self.groups.shutdown(self.config.kill_grace),
+            self.probe_alive.shutdown(),
+        );
     }
 }
 
@@ -284,7 +289,8 @@ impl AiProvider for ClaudeCliProvider {
         if !self.config.work_dir.is_dir() {
             return Err(AiError::Connection);
         }
-        let deadline = tokio::time::Instant::now() + self.config.timeout;
+        // 끝 시각은 띄우기 전에 센다. 넘치면 제한 없음(ai.md 5차 1).
+        let deadline = tokio::time::Instant::now().checked_add(self.config.timeout);
         let call = process::run_once(
             &self.config,
             &self.slots,
@@ -293,8 +299,11 @@ impl AiProvider for ClaudeCliProvider {
             &request,
             input,
         );
-        tokio::time::timeout_at(deadline, call)
-            .await
-            .unwrap_or(Err(AiError::Timeout))
+        match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, call)
+                .await
+                .unwrap_or(Err(AiError::Timeout)),
+            None => call.await,
+        }
     }
 }

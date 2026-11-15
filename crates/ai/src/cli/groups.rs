@@ -7,6 +7,7 @@
 //! 띄우는 중이던 자리도 명부에 있으므로 끝내기는 그 호출이 자식을 거두고 자리를 놓을 때까지 기다린다.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -16,7 +17,7 @@ use tokio::sync::{Notify, oneshot};
 use super::CLI_STDIN_CLOSE_WAIT;
 
 /// 그룹에 신호를 보내는 시스템 명령.
-const KILL_COMMAND: &str = "/bin/kill";
+pub(super) const KILL_COMMAND: &str = "/bin/kill";
 
 /// 살아 있는 자식 그룹의 명부.
 #[derive(Default)]
@@ -69,6 +70,15 @@ impl Registration {
                 true
             }
             None => false,
+        }
+    }
+
+    /// 자식을 거뒀다고 적는다. 그 뒤로 끝내기는 이 그룹 번호에 신호를 보내지 않는다(ai.md 5차 6).
+    /// 자리는 그대로 두므로 끝내기는 이 호출이 자리를 놓을 때까지 기다린다.
+    pub(super) fn mark_reaped(&self) {
+        if let Some(live) = self.groups.lock().live.get_mut(&self.id) {
+            live.pgid = None;
+            live.close_stdin = None;
         }
     }
 }
@@ -142,7 +152,7 @@ impl Groups {
         self.wait_empty().await;
     }
 
-    /// 명부에서 이미 띄운 그룹들.
+    /// 명부에서 이미 띄웠고 아직 거두지 않은 그룹들.
     fn live_pgids(&self) -> Vec<u32> {
         self.lock().live.values().filter_map(|l| l.pgid).collect()
     }
@@ -160,24 +170,32 @@ impl Groups {
 }
 
 /// 그룹 전체에 신호를 보낸다(`kill -<신호> -- -<그룹>`). 막히는 함수 안에서 쓴다.
-pub(super) fn signal_group(signal: &str, pgid: u32) {
-    let _ = StdCommand::new(KILL_COMMAND)
-        .args(kill_args(signal, pgid))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-/// [`signal_group`]의 비동기판.
-pub(super) async fn signal_group_async(signal: &str, pgid: u32) {
-    let _ = tokio::process::Command::new(KILL_COMMAND)
+/// 신호 명령이 떠서 성공으로 끝났으면 참.
+pub(super) fn signal_group(signal: &str, pgid: u32) -> bool {
+    StdCommand::new(KILL_COMMAND)
         .args(kill_args(signal, pgid))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .await;
+        .is_ok_and(|s| s.success())
+}
+
+/// [`signal_group`]의 비동기판.
+pub(super) async fn signal_group_async(signal: &str, pgid: u32) -> bool {
+    signal_group_with(Path::new(KILL_COMMAND), signal, pgid).await
+}
+
+/// `program`을 신호 명령으로 써서 그룹 전체에 신호를 보낸다. 떠서 성공으로 끝났으면 참.
+pub(super) async fn signal_group_with(program: &Path, signal: &str, pgid: u32) -> bool {
+    tokio::process::Command::new(program)
+        .args(kill_args(signal, pgid))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .is_ok_and(|s| s.success())
 }
 
 fn kill_args(signal: &str, pgid: u32) -> [String; 3] {
@@ -214,6 +232,31 @@ mod tests {
         let (tx, _rx) = oneshot::channel();
         assert!(!reserved.as_ref().is_some_and(|r| r.attach(u32::MAX, tx)));
         tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !shutting.is_finished(),
+            "자리를 놓기 전에 끝내기가 돌아왔다"
+        );
+        drop(reserved);
+        assert!(shutting.await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn 거둔_그룹_번호는_끝내기가_신호를_보내지_않고_자리는_기다린다() {
+        let groups = Arc::new(Groups::default());
+        let reserved = groups.reserve().unwrap();
+        let (tx, _rx) = oneshot::channel();
+        assert!(reserved.attach(u32::MAX, tx));
+        assert_eq!(groups.live_pgids(), vec![u32::MAX]);
+        reserved.mark_reaped();
+        assert!(
+            groups.live_pgids().is_empty(),
+            "거둔 그룹 번호가 명부에 남았다"
+        );
+        let shutting = {
+            let groups = Arc::clone(&groups);
+            tokio::spawn(async move { groups.shutdown(Duration::from_millis(10)).await })
+        };
+        tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(
             !shutting.is_finished(),
             "자리를 놓기 전에 끝내기가 돌아왔다"

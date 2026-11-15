@@ -259,6 +259,8 @@ struct GroupGuard {
     registration: Option<Registration>,
     /// 자식을 거뒀다(그룹을 끝낼 필요가 없다).
     reaped: bool,
+    /// 거두기 전에 그룹 전체에 신호를 보냈다(거둔 뒤에 다시 보내지 않는다 — ai.md 5차 6).
+    signalled: bool,
 }
 
 impl GroupGuard {
@@ -277,11 +279,14 @@ impl GroupGuard {
             held,
             registration,
             reaped: false,
+            signalled: false,
         }
     }
 
     /// 표준 입력이 닫힌 자식을 끝내기와 같은 순서로 끝내고 거둔다: [`CLI_STDIN_CLOSE_WAIT`] 동안
     /// 스스로 끝나기를 기다리고, 그래도 살아 있으면 그룹에 `SIGTERM` → 유예 → `SIGKILL`.
+    /// 신호 명령을 띄우지 못하면 자식 하나에 `SIGKILL`로 물러서고, 마지막 기다림에는 상한을 둔다
+    /// (못 거두면 버릴 때 다시 끝낸다).
     async fn terminate(&mut self) {
         let (Some(child), Some(pgid)) = (self.child.as_mut(), self.pgid) else {
             return;
@@ -290,16 +295,28 @@ impl GroupGuard {
             .await
             .is_err()
         {
-            signal_group_async("TERM", pgid).await;
+            self.signalled |= signal_group_async("TERM", pgid).await;
             if tokio::time::timeout(self.grace, child.wait())
                 .await
                 .is_err()
             {
-                signal_group_async("KILL", pgid).await;
+                if signal_group_async("KILL", pgid).await {
+                    self.signalled = true;
+                } else {
+                    let _ = child.start_kill();
+                }
             }
         }
-        if child.wait().await.is_ok() {
-            self.reaped = true;
+        if let Ok(Ok(_)) = tokio::time::timeout(REAP_WAIT, child.wait()).await {
+            self.set_reaped();
+        }
+    }
+
+    /// 거뒀다고 적는다. 명부도 그 그룹 번호를 잊는다(ai.md 5차 6).
+    fn set_reaped(&mut self) {
+        self.reaped = true;
+        if let Some(registration) = &self.registration {
+            registration.mark_reaped();
         }
     }
 
@@ -309,15 +326,16 @@ impl GroupGuard {
             return Err(io::Error::other("자식이 없다"));
         };
         let status = child.wait().await?;
-        self.reaped = true;
+        self.set_reaped();
         Ok(status)
     }
 }
 
 impl Drop for GroupGuard {
     /// 거두지 못했으면 그룹에 `SIGTERM` → 유예 → `SIGKILL`을 보내고 거둔다.
-    /// 거뒀어도 남은 손주가 있을 수 있으니 그룹에 `SIGTERM`을 한 번 보낸다.
-    /// 자리표 · 명부 자리는 그 뒤에 놓는다. 막히지 않게 따로 된 실에서 한다.
+    /// 거뒀으면 남은 손주가 있을 수 있으니 그룹에 `SIGTERM`을 한 번 보내되, 거두기 전에 이미 그룹에
+    /// 신호를 보냈으면 다시 보내지 않는다(ai.md 5차 6). 신호 명령을 띄우지 못하면 자식 하나에
+    /// `SIGKILL`로 물러선다. 자리표 · 명부 자리는 그 뒤에 놓는다. 막히지 않게 따로 된 실에서 한다.
     fn drop(&mut self) {
         let child = self.child.take();
         let permit = self.permit.take();
@@ -326,17 +344,17 @@ impl Drop for GroupGuard {
         let Some(pgid) = self.pgid else {
             return;
         };
-        let (reaped, grace) = (self.reaped, self.grace);
+        let (reaped, signalled, grace) = (self.reaped, self.signalled, self.grace);
+        if reaped && signalled {
+            return;
+        }
         let spawned = std::thread::Builder::new()
             .name("pi-ai-cli-kill".to_string())
             .spawn(move || {
-                signal_group("TERM", pgid);
-                if !reaped {
-                    std::thread::sleep(grace);
-                    signal_group("KILL", pgid);
-                    if let Some(child) = child {
-                        reap(child);
-                    }
+                if reaped {
+                    signal_group("TERM", pgid);
+                } else {
+                    end_unreaped(child, pgid, grace);
                 }
                 drop(held);
                 drop(permit);
@@ -345,6 +363,25 @@ impl Drop for GroupGuard {
         if spawned.is_err() {
             signal_group(if reaped { "TERM" } else { "KILL" }, pgid);
         }
+    }
+}
+
+/// 거두지 못한 자식의 그룹에 `SIGTERM` → 유예 → `SIGKILL`을 보내고 잠깐 기다려 거둔다.
+/// 신호 명령을 띄우지 못하면 자식 하나에 `SIGKILL`로 물러선다.
+fn end_unreaped(mut child: Option<Child>, pgid: u32, grace: Duration) {
+    if !signal_group("TERM", pgid)
+        && let Some(child) = child.as_mut()
+    {
+        let _ = child.start_kill();
+    }
+    std::thread::sleep(grace);
+    if !signal_group("KILL", pgid)
+        && let Some(child) = child.as_mut()
+    {
+        let _ = child.start_kill();
+    }
+    if let Some(child) = child {
+        reap(child);
     }
 }
 

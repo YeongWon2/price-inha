@@ -125,6 +125,26 @@ pub(super) fn stdin_text(messages: &[Message]) -> String {
     parts.join("\n\n")
 }
 
+/// 시스템 글 파일 이름의 앞(`.pi-ai-system-<프로세스 번호>-<차례>.txt`).
+const SYSTEM_FILE_PREFIX: &str = ".pi-ai-system-";
+
+/// 시스템 글 파일 이름의 끝.
+const SYSTEM_FILE_SUFFIX: &str = ".txt";
+
+/// [`SystemFile::create`]가 만드는 이름 모양(`.pi-ai-system-<수>-<수>.txt`)이면 참.
+pub(super) fn is_system_file_name(name: &str) -> bool {
+    let Some(middle) = name
+        .strip_prefix(SYSTEM_FILE_PREFIX)
+        .and_then(|rest| rest.strip_suffix(SYSTEM_FILE_SUFFIX))
+    else {
+        return false;
+    };
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    middle
+        .split_once('-')
+        .is_some_and(|(pid, n)| digits(pid) && digits(n))
+}
+
 /// 작업 폴더 안의 0600 시스템 글 파일. 버려지면(어떤 길로 끝나도) 지운다.
 pub(super) struct SystemFile {
     path: PathBuf,
@@ -136,7 +156,10 @@ impl SystemFile {
         let mut last_err = io::Error::other("시스템 글 파일을 만들지 못했다");
         for _ in 0..16 {
             let n = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
-            let path = dir.join(format!(".pi-ai-system-{}-{n}.txt", std::process::id()));
+            let path = dir.join(format!(
+                "{SYSTEM_FILE_PREFIX}{}-{n}{SYSTEM_FILE_SUFFIX}",
+                std::process::id()
+            ));
             match OpenOptions::new()
                 .write(true)
                 .create_new(true)
