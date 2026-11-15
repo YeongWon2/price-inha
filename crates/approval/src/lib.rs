@@ -5,6 +5,8 @@
 
 mod approvals;
 mod error;
+mod inner;
+mod record;
 mod subject;
 
 pub use approvals::{

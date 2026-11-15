@@ -5,6 +5,7 @@
 
 use pi_store::{AccountKind, ProposalId, TemplateId, UnixMillis};
 use rust_decimal::Decimal;
+use sha2::{Digest, Sha256};
 
 /// 주문 방향.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,12 +91,12 @@ pub struct Fingerprint(String);
 impl Fingerprint {
     /// 16진수 64자 글자.
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 
     /// 카드에 보이는 짧은 표시: 지문 앞 6자(결정 4번). 사용자가 치지는 않는다.
     pub fn short_code(&self) -> &str {
-        todo!()
+        self.0.get(..6).unwrap_or(&self.0)
     }
 }
 
@@ -110,12 +111,113 @@ impl Fingerprint {
 ///
 /// 대상 종류와 대상 번호가 들어가므로 한 대상의 승인은 다른 대상에 쓸 수 없다.
 pub fn canonical_json(subject: &Subject) -> String {
-    let _ = subject;
-    todo!()
+    match subject {
+        Subject::Order(order) => format!(
+            "{{\"kind\":\"order\",\"account\":{},\"symbol\":{},\"side\":{},\"quantity\":{},\"price\":{},\"order_type\":{},\"signal_id\":{}}}",
+            json_str(account_code(order.account)),
+            json_str(&order.symbol),
+            json_str(side_code(order.side)),
+            order.quantity,
+            json_str(&order.price.normalize().to_string()),
+            json_str(order_type_code(order.order_type)),
+            json_str(&order.signal_id),
+        ),
+        Subject::LivePromotion { template } => {
+            format!(
+                "{{\"kind\":\"live_promotion\",\"template\":{}}}",
+                template.0
+            )
+        }
+        Subject::RuleImprovement { proposal } => {
+            format!(
+                "{{\"kind\":\"rule_improvement\",\"proposal\":{}}}",
+                proposal.0
+            )
+        }
+        Subject::Restart => "{\"kind\":\"restart\"}".to_string(),
+    }
 }
 
 /// 대상의 내용 지문.
 pub fn fingerprint(subject: &Subject) -> Fingerprint {
-    let _ = subject;
-    todo!()
+    let digest = Sha256::digest(canonical_json(subject).as_bytes());
+    let mut hex = String::with_capacity(64);
+    for byte in digest.iter() {
+        hex.push(HEX[usize::from(byte >> 4)]);
+        hex.push(HEX[usize::from(byte & 0x0f)]);
+    }
+    Fingerprint(hex)
+}
+
+impl Fingerprint {
+    /// 저장소에 남긴 글자로 되살린다(이 크레이트 안에서만).
+    pub(crate) fn from_stored(text: String) -> Fingerprint {
+        Fingerprint(text)
+    }
+}
+
+const HEX: [char; 16] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+];
+
+/// JSON 글자 하나(따옴표 · 이스케이프 포함).
+fn json_str(text: &str) -> String {
+    serde_json::Value::String(text.to_string()).to_string()
+}
+
+pub(crate) fn account_code(account: AccountKind) -> &'static str {
+    match account {
+        AccountKind::Paper => "paper",
+        AccountKind::Live => "live",
+    }
+}
+
+pub(crate) fn side_code(side: Side) -> &'static str {
+    match side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    }
+}
+
+pub(crate) fn order_type_code(order_type: OrderType) -> &'static str {
+    match order_type {
+        OrderType::Limit => "limit",
+        OrderType::Market => "market",
+    }
+}
+
+pub(crate) fn signal_kind_code(kind: SignalKind) -> &'static str {
+    match kind {
+        SignalKind::StopLoss => "stop_loss",
+        SignalKind::TakeProfit => "take_profit",
+        SignalKind::Buy => "buy",
+    }
+}
+
+/// 두 지문 글자를 상수 시간으로 비교한다(길이가 다르면 바로 다르다).
+pub(crate) fn same_fingerprint(expected: &str, given: &str) -> bool {
+    let (a, b) = (expected.as_bytes(), given.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_fingerprint_needs_every_char() {
+        let fp = fingerprint(&Subject::Restart);
+        assert!(same_fingerprint(fp.as_str(), fp.as_str()));
+        assert!(!same_fingerprint(fp.as_str(), fp.short_code()));
+        let mut changed = fp.as_str().to_string();
+        let last = if changed.ends_with('0') { "1" } else { "0" };
+        changed.replace_range(63.., last);
+        assert!(!same_fingerprint(fp.as_str(), &changed));
+    }
 }
