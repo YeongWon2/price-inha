@@ -1,10 +1,8 @@
 //! 승인을 실행에 쓰기: 한 번만 · 지문 다시 비교 · 다른 대상에 못 씀 · 전체 정지 중 실전 승격 막기.
 
-mod common;
-
 use std::sync::{Arc, Barrier};
 
-use common::{MIN, T0, ask, buy, env, full_stop, order, owner_restart};
+use crate::common::{MIN, T0, ask, buy, env, full_stop, order, owner_restart};
 use pi_approval::{
     Answer, ApprovalNumber, Approvals, Decision, Error, RejectReason, Side, SignalKind, Subject,
     WaitTimes,

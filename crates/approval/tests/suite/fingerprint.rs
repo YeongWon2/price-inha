@@ -1,8 +1,6 @@
 //! 내용 지문: 정규 JSON의 SHA-256, 앞 6자 표시(결정 4번 · 7번).
 
-mod common;
-
-use common::{T0, buy, order};
+use crate::common::{T0, buy, order};
 use pi_approval::{OrderType, Side, SignalKind, Subject, canonical_json, fingerprint};
 use pi_store::{AccountKind, ProposalId, TemplateId, UnixMillis};
 use rust_decimal::Decimal;

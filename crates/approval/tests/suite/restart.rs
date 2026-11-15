@@ -1,8 +1,6 @@
 //! 다시 켠 뒤(결정 6번 · M5): 신호 유효 시간이 지난 기다림은 만료, 안이면 유지.
 
-mod common;
-
-use common::{FakeClock, MIN, T0, ask, buy, env, order, reopen};
+use crate::common::{FakeClock, MIN, T0, ask, buy, env, order, reopen};
 use pi_approval::{Answer, Decision, Error, RejectReason, Side, SignalKind, Subject};
 use pi_store::{ApprovalStatus, ProposalId, UnixMillis};
 

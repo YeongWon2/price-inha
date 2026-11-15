@@ -1,9 +1,7 @@
 //! 답 없음(E22 · FN2 3b): 신호별 기다릴 시간(N2), 사는 주문은 줄이거나(알림 감) 사지 않음(P20),
 //! 파는 신호는 팀 판단, 다시 시작 · 규칙 개선 · 실전 승격은 계속 기다림(V42).
 
-mod common;
-
-use common::{MIN, T0, ask, buy, env, stop_loss, take_profit};
+use crate::common::{MIN, T0, ask, buy, env, stop_loss, take_profit};
 use pi_approval::{
     Answer, ApprovalNumber, Decision, DueAction, Error, Notice, RejectReason, Subject,
 };

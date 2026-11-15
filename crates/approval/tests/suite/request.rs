@@ -1,11 +1,9 @@
 //! 승인 요청 만들기(C12): 번호 · 기다릴 시간(N2) · 합치기 · 지정가 · 전체 정지.
 
-mod common;
-
 use std::collections::HashSet;
 use std::time::Duration;
 
-use common::{MIN, T0, ask, buy, env, env_with, full_stop, order, stop_loss, take_profit};
+use crate::common::{MIN, T0, ask, buy, env, env_with, full_stop, order, stop_loss, take_profit};
 use pi_approval::{Decision, Error, OrderType, Side, SignalKind, Subject, WaitTimes, fingerprint};
 use pi_store::{ApprovalStatus, ProposalId, TemplateId, UnixMillis};
 use rust_decimal::Decimal;

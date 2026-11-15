@@ -35,7 +35,8 @@ impl Clock for FakeClock {
 }
 
 pub struct Env {
-    pub dir: TempDir,
+    /// 임시 폴더를 테스트 끝까지 살려 둔다(떨어지면 지워진다).
+    pub _dir: TempDir,
     pub path: PathBuf,
     pub store: Store,
     pub clock: Arc<FakeClock>,
@@ -53,7 +54,7 @@ pub fn env_with(waits: WaitTimes) -> Env {
     let clock = FakeClock::at(T0);
     let approvals = Arc::new(Approvals::new(store.clone(), clock.clone(), waits));
     Env {
-        dir,
+        _dir: dir,
         path,
         store,
         clock,
