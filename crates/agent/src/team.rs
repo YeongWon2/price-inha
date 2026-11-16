@@ -24,7 +24,7 @@
 //! 6. 팀장 판단 턴. 답은 `decision` 칸이 있는 객체 하나다:
 //!    - 사기 · 팔기: `{"decision": "buy"|"sell", "hypothesis": 글, "trigger": 글, "entry": 정수,
 //!      "stop": 정수, "target": 정수, "expected_value": 정수}`.
-//!      사기인데 근거 칸이 하나라도 비었으면 지켜보기([`WatchReason::RationaleIncomplete`], P9).
+//!      사기 · 팔기 모두 근거 칸이 하나라도 비었거나 금액 칸이 0 · 음수면 지켜보기([`WatchReason::RationaleIncomplete`], P9).
 //!      아니면 `judge_trade`로 근거 · 자료(요청의 자료 이름과 알게 된 시각) · 담당 점수 · 합의 점수를
 //!      남긴다(판단 시각은 시계). 매매는 판단됨이 된다(V3, M2).
 //!    - 지켜보기: `{"decision": "watch", "reason": 글, "revisit": 글}` → [`WatchReason::LeaderWatch`].
@@ -35,6 +35,9 @@
 //! 지켜보기로 끝나면 매매는 논의중 그대로이고(판단을 저장하지 않는다) 주문 안을 만들지 않는다.
 //! 그때 방 로그에 `room.activity`(쓴 쪽 `Gateway`, 내용 `{"status": "watch", "reason_code": <코드>}`)를
 //! 하나 남긴다. 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
+
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use pi_store::{Judgment, RoleScore, SourceRef, TradeId, TradeState};
 use serde_json::json;
@@ -57,6 +60,8 @@ pub struct Team {
     ports: Ports,
     roles: Vec<RoleConfig>,
     limits: TimeLimits,
+    /// 팔기로 판단된 매매들. 사기 주문 안을 내지 않는다.
+    sold: Arc<Mutex<HashSet<TradeId>>>,
 }
 
 /// 한 담당 턴의 끝.
@@ -90,6 +95,7 @@ impl Team {
             ports,
             roles,
             limits,
+            sold: Arc::default(),
         })
     }
 
@@ -173,10 +179,13 @@ impl Team {
                 state: found.state,
             });
         }
+        if self.sold.lock().is_ok_and(|sold| sold.contains(&trade)) {
+            return Err(Error::TradeNotBuy { trade });
+        }
         let out = self
             .turn(Role::Trader, trade, &prompt::order_turn(&found))
             .await?;
-        let note = parse_draft(&out.text).ok_or(Error::RoleUnavailable {
+        let reply = parse_draft(&out.text).ok_or(Error::RoleUnavailable {
             role: Role::Trader,
             cause: TurnFailure::InvalidStructuredReply,
         })?;
@@ -184,9 +193,9 @@ impl Team {
             trade,
             symbol: found.symbol,
             side: Side::Buy,
-            note,
-            ai_quantity: None,
-            ai_price: None,
+            note: reply.note,
+            ai_quantity: reply.ai_quantity,
+            ai_price: reply.ai_price,
         };
         self.ports.tools.submit_order_draft(&draft).await?;
         Ok(draft)
@@ -326,7 +335,7 @@ impl Team {
             }
             Verdict::Trade { side, rationale } => (side, rationale),
         };
-        if side == Side::Buy && !is_complete(&rationale) {
+        if !is_complete(&rationale) {
             return watched(
                 session,
                 WatchReason::RationaleIncomplete,
@@ -345,7 +354,12 @@ impl Team {
             .store
             .judge_trade(session.request.trade, judgment)?;
         let (decision, order) = match side {
-            Side::Sell => (Decision::Sell, None),
+            Side::Sell => {
+                if let Ok(mut sold) = self.sold.lock() {
+                    sold.insert(session.request.trade);
+                }
+                (Decision::Sell, None)
+            }
             Side::Buy => (Decision::Buy, self.order_after_judgment(session).await?),
         };
         Ok(DiscussionOutcome {

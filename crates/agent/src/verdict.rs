@@ -1,6 +1,9 @@
 //! 팀장 판단 · 매매 담당 주문 안 답 읽기(만드는 것 3-3 · 3-4).
 
+use std::str::FromStr;
+
 use pi_store::{Amount, Rationale};
+use rust_decimal::Decimal;
 use serde_json::{Map, Value};
 
 use crate::action::find_object_with;
@@ -62,28 +65,58 @@ pub(crate) fn parse_verdict(text: &str) -> Option<Verdict> {
     }
 }
 
-/// 근거 칸이 모두 찼는가(P9).
+/// 근거 칸이 모두 찼는가(P9). 금액 칸은 0보다 커야 찬 것이다.
 pub(crate) fn is_complete(rationale: &Rationale) -> bool {
+    let positive = |amount: Option<Amount>| amount.is_some_and(|a| a.0 > 0);
     rationale.hypothesis.is_some()
         && rationale.trigger.is_some()
-        && rationale.entry.is_some()
-        && rationale.stop.is_some()
-        && rationale.target.is_some()
-        && rationale.expected_value.is_some()
+        && positive(rationale.entry)
+        && positive(rationale.stop)
+        && positive(rationale.target)
+        && positive(rationale.expected_value)
 }
 
-/// 매매 담당의 주문 안 답을 읽는다: 방향이 `buy`인 객체만 된다. 다른 칸(수량 · 가격)은 버린다(P7).
-pub(crate) fn parse_draft(text: &str) -> Option<String> {
+/// 매매 담당의 주문 안 답.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DraftReply {
+    /// 설명.
+    pub(crate) note: String,
+    /// 적은 수량(참고값).
+    pub(crate) ai_quantity: Option<Decimal>,
+    /// 적은 가격(참고값).
+    pub(crate) ai_price: Option<Decimal>,
+}
+
+/// 매매 담당의 주문 안 답을 읽는다: 방향이 `buy`인 객체만 된다.
+/// 수량 · 가격은 0보다 큰 숫자일 때만 참고값으로 담고, 아니면 버린다(P7).
+pub(crate) fn parse_draft(text: &str) -> Option<DraftReply> {
     let object = find_object_with(text, "side")?;
     let side = object.get("side")?.as_str()?.trim().to_ascii_lowercase();
     if side != "buy" {
         return None;
     }
-    match object.get("note") {
-        None | Some(Value::Null) => Some(String::new()),
-        Some(Value::String(note)) => Some(note.trim().to_string()),
-        Some(_) => None,
-    }
+    let note = match object.get("note") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(note)) => note.trim().to_string(),
+        Some(_) => return None,
+    };
+    Some(DraftReply {
+        note,
+        ai_quantity: reference(&object, "quantity"),
+        ai_price: reference(&object, "price"),
+    })
+}
+
+/// 참고값 칸: 0보다 큰 숫자만 된다.
+fn reference(object: &Map<String, Value>, key: &str) -> Option<Decimal> {
+    let Value::Number(number) = object.get(key)? else {
+        return None;
+    };
+    let text = number.to_string();
+    let value = Decimal::from_str(&text)
+        .or_else(|_| Decimal::from_scientific(&text))
+        .ok()?;
+    (value > Decimal::ZERO).then_some(value)
 }
 
 fn trade(object: &Map<String, Value>, side: Side) -> Option<Verdict> {
@@ -142,6 +175,7 @@ mod tests {
     fn 지켜보기는_이유와_조건이_글이어야_한다() {
         assert!(parse_verdict("{\"decision\": \"watch\", \"reason\": \"x\"}").is_none());
         assert!(parse_draft("{\"side\": \"buy\", \"note\": 3}").is_none());
-        assert_eq!(parse_draft("{\"side\": \"buy\"}"), Some(String::new()));
+        let empty = parse_draft("{\"side\": \"buy\"}").unwrap();
+        assert_eq!(empty.note, "");
     }
 }
