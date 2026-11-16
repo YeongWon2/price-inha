@@ -65,3 +65,8 @@ M2 E6 E20 E27 E32 E38 V2 V3 V4 P7 P9 P21
 
 ## 새 store API 쓰기 (store 12차에서 넘어옴)
 - 팔기 매매의 `draft_order`는 `judge_trade_with_side`로 방향을 저장하고 `trade_side`로 막는다(다시 띄운 뒤에도). Team 메모리에만 기대지 않는다.
+
+## 4차 작업 (후보 일괄 처리: 새 store API)
+- 팀장 판단은 `judge_trade_with_side`로 근거와 방향을 한 묶음에 남긴다.
+- `draft_order`는 저장소의 `trade_side`가 팔기면 `TradeNotBuy`로 거부한다(AI를 부르지 않는다). 다시 띄운 팀 · 팀을 거치지 않고 저장소에 팔기로 판단된 매매도 같다. Team 메모리의 팔기 목록은 걷어냈다.
+- 남김: 3차 검토 참고의 방 마지막 번호 조회 API(store 몫).

@@ -82,3 +82,9 @@ C10 E12 E13 E16 E25 E29 E30 E33 V6
 ## 새 store API 쓰기 (store 12차에서 넘어옴)
 - 점검 통과 표시: `submit` · `sell` · `retry_sell`에서 `pi_rules::issue_for_trade`로 낸 표시를 받고 `permit.trade() == Some(trade_id.0)`이 아니면(묶이지 않은 `None` 포함) PermitMismatch.
 - 사는 수량을 `trade_quantity`와 대조한다(승인 내용 · 주문 수량).
+
+## 4차 작업 (후보 일괄 처리 · 새 store API)
+
+- 점검 통과 표시: `submit` · `sell` · `retry_sell`은 `permit.trade()`가 다른 매매 번호면 PermitMismatch(주문 · 저장 없음). 묶이지 않은 표시(`None`, `pi_rules::issue`)는 아직 받는다: 잠긴 시험(`common.rs`의 `permit`)과 server(`trading/order.rs`의 `pi_rules::issue`)가 모두 묶이지 않은 표시를 쓰기 때문이다. server가 `issue_for_trade`로 옮기고 잠긴 시험의 도우미를 묶인 표시로 바로잡은(amend) 뒤 `None`도 막는다.
+- 사는 수량: 저장소에 매매 수량(`trade_quantity`)이 있으면 표시의 수량이 그것과 같아야 한다(아니면 PermitMismatch). 승인 내용은 이미 표시와 대조하므로 승인 수량도 함께 맞는다. 매매 수량이 없으면(2차 이전 문서 · 아직 두지 않는 server) 대조하지 않는다.
+- 시험: `tests/suite/tied.rs`.

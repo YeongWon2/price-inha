@@ -82,3 +82,5 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - 폰 화면이 가정한 경로(/api/push/key, /api/push/subscribe, /api/notices, /api/approvals/{id}/approve|reject, /api/daily-summary)를 서버 경로와 맞춘다.
 - 사무실 스냅샷은 `last_seq`를 먼저 읽고 `agents()` · `pending_responses()`를 읽는다.
 - notify 시험용 `redirect_to`를 시험 전용 feature로 묶는다(server Cargo.toml · 시험).
+- 점검 표시: `trading/order.rs`의 `pi_rules::issue`를 `issue_for_trade(&authority, passed, trade.0)`으로 바꾸고, 사는 수량을 `set_trade_quantity`로 저장한다. 그 뒤 exec가 묶이지 않은 표시(`None`)도 막도록 exec 잠긴 시험 도우미(`common.rs` permit)를 묶인 표시로 바로잡는다.
+- store 방 로그 마지막 번호 조회 API가 생기면 agent가 쓴다(지금은 500줄씩 읽음).

@@ -54,3 +54,7 @@ C6 M4 E17 E28 E35 V12 V16 V18 V19 V20 V21 V50
 
 ## 새 store API 쓰기 (store 12차에서 넘어옴)
 - `approve_as_risky` 우회를 걷어내고 `mark_proposal_risky`로 위험 표시를 올린다. 하루 정리는 `trade_state_changes_between`으로 그날의 중간 상태 바뀜을 본다.
+
+## 4차 작업 (후보 일괄 처리: 새 store API)
+- `approve`: 제안 때는 안전했지만 지금 규칙보다 위험해진 개선안은 `mark_proposal_risky`로 같은 개선안에 위험 표시를 올린 뒤 승인한다(냉각중). 새 개선안을 만들고 원래 것을 거절하던 `approve_as_risky` 우회는 걷어냈다. 승인이 안 되면 개선안은 제안됨으로 남고 위험 표시는 그대로다(내리는 길이 없고, 지금 규칙 기준으로 맞는 표시다).
+- `daily_summary`의 한 일: `trade_state_changes_between`으로 그날 상태가 바뀐 매매도 남긴다(중간에만 바뀌고 뒤에 또 바뀐 것).
