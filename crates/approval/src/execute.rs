@@ -87,6 +87,27 @@ impl Approvals {
         })
     }
 
+    /// 승인 `number`로 규칙 개선안 `proposal`의 승인을 소비하는 자리를 열어, `f`에 소비할 승인과 시각을 넘긴다(3차).
+    ///
+    /// 개선안을 반영할지(지금 규칙과 비교한 위험 재판정 → 냉각)는 `f`가 호출하는 쪽(journal)이 판정한다.
+    /// [`ApprovalUse`]는 이 호출 안에서만 내준다. 승인을 먼저 확인하고(없는 번호 · 승인됨이 아님 · 이미 씀 ·
+    /// 만료 · 지문 다름) 쓸 수 없으면 `f`를 부르지 않고 [`Error::Denied`]를 돌려준다. 지문이 달라 거부되면
+    /// 그 번호는 무효가 된다([`Approvals::approve_proposal`]과 같다). 전체 정지 중에도 된다.
+    ///
+    /// `f`의 결과를 그대로 돌려준다. `f`가 실패해도 승인 소비를 되돌리지 않는다(쓴 승인은 쓴 것이다).
+    pub fn with_proposal_approval<T, E>(
+        &self,
+        number: &ApprovalNumber,
+        proposal: ProposalId,
+        f: impl FnOnce(ApprovalUse, UnixMillis) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<Error>,
+    {
+        let _ = (number, proposal, f);
+        todo!("3차: 승인 확인 뒤 f에 넘긴다")
+    }
+
     /// 번호의 승인 줄. 없는 번호면 `NotFound`, 실행 때 지문이 달라 무효가 된 번호면
     /// `FingerprintMismatch`(E7: 어떤 대상으로도 다시 쓸 수 없다).
     fn known_record(&self, number: &ApprovalNumber) -> Result<Record, Error> {

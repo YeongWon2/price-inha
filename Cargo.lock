@@ -1992,7 +1992,9 @@ dependencies = [
 name = "pi-approval"
 version = "0.1.0"
 dependencies = [
+ "pi-journal",
  "pi-store",
+ "pi-template",
  "rand 0.9.5",
  "rust_decimal",
  "serde_json",

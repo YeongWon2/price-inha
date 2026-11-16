@@ -8,6 +8,7 @@ mod execute;
 mod fingerprint;
 mod late_answer;
 mod no_answer;
+mod proposal_approval;
 mod request;
 mod restart;
 mod voided;
