@@ -166,10 +166,25 @@ SQLite는 `recursive_triggers`가 꺼져 있어 `INSERT OR REPLACE` · `REPLACE 
 
 rowid를 명시한 `INSERT OR REPLACE (rowid, …)`는 선언 키만 보는 트리거를 비켜 옛 줄을 지운다. `INTEGER PRIMARY KEY` 별칭이 없는 보호 표(room_events · trigger_receipts · trade_facts · template_revisions · proposal_evidence)의 `*_no_replace`에 `OR EXISTS (… WHERE rowid = NEW.rowid)`를 더한다. 공통 우회 테스트에 rowid 명시 변형을 보호 표 전체로 더한다.
 
+## 12차 작업 (후보 일괄 처리, 2026-11-16 사용자 "다 처리해")
+
+"다음 차수 후보" · "11차 검토 참고" · "다른 모듈에서 넘어온 것"을 모두 처리했다. 공개 API는 더하기만 했다(다른 모듈이 쓴다). 스키마는 8로 올린다(버전 7 픽스처 `tests/fixtures/v7.db`로 이전 시험, 옛 파일을 지우지 않는다).
+
+1. 실전 승격 확인판 `promote_template_live_checked(id, revision, approval, at)`: 같은 묶음 안에서 상태 → 전체 정지(`DenyReason::TeamFullStop`) → 판(`TemplateRevisionMismatch`) → 승인 소비 순으로 본다. 거부되면 템플릿도 승인도 그대로다. 옛 `promote_template_live`는 그대로 둔다(전체 정지 중 승격 금지는 approval이 정했고, 표 트리거로 막으면 옛 API 동작이 바뀐다).
+2. 픽스처 폴더의 `v5.db-shm` · `v5.db-wal`: 이미 저장소에 없다(확인만).
+3. 지식 조각표 `knowledge_chunks_no_replace`가 `(kind, record_ref, ordinal)` 겹침도 거부한다(버전 8에서 트리거를 바꾼다).
+4. `snapshot_to`는 손잡이의 연결 잠금을 쥐지 않는다: 저장 파일에 따로 연 연결의 읽기 묶음 하나(WAL)에서 백업 한 단계로 뜬다. 그동안 같은 손잡이의 쓰기는 기다리지 않는다.
+5. 매매 방향: `judge_trade_with_side(id, judgment, TradeSide)`가 판단과 방향을 한 묶음에 남기고 `trade_side(id)`로 읽는다. 방향은 바뀌지 않는다(표 `trade_plans` 트리거).
+6. 매매 수량: `set_trade_quantity(id, u64)` · `trade_quantity(id)`. 논의중 · 판단됨 · 승인대기이고 승인이 붙기 전에만 두거나 바꾼다(`QuantityLocked`, 표 트리거도 같다). 0 · `i64` 밖은 `InvalidQuantity`.
+7. 매매 상태 바뀜 이력: 표 `trade_state_changes`를 `trades`의 넣기 · 상태 바꾸기 트리거가 채운다(어떤 길로 바꿔도 남고, 쌓기만 한다). `trade_state_changes(id)` · `trade_state_changes_between(from, until)`(`[from, until)`, 시각 · 번호 순). 버전 8 전 매매의 지난 바뀜은 없다.
+8. 개선안 위험 표시: `mark_proposal_risky(id, at)`는 제안됨일 때 거짓 → 참만 한다(이미 참이면 그대로, 아니면 `ProposalLocked`). 표 `proposals_fixed`도 그 한 방향만 허락한다.
+9. 지식 조각 · 메타: `knowledge_chunk(id)`, `remove_knowledge_meta(key) -> bool`, `index_record_with_meta(record, key_prefix, values)`(조각과 `앞붙이+번호` 메타를 한 묶음에 두고, 바뀌어 사라진 옛 조각의 같은 꼴 키를 지운다).
+
+보호 표 목록(공통 우회 테스트)에 `trade_plans` · `trade_state_changes`를 더했다.
+
 ## 다음 차수 후보
 
-2. `promote_template_live`가 같은 묶음 안에서 전체 정지와 템플릿 판을 확인한다(approval 2차 검토: 지금은 approval 쪽 확인과 store 승격 사이에 짧은 틈).
-1. 잠긴 픽스처 폴더에 실수로 커밋된 `tests/fixtures/v5.db-shm` · `v5.db-wal`(빈 SQLite 부속 파일)을 지운다(다음 N1 때).
+(12차에서 모두 처리했다.)
 
 ## 모양
 
@@ -186,13 +201,13 @@ rowid를 명시한 `INSERT OR REPLACE (rowid, …)`는 선언 키만 보는 트�
 
 M1 M2 M5 C2 E3 M6 V6 D6 E12 E36 M3 M4 V29 V30 C11 V36 D10 M7 V51
 
-### 11차 검토 참고 (다음 차수 후보)
+### 11차 검토 참고 (12차에서 처리함)
 
 - `knowledge_chunks_no_replace`는 `id` 충돌만 막는다. `UNIQUE(kind, record_ref, ordinal)`에 걸리는 `INSERT OR REPLACE`는 옛 줄을 트리거 없이 지워 FTS 줄과 임베딩이 고아로 남는다(store 코드는 이 SQL을 쓰지 않음). 트리거에 같은 (kind, record_ref, ordinal) 검사를 더한다.
 - `snapshot_to`는 백업 동안 연결 잠금을 쥔다. 파일이 크면 쓰기가 오래 기다린다.
 - 매매 방향(사기/팔기)을 저장한다(agent 2차 검토): 지금은 팔기 판단이 agent 메모리에만 있어 재시작하면 사라진다(rules · 승인이 막아 안전하지만 기록이 없다).
 
-### 후보 일괄 처리 때 다른 모듈에서 넘어온 것
+### 후보 일괄 처리 때 다른 모듈에서 넘어온 것 (12차에서 처리함)
 - 판단에 방향(사기 · 팔기) 칸: 서버를 다시 띄운 뒤에도 agent가 팔기 매매의 `draft_order`를 막을 수 있게 한다.
 - 매매 상태 바뀜 이력 조회 API(journal 하루 정리가 중간 바뀜을 본다).
 - 개선안 위험 표시 갱신 API(journal `approve_as_risky` 우회를 없앤다).
