@@ -49,7 +49,15 @@ impl CheckAuthority {
         CheckPermit {
             seal: Arc::clone(&self.seal),
             approved,
+            trade: None,
         }
+    }
+
+    /// 매매 하나(`trade`, 저장소의 매매 번호)에 묶인 표시를 낸다. 주문을 내는 쪽은
+    /// [`CheckPermit::trade`]가 그 매매의 번호인지 대조한다(같은 종목 · 방향의 다른 매매에 쓰지 못하게).
+    pub fn approve_for_trade(&self, trade: i64, approved: ApprovedOrder) -> CheckPermit {
+        let _ = trade;
+        todo!("approve_for_trade: {approved:?}")
     }
 }
 
@@ -60,12 +68,19 @@ pub struct CheckPermit {
     seal: Arc<()>,
     /// 승인한 내용.
     approved: ApprovedOrder,
+    /// 묶인 매매 번호. [`CheckAuthority::approve`]로 낸 표시는 `None`.
+    trade: Option<i64>,
 }
 
 impl CheckPermit {
     /// 승인한 내용.
     pub fn approved(&self) -> &ApprovedOrder {
         &self.approved
+    }
+
+    /// 이 표시가 묶인 매매 번호([`CheckAuthority::approve_for_trade`]). 묶이지 않았으면 `None`.
+    pub fn trade(&self) -> Option<i64> {
+        todo!("trade: {:?}", self.trade)
     }
 
     /// 이 표시를 낸 권한이 그 표식(계좌)의 짝인가.
