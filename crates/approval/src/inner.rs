@@ -2,7 +2,7 @@
 
 use std::sync::MutexGuard;
 
-use pi_store::{NewApprovalRequest, StoreError, TeamState, UnixMillis};
+use pi_store::{DenyReason, NewApprovalRequest, StoreError, TeamState, UnixMillis};
 
 use crate::approvals::{ApprovalNumber, Approvals, Ask, Notice, Requested, lock};
 use crate::error::{Error, RejectReason};
@@ -122,12 +122,19 @@ impl Approvals {
             StoreError::ApprovalNotUsable { .. } => RejectReason::NotApproved,
             StoreError::ApprovalAlreadyConsumed { .. } => RejectReason::AlreadyConsumed,
             StoreError::ApprovalExpired { .. } => RejectReason::Expired,
-            StoreError::ApprovalFingerprintMismatch { .. } => {
+            // 승인한 뒤 템플릿 판이 바뀐 것은 승인한 지문과 달라진 것이다(무효).
+            StoreError::ApprovalFingerprintMismatch { .. }
+            | StoreError::TemplateRevisionMismatch { .. } => {
                 if let Err(log_err) = record::log_voided(&self.store, number, now) {
                     return log_err.into();
                 }
                 RejectReason::FingerprintMismatch
             }
+            // 승인을 본 뒤 승격 사이에 팀이 전체 정지가 됐다(승인은 그대로).
+            StoreError::TransitionDenied {
+                reason: DenyReason::TeamFullStop,
+                ..
+            } => RejectReason::FullStop,
             other => return other.into(),
         };
         Error::Denied(reason)

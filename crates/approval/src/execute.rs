@@ -1,10 +1,10 @@
 //! 승인을 실행에 쓴다: 소비, 그리고 승인받은 실전 승격 · 규칙 개선을 저장소에 끝까지 넘긴다(2차 1번).
 //!
 //! 호출하는 쪽은 이 크레이트만 쓴다: 번호와 대상 번호를 주면 무효 번호 · 전체 정지를 확인하고,
-//! 대상의 **지금** 모습에서 지문을 계산해 `pi-store`의 [`Store::promote_template_live`] ·
+//! 대상의 **지금** 모습에서 지문을 계산해 `pi-store`의 [`Store::promote_template_live_checked`] ·
 //! [`Store::approve_proposal`]을 부른다(승인 소비는 저장소가 같은 묶음 안에서 한다).
 //!
-//! [`Store::promote_template_live`]: pi_store::Store::promote_template_live
+//! [`Store::promote_template_live_checked`]: pi_store::Store::promote_template_live_checked
 //! [`Store::approve_proposal`]: pi_store::Store::approve_proposal
 
 use pi_store::{
@@ -58,8 +58,12 @@ impl Approvals {
             template,
             revision: current.revision,
         };
-        self.use_approval(found, number, &executing, now, |using, at| {
-            self.store.promote_template_live(template, using, at)
+        self.use_approval(found, number, &executing, now, |using, _checked_at| {
+            // 승격 시각은 템플릿을 읽은 뒤, 승격 바로 앞에서 시계로 얻는다.
+            let at = self.clock.now();
+            // 템플릿을 읽은 뒤 승격 사이에 팀이 멈추거나 판이 바뀌는 틈을 저장소가 같은 묶음에서 막는다.
+            self.store
+                .promote_template_live_checked(template, current.revision, using, at)
         })
     }
 
