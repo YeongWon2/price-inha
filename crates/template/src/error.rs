@@ -82,6 +82,8 @@ pub enum InvalidReason {
     RangeReversed,
     /// 업종 비중이 종목 비중(확신 종목 비중 포함)보다 작다.
     SectorBelowSymbol,
+    /// 손절 방식이 모두 꺼져 있다(고정 % · ATR · 논리 · 장 마감 청산 · 보유 기간이 모두 없음).
+    NoStopMethod,
 }
 
 /// 아래쪽 경계 · 모양을 어긴 칸 하나.
