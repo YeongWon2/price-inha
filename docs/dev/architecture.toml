@@ -108,6 +108,12 @@ component = "M7 지식 (키워드 · 조건 검색, 뜻 검색 자리)"
 internal = ["pi-store"]
 external = ["serde", "serde_json", "thiserror", "async-trait", "rust_decimal", "tokio", "tracing", "chrono"]
 
+[crates.pi-backup]
+dir = "crates/backup"
+component = "D7 백업과 되살리기 (age 암호화 · private GitHub contents API)"
+internal = ["pi-store", "pi-secrets"]
+external = ["age", "base64", "hex", "reqwest", "serde", "serde_json", "sha2", "tempfile", "thiserror", "tokio", "tracing", "chrono", "zeroize"]
+
 [crates.price-inha]
 dir = "crates/server"
 component = "실행 파일, 조립"
