@@ -84,3 +84,18 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - notify 시험용 `redirect_to`를 시험 전용 feature로 묶는다(server Cargo.toml · 시험).
 - 점검 표시: `trading/order.rs`의 `pi_rules::issue`를 `issue_for_trade(&authority, passed, trade.0)`으로 바꾸고, 사는 수량을 `set_trade_quantity`로 저장한다. 그 뒤 exec가 묶이지 않은 표시(`None`)도 막도록 exec 잠긴 시험 도우미(`common.rs` permit)를 묶인 표시로 바로잡는다.
 - store 방 로그 마지막 번호 조회 API가 생기면 agent가 쓴다(지금은 500줄씩 읽음).
+
+## 5차 작업 (후보 일괄 처리)
+
+테스트: `crates/server/tests/round12/`. "4차 후보"와 "다른 모듈에서 넘어온 것(5차)"을 처리했다(store 방 로그 마지막 번호 API는 다음 다듬기).
+
+- 점검 표시는 `pi_rules::issue_for_trade(&authority, passed, trade.0)`로 매매에 묶고, 사는 주문은 규칙 엔진이 정한 수량을 `set_trade_quantity`로 남긴다(승인이 붙어 잠겼으면 그대로 둔다).
+- 주문 안 도구(`submit_order_draft`)는 매매 담당이 적은 `ai_quantity`를 넘기고, `ai_price`는 진입가와 견줘 작은 쪽을 지정가로 쓴다(P7). 저장소 금액은 통화 최소 단위로 읽는다(미국 센트 ÷ 100).
+- 손절 감시: 시세마다 `stop_hits` → `stop_draft` → 주문 길(규칙 점검 → 묶인 표시 → `sell(StopLoss)`). 쉬는 날 검사는 건너뛰고, 이상 감지 멈춤은 주문 길이 팀 상태로 옮긴다. 같은 매매에 손절 주문이 걸려 있으면 다시 내지 않고 그 주문을 돌려준다(E30). 기준가는 그 시세를 쓴다.
+- 지식 검색을 담당 도구 `knowledge_search`로 등록했다(모든 담당). 자동 회상은 같은 종목을 `recall_by_condition`으로 먼저 찾고 모자라면 키워드 자동 회상으로 채운다(둘 다 바깥 자료 조각은 넘기지 않음, M7). 복기 색인은 가린 글만 넘김을 확인했다.
+- 공식 조립의 종목 → DART 고유번호 표(`known_corp_codes`, 확인한 2종목).
+- 백업 설정 화면 `GET/POST /api/setup/backup`(저장소 `소유자/이름` · age 공개키, 보관 폴더 `backup-settings.json`, 다시 켜도 남고 `reach.backup`의 저장소 · 공개키보다 앞선다). 되살리기 `restore_backup`은 `pi_backup::restore_in`에 대상 옆 작업 폴더를 넘기고 끝나면 지운다.
+- 구독이 생길 때와 앱 시계로 1분마다 `release_held()`를 부른다(조용한 시간이면 아무것도 안 한다). 사무실 채팅 간격 표는 간격이 지난 기기를 지운다.
+- 확인만 한 것: 폰 화면 경로 6개는 서버 경로와 같다. 사무실 스냅샷은 이미 `last_seq`를 먼저 읽는다.
+- 하루 시험(V47)에 기록 출력과 백업 묶음을 넣었다.
+- 다른 기기의 키 입력: 공개 경로 없이 세션(TOTP 로그인) 뒤에 둔다. 화면 `GET /keys`(`web/keys.html`), 등록 `POST /api/remote/keys`(몸통 · 상한 · 답은 `/api/setup/keys`와 같고 답은 등록 여부뿐). 키 값은 저장만 하고 다시 보여 주지 않는다. 시험은 `page.rs` 단위 시험(잠긴 뒤라 HTTP 경로 시험은 다음 차수).
