@@ -102,6 +102,18 @@ impl Default for Wiring {
     }
 }
 
+/// (W5 2차) 띄울 때 고르는 것들. [`App::launch`]에 준다.
+#[derive(Clone)]
+pub struct Launch {
+    /// 주문 길의 바깥 값.
+    pub trading: crate::TradingWiring,
+    /// 투자 팀(에이전트 · 자료 · 트리거 · 복기)의 바깥 값. `None`이면 팀을 잇지 않는다(1차까지와 같다:
+    /// 아무도 깨우지 않고 하루 운용 판단은 [`crate::Trading::decide_day`]를 부르는 쪽이 한다).
+    pub team: Option<crate::TeamWiring>,
+    /// 부르는 쪽이 연 비밀 보관소(`settings.home`으로 연 것). `None`이면 여기서 연다.
+    pub secrets: Option<Arc<SecretStore>>,
+}
+
 /// 접속 관문의 시계 자리에 시세와 같은 시계를 끼운다(이벤트 시각과 접속 기록).
 struct GateClock(Arc<dyn Clock>);
 
@@ -372,6 +384,29 @@ impl App {
             trading,
             days,
         })
+    }
+
+    /// (W5 2차) [`App::start_with_secrets`]가 하는 일에 더해, `launch.team`이 있으면 투자 팀을 잇는다:
+    ///
+    /// - 에이전트 실행기(담당 6명)를 고른 AI 연결(시연 모드면 [`crate::DemoAi`])로 만든다. 공급자는 가리기
+    ///   공급자로 감싼다(받은 답 · 오류 글도 가린다). 도구는 자료 받기와 주문 안 넘기기(주문 길)다.
+    /// - 깨우기 엔진을 저장소(작업 상태 · 영수증)와 시장 달력으로 띄운다: 장 시작에 하루 운용 판단
+    ///   ([`crate::Crew::plan_day`])과 새 공시 보기([`crate::Crew::scan`]), 마감 뒤에 하루 복기
+    ///   ([`crate::Crew::review_day`]).
+    /// - [`crate::TEAM_MEMBERS_PATH`] · [`crate::TRADE_BASIS_PATH`] · [`crate::PROPOSALS_PATH`] ·
+    ///   [`crate::PROPOSAL_ANSWER_PATH`]를 세션이 있어야 열리는 경로에 단다.
+    pub async fn launch(
+        settings: Settings,
+        wiring: Wiring,
+        launch: Launch,
+    ) -> Result<App, AppError> {
+        let _ = (settings, wiring, launch);
+        todo!()
+    }
+
+    /// (W5 2차) 조립된 투자 팀. 팀을 잇지 않고 띄웠으면 `None`.
+    pub fn crew(&self) -> Option<Arc<crate::Crew>> {
+        todo!()
     }
 
     /// (W5 1차) 이 앱의 저장소(같은 연결을 나눠 쓴다).

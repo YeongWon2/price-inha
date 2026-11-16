@@ -182,3 +182,30 @@ pub enum TradingError {
     #[error("저장소 오류: {0}")]
     Store(#[from] pi_store::StoreError),
 }
+
+/// (W5 2차) 투자 팀 조립의 실패. 다른 모듈의 오류는 가린 글로만 싣는다(비밀 값을 담지 않는다).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TeamError {
+    /// 종목 글자가 종목 규칙에 맞지 않아 논의할 수 없다.
+    #[error("논의할 수 없는 종목입니다: {0}")]
+    UnknownSymbol(String),
+    /// 에이전트 실행기 오류(가린 글).
+    #[error("에이전트 오류: {0}")]
+    Agent(String),
+    /// 복기 · 개선안 오류(가린 글).
+    #[error("복기 오류: {0}")]
+    Journal(String),
+    /// 승인 모듈 오류(가린 글).
+    #[error("승인 오류: {0}")]
+    Approval(String),
+    /// 깨우기 엔진 오류.
+    #[error("깨우기 오류: {0}")]
+    Trigger(String),
+    /// 주문 길 오류.
+    #[error("주문 길 오류: {0}")]
+    Trading(#[from] TradingError),
+    /// 저장소 오류.
+    #[error("저장소 오류: {0}")]
+    Store(#[from] pi_store::StoreError),
+}

@@ -12,16 +12,20 @@ workspace = true
 async-trait = "0.1.92"
 axum = "0.8.9"
 chrono = "0.4.45"
+pi-agent = { version = "0.1.0", path = "../agent" }
 pi-ai = { version = "0.1.0", path = "../ai" }
 pi-approval = { version = "0.1.0", path = "../approval" }
+pi-data = { version = "0.1.0", path = "../data" }
 pi-exec = { version = "0.1.0", path = "../exec" }
 pi-gate = { version = "0.1.0", path = "../gate" }
+pi-journal = { version = "0.1.0", path = "../journal" }
 pi-market = { version = "0.1.0", path = "../market" }
 pi-paper = { version = "0.1.0", path = "../paper" }
 pi-rules = { version = "0.1.0", path = "../rules" }
 pi-secrets = { version = "0.1.0", path = "../secrets" }
 pi-store = { version = "0.1.0", path = "../store" }
 pi-template = { version = "0.1.0", path = "../template" }
+pi-trigger = { version = "0.1.0", path = "../trigger" }
 rust_decimal = "1.43.0"
 serde_json = "1.0.154"
 thiserror = "2.0.21"

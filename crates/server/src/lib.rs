@@ -16,6 +16,7 @@ mod retry;
 mod settings;
 mod setup;
 mod setup_http;
+mod team;
 mod trading;
 
 pub use ai_link::{
@@ -29,9 +30,9 @@ pub use ai_link::{
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,
     FEED_LIVE, FEED_NO_BROKER_KEY, FEED_REQUEST_REJECTED, FEED_SETUP_REQUIRED, KIND_FEED_STATUS,
-    KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Wiring, announce_addr,
+    KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, Wiring, announce_addr,
 };
-pub use error::{AppError, SettingsError, SetupRefusal, TradingError};
+pub use error::{AppError, SettingsError, SetupRefusal, TeamError, TradingError};
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
 pub use log::{RedactedLine, RedactingWriter};
 pub use settings::{
@@ -46,6 +47,11 @@ pub use setup::{
     KEY_DATA, KIND_SETUP, KeyRequest, MAX_WATCH_SYMBOLS, SETUP_ITEMS, SETUP_KEYS_PATH, SETUP_PATH,
     SETUP_REQUIRED, SETUP_STARTED, SETUP_SYMBOLS_PATH, SetupItem, SetupItemSpec, SetupStatus,
     SymbolsSource, WATCHLIST_FILE, load_watchlist, parse_symbols, save_watchlist,
+};
+pub use team::{
+    Crew, DAY_ROOM, DEFAULT_CONSENSUS_REQUIRED, DemoAi, DemoTurn, Discussed, KIND_DAY_DISCUSSION,
+    KIND_PROPOSAL, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH, Reviewed, TEAM_MEMBERS_PATH,
+    TRADE_BASIS_PATH, TRADE_ROOM_PREFIX, TeamWiring,
 };
 pub use trading::{
     ANSWER_CONTENT_CHANGED, ANSWER_FINGERPRINT_MISMATCH, ANSWER_NOT_FOUND, ANSWER_REST_DAY,
