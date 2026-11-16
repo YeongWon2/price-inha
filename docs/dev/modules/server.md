@@ -65,3 +65,4 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - 개선안 승인은 승인 때의 지금 규칙(current)과 개선안의 after로 `pi_journal::increases_risk`를 **다시** 판정하고, 위험하면 냉각으로 보낸다(journal `approve` · `approve_as_risky`와 같은 길, 가능하면 journal의 `approve`를 그대로 부른다). 시험: 같은 규칙에서 낸 개선안 둘 중 한도를 좁히는 것을 먼저 반영한 뒤 다른 것을 승인하면 냉각중이 되고 한도가 넓어지지 않는다.
 - 담당 모델 기본값은 지금 모델 `claude-sonnet-5-5`로 바꾼다(조정자 결정, 사용자가 고르는 설정은 다음 차수 후보).
 - 참고(되돌림 아님): 거절 경로가 승인 모듈 거절 답의 오류를 버림(`let _`); `proposal_notices`가 이벤트를 매번 처음부터 읽음; 종목 → DART 고유번호 표가 비어 실행 파일은 공시 논의를 안 함; V32 거래량 · V35 뉴스 미덮음; 트리거 단조 시계가 실제 `Instant`.
+- 2차 보강 검토 참고: `trading.params()`가 없음 · 오류이면 승인을 쓰지 않은 채 "rejected/not_found"로 답한다(승인은 남음).
