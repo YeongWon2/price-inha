@@ -99,3 +99,9 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - 확인만 한 것: 폰 화면 경로 6개는 서버 경로와 같다. 사무실 스냅샷은 이미 `last_seq`를 먼저 읽는다.
 - 하루 시험(V47)에 기록 출력과 백업 묶음을 넣었다.
 - 다른 기기의 키 입력: 공개 경로 없이 세션(TOTP 로그인) 뒤에 둔다. 화면 `GET /keys`(`web/keys.html`), 등록 `POST /api/remote/keys`(몸통 · 상한 · 답은 `/api/setup/keys`와 같고 답은 등록 여부뿐). 키 값은 저장만 하고 다시 보여 주지 않는다. 시험은 `page.rs` 단위 시험(잠긴 뒤라 HTTP 경로 시험은 다음 차수).
+
+## 6차 작업 (마지막 차수 검토 참고)
+- `/keys` · `POST /api/remote/keys` HTTP 경로 시험: 세션 없이 401, 다른 출처 POST 거부, 세션이면 등록되고 답에 값이 없다.
+- `POST /api/setup/backup`은 `/api/setup/keys`처럼 그 컴퓨터에서만 받는다(원격에서 공개키를 바꾸지 못한다).
+- 되살리기 중 꺼져 남은 작업 폴더는 다음 되살리기 · 켤 때 지운다.
+- notify 시험용 `redirect_to`를 시험 전용 feature로 묶는다(notify Cargo.toml에 feature, server는 dev-dependency에서만 켠다). notify 쪽 고침은 같은 차수에 notify 차수로 연다.

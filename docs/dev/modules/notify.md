@@ -71,3 +71,6 @@ N5 E2 E38 V10 V11 V12
 
 ### 4차 검토 참고 (다음 차수 후보)
 - `release_held`를 동시에 두 번 부르는 시험(`release_gate`)이 없다.
+
+## 5차 작업 (server 6차와 함께)
+- `HttpTransport::redirect_to`를 `test-redirect` feature 뒤로 옮긴다(기본은 꺼짐). 기본 빌드에서 그 함수가 없는지 시험한다.
