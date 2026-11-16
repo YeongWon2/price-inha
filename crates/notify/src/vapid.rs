@@ -47,11 +47,20 @@ impl VapidKey {
     /// 파일을 덮어쓰지 않는다. 읽고 쓰지 못하면 [`Error::KeyFile`].
     /// 새 키는 같은 폴더의 임시 파일(0600)에 다 쓴 뒤 이름을 바꿔 둔다(쓰다 꺼져도 빈 키 파일이 남지 않는다).
     /// 키 파일이 비었거나 공백뿐이면(예전에 쓰다 꺼진 흔적) 없는 것으로 보고 새로 만든다.
+    /// 키 파일이 링크이면 따라가지 않고 [`Error::KeyFile`]로 멈춘다(가리킨 파일을 건드리지 않는다).
+    /// 같은 폴더를 여러 스레드 · 프로세스가 동시에 처음 열어도 폴더 잠금으로 한 번에 하나씩
+    /// 하므로 모두 같은 키를 받는다.
     pub fn load_or_create(secret_dir: &Path) -> Result<VapidKey, Error> {
         fs::create_dir_all(secret_dir)
             .map_err(|e| Error::KeyFile(format!("비밀 폴더를 만들지 못했다: {}", e.kind())))?;
+        let _lock = lock_folder(secret_dir)?;
         remove_leftover_temp_files(secret_dir);
         let path = secret_dir.join(VAPID_KEY_FILE);
+        if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(Error::KeyFile(
+                "키 파일이 링크라서 쓰지 않는다(링크를 따라가지 않는다)".to_owned(),
+            ));
+        }
         if path.exists() {
             restrict_permissions(&path)?;
             let text = fs::read_to_string(&path)
@@ -140,6 +149,18 @@ fn restrict_permissions(path: &Path) -> Result<(), Error> {
 #[cfg(not(unix))]
 fn restrict_permissions(_path: &Path) -> Result<(), Error> {
     Ok(())
+}
+
+/// 비밀 폴더 자체에 배타 잠금을 건다(잠금 파일을 따로 만들지 않는다: 폴더에는 키 파일만 남는다).
+/// 돌려준 값을 놓으면(drop) 풀린다. Unix가 아니면 잠그지 않는다.
+fn lock_folder(secret_dir: &Path) -> Result<fs::File, Error> {
+    let fail = |what: &str, e: std::io::Error| Error::KeyFile(format!("{what}: {}", e.kind()));
+    let folder = fs::File::open(secret_dir).map_err(|e| fail("비밀 폴더를 열지 못했다", e))?;
+    #[cfg(unix)]
+    folder
+        .lock()
+        .map_err(|e| fail("비밀 폴더에 잠금을 걸지 못했다", e))?;
+    Ok(folder)
 }
 
 /// 임시 키 파일 이름의 앞부분. 백업 · 정리에서 이 모양을 남은 임시 파일로 본다.

@@ -155,8 +155,10 @@ pub struct NotifierConfig {
 
 /// 알림을 쌓고 보낸다. 복제하지 않고 `Arc`로 나눈다.
 pub struct Notifier {
-    shared: Arc<Shared>,
-    quiet_hours: Mutex<Option<QuietHours>>,
+    pub(crate) shared: Arc<Shared>,
+    pub(crate) quiet_hours: Mutex<Option<QuietHours>>,
+    /// 미룬 푸시를 다시 보내는 일이 겹치지 않게 한다.
+    pub(crate) release_gate: tokio::sync::Mutex<()>,
 }
 
 impl Notifier {
@@ -173,6 +175,7 @@ impl Notifier {
                 attempt_timeout: config.attempt_timeout,
             }),
             quiet_hours: Mutex::new(config.quiet_hours),
+            release_gate: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -251,6 +254,9 @@ impl Notifier {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if !notice.kind.ignores_quiet_hours() && quiet.is_some_and(|q| q.contains(now)) {
+            self.shared
+                .store
+                .append_at(HELD_EVENT, &serde_json::json!({"seq": seq}), now)?;
             return Ok(Delivery {
                 seq,
                 held: Some(HoldReason::QuietHours),
@@ -268,20 +274,11 @@ impl Notifier {
                 attempts: Vec::new(),
             });
         }
-        let mut push = serde_json::json!({
-            "kind": notice.kind.name(),
-            "title": truncate_chars(&title, MAX_PUSH_TITLE_CHARS),
-            "body": truncate_chars(&body, MAX_PUSH_BODY_CHARS),
-            "seq": seq,
-        });
-        if let Some(link) = link.filter(|l| l.chars().count() <= MAX_PUSH_LINK_CHARS) {
-            push["link"] = serde_json::Value::from(link);
-        }
         let attempts = send_all(
             &self.shared,
             subscriptions,
             notice.kind.urgency(),
-            push.to_string().into_bytes(),
+            push_payload(notice.kind, &title, &body, link.as_deref(), seq),
             now,
         )
         .await;
@@ -320,11 +317,37 @@ impl Notifier {
     }
 }
 
+/// 푸시를 미뤘다는 표시 이벤트의 종류(내용 `{"seq"}`). 알림 목록에는 나오지 않는다.
+pub(crate) const HELD_EVENT: &str = "push.held";
+
+/// 미뤘던 푸시를 다시 보냈다는 표시 이벤트의 종류(내용 `{"seq"}`).
+pub(crate) const RELEASED_EVENT: &str = "push.released";
+
+/// 푸시 본문(암호화 전 JSON). 제목 · 본문은 글자 수 상한으로 자르고, 주소가 상한을 넘으면 싣지 않는다.
+pub(crate) fn push_payload(
+    kind: NoticeKind,
+    title: &str,
+    body: &str,
+    link: Option<&str>,
+    seq: u64,
+) -> Vec<u8> {
+    let mut push = serde_json::json!({
+        "kind": kind.name(),
+        "title": truncate_chars(title, MAX_PUSH_TITLE_CHARS),
+        "body": truncate_chars(body, MAX_PUSH_BODY_CHARS),
+        "seq": seq,
+    });
+    if let Some(link) = link.filter(|l| l.chars().count() <= MAX_PUSH_LINK_CHARS) {
+        push["link"] = serde_json::Value::from(link);
+    }
+    push.to_string().into_bytes()
+}
+
 /// 알림 목록을 읽을 때 한 번에 읽는 이벤트 수의 상한.
 const NOTICE_READ_BATCH: usize = 256;
 
 /// 저장된 이벤트가 알림(`notice.` + 아는 이름)이면 목록의 한 줄로 바꾼다.
-fn notice_record(event: TimedEvent) -> Option<NoticeRecord> {
+pub(crate) fn notice_record(event: TimedEvent) -> Option<NoticeRecord> {
     let kind = NoticeKind::from_name(event.kind.strip_prefix("notice.")?)?;
     let text = |key: &str| event.payload[key].as_str().unwrap_or_default().to_owned();
     Some(NoticeRecord {
