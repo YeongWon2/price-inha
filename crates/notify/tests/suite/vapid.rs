@@ -197,3 +197,76 @@ fn 키를_만든_뒤_비밀_폴더에는_키_파일_하나만_남는다() {
         "임시 파일이 남지 않는다"
     );
 }
+
+/// 비밀 폴더 안의 이름들(정렬).
+fn names_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+// 검증: N5
+#[test]
+fn 켤_때_남은_임시_키_파일을_지운다() {
+    // 키가 없을 때(새로 만든다)와 있을 때(읽기만 한다) 모두.
+    for with_key in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let first = with_key.then(|| VapidKey::load_or_create(dir.path()).unwrap());
+        for leftover in ["vapid.tmp-1", "vapid.tmp-999-3", "vapid.tmp-"] {
+            fs::write(dir.path().join(leftover), "반쯤 쓴 키").unwrap();
+        }
+        let key = VapidKey::load_or_create(dir.path()).unwrap();
+        assert_eq!(names_in(dir.path()), vec![VAPID_KEY_FILE.to_owned()]);
+        if let Some(first) = first {
+            assert_eq!(first.public_key(), key.public_key());
+        }
+    }
+}
+
+// 검증: N5
+#[test]
+fn 다른_이름의_파일은_건드리지_않는다() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("other.tmp-1"), "남의 것").unwrap();
+    fs::write(dir.path().join("vapid.tmpx"), "남의 것").unwrap();
+    VapidKey::load_or_create(dir.path()).unwrap();
+    assert_eq!(
+        names_in(dir.path()),
+        vec![
+            "other.tmp-1".to_owned(),
+            VAPID_KEY_FILE.to_owned(),
+            "vapid.tmpx".to_owned()
+        ]
+    );
+}
+
+#[cfg(unix)]
+// 검증: N5 E38
+#[test]
+fn 임시_파일_자리의_심볼릭_링크를_따라가_밖의_파일을_고치지_않는다() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let secret_dir = dir.path().join("secret");
+    fs::create_dir(&secret_dir).unwrap();
+    let outside = dir.path().join("outside.txt");
+    fs::write(&outside, "밖의 파일").unwrap();
+    for name in ["vapid.tmp-1", "vapid.tmp-2-0", "vapid.tmp-x"] {
+        symlink(&outside, secret_dir.join(name)).unwrap();
+    }
+    let key = VapidKey::load_or_create(&secret_dir).unwrap();
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "밖의 파일");
+    assert_eq!(names_in(&secret_dir), vec![VAPID_KEY_FILE.to_owned()]);
+    let file = secret_dir.join(VAPID_KEY_FILE);
+    assert!(
+        !fs::symlink_metadata(&file)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let again = VapidKey::load_or_create(&secret_dir).unwrap();
+    assert_eq!(key.public_key(), again.public_key());
+}
