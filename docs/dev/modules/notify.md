@@ -44,3 +44,8 @@ N5 E2 E38 V10 V11 V12
 - VAPID 키 파일을 만들고 쓰는 사이에 꺼지면 빈 파일이 남아 켤 때마다 InvalidKey로 멈춘다(임시 파일에 쓰고 이름 바꾸기).
 - RFC 8291 부록 A 시험값으로 확인하는 테스트를 더한다.
 - 폰 화면이 가정한 서버 경로(`/api/push/key`, `/api/push/subscribe`, `/api/notices`, `/api/approvals/{id}/approve|reject`, `/api/daily-summary`)를 server 조립 때 맞춘다.
+
+## 2차 작업 (후보 일괄 처리 때 꼭 함)
+
+- SSRF: 보낼 때 구독 주소의 이름을 해석해 해석된 주소가 하나라도 내부망(루프백 · 사설 · 링크 로컬 · ULA 등)이면 보내지 않고, 검사한 IP로만 접속한다(reqwest `resolve`로 고정, DNS 재바인딩 막기). 리다이렉트는 계속 막는다. 서버의 구독 때 글자 검사(`crates/server/src/reach/phone_http.rs` `inside`)는 앞단 거르기로 남긴다.
+- 폰 승인: 결정 4번대로 사용자가 숫자를 치지 않는다. 카드에 지문 앞 6자리를 보이고, 화면이 승인 카드의 지문을 그대로 보낸다(지금 `app.js`의 6자리 숫자 입력 강제를 없앤다).
