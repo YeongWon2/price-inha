@@ -104,8 +104,17 @@ impl Approvals {
     where
         E: From<Error>,
     {
-        let _ = (number, proposal, f);
-        todo!("3차: 승인 확인 뒤 f에 넘긴다")
+        let now = self.clock.now();
+        let found = self.known_record(number)?;
+        let fp = fingerprint(&Subject::RuleImprovement { proposal });
+        if let Some(err) = unusable(&found, &fp, now) {
+            return Err(self.consume_denied(err, number, now).into());
+        }
+        let using = ApprovalUse {
+            id: found.id,
+            fingerprint: fp.as_str().to_string(),
+        };
+        f(using, now)
     }
 
     /// 번호의 승인 줄. 없는 번호면 `NotFound`, 실행 때 지문이 달라 무효가 된 번호면
