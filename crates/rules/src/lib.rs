@@ -23,7 +23,7 @@ mod screen;
 mod sizing;
 
 pub use approval::{ApprovalGrant, approved};
-pub use check::{check, issue};
+pub use check::{check, issue, issue_for_trade};
 pub use error::Error;
 pub use loss::{StopContext, StopTransition, day_loss_pct, drawdown_pct, evaluate_stops};
 pub use model::{

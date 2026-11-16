@@ -7,3 +7,4 @@ mod principles_table;
 mod second_round;
 mod sizing;
 mod stops;
+mod trade_permit;

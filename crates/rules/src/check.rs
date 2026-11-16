@@ -133,3 +133,11 @@ fn unique(found: Vec<Violation>) -> Vec<Violation> {
 pub fn issue(authority: &CheckAuthority, passed: Passed) -> CheckPermit {
     authority.approve(passed.into_order())
 }
+
+/// [`issue`]와 같되, 표시를 매매 하나(`trade`, 저장소의 매매 번호)에 묶는다(E33). 주문을 내는
+/// 쪽은 [`CheckPermit::trade`]가 그 매매의 번호인지 대조한다. 같은 종목 · 방향의 다른 매매에
+/// 이 표시를 쓰지 못하게 한다.
+pub fn issue_for_trade(authority: &CheckAuthority, passed: Passed, trade: i64) -> CheckPermit {
+    let _ = (authority, trade);
+    todo!("issue_for_trade: {:?}", passed.order())
+}
