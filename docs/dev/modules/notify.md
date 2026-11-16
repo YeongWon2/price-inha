@@ -74,3 +74,5 @@ N5 E2 E38 V10 V11 V12
 
 ## 5차 작업 (server 6차와 함께)
 - `HttpTransport::redirect_to`를 `test-redirect` feature 뒤로 옮긴다(기본은 꺼짐). 기본 빌드에서 그 함수가 없는지 시험한다.
+
+- `HttpTransport::redirect_to`를 `test-redirect` feature(기본 꺼짐) 뒤로 옮겼다. notify 자기 시험은 dev-dependency로 자신을 이 feature를 켜서 쓴다. server는 자기 `Cargo.toml`의 dev-dependencies에서 `pi-notify`에 `features = ["test-redirect"]`를 켜야 한다(server 6차).
