@@ -56,20 +56,7 @@ impl crate::Knowledge {
                 unavailable: true,
             });
         };
-        let ids = self.store.chunks_missing_embedding(embedder.model(), max)?;
-        let mut targets: Vec<(pi_store::ChunkId, String)> = Vec::new();
-        for id in ids {
-            // 이 모듈을 거치지 않고 올라온 조각은 어느 기록인지 몰라 건너뛴다.
-            let Some(origin) = crate::meta::origin_of(&self.store, id)? else {
-                continue;
-            };
-            let chunks = self
-                .store
-                .knowledge_chunks(origin.kind, &origin.record_ref)?;
-            if let Some(chunk) = chunks.into_iter().find(|c| c.id == id) {
-                targets.push((id, chunk.text));
-            }
-        }
+        let targets = self.embed_targets(embedder.model(), max)?;
         if targets.is_empty() {
             return Ok(EmbedReport {
                 embedded: 0,
@@ -94,5 +81,37 @@ impl crate::Knowledge {
             embedded: targets.len(),
             unavailable: false,
         })
+    }
+    /// 임베딩할 조각(번호 · 글)을 `max`개까지 고른다. 어느 기록인지 모르는 조각(메타가 없음)은 건너뛰되
+    /// 그 때문에 뒤의 조각이 막히지 않게 창을 넓혀 다시 본다(창은 매번 커지고 목록이 끝나면 멈춘다).
+    fn embed_targets(
+        &self,
+        model: &str,
+        max: usize,
+    ) -> Result<Vec<(pi_store::ChunkId, String)>, crate::Error> {
+        let mut window = max;
+        loop {
+            let ids = self.store.chunks_missing_embedding(model, window)?;
+            let mut targets: Vec<(pi_store::ChunkId, String)> = Vec::new();
+            for &id in &ids {
+                if targets.len() >= max {
+                    break;
+                }
+                // 이 모듈을 거치지 않고 올라온 조각(또는 메타가 빠진 조각)은 어느 기록인지 몰라 건너뛴다.
+                let Some(origin) = crate::meta::origin_of(&self.store, id)? else {
+                    continue;
+                };
+                let chunks = self
+                    .store
+                    .knowledge_chunks(origin.kind, &origin.record_ref)?;
+                if let Some(chunk) = chunks.into_iter().find(|c| c.id == id) {
+                    targets.push((id, chunk.text));
+                }
+            }
+            if targets.len() >= max || ids.len() < window {
+                return Ok(targets);
+            }
+            window = max.saturating_add(ids.len() - targets.len());
+        }
     }
 }

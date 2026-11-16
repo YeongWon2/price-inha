@@ -52,6 +52,14 @@ pub(crate) fn remember_chunk(
     Ok(())
 }
 
+/// 지운 조각의 줄 범위 메타를 비운다(저장소에 메타를 지우는 길이 없어 빈 값으로 둔다. 빈 값은 "없음"이다).
+pub(crate) fn forget_chunk(store: &Store, id: ChunkId) -> Result<(), Error> {
+    if store.knowledge_meta(&chunk_key(id))?.is_some() {
+        store.set_knowledge_meta(&chunk_key(id), "")?;
+    }
+    Ok(())
+}
+
 /// 남긴 조각 정보. 이 모듈을 거치지 않고 올라온 조각이면 `None`.
 pub(crate) fn origin_of(store: &Store, id: ChunkId) -> Result<Option<ChunkOrigin>, Error> {
     let Some(value) = store.knowledge_meta(&chunk_key(id))? else {

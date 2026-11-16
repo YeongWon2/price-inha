@@ -138,6 +138,19 @@ impl Knowledge {
                 .zip(&chunks)
                 .all(|(old, new)| old.text == new.text && old.source == record.source);
         if unchanged {
+            // 앞서 조각 저장과 메타 저장 사이에 꺼졌으면 빠진 메타를 여기서 채운다.
+            for (old, chunk) in existing.iter().zip(&chunks) {
+                if meta::origin_of(&self.store, old.id)?.is_none() {
+                    let lines = (chunk.start_line, chunk.end_line);
+                    meta::remember_chunk(
+                        &self.store,
+                        old.id,
+                        record.kind,
+                        &record.record_ref,
+                        lines,
+                    )?;
+                }
+            }
             return Ok(existing.iter().map(|c| c.id).collect());
         }
         let ids = self.store.index_record(NewKnowledgeRecord {
@@ -147,6 +160,9 @@ impl Knowledge {
             chunks: chunks.iter().map(|c| c.text.clone()).collect(),
             at: record.at,
         })?;
+        for old in existing.iter().filter(|old| !ids.contains(&old.id)) {
+            meta::forget_chunk(&self.store, old.id)?;
+        }
         for (id, chunk) in ids.iter().zip(&chunks) {
             let lines = (chunk.start_line, chunk.end_line);
             meta::remember_chunk(&self.store, *id, record.kind, &record.record_ref, lines)?;
@@ -169,6 +185,25 @@ impl Knowledge {
         condition: &Condition,
         catalog: &dyn TradeCatalog,
     ) -> Result<SearchOutput, Error> {
+        self.run_condition(condition, catalog, false)
+    }
+
+    /// 자동 회상용 조건 찾기. [`Knowledge::search_by_condition`]과 같되 바깥 자료(`External`)의 조각은
+    /// 건너뛴다(M7). 건너뛴 것은 개수에 들지 않는다.
+    pub fn recall_by_condition(
+        &self,
+        condition: &Condition,
+        catalog: &dyn TradeCatalog,
+    ) -> Result<SearchOutput, Error> {
+        self.run_condition(condition, catalog, true)
+    }
+
+    fn run_condition(
+        &self,
+        condition: &Condition,
+        catalog: &dyn TradeCatalog,
+        auto_recall: bool,
+    ) -> Result<SearchOutput, Error> {
         let mut trades: Vec<TradeRecord> = catalog
             .trades()
             .into_iter()
@@ -189,9 +224,13 @@ impl Knowledge {
             let chunks = self
                 .store
                 .knowledge_chunks(KnowledgeKind::Trade, &trade.record_ref)?;
-            if let Some(first) = chunks.first() {
-                results.push(self.tool_hit(first, None)?);
+            let Some(first) = chunks.first() else {
+                continue;
+            };
+            if auto_recall && first.source == KnowledgeSource::External {
+                continue;
             }
+            results.push(self.tool_hit(first, None)?);
         }
         Ok(SearchOutput {
             results,
@@ -199,15 +238,6 @@ impl Knowledge {
             relaxed: false,
             semantic: self.semantic_status(),
         })
-    }
-
-    /// 자동 회상용 조건 찾기. [`Knowledge::search_by_condition`]과 같되 바깥 자료는 나오지 않는다(M7).
-    pub fn recall_by_condition(
-        &self,
-        condition: &Condition,
-        catalog: &dyn TradeCatalog,
-    ) -> Result<SearchOutput, Error> {
-        self.search_by_condition(condition, catalog)
     }
 
     /// 뜻 검색. 임베딩 포트가 없으면 오류가 아니라 빈 결과와 [`SemanticStatus::Unavailable`]
