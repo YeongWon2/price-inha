@@ -79,6 +79,7 @@ impl HttpTransport {
         })
     }
 
+    #[cfg(feature = "test-redirect")]
     /// 시험용: 모든 요청의 scheme · host · port를 `base`로 바꿔 보낸다(경로 · 쿼리는 `endpoint` 것 그대로).
     /// 구독의 `endpoint`는 `https://`여야 하므로, 로컬 가짜 서버(http)로 보내려면 이 길이 필요하다.
     /// 이 길은 내부망 검사를 하지 않는다(시험 서버가 127.0.0.1이다).

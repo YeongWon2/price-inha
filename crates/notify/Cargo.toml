@@ -8,6 +8,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# 시험 전용: HttpTransport::redirect_to를 연다. 기본은 꺼짐.
+test-redirect = []
+
 [dependencies]
 thiserror = "2.0.21"
 pi-store = { path = "../store" }
@@ -25,3 +29,4 @@ sha2 = "0.11.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+pi-notify = { path = ".", features = ["test-redirect"] }
