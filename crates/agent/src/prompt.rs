@@ -107,6 +107,8 @@ pub(crate) fn leader_turn(
     }
     out.push_str(&format!(
         "합의 점수: {consensus}\n\n판단을 JSON 객체 하나로 답한다.\n\
+         금액(entry · stop · target · expected_value)은 통화의 최소 단위 정수다: \
+         국내 종목은 원, 미국 종목은 센트.\n\
          사기 · 팔기: {{\"decision\": \"buy\"|\"sell\", \"hypothesis\": \"<가설>\", \
          \"trigger\": \"<계기>\", \"entry\": <정수>, \"stop\": <정수>, \"target\": <정수>, \
          \"expected_value\": <정수>}}\n\
