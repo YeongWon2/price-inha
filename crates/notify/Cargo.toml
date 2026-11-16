@@ -11,3 +11,17 @@ workspace = true
 [dependencies]
 thiserror = "2.0.21"
 pi-store = { path = "../store" }
+p256 = { version = "0.14.0", features = ["ecdh", "ecdsa"] }
+aes-gcm = "0.11.1"
+hkdf = "0.13.0"
+base64 = "0.23.1"
+rand = "0.10.3"
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt", "time", "macros", "net", "sync", "io-util"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+async-trait = "0.1.92"
+url = "2.5.8"
+sha2 = "0.11.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
