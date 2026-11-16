@@ -43,6 +43,8 @@ pub(crate) struct InFlight {
     finished: Mutex<Vec<Finished>>,
     alerts: Mutex<Vec<Alert>>,
     errors: Mutex<Vec<StoreError>>,
+    /// 띄운 깨우기가 하나 끝날 때마다 알린다(`settle`이 취소돼도 잃는 것이 없게 이것으로 기다린다).
+    idle: tokio::sync::Notify,
 }
 
 impl InFlight {
@@ -86,6 +88,7 @@ impl InFlight {
             }
         }
         self.count.fetch_sub(1, Ordering::SeqCst);
+        self.idle.notify_waiters();
     }
 
     /// 아직 내지 않은 알림 요구를 가져간다(한 번만 낸다).
@@ -94,16 +97,25 @@ impl InFlight {
     }
 
     /// 띄운 깨우기가 모두 끝날 때까지 기다리고, 끝난 것과 아직 내지 않은 알림 요구를 낸다.
+    ///
+    /// 취소해도 안전하다(4차 2번): 핸들을 꺼내 쥐고 기다리지 않고 끝난 수가 0이 되기를 기다리므로,
+    /// 이 future가 버려져도 띄운 깨우기는 그대로 돌고 다음 `settle`이 끝까지 기다린다.
     pub(crate) async fn settle(&self) -> Result<SettleReport, Error> {
         loop {
-            let handles = mem::take(&mut *lock(&self.handles));
-            if handles.is_empty() {
+            let notified = self.idle.notified();
+            tokio::pin!(notified);
+            // 알림을 놓치지 않게 먼저 등록하고 나서 수를 본다.
+            notified.as_mut().enable();
+            if self.count() == 0 {
                 break;
             }
-            for handle in handles {
-                if let Err(error) = handle.await {
-                    tracing::error!(%error, "띄운 깨우기가 끝까지 돌지 못했다");
-                }
+            notified.await;
+        }
+        // 모두 끝났으니 핸들은 곧바로 끝난다. 패닉으로 끝난 것만 남긴다.
+        let handles = mem::take(&mut *lock(&self.handles));
+        for handle in handles {
+            if let Err(error) = handle.await {
+                tracing::error!(%error, "띄운 깨우기가 끝까지 돌지 못했다");
             }
         }
         let errors = mem::take(&mut *lock(&self.errors));
@@ -129,13 +141,29 @@ pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
             .iter()
             .map(|firing| firing.key.job.clone())
             .collect();
+        // 저장소가 패닉해도 `in_flight`가 줄고 작업이 실행 중으로 굳지 않게 drop에서 나간다(4차 1번).
+        let _leave = LeaveGuard {
+            inflight: Arc::clone(&task),
+            jobs,
+        };
         settle_members(&ports, &task, members, ok).await;
         lock(&task.finished).push(Finished { wake, ok });
-        task.leave(&jobs);
     });
     let mut handles = lock(&inflight.handles);
     handles.retain(|handle| !handle.is_finished());
     handles.push(handle);
+}
+
+/// 띄운 바깥 작업이 어떻게 끝나든(패닉 포함) 묶인 작업과 수를 풀어 주는 지킴이.
+struct LeaveGuard {
+    inflight: Arc<InFlight>,
+    jobs: Vec<JobId>,
+}
+
+impl Drop for LeaveGuard {
+    fn drop(&mut self) {
+        self.inflight.leave(&self.jobs);
+    }
 }
 
 /// 깨우기를 따로 띄워 돌린다. 실패하거나 패닉하면 거짓(실패로 센다, 3차 1번).
@@ -179,6 +207,10 @@ async fn finish(
         Ok(jobs) => {
             if let Some(mut state) = jobs.into_iter().find(|job| job.id == firing.key.job) {
                 let raised = apply_result(&mut state, firing.on_success, ok, finished_at);
+                // 끝난 회차는 주인 없는 회차가 아니다. 영수증이 정리돼도 옛 회차를 되살리지 않게 지운다.
+                if state.pending_slot == Some(firing.key.slot) {
+                    state.pending_slot = None;
+                }
                 match store.save_job(&state).await {
                     Ok(()) => alert = raised,
                     Err(error) => errors.push(error),
