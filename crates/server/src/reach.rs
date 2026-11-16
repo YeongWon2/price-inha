@@ -35,12 +35,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod assets;
+mod backup_http;
 mod linked;
 mod office_http;
 mod phone_http;
 mod summary;
 
 pub(crate) use assets::routes as asset_routes;
+pub use backup_http::{SETUP_BACKUP_PATH, restore_backup};
 pub(crate) use linked::{Linked, LockNotices};
 pub(crate) use office_http::{OfficeDesk, routes as office_routes};
 pub(crate) use phone_http::{Phone, routes as phone_routes};
