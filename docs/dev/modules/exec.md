@@ -91,3 +91,6 @@ C10 E12 E13 E16 E25 E29 E30 E33 V6
 
 ## 5차 작업 (server가 issue_for_trade로 옮긴 뒤)
 - 묶이지 않은 점검 표시(`permit.trade() == None`)도 PermitMismatch로 막는다(`fits_trade`의 `is_none_or`를 `== Some`으로). 시험 도우미 `tests/suite/common.rs`의 permit · buy · sell을 `approve_for_trade(trade_id.0, ..)`로 바꾸고 부르는 곳에 매매 번호를 넘긴다.
+
+### 5차 구현 메모
+- `fits_trade`는 `permit.trade() == Some(매매 번호)`만 받는다. 묶이지 않은 표시는 submit · sell · retry_sell 모두 PermitMismatch. 시험 도우미 `permit(trade_id, ..)`는 묶인 표시, `unbound_permit`은 옛 길.
