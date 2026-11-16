@@ -13,17 +13,33 @@
 //!   (`pi_exec::Error::AnomalyStop`)는 저장소의 팀 상태 전이(`pi_store::Store::change_team_state`)로 한다.
 //! - 시각은 [`crate::Wiring::clock`]에서만 읽는다. 돈은 십진수다.
 
-use std::sync::Arc;
+mod answer;
+mod base;
+mod day;
+mod http;
+mod order;
+mod templates;
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::NaiveDate;
-use pi_approval::{ApprovalNumber, Fingerprint};
-use pi_market::{MarketCalendar, Quote};
-use pi_paper::{OrderId, PaperBroker, PaperConfig};
+use pi_approval::{ApprovalNumber, Approvals, Fingerprint};
+use pi_exec::Executor;
+use pi_gate::Publisher;
+use pi_market::{Clock, Market, MarketCalendar, Quote};
+use pi_paper::{CheckAuthority, OrderId, PaperBroker, PaperConfig};
 use pi_rules::{Blocked, OrderDraft, RulesConfig, SymbolStatus};
-use pi_store::{TeamState, TradeId};
+use pi_store::{Store, TeamState, TradeId};
 use rust_decimal::Decimal;
 
 use crate::TradingError;
+use crate::desk::Desk;
+use answer::Waiting;
+use base::{Calendars, DayLog, Marks};
+
+pub(crate) use base::{TradingParts, default_wiring};
+pub(crate) use http::routes;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
 /// `{"state": 팀 상태 글자, "plan": "trade" | "rest" | null, "reason": 쉬는 이유 | null}`.
@@ -172,13 +188,37 @@ pub enum Placed {
 
 /// 주문 길 하나(앱마다 하나). [`crate::App::trading`]으로 받는다.
 pub struct Trading {
-    _wired: (),
+    store: Store,
+    clock: Arc<dyn Clock>,
+    market: Market,
+    desk: Arc<Desk>,
+    executor: Executor,
+    /// 주문 실행기가 준 점검 권한. 규칙 엔진의 길(`pi_rules::issue`)에만 건넨다.
+    authority: CheckAuthority,
+    approvals: Approvals,
+    paper_config: PaperConfig,
+    rules: RulesConfig,
+    calendars: Calendars,
+    /// 모의계좌에 달력을 넣은 날짜.
+    paper_day: Mutex<Option<NaiveDate>>,
+    /// 종목마다 마지막으로 받은 시세.
+    quotes: Mutex<HashMap<String, Quote>>,
+    /// 통화별 그날 시작 · 최고 평가액과 마지막으로 셈한 장부.
+    marks: Mutex<Marks>,
+    /// 하루 시작 · 마감과 오늘 판단.
+    days: Mutex<DayLog>,
+    /// 승인을 기다리는 주문 안(승인 번호 → 다시 점검할 것).
+    waiting: Mutex<HashMap<String, Waiting>>,
+    /// 팀 상태를 읽고 바꾸는 일을 한 줄로 세운다.
+    team_turn: Mutex<()>,
+    /// 저장되는 이벤트를 내보내는 손잡이(접속 관문이 뜬 뒤에 붙는다).
+    publisher: OnceLock<Publisher>,
 }
 
 impl Trading {
     /// 모의계좌. 조립하는 쪽(테스트)이 장애 흉내를 켜거나 주문 · 보유를 읽는다.
     pub fn paper(&self) -> &PaperBroker {
-        todo!()
+        self.executor.broker()
     }
 
     /// 팀장의 오늘 판단을 받는다. 바뀐 뒤의 팀 상태를 돌려준다. [`KIND_DAY_PLAN`]을 남긴다.
@@ -188,8 +228,7 @@ impl Trading {
     ///   [`TradingError::Halted`]이고 상태는 그대로다(V9: 전체 정지는 내 승인으로만 풀린다).
     /// - 이미 그 상태면 전이 없이 그 상태를 돌려준다.
     pub fn decide_day(&self, plan: DayPlan) -> Result<TeamState, TradingError> {
-        let _ = plan;
-        todo!()
+        self.decide(plan)
     }
 
     /// 주문 안 하나를 점검하고 낸다(C9 → C10, 승인이 필요하면 C12).
@@ -202,15 +241,13 @@ impl Trading {
     /// - 실행기가 이상 감지 멈춤을 요구하면(증권사가 받지 않음 · 응답 없음) 팀을 이상 감지 멈춤으로 바꾸고
     ///   (`TeamCause::AnomalyDetected`) [`TradingError::Broker`]를 돌려준다.
     pub async fn place(&self, request: OrderRequest) -> Result<Placed, TradingError> {
-        let _ = request;
-        todo!()
+        self.place_order(request).await
     }
 
     /// 시세 하나를 받는다(시세 흐름도 부른다). 모의계좌 체결 → 매매 상태(주문됨 → 보유중 등) →
     /// 장부 → 손실 · 멈춤 판단까지 마친 뒤 돌아온다. `pi_rules::evaluate_stops`가 요구한 전이를
     /// 저장소에 한다(하루 한도 멈춤: `TeamCause::DailyLossLimit`, 전체 정지: `TeamCause::MaxLoss`).
     pub async fn on_quote(&self, quote: Quote) -> Result<(), TradingError> {
-        let _ = quote;
-        todo!()
+        self.take_quote(quote).await
     }
 }

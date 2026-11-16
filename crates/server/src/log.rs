@@ -30,16 +30,40 @@ impl<W> RedactingWriter<W> {
 pub struct RedactedLine<W: io::Write> {
     secrets: Arc<SecretStore>,
     inner: W,
+    /// 아직 줄바꿈을 받지 못한 글자. 줄이 끝나야 가린다(비밀 값이 두 번의 쓰기로 나뉘어 와도 가리게).
+    pending: Vec<u8>,
+}
+
+impl<W: io::Write> RedactedLine<W> {
+    /// 모은 글자 가운데 앞의 `upto`바이트를 가려서 안쪽에 쓴다.
+    fn emit(&mut self, upto: usize) -> io::Result<()> {
+        let line: Vec<u8> = self.pending.drain(..upto).collect();
+        let clean = self.secrets.redact(&String::from_utf8_lossy(&line));
+        self.inner.write_all(clean.as_bytes())
+    }
 }
 
 impl<W: io::Write> io::Write for RedactedLine<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let _ = (&self.secrets, &mut self.inner, buf);
-        todo!()
+        self.pending.extend_from_slice(buf);
+        if let Some(end) = self.pending.iter().rposition(|b| *b == b'\n') {
+            self.emit(end + 1)?;
+        }
+        Ok(buf.len())
     }
 
+    /// 끝나지 않은 줄은 쓰지 않는다(가리기 전에 비밀 값의 앞부분이 나가지 않게). 안쪽만 비운다.
     fn flush(&mut self) -> io::Result<()> {
-        todo!()
+        self.inner.flush()
+    }
+}
+
+impl<W: io::Write> Drop for RedactedLine<W> {
+    fn drop(&mut self) {
+        if !self.pending.is_empty() {
+            let _ = self.emit(self.pending.len());
+        }
+        let _ = self.inner.flush();
     }
 }
 
@@ -50,7 +74,10 @@ where
     type Writer = RedactedLine<W::Writer>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        let _ = (&self.secrets, &self.inner);
-        todo!()
+        RedactedLine {
+            secrets: Arc::clone(&self.secrets),
+            inner: self.inner.make_writer(),
+            pending: Vec::new(),
+        }
     }
 }

@@ -16,9 +16,10 @@ use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
 use crate::feed::{Feed, Pace, Source};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
+use crate::trading::{TradingParts, default_wiring};
 use crate::{
     AiChoice, AppError, BrokerKeys, CLI_COMMON_LOCATIONS, KeyVerifier, SecretsRedactor, Settings,
-    Upstreams, load_ai_choice, page, setup_http,
+    Trading, Upstreams, load_ai_choice, page, setup_http,
 };
 
 /// (7차 11번) 띄울 때 CLI 확인을 기다려 주는 가장 긴 시간. 접속 관문은 이미 연결을 받고 있다.
@@ -180,6 +181,76 @@ async fn open_desk(
     Ok(desk)
 }
 
+/// 접속 관문을 연다. 공개 경로는 첫 화면, 세션 경로는 설정 상태와 주문 길, 그 컴퓨터에서만 열리는
+/// 경로는 키 · 종목 등록이다. 가리기 자리에는 비밀 보관소를 끼운다.
+async fn open_gate(
+    settings: &Settings,
+    wiring: &Wiring,
+    store: &Store,
+    secrets: &Arc<SecretStore>,
+    desk: &Arc<Desk>,
+    trading: &Arc<Trading>,
+) -> Result<GateServer, AppError> {
+    let config = GateConfig {
+        bind: SocketAddr::new(settings.bind, settings.port),
+        ..GateConfig::default()
+    };
+    let mut builder = Gate::builder(store.clone(), config)
+        .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
+        .redactor(Arc::new(SecretsRedactor::new(Arc::clone(secrets))))
+        .public_routes(page::routes())
+        .protected_routes(setup_http::status_routes(Arc::clone(desk)))
+        .protected_routes(crate::trading::routes(Arc::clone(trading)))
+        // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
+        .local_routes(setup_http::register_routes(Arc::clone(desk)));
+    if let Some(peer) = wiring.peer_override.clone() {
+        builder = builder.peer_override(peer);
+    }
+    Ok(builder.build().serve().await?)
+}
+
+/// 시세 흐름을 뒤에서 돌린다: `--demo`면 가짜 어댑터, 아니면 토스 어댑터. 받은 시세는 주문 길로도 간다.
+fn spawn_feed(
+    settings: &Settings,
+    wiring: Wiring,
+    secrets: Arc<SecretStore>,
+    gate: &GateServer,
+    desk: &Arc<Desk>,
+    trading: &Arc<Trading>,
+    mut stopping: watch::Receiver<bool>,
+) -> JoinHandle<()> {
+    let source = if settings.demo {
+        let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
+        Source::Demo(Arc::new(demo))
+    } else {
+        let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));
+        let client = TossClient::new(wiring.upstreams.toss, keys, Arc::clone(&wiring.clock));
+        let adapter: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
+        Source::Broker(adapter)
+    };
+    let pace = Pace {
+        interval: settings.quote_interval,
+        retry_initial: settings.retry_initial,
+        retry_max: settings.retry_max,
+        calendar_retry: settings.calendar_retry,
+    };
+    let feed = Feed::new(
+        gate.publisher(),
+        wiring.clock,
+        settings.market,
+        Arc::clone(desk),
+        pace,
+    )
+    .feeding(Arc::clone(trading));
+    tokio::spawn(async move {
+        tokio::select! {
+            // 알리는 쪽이 사라져도 멈춘다.
+            _ = stopping.wait_for(|stop| *stop) => {}
+            () = feed.run(source) => {}
+        }
+    })
+}
+
 /// 떠 있는 서버.
 ///
 /// 띄울 때 하는 일:
@@ -209,89 +280,23 @@ pub struct App {
     gate: GateServer,
     /// 설정 책상(6차: 고른 AI 연결의 공급자를 쥔다).
     desk: Arc<Desk>,
-    /// 시세 흐름을 멈추는 알림.
+    /// 시세 흐름 · 하루 시작/마감을 멈추는 알림.
     stop: watch::Sender<bool>,
     feed: JoinHandle<()>,
     /// (7차 11번) 뒤에서 도는 CLI 확인(띄울 때 끝났으면 없다). 끌 때 그만둔다.
     ai_check: Option<JoinHandle<()>>,
     /// 끌 때 닫는다(놓는다).
     store: Store,
+    /// (W5 1차) 주문 길.
+    trading: Arc<Trading>,
+    /// (W5 1차) 뒤에서 도는 하루 시작 · 마감.
+    days: JoinHandle<()>,
 }
 
 impl App {
     /// 서버를 띄운다.
     pub async fn start(settings: Settings, wiring: Wiring) -> Result<App, AppError> {
-        // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
-        let secrets = Arc::new(SecretStore::open(settings.home.clone())?);
-        let store = Store::open(settings.home.join(DB_FILE))?;
-        if !settings.bind.is_loopback() {
-            tracing::warn!(
-                bind = %settings.bind,
-                "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
-            );
-        }
-        let config = GateConfig {
-            bind: SocketAddr::new(settings.bind, settings.port),
-            ..GateConfig::default()
-        };
-        let desk = open_desk(&settings, &wiring, &secrets).await?;
-        let mut builder = Gate::builder(store.clone(), config)
-            .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
-            .redactor(Arc::new(SecretsRedactor::new(Arc::clone(&secrets))))
-            .public_routes(page::routes())
-            .protected_routes(setup_http::status_routes(Arc::clone(&desk)))
-            // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
-            .local_routes(setup_http::register_routes(Arc::clone(&desk)));
-        if let Some(peer) = wiring.peer_override {
-            builder = builder.peer_override(peer);
-        }
-        let gate = builder.build().serve().await?;
-        // 연결을 먼저 받고(관문은 이미 떠 있다), CLI 확인은 짧게만 기다린 뒤 뒤에서 이어 간다
-        // (끝나기 전 상태는 "확인 중").
-        let checking = Arc::clone(&desk);
-        let mut check = Box::pin(async move { checking.check_cli().await });
-        let ai_check = match tokio::time::timeout(CLI_CHECK_GRACE, &mut check).await {
-            Ok(()) => None,
-            Err(_) => Some(tokio::spawn(check)),
-        };
-
-        let source = if settings.demo {
-            let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
-            Source::Demo(Arc::new(demo))
-        } else {
-            let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));
-            let client = TossClient::new(wiring.upstreams.toss, keys, Arc::clone(&wiring.clock));
-            let adapter: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
-            Source::Broker(adapter)
-        };
-        let feed = Feed::new(
-            gate.publisher(),
-            wiring.clock,
-            settings.market,
-            Arc::clone(&desk),
-            Pace {
-                interval: settings.quote_interval,
-                retry_initial: settings.retry_initial,
-                retry_max: settings.retry_max,
-                calendar_retry: settings.calendar_retry,
-            },
-        );
-        let (stop, mut stopping) = watch::channel(false);
-        let feed = tokio::spawn(async move {
-            tokio::select! {
-                // 알리는 쪽이 사라져도 멈춘다.
-                _ = stopping.wait_for(|stop| *stop) => {}
-                () = feed.run(source) => {}
-            }
-        });
-        Ok(App {
-            gate,
-            desk,
-            stop,
-            feed,
-            ai_check,
-            store,
-        })
+        App::start_with(settings, wiring, default_wiring()).await
     }
 
     /// (W5 1차) 주문 길까지 이어 서버를 띄운다: [`App::start`]가 하는 일에 더해
@@ -310,8 +315,49 @@ impl App {
         wiring: Wiring,
         trading: crate::TradingWiring,
     ) -> Result<App, AppError> {
-        let _ = (settings, wiring, trading);
-        todo!()
+        // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
+        let secrets = Arc::new(SecretStore::open(settings.home.clone())?);
+        let store = Store::open(settings.home.join(DB_FILE))?;
+        if !settings.bind.is_loopback() {
+            tracing::warn!(
+                bind = %settings.bind,
+                "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
+            );
+        }
+        let desk = open_desk(&settings, &wiring, &secrets).await?;
+        let trading = Trading::open(TradingParts {
+            store: store.clone(),
+            clock: Arc::clone(&wiring.clock),
+            market: settings.market,
+            desk: Arc::clone(&desk),
+            wiring: trading,
+        })
+        .await?;
+        let gate = open_gate(&settings, &wiring, &store, &secrets, &desk, &trading).await?;
+        trading.attach(gate.publisher());
+        // 연결을 먼저 받고(관문은 이미 떠 있다), CLI 확인은 짧게만 기다린 뒤 뒤에서 이어 간다
+        // (끝나기 전 상태는 "확인 중").
+        let checking = Arc::clone(&desk);
+        let mut check = Box::pin(async move { checking.check_cli().await });
+        let ai_check = match tokio::time::timeout(CLI_CHECK_GRACE, &mut check).await {
+            Ok(()) => None,
+            Err(_) => Some(tokio::spawn(check)),
+        };
+        // 띄운 그때 이미 그 날 세션 안이면 하루 시작을 바로 남긴다.
+        trading.tick().await;
+        let (stop, stopping) = watch::channel(false);
+        let days = trading.spawn_days(stop.subscribe());
+        let feed = spawn_feed(&settings, wiring, secrets, &gate, &desk, &trading, stopping);
+        Ok(App {
+            gate,
+            desk,
+            stop,
+            feed,
+            ai_check,
+            store,
+            trading,
+            days,
+        })
     }
 
     /// (W5 1차) 이 앱의 저장소(같은 연결을 나눠 쓴다).
@@ -321,7 +367,7 @@ impl App {
 
     /// (W5 1차) 주문 길.
     pub fn trading(&self) -> Arc<crate::Trading> {
-        todo!()
+        Arc::clone(&self.trading)
     }
 
     /// 실제로 연 주소.
@@ -361,6 +407,7 @@ impl App {
         self.desk.begin_closing();
         self.stop.send_replace(true);
         let feed = self.feed.await.map_err(|_| AppError::Task);
+        let days = self.days.await.map_err(|_| AppError::Task);
         // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),
         // 쥔 CLI 공급자의 자식을 끝낸다.
         if let Some(check) = self.ai_check {
@@ -370,8 +417,10 @@ impl App {
         self.desk.shutdown_ai().await;
         // 시세 흐름이 비정상으로 끝났어도 연결과 저장소는 정리한다.
         let gate = self.gate.shutdown().await;
+        drop(self.trading);
         drop(self.store);
         gate?;
+        days?;
         feed
     }
 }

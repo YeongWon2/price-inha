@@ -255,6 +255,11 @@ impl Desk {
             .all(|spec| self.registered(spec.name))
     }
 
+    /// (W5 1차) 필수 키(증권사 · AI)가 모두 등록돼 있는가(다시 시작, E9).
+    pub(crate) fn keys_ready(&self) -> bool {
+        self.registered(ITEM_BROKER) && self.registered(ITEM_AI)
+    }
+
     /// 설정 상태. 값 · 값의 일부 · 길이는 없다(V46).
     pub(crate) fn status(&self) -> SetupStatus {
         let items: Vec<SetupItem> = SETUP_ITEMS

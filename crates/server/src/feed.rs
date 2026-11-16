@@ -18,6 +18,7 @@ use pi_market::{Clock, Market, MarketAdapter, MarketError, Symbol};
 use serde_json::json;
 use tokio::time::Instant;
 
+use crate::Trading;
 use crate::desk::Desk;
 use crate::retry::{Backoff, LOG_EVERY, LogGate};
 use crate::{
@@ -29,6 +30,7 @@ use fetch::{Fetched, Plan};
 use late::Board;
 use step::{Rested, Step, failure_state, millis};
 
+pub(crate) use late::market_date;
 pub(crate) use step::{Pace, Source};
 
 /// 필수 설정이 그대로인지 다시 보는 간격(키 파일만 읽는다. 바깥으로 나가지 않는다).
@@ -73,6 +75,8 @@ pub(crate) struct Feed {
     quotes_log: LogGate,
     /// 달력 받기 실패의 기록 묶기.
     calendar_log: LogGate,
+    /// (W5 1차) 받은 시세 · 달력을 넘길 주문 길.
+    trading: Option<Arc<Trading>>,
 }
 
 impl Feed {
@@ -101,6 +105,25 @@ impl Feed {
             setup: None,
             quotes_log: LogGate::new(LOG_EVERY),
             calendar_log: LogGate::new(LOG_EVERY),
+            trading: None,
+        }
+    }
+
+    /// (W5 1차) 받은 시세를 [`Trading::on_quote`]로, 받은 달력을 주문 길에 넘긴다.
+    pub(crate) fn feeding(mut self, trading: Arc<Trading>) -> Self {
+        self.trading = Some(trading);
+        self
+    }
+
+    /// 받은 시세를 주문 길에 넘긴다(체결 · 손실 판단까지 마친 뒤 돌아온다).
+    async fn pass_on(&self, quotes: Vec<pi_market::Quote>) {
+        let Some(trading) = &self.trading else {
+            return;
+        };
+        for quote in quotes {
+            if let Err(error) = trading.on_quote(quote).await {
+                tracing::warn!(%error, "받은 시세를 주문 길에 넘기지 못했습니다");
+            }
         }
     }
 
@@ -217,7 +240,13 @@ impl Feed {
             let plan = self.plan();
             self.board.asked(&plan.asking(), self.clock.now());
             let fetched = self.fetch_watching(adapter, plan).await;
-            let Step::Wait { wait, not_before } = self.settle(fetched, demo, &mut backoff) else {
+            let came = match (&fetched, &self.trading) {
+                (Ok(fetched), Some(_)) => fetched.quotes.clone(),
+                _ => Vec::new(),
+            };
+            let step = self.settle(fetched, demo, &mut backoff);
+            self.pass_on(came).await;
+            let Step::Wait { wait, not_before } = step else {
                 return;
             };
             match self.rest(wait, not_before, demo).await {
@@ -314,6 +343,9 @@ impl Feed {
         self.board.hold(fetched.quotes);
         match fetched.calendar {
             Some((date, Ok(calendar))) => {
+                if let Some(trading) = &self.trading {
+                    trading.offer_calendar(calendar.clone());
+                }
                 self.board.set_calendar(date, calendar);
                 self.calendar_retry_at = None;
                 self.calendar_log.clear();

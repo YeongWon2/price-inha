@@ -4,8 +4,10 @@
 
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 
-use price_inha::{App, AppError, Settings, SettingsError, Wiring, announce_addr};
+use pi_secrets::SecretStore;
+use price_inha::{App, AppError, RedactingWriter, Settings, SettingsError, Wiring, announce_addr};
 
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [--home <폴더>] [--bind <IP>] [--port <수>] \
@@ -25,13 +27,24 @@ fn say(text: &str) {
     let _ = writeln!(std::io::stderr(), "price-inha: {text}");
 }
 
+/// 기록(tracing)을 표준 오류로 낸다. 보관 폴더의 비밀 보관소를 열 수 있으면 그 값들을 가린 뒤에만 낸다
+/// ([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
+fn init_tracing(settings: Option<&Settings>) {
+    let secrets = settings.and_then(|s| SecretStore::open(s.home.clone()).ok());
+    let builder = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO);
+    match secrets {
+        Some(secrets) => builder
+            .with_writer(RedactingWriter::new(Arc::new(secrets), std::io::stderr))
+            .init(),
+        None => builder.with_writer(std::io::stderr).init(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_max_level(tracing::Level::INFO)
-        .init();
-    match run().await {
+    let settings = Settings::from_process();
+    init_tracing(settings.as_ref().ok());
+    match run(settings).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Settings(error)) => {
             say(&format!("설정을 읽지 못했습니다: {error}"));
@@ -49,8 +62,8 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), Failure> {
-    let settings = Settings::from_process().map_err(Failure::Settings)?;
+async fn run(settings: Result<Settings, SettingsError>) -> Result<(), Failure> {
+    let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
     let app = App::start(settings, Wiring::default())
         .await
