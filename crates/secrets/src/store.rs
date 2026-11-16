@@ -46,17 +46,21 @@ pub struct SecretStore {
 /// 칸 하나라도 [`MIN_SECRET_CHARS`]보다 짧으면(손으로 고친 파일) 등록되지 않은 것으로 본다(`Ok(None)`):
 /// 가릴 수 없는 값을 내주지 않는다.
 fn load_kind(dir: &Path, entry: impl Into<Entry>) -> Result<Option<Credentials>, SecretsError> {
+    Ok(load_kind_raw(dir, entry)?.filter(|values| {
+        values
+            .values()
+            .all(|value| value.expose().chars().count() >= MIN_SECRET_CHARS)
+    }))
+}
+
+/// [`load_kind`]에서 짧은 값 거르기만 뺀 것: 칸이 모두 채워져 있으면 짧아도 돌려준다.
+fn load_kind_raw(dir: &Path, entry: impl Into<Entry>) -> Result<Option<Credentials>, SecretsError> {
     let kind = entry.into();
     let file = kind.file_name();
     let Some(text) = fsio::read_private(&dir.join(file), file)? else {
         return Ok(None);
     };
-    let found = envfile::read_kind(&text, kind)?;
-    Ok(found.filter(|values| {
-        values
-            .values()
-            .all(|value| value.expose().chars().count() >= MIN_SECRET_CHARS)
-    }))
+    envfile::read_kind(&text, kind)
 }
 
 /// 확인 중인 값. 만들 때 가리기 대상에 넣고, 버려질 때 결과에 맞는 자리로 옮긴다.
@@ -220,6 +224,13 @@ impl SecretStore {
             self.targets_mut(|targets| targets.set_current(kind, values));
         }
         Ok(found)
+    }
+
+    /// 키 파일에 그 묶음의 값이 있지만 [`SecretStore::read_entry_locked`]가 내주지 않는가
+    /// (손으로 짧게 고친 값). 있는 값을 "없음"으로 보고 덮어쓰지 않으려고 쓴다.
+    /// [`SecretStore::lock_files`]를 잡고 부른다.
+    pub(crate) fn has_unusable_entry_locked(&self, kind: Entry) -> Result<bool, SecretsError> {
+        Ok(load_kind_raw(&self.dir, kind)?.is_some())
     }
 
     /// 종류별 등록 여부. [`KeyKind::ALL`] 순서로 하나씩 돌려준다. 값 · 길이는 없다.

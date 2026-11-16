@@ -93,8 +93,32 @@ fn step(text: &[u8], at: usize, byte: u8) -> [Option<usize>; 2] {
 ///
 /// 값에 `%`가 있으면 한 자리에서 두 길이 모두 열릴 수 있어, 가능한 자리들을 함께 따라간다.
 fn match_at(text: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
+    if secret.contains(&b'%') {
+        return match_at_branching(text, start, secret);
+    }
+    // 값에 `%`가 없으면 글자마다 읽는 길이 하나뿐이다(그대로 · `+` · `%XX` 중 하나): 갈래 없이 따라간다.
+    let mut at = start;
+    for &byte in secret {
+        let found = *text.get(at)?;
+        at = if found == byte || (byte == b' ' && found == b'+') {
+            at + 1
+        } else if percent_byte(text, at) == Some(byte) {
+            at + 3
+        } else {
+            return None;
+        };
+    }
+    Some(at)
+}
+
+/// [`match_at`]의 일반 길: 값에 `%`가 있으면 한 자리에서 두 길이 함께 열릴 수 있다.
+fn match_at_branching(text: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
     let (&first, rest) = secret.split_first()?;
-    let mut current: Vec<usize> = step(text, start, first).into_iter().flatten().collect();
+    let opened = step(text, start, first);
+    if opened.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut current: Vec<usize> = opened.into_iter().flatten().collect();
     for &byte in rest {
         if current.is_empty() {
             return None;
@@ -109,6 +133,22 @@ fn match_at(text: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
         current = next;
     }
     current.into_iter().max()
+}
+
+/// `hay` 안에 `needle`이 그대로 들어 있는가. 첫 바이트가 나오는 자리에서만 맞춰 본다.
+fn contains_slice(hay: &[u8], needle: &[u8]) -> bool {
+    let Some((&first, rest)) = needle.split_first() else {
+        return true;
+    };
+    let mut from = 0;
+    while let Some(at) = hay[from..].iter().position(|&byte| byte == first) {
+        let after = from + at + 1;
+        if hay[after..].starts_with(rest) {
+            return true;
+        }
+        from = after;
+    }
+    false
 }
 
 impl Pattern {
@@ -130,11 +170,19 @@ impl Pattern {
 
     /// 바이트 안에 이 값이 그대로 · URL 인코딩 · Base64로 들어 있는가. 바이트는 UTF-8이 아니어도 된다.
     pub(crate) fn occurs_in(&self, bytes: &[u8]) -> bool {
-        let raw = (0..bytes.len()).any(|start| match_at(bytes, start, &self.raw).is_some());
-        raw || self.b64.iter().any(|core| {
-            let needle = core.text.as_bytes();
-            bytes.windows(needle.len()).any(|window| window == needle)
-        })
+        let Some(&first) = self.raw.first() else {
+            return false;
+        };
+        // 첫 글자(또는 `%` · 공백 자리의 `+`)가 나오는 자리에서만 맞춰 본다.
+        let raw = bytes
+            .iter()
+            .enumerate()
+            .filter(|&(_, &byte)| byte == first || byte == b'%' || (first == b' ' && byte == b'+'))
+            .any(|(start, _)| match_at(bytes, start, &self.raw).is_some());
+        raw || self
+            .b64
+            .iter()
+            .any(|core| contains_slice(bytes, core.text.as_bytes()))
     }
 
     /// 이 값이 든 자리들을 `spans`에 더한다.

@@ -6,7 +6,7 @@
 //! 상태 보기도 따로 둔다. 확인 규칙은 다른 키와 같다(칸 검사 → 가리기 대상에 넣기 → 확인 → 원자 쓰기).
 
 use crate::kind::Entry;
-use crate::{Credentials, SecretStore, SecretString, SecretsError, Verifier};
+use crate::{Credentials, ENV_FILE, SecretStore, SecretString, SecretsError, Verifier};
 
 /// 6차에 더한 칸 (D9 · D7).
 ///
@@ -111,6 +111,9 @@ impl SecretStore {
     /// [`BACKUP_EXCLUDED_FILES`](crate::BACKUP_EXCLUDED_FILES)에 들어 있어 백업에서 빠진다.
     /// 값은 가리기 대상이다([`SecretStore::redact`] · [`SecretStore::contains_registered`]).
     ///
+    /// 키 파일에 손으로 적은 값이 있는데 [`MIN_SECRET_CHARS`](crate::MIN_SECRET_CHARS)보다 짧거나 줄이
+    /// 깨졌으면 [`SecretsError::Corrupt`]로 알리고 `generate`를 부르지 않으며 파일을 덮어쓰지 않는다.
+    ///
     /// 만든 값이 [`MIN_SECRET_CHARS`](crate::MIN_SECRET_CHARS)보다 짧으면 [`SecretsError::TooShort`],
     /// 못 쓰는 글자가 있으면 [`SecretsError::InvalidValue`]로 거부하고 저장하지 않는다.
     pub fn vapid_private_key(
@@ -124,6 +127,10 @@ impl SecretStore {
             && let Some(value) = found.get(field)
         {
             return Ok(value.clone());
+        }
+        // 손으로 짧게 고친 값이 있으면 "없음"이 아니다: 덮어쓰지 않고 깨졌다고 알린다.
+        if self.has_unusable_entry_locked(Entry::Vapid)? {
+            return Err(SecretsError::Corrupt { file: ENV_FILE });
         }
         let value = generate();
         let mut values = Credentials::new();
@@ -139,6 +146,10 @@ impl SecretStore {
     /// [`SecretStore::redact`]가 가리는 값 모두(키 파일에서 읽은 값, 등록 · 확인 중인 값, 6차 칸,
     /// VAPID 비밀키)를 그대로 · URL 인코딩 · Base64 모양으로 찾는다. 바이트가 UTF-8이 아니어도 된다
     /// (예: SQLite 스냅샷). 백업기는 이것이 `true`면 올리지 않는다.
+    ///
+    /// 값 하나마다 한 번씩 훑는다(첫 글자가 나오는 자리에서만 맞춰 본다). 대상 밖: 76자마다
+    /// 줄바꿈을 넣은 Base64(MIME 모양)는 줄바꿈이 값 가운데 들어가 못 찾는다. 백업기는 압축 **전에**
+    /// 검사한다(압축하면 어느 모양이든 찾을 수 없다).
     pub fn contains_registered(&self, bytes: &[u8]) -> bool {
         self.targets_found_in(bytes)
     }
