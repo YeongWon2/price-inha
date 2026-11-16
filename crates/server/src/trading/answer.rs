@@ -1,15 +1,17 @@
 //! 승인 답하기(C7 · E7 · E8 · T14): 승인 증표는 승인 모듈이 소비에 성공한 뒤에만 여기서 만든다.
 //!
-//! 순서: `pi_approval::Approvals::answer` → (승인이면) `consume`(한 번만) → 증표 → `pi_rules::approved`
-//! (지금의 시세 · 장부로 다시 점검, 내용이 다르면 막힘) → 실행. 소비가 규칙 확인보다 먼저다.
+//! 순서: `pi_approval::Approvals::answer` → (승인이면) `consume`(한 번만) → 쉬는 날 검사(E19) → 증표 →
+//! `pi_rules::approved`(지금의 시세 · 장부로 다시 점검, 내용이 다르면 막힘) → 실행.
+//! 소비가 규칙 확인보다 먼저다.
 
 use pi_approval::{Answer, ApprovalNumber, Decision, RejectReason, Subject, fingerprint};
-use pi_rules::{ApprovalGrant, Blocked, PendingApproval, Reason};
+use pi_rules::{ApprovalGrant, Blocked, PendingApproval, Purpose, Reason};
 use pi_store::{BlockReason, StoreError, TradeId};
 
 use super::base::{exec_text, lock, millis};
 use super::{
-    ANSWER_CONTENT_CHANGED, ANSWER_FINGERPRINT_MISMATCH, ANSWER_NOT_FOUND, OrderRequest, Trading,
+    ANSWER_CONTENT_CHANGED, ANSWER_FINGERPRINT_MISMATCH, ANSWER_NOT_FOUND, ANSWER_REST_DAY,
+    OrderRequest, Trading,
 };
 use crate::TradingError;
 
@@ -99,6 +101,16 @@ impl Trading {
                 pi_approval::Error::Denied(reason) => reject_word(reason),
                 _ => "consume_failed",
             }));
+        }
+        // 주문 안을 낼 때와 같이 쉬는 날에는 사는 주문 · 익절을 내지 않는다(E19).
+        if let Some(reason) = self.rest_reason(self.clock.now())
+            && !matches!(
+                waiting.request.draft.purpose,
+                Purpose::StopLoss | Purpose::Liquidation
+            )
+        {
+            self.block_rejected(waiting.trade, &format!("쉬는 날: {reason}"))?;
+            return Ok(rejected(ANSWER_REST_DAY));
         }
         let grant = ApprovalGrant::new(number.as_str(), fingerprint(&waiting.subject).as_str());
         let Some(params) = self.params()? else {

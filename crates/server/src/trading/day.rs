@@ -108,7 +108,7 @@ impl Trading {
     /// 하루 시작: 남기고, 그날 시작 평가액을 새로 잡고, 하루 한도 멈춤을 쉬는 중으로 푼다.
     async fn day_start(&self, date: NaiveDate, now: DateTime<Utc>) -> Result<(), TradingError> {
         let books = self.books(now).await?;
-        self.reset_day_start(&books);
+        self.reset_day_start(&books, date)?;
         self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
             .await?;
         lock(&self.days).started = Some(date);

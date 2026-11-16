@@ -20,6 +20,7 @@ use pi_template::RiskParams;
 use rust_decimal::Decimal;
 use serde_json::Value;
 
+use super::marks::{KIND_LOSS_BASIS, Marks};
 use super::{
     CalendarFn, DayPlan, KIND_DAY_CLOSE, KIND_DAY_PLAN, KIND_DAY_START, Trading, TradingWiring,
 };
@@ -73,6 +74,13 @@ pub(crate) fn default_wiring() -> TradingWiring {
     }
 }
 
+impl Default for TradingWiring {
+    /// [`default_wiring`]과 같다(실행 파일이 [`crate::App::start_with_secrets`]에 준다).
+    fn default() -> Self {
+        default_wiring()
+    }
+}
+
 /// 달력이 오는 곳.
 pub(super) enum Calendars {
     /// 조립하는 쪽이 준 것(날짜 → 달력).
@@ -81,20 +89,14 @@ pub(super) enum Calendars {
     Feed(Mutex<Option<MarketCalendar>>),
 }
 
-/// 통화별 그날 시작 · 최고 평가액과 마지막으로 셈한 장부.
-#[derive(Default)]
-pub(super) struct Marks {
-    day_start: HashMap<Currency, Decimal>,
-    peak: HashMap<Currency, Decimal>,
-    pub(super) last: Vec<Book>,
-}
-
 /// 하루 시작 · 마감을 남긴 날짜와 팀장의 마지막 판단.
 #[derive(Default)]
 pub(super) struct DayLog {
     pub(super) started: Option<NaiveDate>,
     pub(super) closed: Option<NaiveDate>,
     pub(super) plan: Option<(NaiveDate, DayPlan)>,
+    /// (1차 보강) 마지막으로 남긴 손실 기준([`KIND_LOSS_BASIS`]).
+    pub(super) basis: Option<Value>,
 }
 
 impl DayLog {
@@ -115,6 +117,10 @@ impl DayLog {
     }
 
     fn absorb(&mut self, kind: &str, payload: &Value) {
+        if kind == KIND_LOSS_BASIS {
+            self.basis = Some(payload.clone());
+            return;
+        }
         let Some(date) = payload["date"]
             .as_str()
             .and_then(|text| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok())
@@ -164,7 +170,8 @@ pub(super) fn exec_text(error: impl std::fmt::Display) -> TradingError {
 
 impl Trading {
     /// 주문 길을 연다: 저장소로 주문 실행기를 열고(계좌 스냅샷이 있으면 되살림) 맞춰 본 뒤,
-    /// 같은 저장소 · 시계로 승인 관리자를 연다. 장부의 그날 시작 · 최고 평가액은 지금 평가액에서 시작한다.
+    /// 같은 저장소 · 시계로 승인 관리자를 연다. 장부의 최고 평가액은 저장소에 남긴 손실 기준에서,
+    /// 그날 시작 평가액은 남긴 날짜가 오늘이면 거기서 되읽는다(없으면 지금 평가액, 1차 보강).
     pub(crate) async fn open(parts: TradingParts) -> Result<Arc<Trading>, AppError> {
         let TradingParts {
             store,
@@ -183,6 +190,13 @@ impl Trading {
             None => Calendars::Feed(Mutex::new(None)),
         };
         let days = DayLog::read(&store)?;
+        let today = crate::feed::market_date(market, clock.now());
+        let marks = Marks::restore(
+            days.basis.as_ref(),
+            today,
+            &wiring.paper.initial_cash,
+            &CURRENCIES,
+        );
         let trading = Arc::new(Trading {
             store,
             clock,
@@ -196,7 +210,7 @@ impl Trading {
             calendars,
             paper_day: Mutex::new(None),
             quotes: Mutex::new(HashMap::new()),
-            marks: Mutex::new(Marks::default()),
+            marks: Mutex::new(marks),
             days: Mutex::new(days),
             waiting: Mutex::new(HashMap::new()),
             team_turn: Mutex::new(()),
@@ -275,14 +289,16 @@ impl Trading {
     }
 
     /// 통화별 장부를 모의계좌에서 셈한다. 평가에는 그 종목의 마지막 시세(없으면 평균 단가)를 쓰고,
-    /// 최고 평가액을 올린다. 그날 시작 평가액이 아직 없으면 지금 평가액이다.
+    /// 최고 평가액을 올린다. 그날 시작 평가액이 아직 없으면 지금 평가액이다. 기준이 바뀌면 저장소에 남긴다.
     pub(super) async fn books(&self, now: DateTime<Utc>) -> Result<Vec<Book>, TradingError> {
         let paper = self.executor.broker();
         let holdings = Broker::holdings(paper, None, now)
             .await
             .map_err(exec_text)?;
         let quotes = lock(&self.quotes).clone();
+        let today = self.date_of(now);
         let mut marks = lock(&self.marks);
+        let mut changed = false;
         let mut books = Vec::with_capacity(CURRENCIES.len());
         for currency in &CURRENCIES {
             let cash = paper.cash(currency, now);
@@ -304,29 +320,46 @@ impl Trading {
                 .fold(cash.available + cash.held + cash.unsettled, |sum, p| {
                     sum.saturating_add(p.quantity.saturating_mul(p.last_price))
                 });
-            let day_start = *marks.day_start.entry(currency.clone()).or_insert(equity);
-            let peak = marks.peak.entry(currency.clone()).or_insert(equity);
-            *peak = (*peak).max(equity);
+            let (day_start, peak, moved) = marks.mark(currency, equity, today);
+            changed |= moved;
             books.push(Book {
                 currency: currency.clone(),
                 equity,
                 day_start_equity: day_start,
-                peak_equity: *peak,
+                peak_equity: peak,
                 positions,
             });
         }
         marks.last.clone_from(&books);
+        let payload = changed.then(|| marks.take_payload());
+        drop(marks);
+        if let Some(payload) = payload {
+            self.save_basis(&payload)?;
+        }
         Ok(books)
     }
 
-    /// 그날 시작 평가액을 지금 장부의 평가액으로 새로 잡는다.
-    pub(super) fn reset_day_start(&self, books: &[Book]) {
-        let mut marks = lock(&self.marks);
-        for book in books {
-            marks.day_start.insert(book.currency.clone(), book.equity);
-        }
-        for book in &mut marks.last {
-            book.day_start_equity = book.equity;
+    /// 손실 기준을 저장소에 남긴다(화면에는 보내지 않는다).
+    fn save_basis(&self, payload: &Value) -> Result<(), TradingError> {
+        self.store
+            .append_at(KIND_LOSS_BASIS, payload, millis(self.clock.now()))?;
+        Ok(())
+    }
+
+    /// 그날 시작 평가액을 지금 장부의 평가액으로 새로 잡는다(보유 종목이 있으면 바로 저장소에 남긴다).
+    pub(super) fn reset_day_start(
+        &self,
+        books: &[Book],
+        today: NaiveDate,
+    ) -> Result<(), TradingError> {
+        let payload = {
+            let mut marks = lock(&self.marks);
+            let now = marks.reset_day(books, today);
+            now.then(|| marks.take_payload())
+        };
+        match payload {
+            Some(payload) => self.save_basis(&payload),
+            None => Ok(()),
         }
     }
 

@@ -17,6 +17,7 @@ mod answer;
 mod base;
 mod day;
 mod http;
+mod marks;
 mod order;
 mod templates;
 
@@ -36,7 +37,8 @@ use rust_decimal::Decimal;
 use crate::TradingError;
 use crate::desk::Desk;
 use answer::Waiting;
-use base::{Calendars, DayLog, Marks};
+use base::{Calendars, DayLog};
+use marks::Marks;
 
 pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use http::routes;
@@ -69,6 +71,8 @@ pub const TEAM_RESTART_PATH: &str = "/api/team/restart";
 /// - 없는 번호는 `"rejected"`, 이유 [`ANSWER_NOT_FOUND`](E8). 아무것도 바뀌지 않는다.
 /// - 거절이면 `"rejected"`, 이유 `"user_rejected"`. 매매는 막힘(승인 거절)이다.
 /// - 이미 처리된 번호는 `"rejected"`, 이유 `"already_resolved"`. 첫 결과는 그대로이고 내지 않는다.
+/// - (1차 보강) 승인했지만 그 사이 오늘을 쉬는 날로 정했으면 사는 주문 · 익절은 내지 않는다(E19):
+///   `"rejected"`, 이유 [`ANSWER_REST_DAY`]. 매매는 막힘(승인 거절)이다. 손절 · 청산은 그대로 낸다.
 pub const APPROVAL_ANSWER_PATH: &str = "/api/approvals/answer";
 
 /// 템플릿 고르기(C4). `POST` `{"style": "day_trade" | "swing" | "long_term"}` → 200
@@ -95,6 +99,8 @@ pub const ANSWER_CONTENT_CHANGED: &str = "content_changed";
 pub const ANSWER_FINGERPRINT_MISMATCH: &str = "fingerprint_mismatch";
 /// 승인 답 결과의 이유: 없는 승인 번호다(E8).
 pub const ANSWER_NOT_FOUND: &str = "not_found";
+/// 승인 답 결과의 이유: 승인한 사이 오늘을 쉬는 날로 정했다(E19).
+pub const ANSWER_REST_DAY: &str = "rest_day";
 /// 템플릿 값 거부: 절대 상한 · 아래쪽 경계(E5).
 pub const TEMPLATE_OVER_CAP: &str = "over_cap";
 

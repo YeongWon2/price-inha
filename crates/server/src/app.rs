@@ -317,6 +317,20 @@ impl App {
     ) -> Result<App, AppError> {
         // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
         let secrets = Arc::new(SecretStore::open(settings.home.clone())?);
+        App::start_with_secrets(settings, wiring, trading, secrets).await
+    }
+
+    /// (W5 1차 보강) [`App::start_with`]와 같되, 비밀 보관소를 부르는 쪽이 연 것(`Arc`)으로 쓴다.
+    ///
+    /// 실행 파일은 기록(tracing)의 가리기([`crate::RedactingWriter`])와 이 앱에 **같은** 보관소를 준다.
+    /// 그래서 띄운 뒤 설정 화면에서 등록한 키(확인에 실패한 값 포함)도 표준 오류 · 기록에서 가려진다
+    /// (E38 · N8). `secrets`는 `settings.home`으로 연 것이어야 한다.
+    pub async fn start_with_secrets(
+        settings: Settings,
+        wiring: Wiring,
+        trading: crate::TradingWiring,
+        secrets: Arc<SecretStore>,
+    ) -> Result<App, AppError> {
         let store = Store::open(settings.home.join(DB_FILE))?;
         if !settings.bind.is_loopback() {
             tracing::warn!(
@@ -358,20 +372,6 @@ impl App {
             trading,
             days,
         })
-    }
-
-    /// (W5 1차 보강) [`App::start_with`]와 같되, 비밀 보관소를 부르는 쪽이 연 것(`Arc`)으로 쓴다.
-    ///
-    /// 실행 파일은 기록(tracing)의 가리기([`crate::RedactingWriter`])와 이 앱에 **같은** 보관소를 준다.
-    /// 그래서 띄운 뒤 설정 화면에서 등록한 키(확인에 실패한 값 포함)도 표준 오류 · 기록에서 가려진다
-    /// (E38 · N8). `secrets`는 `settings.home`으로 연 것이어야 한다.
-    pub async fn start_with_secrets(
-        _settings: Settings,
-        _wiring: Wiring,
-        _trading: crate::TradingWiring,
-        _secrets: Arc<SecretStore>,
-    ) -> Result<App, AppError> {
-        todo!()
     }
 
     /// (W5 1차) 이 앱의 저장소(같은 연결을 나눠 쓴다).

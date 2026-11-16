@@ -7,7 +7,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use pi_secrets::SecretStore;
-use price_inha::{App, AppError, RedactingWriter, Settings, SettingsError, Wiring, announce_addr};
+use price_inha::{
+    App, AppError, RedactingWriter, Settings, SettingsError, TradingWiring, Wiring, announce_addr,
+};
 
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [--home <폴더>] [--bind <IP>] [--port <수>] \
@@ -29,22 +31,27 @@ fn say(text: &str) {
 
 /// 기록(tracing)을 표준 오류로 낸다. 보관 폴더의 비밀 보관소를 열 수 있으면 그 값들을 가린 뒤에만 낸다
 /// ([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
-fn init_tracing(settings: Option<&Settings>) {
-    let secrets = settings.and_then(|s| SecretStore::open(s.home.clone()).ok());
+///
+/// 연 보관소는 앱에도 그대로 준다([`App::start_with_secrets`]): 띄운 뒤 등록한 키도 가리게.
+fn init_tracing(settings: Option<&Settings>) -> Option<Arc<SecretStore>> {
+    let secrets = settings
+        .and_then(|s| SecretStore::open(s.home.clone()).ok())
+        .map(Arc::new);
     let builder = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO);
-    match secrets {
+    match &secrets {
         Some(secrets) => builder
-            .with_writer(RedactingWriter::new(Arc::new(secrets), std::io::stderr))
+            .with_writer(RedactingWriter::new(Arc::clone(secrets), std::io::stderr))
             .init(),
         None => builder.with_writer(std::io::stderr).init(),
     }
+    secrets
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let settings = Settings::from_process();
-    init_tracing(settings.as_ref().ok());
-    match run(settings).await {
+    let secrets = init_tracing(settings.as_ref().ok());
+    match run(settings, secrets).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Settings(error)) => {
             say(&format!("설정을 읽지 못했습니다: {error}"));
@@ -62,12 +69,26 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run(settings: Result<Settings, SettingsError>) -> Result<(), Failure> {
+async fn run(
+    settings: Result<Settings, SettingsError>,
+    secrets: Option<Arc<SecretStore>>,
+) -> Result<(), Failure> {
     let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
-    let app = App::start(settings, Wiring::default())
-        .await
-        .map_err(Failure::App)?;
+    // 보관소를 열지 못했으면 앱이 다시 열어 보고 그 오류를 알린다.
+    let started = match secrets {
+        Some(secrets) => {
+            App::start_with_secrets(
+                settings,
+                Wiring::default(),
+                TradingWiring::default(),
+                secrets,
+            )
+            .await
+        }
+        None => App::start(settings, Wiring::default()).await,
+    };
+    let app = started.map_err(Failure::App)?;
     let mode = if demo {
         " (시연용 가짜 시세)"
     } else {
