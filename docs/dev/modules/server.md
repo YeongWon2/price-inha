@@ -122,3 +122,11 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 - 잠금 알림: gate 잠금 알림 포트를 notify로 잇는다(E2, 조용한 시간을 무시하는 종류).
 - 접속 기록 보기: 그 컴퓨터 · 세션에서 기기 · 시각을 본다(V40).
 - 시험: 루프백에서 발급 → 그 키로 원격 세션이 생긴다(시험이 해시를 직접 두지 않는다), 원격에서 발급 · 풀기는 403, 답 말고는 키가 어디에도 안 남는다.
+
+### 7차 구현 메모
+테스트: `crates/server/tests/round14/`. 코드: `crates/server/src/access_http.rs`, 조립은 `app/parts.rs`의 `open_gate`.
+
+- 경로: `POST /api/access/key`(그 컴퓨터, 답 `{"access_key", "generation"}`, `no-store`) · `POST /api/access/unlock`(그 컴퓨터, 본문 `{"device": "<IP>"}`, 답 `{"unlocked": bool}`, IP가 아니면 400) · `GET /api/access/log`(세션, 기록 새것부터 200줄과 `locked` 기기 목록).
+- `AccessKeys`는 관문을 연 뒤에야 얻으므로 경로는 빈 자리(`OnceLock`)를 쥐고 `serve` 뒤 채운다. 채우기 전 요청은 503.
+- 잠금 알림(E2)은 5차에서 이미 이어져 있었다(`reach::LockNotices` → notify `AccessLock`, round11 시험). 확인만 했다.
+- 설정 화면에 "접속 키" 칸: 만들기/바꾸기 단추(키는 답에서 한 번만 보이고 화면에 간직하지 않음), 잠긴 기기와 풀기 단추, 접속 기록.
