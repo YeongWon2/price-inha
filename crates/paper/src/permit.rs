@@ -4,6 +4,9 @@
 //! 계좌를 열 때([`crate::PaperBroker::open`] · [`crate::PaperBroker::restore`]) 함께 나오는
 //! [`CheckAuthority`]. 조립하는 쪽이 이것을 규칙 엔진(T6)에만 건넨다. 다른 곳에서는
 //! [`CheckPermit`]을 만들 수 없고(필드가 비공개, 생성자 없음), 복제할 수도 없다.
+//!
+//! 표시는 매매 번호에 묶을 수 있다([`CheckAuthority::approve_for_trade`]). 모의계좌는 매매를 모르므로
+//! 묶인 표시도 같이 받는다(계좌 표식 · 내용 대조만). 그 매매의 표시인지는 주문을 내는 쪽이 본다.
 
 use std::sync::Arc;
 
@@ -56,8 +59,11 @@ impl CheckAuthority {
     /// 매매 하나(`trade`, 저장소의 매매 번호)에 묶인 표시를 낸다. 주문을 내는 쪽은
     /// [`CheckPermit::trade`]가 그 매매의 번호인지 대조한다(같은 종목 · 방향의 다른 매매에 쓰지 못하게).
     pub fn approve_for_trade(&self, trade: i64, approved: ApprovedOrder) -> CheckPermit {
-        let _ = trade;
-        todo!("approve_for_trade: {approved:?}")
+        CheckPermit {
+            seal: Arc::clone(&self.seal),
+            approved,
+            trade: Some(trade),
+        }
     }
 }
 
@@ -80,7 +86,7 @@ impl CheckPermit {
 
     /// 이 표시가 묶인 매매 번호([`CheckAuthority::approve_for_trade`]). 묶이지 않았으면 `None`.
     pub fn trade(&self) -> Option<i64> {
-        todo!("trade: {:?}", self.trade)
+        self.trade
     }
 
     /// 이 표시를 낸 권한이 그 표식(계좌)의 짝인가.
