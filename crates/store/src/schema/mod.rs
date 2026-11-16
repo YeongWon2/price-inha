@@ -17,6 +17,7 @@ mod v4;
 mod v5;
 mod v6;
 mod v7;
+mod v8;
 
 use v1::V1;
 use v2::V2;
@@ -25,6 +26,7 @@ use v4::V4;
 use v5::V5;
 use v6::V6;
 use v7::V7;
+use v8::V8;
 
 pub(crate) use v4::{legacy_envelope_seqs, legacy_envelope_seqs_upto, legacy_envelope_until};
 
@@ -35,7 +37,7 @@ const APPLICATION_ID: i64 = 0x5049_5354;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 버전 n에서 n+1로 올리는 SQL. `MIGRATIONS[n]`이 n → n+1이다. 이미 나간 것은 고치지 않고 뒤에 더한다.
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7];
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7, V8];
 
 /// 파일을 열고, 이 저장소의 파일인지 본 뒤, 설정을 켜고 스키마를 최신으로 올린다.
 ///

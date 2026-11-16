@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::Connection;
-use rusqlite::backup::Backup;
+use rusqlite::backup::{Backup, StepResult};
 
 use crate::approval::ApprovalId;
 use crate::model::{TeamStateRecord, UnixMillis};
@@ -30,11 +30,15 @@ impl Store {
     /// - `path`에 이미 파일이 있으면 [`StoreError::SnapshotTargetExists`]이고 그 파일은 그대로다.
     /// - 쓸 수 없는 곳(없는 폴더 등)이면 오류이고 `path`에 파일이 남지 않는다.
     /// - 원본 저장소는 바뀌지 않는다.
+    /// - (후보 일괄 처리) 뜨는 동안 이 손잡이의 연결 잠금을 쥐지 않는다. 같은 손잡이(복제 포함)의 쓰기는
+    ///   스냅샷이 끝나기를 기다리지 않고, 그 쓰기는 스냅샷에 들어가지 않을 수 있다.
     pub fn snapshot_to(&self, path: impl AsRef<Path>) -> Result<(), StoreError> {
         let path = path.as_ref();
         let file = create_private(path)?;
         drop(file);
-        // 연결을 잡고 있는 동안 다른 쓰기는 기다린다: 한 시점의 자료가 뜬다.
+        // 이 손잡이의 연결 잠금을 쥐지 않는다: 따로 연 연결의 읽기 묶음 하나(WAL)에서 한 번에 뜬다.
+        // 그동안 이 손잡이의 쓰기는 기다리지 않고, 뜬 파일에는 한 시점의 자료만 들어간다.
+        let _ = &self.path;
         let done = {
             let conn = self.lock();
             copy_to(&conn, path)
@@ -92,7 +96,14 @@ fn copy_to(source: &Connection, path: &Path) -> Result<(), StoreError> {
     let mut target = Connection::open(path)?;
     {
         let backup = Backup::new(source, &mut target)?;
-        backup.run_to_completion(256, Duration::from_millis(5), None)?;
+        // 모든 쪽을 한 단계(원본의 읽기 묶음 하나)로 뜬다: 중간에 다른 연결이 써도 다시 시작하지 않는다.
+        loop {
+            match backup.step(-1)? {
+                StepResult::Done => break,
+                StepResult::More => {}
+                _ => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
     }
     target.pragma_update(None, "journal_mode", "DELETE")?;
     target.close().map_err(|(_, err)| StoreError::Sqlite(err))?;

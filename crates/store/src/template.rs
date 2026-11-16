@@ -7,8 +7,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::approval::{self, ApprovalId, ApprovalUse};
 use crate::error::{DenyReason, Transition};
-use crate::model::UnixMillis;
-use crate::{Store, StoreError};
+use crate::model::{TeamState, UnixMillis};
+use crate::{Store, StoreError, team};
 
 /// 템플릿 번호. 저장소가 1부터 붙인다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -175,6 +175,46 @@ impl Store {
         at: UnixMillis,
     ) -> Result<Template, StoreError> {
         self.write(|conn| promote(conn, id, &approval, at))
+    }
+
+    /// [`Store::promote_template_live`]와 같고, 같은 묶음 안에서 더 확인한다(후보 일괄 처리).
+    /// 승인을 확인한 쪽과 승격 사이에 팀이 멈추거나 값이 바뀌는 틈을 없앤다.
+    ///
+    /// 순서: 상태(승격대기) → 투자 팀이 전체 정지면 [`StoreError::TransitionDenied`]
+    /// ([`DenyReason::TeamFullStop`]) → 지금 판이 `revision`이 아니면
+    /// [`StoreError::TemplateRevisionMismatch`] → 승인 소비. 거부되면 템플릿도 승인도 그대로다.
+    pub fn promote_template_live_checked(
+        &self,
+        id: TemplateId,
+        revision: u32,
+        approval: ApprovalUse,
+        at: UnixMillis,
+    ) -> Result<Template, StoreError> {
+        self.write(|conn| {
+            let now = expect(
+                conn,
+                id,
+                TemplateState::PromotionPending,
+                TemplateState::Live,
+            )?;
+            if team::current(conn)? == TeamState::FullStop {
+                return Err(StoreError::TransitionDenied {
+                    transition: Transition::Template {
+                        from: now.state,
+                        to: TemplateState::Live,
+                    },
+                    reason: DenyReason::TeamFullStop,
+                });
+            }
+            if now.revision != revision {
+                return Err(StoreError::TemplateRevisionMismatch {
+                    id,
+                    expected: revision,
+                    actual: now.revision,
+                });
+            }
+            promote(conn, id, &approval, at)
+        })
     }
 
     /// 실전중 → 멈춤(내가 실전 템플릿을 멈춤). 실전중이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.

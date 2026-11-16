@@ -146,14 +146,7 @@ impl Store {
     /// - `record_ref`가 비었거나 조각 글이 빈 글자이면 [`StoreError::InvalidKnowledge`]이고 아무것도 바꾸지 않는다.
     /// - 돌려주는 번호는 조각 순서대로다.
     pub fn index_record(&self, record: NewKnowledgeRecord) -> Result<Vec<ChunkId>, StoreError> {
-        if record.record_ref.is_empty() {
-            return Err(StoreError::InvalidKnowledge("기록 키가 비었다".to_string()));
-        }
-        if let Some(index) = record.chunks.iter().position(|text| text.trim().is_empty()) {
-            return Err(StoreError::InvalidKnowledge(format!(
-                "{index}번째 조각이 비었다"
-            )));
-        }
+        check_record(&record)?;
         self.write(|conn| index(conn, &record))
     }
 
@@ -294,9 +287,10 @@ impl Store {
 
 // ───────────── 안에서만 쓰는 것 ─────────────
 
-const CHUNK_COLUMNS: &str = "c.id, c.kind, c.source, c.record_ref, c.ordinal, c.text, c.updated_at";
+pub(crate) const CHUNK_COLUMNS: &str =
+    "c.id, c.kind, c.source, c.record_ref, c.ordinal, c.text, c.updated_at";
 
-fn kind_code(kind: KnowledgeKind) -> &'static str {
+pub(crate) fn kind_code(kind: KnowledgeKind) -> &'static str {
     match kind {
         KnowledgeKind::Trade => "trade",
         KnowledgeKind::Review => "review",
@@ -332,7 +326,7 @@ fn limit_of(max: usize) -> i64 {
 }
 
 /// `CHUNK_COLUMNS` 순서의 줄을 조각으로 읽는다.
-fn chunk_from(row: &Row<'_>) -> Result<KnowledgeChunk, StoreError> {
+pub(crate) fn chunk_from(row: &Row<'_>) -> Result<KnowledgeChunk, StoreError> {
     let ordinal: i64 = row.get(4)?;
     Ok(KnowledgeChunk {
         id: ChunkId(row.get(0)?),
@@ -346,7 +340,23 @@ fn chunk_from(row: &Row<'_>) -> Result<KnowledgeChunk, StoreError> {
     })
 }
 
-fn index(conn: &Connection, record: &NewKnowledgeRecord) -> Result<Vec<ChunkId>, StoreError> {
+/// 색인에 올릴 기록의 모양을 본다: 기록 키와 조각 글이 비면 안 된다.
+pub(crate) fn check_record(record: &NewKnowledgeRecord) -> Result<(), StoreError> {
+    if record.record_ref.is_empty() {
+        return Err(StoreError::InvalidKnowledge("기록 키가 비었다".to_string()));
+    }
+    if let Some(index) = record.chunks.iter().position(|text| text.trim().is_empty()) {
+        return Err(StoreError::InvalidKnowledge(format!(
+            "{index}번째 조각이 비었다"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn index(
+    conn: &Connection,
+    record: &NewKnowledgeRecord,
+) -> Result<Vec<ChunkId>, StoreError> {
     let kind = kind_code(record.kind);
     // 지우기 트리거가 색인과 임베딩도 함께 지운다.
     conn.execute(

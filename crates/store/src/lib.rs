@@ -12,6 +12,7 @@
 //! - 거부된 호출은 아무것도 바꾸지 않는다.
 
 mod approval;
+mod chunkmeta;
 mod codec;
 mod error;
 mod fact;
@@ -19,6 +20,7 @@ mod keep;
 mod knowledge;
 mod log;
 mod model;
+mod plan;
 mod proposal;
 mod push;
 mod receipt;
@@ -30,7 +32,7 @@ mod team;
 mod template;
 mod trade;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, TransactionBehavior};
@@ -49,6 +51,7 @@ pub use model::{
     TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState,
     UnixMillis,
 };
+pub use plan::{TradeSide, TradeStateChange};
 pub use proposal::{NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState};
 pub use push::{NewPushSubscription, PushSubscription};
 pub use receipt::{
@@ -67,7 +70,8 @@ pub use template::{
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
 /// (10차) 10차의 표(세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료)를 더하며 6으로 올린다.
 /// (11차) 지식(조각 · FTS5 trigram · 임베딩 · 메타)과 웹 푸시 구독 표를 더하며 7로 올린다.
-pub const SCHEMA_VERSION: u32 = 7;
+/// (후보 일괄 처리) 매매 계획(방향 · 수량) · 매매 상태 바뀜 이력 표를 더하고 보호 트리거를 고치며 8로 올린다.
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///
@@ -84,6 +88,8 @@ pub const REJECTED_KIND_KEEP_CHARS: usize = 256;
 #[derive(Clone)]
 pub struct Store {
     conn: Arc<Mutex<rusqlite::Connection>>,
+    /// 연 파일의 경로. 스냅샷이 따로 연결을 열어 이 손잡이의 잠금을 쥐지 않고 뜬다.
+    path: Arc<PathBuf>,
 }
 
 impl Store {
@@ -105,9 +111,12 @@ impl Store {
     ///   거부된 열기는 파일을 바꾸지 않는다: 이 저장소의 파일이 아니어서 거부하면 그 파일의 권한도 그대로다.
     ///   심어 둔 심볼릭 링크는 따라가 권한을 바꾸지 않는다.
     pub fn open(path: impl AsRef<Path>) -> Result<Store, StoreError> {
-        let conn = schema::open(path.as_ref())?;
+        let path = path.as_ref();
+        let conn = schema::open(path)?;
+        let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Store {
             conn: Arc::new(Mutex::new(conn)),
+            path: Arc::new(path),
         })
     }
 

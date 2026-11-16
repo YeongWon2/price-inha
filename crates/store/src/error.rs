@@ -72,6 +72,8 @@ pub enum DenyReason {
     BlockReasonMismatch,
     /// 전체 정지로 가는 사유는 최대 손실([`crate::TeamCause::MaxLoss`])뿐이다.
     MaxLossOnly,
+    /// 투자 팀이 전체 정지인 동안에는 실전 승격을 하지 않는다. (후보 일괄 처리)
+    TeamFullStop,
 }
 
 /// 저장소의 모든 오류.
@@ -262,6 +264,33 @@ pub enum StoreError {
     /// 스냅샷을 뜰 자리에 이미 파일이 있다. 그 파일은 건드리지 않았다. (11차)
     #[error("스냅샷 자리에 이미 파일이 있다: {}", .0.display())]
     SnapshotTargetExists(std::path::PathBuf),
+    /// 매매 수량이 0이거나 너무 크다. (후보 일괄 처리)
+    #[error("매매 수량은 1 이상이어야 한다")]
+    InvalidQuantity,
+    /// 승인이 붙었거나 승인대기를 지난 매매의 수량을 두거나 바꾸려 했다. (후보 일괄 처리)
+    #[error("이 매매의 수량은 더 바꿀 수 없다: {state:?}")]
+    QuantityLocked {
+        /// 그 매매의 지금 상태.
+        state: TradeState,
+    },
+    /// 제안됨이 아닌 개선안의 위험 표시를 바꾸려 했다. (후보 일괄 처리)
+    #[error("제안됨이 아닌 개선안의 위험 표시는 바꿀 수 없다: {id:?} {state:?}")]
+    ProposalLocked {
+        /// 개선안 번호.
+        id: ProposalId,
+        /// 그 개선안의 지금 상태.
+        state: ProposalState,
+    },
+    /// 실전 승격을 확인한 판과 템플릿의 지금 판이 다르다. 템플릿도 승인도 그대로다. (후보 일괄 처리)
+    #[error("템플릿 {id:?}의 판이 다르다: 확인한 판 {expected}, 지금 판 {actual}")]
+    TemplateRevisionMismatch {
+        /// 템플릿 번호.
+        id: TemplateId,
+        /// 호출하는 쪽이 확인한 판.
+        expected: u32,
+        /// 지금 판.
+        actual: u32,
+    },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

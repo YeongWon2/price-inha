@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use common::{t, temp_store};
 use pi_store::{
     AccountKind, FactValue, Judgment, MessageRole, NewFact, NewMessage, NewProposal, NewRoomEvent,
-    NewTrade, Rationale, RoomActorKind, Store, TradeId, TriggerReceiptKey, TriggerReceiptStatus,
+    NewTrade, Rationale, RoomActorKind, Store, TradeId, TradeSide, TriggerReceiptKey,
+    TriggerReceiptStatus,
 };
 use rusqlite::types::Value as SqlValue;
 use serde_json::json;
@@ -26,7 +27,7 @@ use serde_json::json;
 // ───────────── 도우미 ─────────────
 
 /// 보호한다고 적은 표. 지우기를 막는 표는 모두 여기 있어야 한다(아래 테스트가 스키마에서 확인한다).
-const PROTECTED: [&str; 21] = [
+const PROTECTED: [&str; 23] = [
     "team_history",
     "events",
     "access_log",
@@ -48,6 +49,8 @@ const PROTECTED: [&str; 21] = [
     "facts",
     "trade_facts",
     "restore_marks",
+    "trade_plans",
+    "trade_state_changes",
 ];
 
 const VERBS: [&str; 2] = ["INSERT OR REPLACE INTO", "REPLACE INTO"];
@@ -171,8 +174,10 @@ fn fill(store: &Store) -> TradeId {
     // 셋째 자료(알게 된 시각 42)는 붙이지 않는다: rowid 우회가 쓸 아직 없는 (매매, 자료) 짝이 된다.
     let facts = store.save_facts(&[fact(40), fact(41), fact(42)]).unwrap();
     let judged = new_trade(store);
+    // 매매 계획 줄(수량 · 방향)도 가지게 한다(버전 8).
+    store.set_trade_quantity(judged, 10).unwrap();
     store
-        .judge_trade(
+        .judge_trade_with_side(
             judged,
             Judgment {
                 decided_at: t(50),
@@ -181,6 +186,7 @@ fn fill(store: &Store) -> TradeId {
                 scores: Vec::new(),
                 consensus_score: 70,
             },
+            TradeSide::Buy,
         )
         .unwrap();
     store

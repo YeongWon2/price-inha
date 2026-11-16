@@ -127,6 +127,34 @@ impl Store {
         self.write(|conn| reject(conn, id, at))
     }
 
+    /// 제안됨인 개선안을 위험을 키우는 개선안으로 표시한다(후보 일괄 처리). 그 뒤 승인하면 냉각중을 거친다.
+    ///
+    /// - 이미 위험 표시가 있으면 아무것도 바꾸지 않고 그대로 돌려준다.
+    /// - 제안됨이 아니면 [`StoreError::ProposalLocked`]이고 그대로다. 표시를 내리는 길은 없다
+    ///   (내리면 냉각을 건너뛴다). 표의 트리거도 거짓 → 참(제안됨일 때)만 허락한다.
+    pub fn mark_proposal_risky(
+        &self,
+        id: ProposalId,
+        at: UnixMillis,
+    ) -> Result<Proposal, StoreError> {
+        self.write(|conn| {
+            let now = get(conn, id)?;
+            if now.state != ProposalState::Proposed {
+                return Err(StoreError::ProposalLocked {
+                    id,
+                    state: now.state,
+                });
+            }
+            if !now.increases_risk {
+                conn.execute(
+                    "UPDATE proposals SET increases_risk = 1, updated_at = ?2 WHERE id = ?1",
+                    params![id.0, at.0],
+                )?;
+            }
+            get(conn, id)
+        })
+    }
+
     /// 냉각중 → 반영됨(`applied_at = at`). 냉각중이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.
     ///
     /// "다음 거래일이 됐는가"는 저장소가 알 수 없다(달력을 모른다). 호출하는 쪽 책임이다.
