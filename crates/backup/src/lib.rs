@@ -27,7 +27,7 @@ mod status;
 
 pub use bundle::{Bundle, BundleFile, Manifest, ManifestFile, open, seal, sha256_hex, verify};
 pub use error::{BackupError, BundleProblem, FailureKind};
-pub use restore::{RestoreReport, restore};
+pub use restore::{RestoreReport, restore, restore_in};
 pub use retention::{RetentionPlan, backup_file_name, parse_backup_file_name, plan_retention};
 pub use run::{
     Backup, BackupFailure, BackupNotice, BackupReport, BackupSettings, BackupStatus, LastFailure,

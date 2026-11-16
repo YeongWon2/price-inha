@@ -50,6 +50,17 @@ pub fn restore(
     })
 }
 
+/// [`restore`]와 같되 검증 사본을 `temp_root` 안에만 둔다(시스템 임시 폴더에 평문을 두지 않는다).
+pub fn restore_in(
+    encrypted: &[u8],
+    identity: &SecretString,
+    target: &Path,
+    _temp_root: &Path,
+    at: UnixMillis,
+) -> Result<RestoreReport, BackupError> {
+    restore(encrypted, identity, target, at)
+}
+
 /// 대상이 없거나 빈 폴더인가. 파일이거나 무언가 들어 있으면 [`BackupError::TargetNotEmpty`].
 fn ensure_empty(target: &Path) -> Result<(), BackupError> {
     let meta = match std::fs::symlink_metadata(target) {

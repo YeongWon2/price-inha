@@ -53,6 +53,7 @@ struct RemoteState {
     files: BTreeMap<String, Vec<u8>>,
     fail_put: Option<u16>,
     fail_delete: Option<u16>,
+    deletes_before_fail: Option<usize>,
     lie_size: bool,
 }
 
@@ -126,7 +127,10 @@ impl Handler {
 
     fn delete(&self, state: &mut RemoteState, path: &str, body: &Value) -> ResponseTemplate {
         if let Some(status) = state.fail_delete {
-            return reply(status, json!({ "message": "Server Error" }));
+            match state.deletes_before_fail {
+                Some(left) if left > 0 => state.deletes_before_fail = Some(left - 1),
+                _ => return reply(status, json!({ "message": "Server Error" })),
+            }
         }
         let Some(bytes) = state.files.get(path) else {
             return reply(404, json!({ "message": "Not Found" }));
@@ -208,6 +212,13 @@ impl FakeGithub {
 
     pub fn fail_deletes(&self, status: u16) {
         self.state.lock().unwrap().fail_delete = Some(status);
+    }
+
+    /// 지우기를 `ok`번은 받아 주고 그 뒤로는 `status`로 실패한다.
+    pub fn fail_deletes_after(&self, ok: usize, status: u16) {
+        let mut state = self.state.lock().unwrap();
+        state.deletes_before_fail = Some(ok);
+        state.fail_delete = Some(status);
     }
 
     pub fn lie_about_size(&self) {
