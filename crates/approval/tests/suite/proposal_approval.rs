@@ -148,8 +148,9 @@ fn risky_proposal_becomes_cooling_through_journal_judgment() {
     let out = through_journal(&e.approvals, &journal, &n, p).unwrap();
     assert_eq!(out.proposal.state, ProposalState::Cooling);
     assert_eq!(out.rules, current());
+    // 제안 때 안전했던 개선안은 journal이 위험 표시를 단 같은 내용의 개선안으로 바꿔 냉각에 올린다.
     assert_eq!(
-        e.store.get_proposal(p).unwrap().state,
+        e.store.get_proposal(out.proposal.id).unwrap().state,
         ProposalState::Cooling
     );
     assert!(e.approvals.get(&n).unwrap().unwrap().consumed);
@@ -281,17 +282,20 @@ fn concurrent_proposal_approvals_pass_only_once() {
             let approvals = e.approvals.clone();
             let journal = journal.clone();
             let n = n.clone();
-            thread::spawn(move || through_journal(&approvals, &journal, &n, p).is_ok())
+            thread::spawn(move || {
+                through_journal(&approvals, &journal, &n, p)
+                    .ok()
+                    .map(|out| out.proposal.id)
+            })
         })
         .collect();
-    let passed = handles
+    let passed: Vec<_> = handles
         .into_iter()
-        .map(|h| h.join().unwrap())
-        .filter(|ok| *ok)
-        .count();
-    assert_eq!(passed, 1);
+        .filter_map(|h| h.join().unwrap())
+        .collect();
+    assert_eq!(passed.len(), 1);
     assert_eq!(
-        e.store.get_proposal(p).unwrap().state,
+        e.store.get_proposal(passed[0]).unwrap().state,
         ProposalState::Cooling
     );
 }
