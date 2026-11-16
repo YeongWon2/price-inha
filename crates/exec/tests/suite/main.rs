@@ -9,4 +9,5 @@ mod restart;
 mod resume;
 mod sell;
 mod submit;
+mod tied;
 mod watch;
