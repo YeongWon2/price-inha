@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use pi_approval::Approvals;
 use pi_market::{Clock, Market, Quote, Symbol};
 use pi_paper::{
     AccountKind, ApprovedOrder, Broker, CheckAuthority, CheckPermit, OrderGroup, OrderId,
-    PaperBroker, PaperConfig, Side, Snapshot, UnfilledTimeout,
+    PaperBroker, PaperConfig, Side, UnfilledTimeout,
 };
 use pi_rules::ApprovalGrant;
 use pi_store::{Amount, Store, TradeId, TradeState};
@@ -17,6 +18,7 @@ use rust_decimal::Decimal;
 
 use crate::error::Error;
 use crate::track::{State, apply, block_unfilled, buy_key, millis, parse_key};
+use crate::{grant, keep};
 use run::{SellAttempt, classify, order_request, paper_kind};
 
 /// 파는 주문이 실패한 뒤 처음 다시 낼 때까지의 간격(E30). 실패할 때마다 두 배가 된다.
@@ -134,6 +136,8 @@ pub struct Executor {
     store: Store,
     /// 시계.
     clock: Arc<dyn Clock>,
+    /// 저장소의 승인 기록 읽기(증표 대조).
+    approvals: Approvals,
     /// 안쪽 상태(준비됨 · 보유 장부 · 다시 낼 파는 주문 · 구독 · 마지막 스냅샷).
     state: Mutex<State>,
 }
@@ -157,26 +161,29 @@ impl Executor {
         store: Store,
         clock: Arc<dyn Clock>,
     ) -> Result<(Executor, CheckAuthority), Error> {
-        let (broker, authority, saved) = match store.latest_paper_snapshot()? {
+        let (broker, authority, state) = match store.latest_paper_snapshot()? {
             Some(saved) => {
-                let snapshot: Snapshot = serde_json::from_value(saved.state)
+                let restored = keep::split(saved.state)?;
+                let (broker, authority) = PaperBroker::restore(config, restored.snapshot)
                     .map_err(|e| Error::Snapshot(e.to_string()))?;
-                let (broker, authority) = PaperBroker::restore(config, snapshot)
-                    .map_err(|e| Error::Snapshot(e.to_string()))?;
-                let restored = broker.snapshot();
-                (broker, authority, Some(restored))
+                let doc = keep::document(&broker.snapshot(), restored.seq, &restored.pending)?;
+                let events = broker.subscribe();
+                let state = State::new(events, Some(doc), restored.seq, restored.pending);
+                (broker, authority, state)
             }
             None => {
                 let (broker, authority) = PaperBroker::open(config).map_err(Error::Rejected)?;
-                (broker, authority, None)
+                let events = broker.subscribe();
+                let state = State::new(events, None, 0, Default::default());
+                (broker, authority, state)
             }
         };
-        let events = broker.subscribe();
         let executor = Executor {
             broker: Arc::new(broker),
+            approvals: grant::reader(store.clone(), clock.clone()),
             store,
             clock,
-            state: Mutex::new(State::new(events, saved)),
+            state: Mutex::new(state),
         };
         Ok((executor, authority))
     }
@@ -272,8 +279,12 @@ impl Executor {
         if approved.symbol.as_str() != trade.symbol || approved.side != Side::Buy {
             return Err(Error::PermitMismatch);
         }
-        if trade.state == TradeState::AwaitingApproval && submission.approval.is_none() {
-            return Err(Error::ApprovalRequired);
+        match &submission.approval {
+            Some(found) => grant::check(&self.approvals, found, &trade, &approved)?,
+            None if trade.state == TradeState::AwaitingApproval => {
+                return Err(Error::ApprovalRequired);
+            }
+            None => {}
         }
         self.store
             .transition_trade(id, TradeState::Ordered, millis(now))?;
@@ -288,13 +299,15 @@ impl Executor {
         let placed = self.broker.place_order(request, now).await;
         match placed {
             Ok(ack) => {
-                self.persist()?;
+                // 주문은 나갔다. 스냅샷 저장만 실패하면 매매는 주문됨 그대로이고, 마지막 저장값이
+                // 바뀌지 않았으니 다음 저장에서 맞춘다(오류로 끝내지 않는다).
+                self.persist().ok();
                 Ok(ack.order_id)
             }
             Err(e) => {
                 let detail = format!("미체결 취소: 증권사가 주문을 받지 않음({e})");
                 block_unfilled(&self.store, id, detail, millis(now), &mut Vec::new())?;
-                self.persist()?;
+                self.persist().ok();
                 Err(classify(e))
             }
         }
@@ -319,12 +332,24 @@ impl Executor {
         if approved.symbol.as_str() != trade.symbol || approved.side != Side::Sell {
             return Err(Error::PermitMismatch);
         }
+        let key = {
+            let mut state = self.lock();
+            // 장부에 없는 보유(맞춰 보기가 사는 주문을 못 찾은 것)는 막지 않는다: 손절은 어떤
+            // 멈춤에서도 받아야 하고, 계좌보다 많이 파는 것은 모의계좌가 막는다.
+            if let Some(remaining) = state.remaining(id)
+                && approved.quantity > remaining
+            {
+                return Err(Error::SellTooLarge { remaining });
+            }
+            state.sell_key(id, self.clock.now())
+        };
         let attempt = SellAttempt {
             trade_id: id,
             purpose: submission.purpose,
             order: approved,
             timeout: submission.timeout,
             failed_before: 0,
+            key,
         };
         self.send_sell(attempt, submission.permit).await
     }
@@ -345,7 +370,12 @@ impl Executor {
             return Err(Error::NotReady);
         }
         let pending = self.lock().pending.get(&trade_id).cloned();
-        let Some((retry, timeout)) = pending else {
+        let Some(keep::Pending {
+            retry,
+            timeout,
+            key,
+        }) = pending
+        else {
             return Err(Error::NoPendingSell(trade_id));
         };
         if permit.approved() != &retry.order {
@@ -359,6 +389,7 @@ impl Executor {
         let state = self.store.get_trade(trade_id)?.state;
         if state != TradeState::Holding {
             self.lock().pending.remove(&trade_id);
+            self.persist().ok();
             return Err(Error::NotHolding(state));
         }
         let attempt = SellAttempt {
@@ -367,6 +398,7 @@ impl Executor {
             order: retry.order,
             timeout,
             failed_before: retry.attempts,
+            key,
         };
         self.send_sell(attempt, permit).await
     }
@@ -376,7 +408,7 @@ impl Executor {
         self.lock()
             .pending
             .values()
-            .map(|(retry, _)| retry.clone())
+            .map(|pending| pending.retry.clone())
             .collect()
     }
 
@@ -385,8 +417,7 @@ impl Executor {
     /// 한 시도 묶음(처음 낸 것과 그 다시 내기들)은 같은 키를 쓴다. 키는 스냅샷에 함께 남아
     /// 다시 켠 뒤에도 같다(E30). 되면 그 주문의 `client_order_id`가 이 키다.
     pub fn pending_sell_key(&self, trade_id: TradeId) -> Option<String> {
-        let _ = trade_id;
-        todo!()
+        self.lock().pending.get(&trade_id).map(|p| p.key.clone())
     }
 
     /// 손절 감시 자리들. 매매 번호 순서다.

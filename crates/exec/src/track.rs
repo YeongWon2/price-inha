@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use pi_market::{Market, Symbol};
-use pi_paper::{CloseReason, Order, OrderEvent, OrderStatus, Side, Snapshot, UnfilledTimeout};
+use pi_paper::{CloseReason, Order, OrderEvent, OrderStatus, Side};
 use pi_store::{
     Amount, BlockKind, BlockReason, Store, StoreError, Trade, TradeId, TradeState, UnixMillis,
 };
@@ -16,7 +16,8 @@ use rust_decimal::Decimal;
 use tokio::sync::mpsc::Receiver;
 
 use crate::error::Error;
-use crate::executor::{Guard, SellRetry, TradeChange};
+use crate::executor::{Guard, TradeChange};
+use crate::keep::Pending;
 
 /// 멱등성 키의 앞머리.
 const KEY_PREFIX: &str = "pi-exec-";
@@ -50,27 +51,37 @@ pub(crate) struct State {
     pub(crate) ready: bool,
     /// 보유중인 매매의 수량 장부.
     pub(crate) positions: BTreeMap<TradeId, Position>,
-    /// 다시 내기를 기다리는 파는 주문과 그 미체결 취소 시간(E30).
-    pub(crate) pending: BTreeMap<TradeId, (SellRetry, UnfilledTimeout)>,
+    /// 다시 내기를 기다리는 파는 주문과 그 미체결 취소 시간 · 멱등성 키(E30).
+    pub(crate) pending: BTreeMap<TradeId, Pending>,
     /// 체결 알림 구독.
     pub(crate) events: Receiver<OrderEvent>,
-    /// 마지막으로 저장한 계좌 스냅샷.
-    pub(crate) saved: Option<Snapshot>,
+    /// 마지막으로 저장한 계좌 스냅샷 문서.
+    pub(crate) saved: Option<serde_json::Value>,
     /// 파는 주문 키의 순번.
     pub(crate) seq: u64,
 }
 
 impl State {
     /// 새 상태.
-    pub(crate) fn new(events: Receiver<OrderEvent>, saved: Option<Snapshot>) -> Self {
+    pub(crate) fn new(
+        events: Receiver<OrderEvent>,
+        saved: Option<serde_json::Value>,
+        seq: u64,
+        pending: BTreeMap<TradeId, Pending>,
+    ) -> Self {
         Self {
             ready: false,
             positions: BTreeMap::new(),
-            pending: BTreeMap::new(),
+            pending,
             events,
             saved,
-            seq: 0,
+            seq,
         }
+    }
+
+    /// 그 매매의 체결된(아직 팔지 않은) 수량. 장부에 없으면 없음.
+    pub(crate) fn remaining(&self, trade_id: TradeId) -> Option<Decimal> {
+        self.positions.get(&trade_id).map(Position::remaining)
     }
 
     /// 손절 감시 자리들(남은 수량이 있는 것만, 매매 번호 순서).

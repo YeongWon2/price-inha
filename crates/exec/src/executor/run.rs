@@ -14,6 +14,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 
 use super::{Executor, SELL_RETRY_FIRST, SELL_RETRY_MAX, SellPurpose, SellRetry, TradeChange};
 use crate::error::Error;
+use crate::keep;
 use crate::track::{State, apply, millis};
 
 /// 파는 주문 한 번 내기.
@@ -28,6 +29,8 @@ pub(super) struct SellAttempt {
     pub(super) timeout: UnfilledTimeout,
     /// 지금까지 실패한 횟수(처음 내면 0).
     pub(super) failed_before: u32,
+    /// 이 시도 묶음의 멱등성 키(다시 낼 때 같은 것).
+    pub(super) key: String,
 }
 
 impl Executor {
@@ -36,17 +39,18 @@ impl Executor {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// 계좌 스냅샷이 마지막으로 저장한 것과 다르면 저장한다(V6).
+    /// 계좌 스냅샷 문서(모의계좌 + 다시 낼 파는 주문)가 마지막으로 저장한 것과 다르면
+    /// 저장한다(V6 · E30). 실패하면 마지막 저장값을 그대로 두어 다음 저장에서 맞춘다.
     pub(super) fn persist(&self) -> Result<(), Error> {
         let snapshot = self.broker.snapshot();
         let mut state = self.lock();
-        if state.saved.as_ref() == Some(&snapshot) {
+        let doc = keep::document(&snapshot, state.seq, &state.pending)?;
+        if state.saved.as_ref() == Some(&doc) {
             return Ok(());
         }
-        let value = serde_json::to_value(&snapshot).map_err(|e| Error::Snapshot(e.to_string()))?;
         self.store
-            .save_paper_snapshot(&value, millis(self.clock.now()))?;
-        state.saved = Some(snapshot);
+            .save_paper_snapshot(&doc, millis(self.clock.now()))?;
+        state.saved = Some(doc);
         Ok(())
     }
 
@@ -109,12 +113,18 @@ impl Executor {
         {
             return self.sell_failed(attempt, e, now);
         }
-        let key = self.lock().sell_key(attempt.trade_id, now);
-        let request = order_request(&attempt.order, key, attempt.timeout, true, permit);
+        let request = order_request(
+            &attempt.order,
+            attempt.key.clone(),
+            attempt.timeout,
+            true,
+            permit,
+        );
         match self.broker.place_order(request, now).await {
             Ok(ack) => {
                 self.lock().pending.remove(&attempt.trade_id);
-                self.persist()?;
+                // 주문은 나갔다. 스냅샷 저장만 실패하면 다음 저장에서 맞춘다.
+                self.persist().ok();
                 Ok(ack.order_id)
             }
             Err(e) => self.sell_failed(attempt, e, now),
@@ -143,11 +153,15 @@ impl Executor {
                     .checked_add_signed(wait)
                     .unwrap_or(DateTime::<Utc>::MAX_UTC),
             };
-            self.lock()
-                .pending
-                .insert(attempt.trade_id, (retry, attempt.timeout));
+            let pending = keep::Pending {
+                retry,
+                timeout: attempt.timeout,
+                key: attempt.key,
+            };
+            self.lock().pending.insert(attempt.trade_id, pending);
         }
-        self.persist()?;
+        // 증권사 실패를 알리는 것이 먼저다. 저장 실패는 다음 저장에서 맞춘다.
+        self.persist().ok();
         Err(result)
     }
 
