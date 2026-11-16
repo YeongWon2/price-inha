@@ -291,3 +291,5 @@
 
 사용자가 AI 연결을 "API 키 + CLI 백엔드"로 정했다(`docs/dev/decisions.md`). 그래서 1장의 A2 · A3 · A4 · A7 · A8 · A9(구독 OAuth 토큰을 API에 직접 보내는 길과 그 헤더 · 본문 · 판별 · 순서 · 갱신)는 **의도해서 다름(안 가져옴)**이다. 구독은 OpenClaw `claude-cli`의 도구 없는 한 번 호출을 따른다(`docs/research/cli-backend.md` 2장, `docs/dev/modules/ai.md` 2차). 그 안에서 원본과 다른 것: 오래 사는 프로세스 · 세션 이어 가기 · MCP 도구 넘기기 · `--include-partial-messages`(스트리밍) · 무출력 감시 · 대화별 줄 대신 전체 동시 실행 수(`cli-backend.md` 5.1의 까닭).
 
+
+- office 화면: 탭이 숨으면 걷기를 멈추고 돌아오면 목적지에 바로 놓는다(원본과 다름). 까닭: 숨은 탭은 브라우저가 그리기를 멈춰 걷기 계산을 이어 갈 수 없고, 서버는 지도를 모르고 자리 이름만 보내므로 돌아온 순간 마지막 자리가 맞는 모습이다(office 4차).

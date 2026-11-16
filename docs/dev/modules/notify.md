@@ -68,3 +68,6 @@ N5 E2 E38 V10 V11 V12
 - `vapid.key`가 링크이면 따라가지 않고 `Error::KeyFile`로 멈춘다(가리킨 파일의 권한 · 내용을 건드리지 않는다). 폴더 잠금(폴더 자체에 배타 잠금, Unix)으로 동시에 처음 켜도 모두 같은 키를 받는다.
 - 미룬 푸시 다시 보내기: 미룰 때 `push.held` 표시 이벤트를 남기고, `Notifier::release_held()`가 조용한 시간이 아닐 때 기한(`HELD_RELEASE_WINDOW_MS` 24시간) 안에 미룬 것을 번호 순서로 한 번씩 보낸 뒤 `push.released`를 남긴다. 표시는 알림 목록에 나오지 않고 다시 켜도 이어진다. 구독이 없으면 표시를 남기지 않는다. 부르는 쪽(server)이 조용한 시간 끝 · 구독 때 불러야 한다.
 - 하지 않음(넘김): 폰 화면이 가정한 서버 경로 맞추기(server 조립), 시험용 `redirect_to`를 시험 전용 feature로 묶기(server 시험도 쓰므로 server `Cargo.toml` 수정이 필요).
+
+### 4차 검토 참고 (다음 차수 후보)
+- `release_held`를 동시에 두 번 부르는 시험(`release_gate`)이 없다.
