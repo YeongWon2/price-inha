@@ -203,7 +203,15 @@ impl Journal {
     ) -> Result<RuleOutcome, Error> {
         let approval = approval.ok_or(Error::ApprovalRequired)?;
         let improvement = self.checked_improvement(id)?;
-        let proposal = self.store.approve_proposal(id, approval, at)?;
+        let stored = self.store.get_proposal(id)?;
+        // 제안 때가 아니라 지금 규칙 기준으로 다시 판정한다(다른 개선안이 먼저 반영됐을 수 있다).
+        let risky_now = increases_risk(current, &improvement.after);
+        let proposal =
+            if risky_now && !stored.increases_risk && stored.state == ProposalState::Proposed {
+                self.approve_as_risky(&stored, approval, at)?
+            } else {
+                self.store.approve_proposal(id, approval, at)?
+            };
         let rules = match proposal.state {
             ProposalState::Applied => improvement.after,
             _ => current.clone(),
@@ -294,6 +302,32 @@ impl Journal {
     }
 
     /// 개선안을 읽고 반영할 값이 절대 상한 안인지 확인한다(상한 확인이 먼저다).
+    /// 제안 때는 안전했지만 지금은 위험을 키우는 개선안: 위험 표시를 단 같은 내용의 개선안으로 바꿔 승인한다
+    /// (저장소는 표시를 고칠 수 없다). 승인이 안 되면 새 개선안은 거절됨으로 닫고 원래 개선안은 그대로 둔다.
+    fn approve_as_risky(
+        &self,
+        stored: &Proposal,
+        approval: ApprovalUse,
+        at: UnixMillis,
+    ) -> Result<Proposal, Error> {
+        let replacement = self.store.create_proposal(NewProposal {
+            content: stored.content.clone(),
+            evidence: stored.evidence.clone(),
+            increases_risk: true,
+            at,
+        })?;
+        match self.store.approve_proposal(replacement.id, approval, at) {
+            Ok(approved) => {
+                self.store.reject_proposal(stored.id, at)?;
+                Ok(approved)
+            }
+            Err(err) => {
+                self.store.reject_proposal(replacement.id, at)?;
+                Err(err.into())
+            }
+        }
+    }
+
     fn checked_improvement(&self, id: ProposalId) -> Result<Improvement, Error> {
         let improvement = Improvement::from_proposal(&self.store.get_proposal(id)?)?;
         improve::check_caps(&improvement.after)?;
