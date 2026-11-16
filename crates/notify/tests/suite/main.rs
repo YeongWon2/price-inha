@@ -4,6 +4,7 @@
 mod common;
 
 mod crypto;
+mod feature;
 mod hardening;
 mod kind;
 mod link;
