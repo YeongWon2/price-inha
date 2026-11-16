@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -49,6 +50,7 @@ impl VapidKey {
     pub fn load_or_create(secret_dir: &Path) -> Result<VapidKey, Error> {
         fs::create_dir_all(secret_dir)
             .map_err(|e| Error::KeyFile(format!("비밀 폴더를 만들지 못했다: {}", e.kind())))?;
+        remove_leftover_temp_files(secret_dir);
         let path = secret_dir.join(VAPID_KEY_FILE);
         if path.exists() {
             restrict_permissions(&path)?;
@@ -140,10 +142,36 @@ fn restrict_permissions(_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// 같은 폴더의 임시 파일(Unix에서는 처음부터 0600)에 다 쓰고 맞춘 뒤 이름을 바꿔 `path`에 둔다.
-/// 쓰다 꺼져도 `path`에는 빈 파일이 남지 않는다. 실패하면 임시 파일을 지운다.
+/// 임시 키 파일 이름의 앞부분. 백업 · 정리에서 이 모양을 남은 임시 파일로 본다.
+const TEMP_PREFIX: &str = "vapid.tmp-";
+
+/// 프로세스 안에서 임시 파일 이름이 겹치지 않게 하는 번호.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// 예전에 쓰다 꺼져 남은 `vapid.tmp-*`를 지운다. 심볼릭 링크는 따라가지 않고 링크만 지운다.
+/// 폴더는 건드리지 않는다. 지우지 못해도 켜기는 계속한다.
+fn remove_leftover_temp_files(secret_dir: &Path) {
+    let Ok(entries) = fs::read_dir(secret_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let is_temp = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(TEMP_PREFIX));
+        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+        if is_temp && !is_dir {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// 같은 폴더의 새 임시 파일(`create_new`, Unix에서는 처음부터 0600)에 다 쓰고 맞춘 뒤 이름을 바꿔
+/// `path`에 둔다. 쓰다 꺼져도 `path`에는 빈 파일이 남지 않는다. 실패하면 임시 파일을 지운다.
 fn write_private_file_atomically(path: &Path, contents: &[u8]) -> Result<(), Error> {
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!("{TEMP_PREFIX}{}-{unique}", std::process::id()));
     let result = write_and_rename(&tmp, path, contents);
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
@@ -153,7 +181,7 @@ fn write_private_file_atomically(path: &Path, contents: &[u8]) -> Result<(), Err
 
 fn write_and_rename(tmp: &Path, path: &Path, contents: &[u8]) -> Result<(), Error> {
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

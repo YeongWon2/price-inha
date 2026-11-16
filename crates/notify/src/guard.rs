@@ -40,20 +40,42 @@ pub struct PinnedTarget {
 }
 
 /// 내부망 주소인가: 루프백 · 사설(10/8, 172.16/12, 192.168/16) · 링크 로컬(169.254/16, fe80::/10)
-/// · 공유 주소(100.64/10) · 지정 안 됨(0.0.0.0, ::) · 브로드캐스트 · 멀티캐스트 · ULA(fc00::/7).
-/// IPv4를 담은 IPv6(`::ffff:a.b.c.d`)는 안의 IPv4로 본다.
+/// · 공유 주소(100.64/10) · 지정 안 됨(0.0.0.0, ::) · 브로드캐스트 · 멀티캐스트 · ULA(fc00::/7)
+/// · IPv4 예약 대역(0/8, 192.0.0/24, 198.18/15, 240/4).
+/// IPv4를 담는 IPv6 형식은 안의 IPv4로 본다: IPv4-mapped `::ffff:a.b.c.d`, IPv4-compatible
+/// `::a.b.c.d`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`. 지역용 NAT64 `64:ff9b:1::/48`은
+/// 어디에 IPv4를 담는지 정해져 있지 않아 통째로 내부망으로 본다.
 pub fn is_internal_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_internal_v4(v4),
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+        IpAddr::V6(v6) => match embedded_v4(v6) {
             Some(v4) => is_internal_v4(v4),
             None => is_internal_v6(v6),
         },
     }
 }
 
+/// IPv6 안에 담긴 IPv4(정해진 형식만). `::`와 `::1`은 IPv6 그대로 본다.
+fn embedded_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let s = ip.segments();
+    let low = |hi: u16, lo: u16| Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo));
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return Some(v4);
+    }
+    if s[..6] == [0, 0, 0, 0, 0, 0] && !ip.is_loopback() && !ip.is_unspecified() {
+        return Some(low(s[6], s[7]));
+    }
+    if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        return Some(low(s[6], s[7]));
+    }
+    if s[0] == 0x2002 {
+        return Some(low(s[1], s[2]));
+    }
+    None
+}
+
 fn is_internal_v4(ip: Ipv4Addr) -> bool {
-    let [a, b, ..] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     ip.is_loopback()
         || ip.is_private()
         || ip.is_link_local()
@@ -61,16 +83,20 @@ fn is_internal_v4(ip: Ipv4Addr) -> bool {
         || ip.is_broadcast()
         || ip.is_multicast()
         || a == 0
+        || a >= 240
         || (a == 100 && (64..128).contains(&b))
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 192 && b == 0 && c == 0)
 }
 
 fn is_internal_v6(ip: Ipv6Addr) -> bool {
-    let first = ip.segments()[0];
+    let s = ip.segments();
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
-        || (first & 0xfe00) == 0xfc00
-        || (first & 0xffc0) == 0xfe80
+        || (s[0] & 0xfe00) == 0xfc00
+        || (s[0] & 0xffc0) == 0xfe80
+        || (s[0] == 0x64 && s[1] == 0xff9b && s[2] == 1)
 }
 
 /// 구독 주소를 보내기 전에 검사한다.
