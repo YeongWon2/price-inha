@@ -14,6 +14,8 @@ pub use error::Error;
 pub use improve::{Improvement, RuleOutcome, increases_risk};
 pub use review::{Mistake, ReviewRecord};
 
+use std::collections::HashSet;
+
 use pi_store::{
     Amount, ApprovalUse, NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState,
     Store, Trade, TradeId, TradeState, UnixMillis,
@@ -206,12 +208,12 @@ impl Journal {
         let stored = self.store.get_proposal(id)?;
         // 제안 때가 아니라 지금 규칙 기준으로 다시 판정한다(다른 개선안이 먼저 반영됐을 수 있다).
         let risky_now = increases_risk(current, &improvement.after);
-        let proposal =
-            if risky_now && !stored.increases_risk && stored.state == ProposalState::Proposed {
-                self.approve_as_risky(&stored, approval, at)?
-            } else {
-                self.store.approve_proposal(id, approval, at)?
-            };
+        // 제안 때는 안전했지만 지금은 위험을 키우면 같은 개선안에 위험 표시를 올린 뒤 승인한다(냉각을 거친다).
+        // 승인이 안 되면 개선안은 제안됨으로 남고 표시는 그대로다(지금 규칙 기준으로 맞는 표시다).
+        if risky_now && !stored.increases_risk && stored.state == ProposalState::Proposed {
+            self.store.mark_proposal_risky(id, at)?;
+        }
+        let proposal = self.store.approve_proposal(id, approval, at)?;
         let rules = match proposal.state {
             ProposalState::Applied => improvement.after,
             _ => current.clone(),
@@ -266,6 +268,13 @@ impl Journal {
         }
         let in_day = |at: UnixMillis| day.start <= at && at < day.end;
         let mut done = Vec::new();
+        // 그날 상태가 바뀐 매매(중간에만 바뀌고 뒤에 또 바뀐 것도).
+        let changed: HashSet<TradeId> = self
+            .store
+            .trade_state_changes_between(day.start, day.end)?
+            .into_iter()
+            .map(|change| change.trade)
+            .collect();
         for state in TradeState::ALL {
             for trade in self.store.trades_in_state(state)? {
                 // 뒤에 갱신돼(예: 다음 날 복기) `updated_at`이 바뀌어도 그날 만들거나 판단한 매매는 남긴다.
@@ -274,7 +283,7 @@ impl Journal {
                     trade.decided_at,
                     Some(trade.updated_at),
                 ];
-                if touched.into_iter().flatten().any(in_day) {
+                if changed.contains(&trade.id) || touched.into_iter().flatten().any(in_day) {
                     done.push(trade);
                 }
             }
@@ -306,32 +315,6 @@ impl Journal {
                 .collect(),
             last_backup_at: facts.last_backup_at,
         })
-    }
-
-    /// 제안 때는 안전했지만 지금은 위험을 키우는 개선안: 위험 표시를 단 같은 내용의 개선안으로 바꿔 승인한다
-    /// (저장소는 표시를 고칠 수 없다). 승인이 안 되면 새 개선안은 거절됨으로 닫고 원래 개선안은 그대로 둔다.
-    fn approve_as_risky(
-        &self,
-        stored: &Proposal,
-        approval: ApprovalUse,
-        at: UnixMillis,
-    ) -> Result<Proposal, Error> {
-        let replacement = self.store.create_proposal(NewProposal {
-            content: stored.content.clone(),
-            evidence: stored.evidence.clone(),
-            increases_risk: true,
-            at,
-        })?;
-        match self.store.approve_proposal(replacement.id, approval, at) {
-            Ok(approved) => {
-                self.store.reject_proposal(stored.id, at)?;
-                Ok(approved)
-            }
-            Err(err) => {
-                self.store.reject_proposal(replacement.id, at)?;
-                Err(err.into())
-            }
-        }
     }
 
     /// 개선안을 읽고 반영할 값이 절대 상한 안인지 확인한다(상한 확인이 먼저다).
