@@ -267,6 +267,9 @@ struct GroupGuard {
     /// 그룹에 `SIGTERM`은 보냈는데 `SIGKILL` 명령만 실패했다. 버릴 때 그룹이 아직 있으면
     /// `SIGKILL`을 다시 보낸다(ai.md 7차 5).
     kill_pending: bool,
+    /// 거둔 뒤 남은 손주가 끝나기를 지켜보는 중이다. 이 기다림이 취소돼 버려지면 Drop이
+    /// 그룹이 남아 있을 때 `SIGKILL`을 보낸다(ai.md 8차 1).
+    lingering: bool,
     /// 그룹에 신호를 보내는 명령(단위 테스트가 바꿔 넣는다 — ai.md 6차 2).
     kill: &'static Path,
 }
@@ -289,6 +292,7 @@ impl GroupGuard {
             reaped: false,
             signalled: false,
             kill_pending: false,
+            lingering: false,
             kill: Path::new(KILL_COMMAND),
         }
     }
@@ -322,7 +326,11 @@ impl GroupGuard {
                 self.set_reaped();
                 if termed {
                     let until = until.unwrap_or_else(tokio::time::Instant::now);
+                    // 이 기다림이 취소되면(끝내기와 띄우기가 겹치고 호출이 버려질 때) 표시가 남아
+                    // Drop이 TERM을 무시하는 손주를 끝낸다(ai.md 8차 1).
+                    self.lingering = true;
                     kill_lingering_with(self.kill, pgid, until).await;
+                    self.lingering = false;
                 }
                 return;
             }
@@ -381,7 +389,8 @@ impl Drop for GroupGuard {
             return;
         };
         let (reaped, signalled, grace, kill) = (self.reaped, self.signalled, self.grace, self.kill);
-        let kill_pending = self.kill_pending;
+        // 손주를 지켜보다 취소됐으면 TERM · 유예는 이미 지났다: 그룹이 남아 있으면 바로 KILL(8차 1).
+        let kill_pending = self.kill_pending || self.lingering;
         if reaped && signalled && !kill_pending {
             return;
         }
@@ -637,6 +646,38 @@ mod tests {
         assert!(
             group_gone(pgid),
             "버릴 때 KILL을 다시 보내지 않아 손주가 남았다"
+        );
+    }
+
+    #[tokio::test]
+    async fn 남은_손주를_지켜보다_끝내기가_취소돼도_버릴_때_손주를_끝낸다() {
+        // 자식(sh)은 TERM에 끝나고, 손주(sleep)는 TERM을 무시해 유예 끝까지 남는다.
+        let child = shell("(trap '' TERM; exec /bin/sleep 30) & wait");
+        let pgid = child.id().unwrap();
+        let _cleanup = GroupCleanup(pgid);
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        // 유예가 길어, 취소 시점에 손주를 지켜보는 중이다.
+        let mut guard = GroupGuard::new(child, Duration::from_secs(30), permit, Vec::new(), None);
+        guard.kill = Path::new(KILL_COMMAND);
+        let cancelled = tokio::time::timeout(
+            CLI_STDIN_CLOSE_WAIT + Duration::from_millis(700),
+            guard.terminate(),
+        )
+        .await;
+        assert!(cancelled.is_err(), "끝내기가 취소되지 않았다(시험 준비)");
+        assert!(
+            guard.reaped,
+            "취소 시점에 자식을 거둔 상태여야 한다(시험 준비)"
+        );
+        assert!(!group_gone(pgid), "손주가 남아 있어야 이 시험이 뜻이 있다");
+        drop(guard);
+        let started = std::time::Instant::now();
+        while !group_gone(pgid) && started.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            group_gone(pgid),
+            "취소된 끝내기 뒤 버릴 때 TERM을 무시한 손주를 끝내지 않았다"
         );
     }
 }

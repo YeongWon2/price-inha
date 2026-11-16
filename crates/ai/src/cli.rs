@@ -285,6 +285,16 @@ impl ClaudeCliProvider {
     }
 }
 
+/// 가리기 전 길이를 거절하는 상한은 [`CLI_MAX_STDIN_BYTES`]의 몇 배인가(ai.md 8차 3).
+/// 가리기가 글을 이만큼 줄이는 일은 없으므로, 이보다 큰 글은 가리기 전에 거절해도 판단이 같다.
+const PRE_REDACT_FACTOR: usize = 4;
+
+fn too_large() -> AiError {
+    AiError::InvalidRequest {
+        message: format!("시스템 글과 대화 글이 합쳐 {CLI_MAX_STDIN_BYTES}바이트를 넘습니다"),
+    }
+}
+
 #[async_trait]
 impl AiProvider for ClaudeCliProvider {
     /// CLI를 한 번 띄워 응답을 받는다. 어떤 오류도 다시 부르지 않는다.
@@ -295,17 +305,22 @@ impl AiProvider for ClaudeCliProvider {
         let Some(program) = self.config.command.clone() else {
             return Err(AiError::NotConfigured);
         };
+        // 가리기 전 길이가 상한의 4배를 넘으면 가리지 않고 거절한다(복사를 줄인다, ai.md 8차 3).
+        // 그 아래에서는 가린 뒤의 길이로 판단한다.
+        let raw_len = request.messages.iter().fold(
+            request.system.as_ref().map_or(0, String::len),
+            |sum, message| sum.saturating_add(message.content.len()),
+        );
+        if raw_len > CLI_MAX_STDIN_BYTES.saturating_mul(PRE_REDACT_FACTOR) {
+            return Err(too_large());
+        }
         // 가리기는 크기 상한 검사 전에 한다: 상한은 실제로 나가는 가린 글에 건다(ai.md 7차 1).
         // 표준 입력과 시스템 글 임시 파일은 모두 이 가린 요청에서 만든다.
         let request = crate::redact::redact_request(self.redactor.as_ref(), request);
         let input = command::stdin_text(&request.messages);
         let system_len = request.system.as_ref().map_or(0, String::len);
         if input.len().saturating_add(system_len) > CLI_MAX_STDIN_BYTES {
-            return Err(AiError::InvalidRequest {
-                message: format!(
-                    "시스템 글과 대화 글이 합쳐 {CLI_MAX_STDIN_BYTES}바이트를 넘습니다"
-                ),
-            });
+            return Err(too_large());
         }
         // 작업 폴더가 없으면 띄우지 않는다. 띄울 때의 `NotFound`는 실행 파일이 없다는 뜻만 남는다.
         if !self.config.work_dir.is_dir() {
