@@ -37,3 +37,6 @@ D10 M7 V22 V23
 - 지운 조각의 메타 정리: 글이 바뀌어 사라진 조각의 `chunk.<번호>` 메타는 빈 값으로 둔다(빈 값은 "없음"). 키 자체를 지우려면 store API가 필요하다.
 - 조건 검색의 자동 회상: `recall_by_condition`을 더해 바깥 자료 조각은 건너뛴다(M7). `search_by_condition`(명시 검색)은 그대로.
 - 넘김: 비밀키 거르기(M7)는 기록을 만드는 쪽(journal · agent)이 가린 글만 넘기는지 server 조립에서 확인한다.
+
+## 새 store API 쓰기 (store 12차에서 넘어옴)
+- 조각과 메타를 `index_record_with_meta`로 한 트랜잭션에 묶고, 사라진 조각의 메타는 빈 값 대신 `remove_knowledge_meta`로 지운다.

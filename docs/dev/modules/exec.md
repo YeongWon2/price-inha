@@ -78,3 +78,7 @@ C10 E12 E13 E16 E25 E29 E30 E33 V6
 - 파는 수량 검사가 같은 매매의 아직 체결되지 않은 열린 매도를 남은 수량에서 빼지 않는다(지금은 rules 중복 점검이 막는다).
 - 장부 없는 매매가 한 종목에 둘 이상이면 각자 남은 보유 전부를 상한으로 받는다(2차 이전 문서에서만). 섞인 경우의 시험이 없다.
 - 증권사 보유를 찾을 때 종목 글자만 보고 시장은 보지 않는다(`track.rs:126`).
+
+## 새 store API 쓰기 (store 12차에서 넘어옴)
+- 점검 통과 표시: `submit` · `sell` · `retry_sell`에서 `pi_rules::issue_for_trade`로 낸 표시를 받고 `permit.trade() == Some(trade_id.0)`이 아니면(묶이지 않은 `None` 포함) PermitMismatch.
+- 사는 수량을 `trade_quantity`와 대조한다(승인 내용 · 주문 수량).

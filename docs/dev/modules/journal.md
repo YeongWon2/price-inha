@@ -51,3 +51,6 @@ C6 M4 E17 E28 E35 V12 V16 V18 V19 V20 V21 V50
 - `daily_summary`의 한 일: 만든 · 판단한 · 마지막으로 바뀐 시각 가운데 하나가 그날이면 남긴다(다음 날 복기돼도 그날 판 매매가 빠지지 않음). 중간 상태 바뀜 시각은 store에 없어 못 본다.
 - `checked_improvement` 문서 주석 자리 바로잡음. `apply_cooled`의 `current`는 쓰지 않는 까닭을 문서로 남김(잠긴 테스트가 `after` 통째 반영 뜻).
 - 남김(store 몫): 위험 표시 갱신 API가 생기면 `approve_as_risky` 우회 걷어내기, 매매 상태 바뀜 이력.
+
+## 새 store API 쓰기 (store 12차에서 넘어옴)
+- `approve_as_risky` 우회를 걷어내고 `mark_proposal_risky`로 위험 표시를 올린다. 하루 정리는 `trade_state_changes_between`으로 그날의 중간 상태 바뀜을 본다.

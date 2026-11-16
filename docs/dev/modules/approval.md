@@ -56,3 +56,6 @@ C7 C12 M5 E7 E8 E22 N2 V42 V43 V44 V45 P18 P19 P20
 - `Approvals::with_proposal_approval(number, proposal_id, f)` 같은 공개 메서드: 승인 번호의 기다림 · 지문(개선안 번호와 판) 확인 → 소비 → `f(ApprovalUse, at)` 호출 → `f`의 결과를 돌려준다. `ApprovalUse`는 이 호출 안에서만 쓰이고, `f`가 실패하면 소비를 되돌리지 않고(이미 쓴 승인) 오류를 돌려준다 — 기존 `approve_proposal`의 실패 규칙과 같게.
 - 기존 `approve_proposal`은 그대로 둔다.
 - 시험: 지문이 다른 개선안 · 이미 쓴 승인 · 거절된 승인으로는 `f`가 불리지 않는다; `f` 안에서 받은 `ApprovalUse`로 `Journal::approve`를 부르면 위험한 경우 냉각중이 된다(테스트 dev-dependency로 pi-journal 사용 가능).
+
+## 새 store API 쓰기 (store 12차에서 넘어옴)
+- 실전 승격은 `promote_template_live_checked`를 부른다(전체 정지 · 템플릿 판을 같은 묶음에서 본다).

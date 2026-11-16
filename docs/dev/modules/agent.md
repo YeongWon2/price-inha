@@ -62,3 +62,6 @@ M2 E6 E20 E27 E32 E38 V2 V3 V4 P7 P9 P21
 
 ### 3차 검토 참고
 - 논의마다 방 줄을 500개씩 읽어 `last_seq`를 찾는다(방이 길어지면 store에 마지막 번호 조회 API).
+
+## 새 store API 쓰기 (store 12차에서 넘어옴)
+- 팔기 매매의 `draft_order`는 `judge_trade_with_side`로 방향을 저장하고 `trade_side`로 막는다(다시 띄운 뒤에도). Team 메모리에만 기대지 않는다.

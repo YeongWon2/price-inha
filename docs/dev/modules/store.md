@@ -213,3 +213,8 @@ M1 M2 M5 C2 E3 M6 V6 D6 E12 E36 M3 M4 V29 V30 C11 V36 D10 M7 V51
 - 개선안 위험 표시 갱신 API(journal `approve_as_risky` 우회를 없앤다).
 - 지식 조각 번호 조회 · 메타 키 지우기 API(knowledge가 조각과 메타를 한 트랜잭션으로 묶고 빈 값 대신 키를 지운다).
 - Trade에 수량 칸(exec가 사는 수량을 승인 내용과 대조한다).
+
+## 13차 작업 (12차 검토 참고)
+- `knowledge_chunks`에 BEFORE UPDATE 보호: `UPDATE OR REPLACE ... SET ordinal`처럼 다른 줄과 겹치게 바꿔 지우기 트리거 없이 줄을 없애는 길을 막는다(바뀐 뒤 키가 다른 줄과 겹치면 거부).
+- `restore.rs` `copy_to`의 BUSY · LOCKED 다시 시도에 상한(시간)을 두고 넘으면 오류로 알린다.
+- `trade_plans` 방향을 NULL에서 값으로 정하는 것은 논의중 · 판단됨 상태에서만 허락한다.
