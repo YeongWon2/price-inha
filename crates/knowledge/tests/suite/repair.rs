@@ -125,3 +125,28 @@ fn recall_by_condition_leaves_out_outside_material() {
     assert_eq!(refs(&recalled), vec!["T-1"]);
     assert!(recalled.results.iter().all(|h| h.source != "external"));
 }
+
+// 검증: M7
+#[test]
+fn replaced_chunks_drop_their_meta_keys_instead_of_blanking() {
+    let f = Fixture::new();
+    f.add_trade("T-1", &word_lines(900));
+    let old: Vec<i64> = f
+        .store
+        .knowledge_chunks(KnowledgeKind::Trade, "T-1")
+        .expect("조각")
+        .iter()
+        .map(|c| c.id.0)
+        .collect();
+    assert!(old.len() >= 2, "조각이 여럿이어야 시험이 뜻을 가진다");
+
+    f.add_trade("T-1", "짧게 바뀐 글");
+
+    for id in &old {
+        let raw = f
+            .store
+            .knowledge_meta(&format!("chunk.{id}"))
+            .expect("메타 읽기");
+        assert_eq!(raw, None, "지운 조각 {id}의 메타 키가 빈 값으로 남았다");
+    }
+}
