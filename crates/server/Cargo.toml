@@ -44,8 +44,10 @@ age = "0.12.1"
 base64 = "0.23.1"
 chrono = "0.4.45"
 futures = "0.3.34"
+pi-notify = { version = "0.1.0", path = "../notify", features = ["test-redirect"] }
 reqwest = { version = "0.13.5", default-features = false }
 rusqlite = { version = "0.42.0", features = ["bundled"] }
+sha2 = "0.11.1"
 tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 tokio-tungstenite = "0.30.0"
