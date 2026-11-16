@@ -400,6 +400,11 @@ impl Store {
         self.read(log::access_log)
     }
 
+    /// 접속 기록 최근 `max`줄. 새것(큰 번호)부터 준다.
+    pub fn access_recent(&self, _max: usize) -> Result<Vec<AccessRecord>, StoreError> {
+        todo!("14차 뼈대")
+    }
+
     // ───────────── 안에서만 쓰는 것 ─────────────
 
     /// 연결을 잡는다. 잡고 있던 스레드가 패닉했어도 쓴다:

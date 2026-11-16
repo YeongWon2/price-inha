@@ -150,6 +150,11 @@ impl Store {
             rows.map(|row| row?).collect()
         })
     }
+
+    /// 방의 마지막 번호. 이벤트가 없거나 없는 방이면 0이다.
+    pub fn room_last_seq(&self, _room: &str) -> Result<u64, StoreError> {
+        todo!("14차 뼈대")
+    }
 }
 
 const EVENT_SELECT: &str =
