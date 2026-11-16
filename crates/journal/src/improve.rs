@@ -1,7 +1,7 @@
 //! 규칙 개선안(M4 · V20 · V21 · E28 · E35).
 
 use pi_store::Proposal;
-use pi_template::{Change, PctRange, RiskParams, adjust};
+use pi_template::{Change, Cooldown, LossStreakStop, PctRange, RiskParams, adjust};
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Mistake};
@@ -29,8 +29,9 @@ impl Improvement {
 ///
 /// 키우는 것으로 본다: 1회 위험 · 일일 손실 · 최대 낙폭 · 종목 · 확신 종목 · 업종 비중 · 자동 주문 한도의 상향,
 /// 확신 비중이 비었다가(종목 비중이 한도) 종목 비중보다 넓은 값이 생기거나 값이 없어지는 것,
-/// 고정 손절이 사라지거나 그 범위의 아래 · 위 끝이 넓어지는 것, 연속 손실 정지가 해제되는 것,
-/// ATR 배수의 증가, 최소 현금의 감소, 최대 동시 보유 수 · 일일 최대 매매 횟수의 상향.
+/// 고정 손절이 사라지거나 그 범위의 아래 · 위 끝이 넓어지는 것, 연속 손실 정지가 해제되거나
+/// 정지까지의 손실 횟수가 늘거나 쉬는 기간이 줄어드는 것, ATR 손절이 사라지거나 배수가 커지는 것,
+/// 최소 현금의 감소, 최대 동시 보유 수 · 일일 최대 매매 횟수의 상향.
 /// 좁히거나 같거나 다른 칸만 바뀌면 거짓이다.
 pub fn increases_risk(before: &RiskParams, after: &RiskParams) -> bool {
     let conviction = |p: &RiskParams| p.conviction_weight_pct.unwrap_or(p.symbol_weight_pct);
@@ -43,11 +44,29 @@ pub fn increases_risk(before: &RiskParams, after: &RiskParams) -> bool {
         || after.sector_weight_pct > before.sector_weight_pct
         || after.auto_order_limit_pct > before.auto_order_limit_pct
         || stop_widened(before.stop.fixed_loss_pct, after.stop.fixed_loss_pct)
-        || (before.loss_streak.is_some() && after.loss_streak.is_none())
+        || streak_loosened(before.loss_streak, after.loss_streak)
+        || matches!((atr(before), atr(after)), (Some(_), None))
         || matches!((atr(before), atr(after)), (Some(b), Some(a)) if a > b)
         || after.min_cash_pct < before.min_cash_pct
         || after.max_positions.high > before.max_positions.high
         || after.max_trades_per_day > before.max_trades_per_day
+}
+
+/// 연속 손실 정지가 느슨해졌는가: 해제됐거나, 정지까지의 손실 횟수가 늘었거나, 쉬는 기간이 줄었다.
+fn streak_loosened(before: Option<LossStreakStop>, after: Option<LossStreakStop>) -> bool {
+    match (before, after) {
+        (Some(_), None) => true,
+        (Some(b), Some(a)) => a.losses > b.losses || rest_days(a.cooldown) < rest_days(b.cooldown),
+        _ => false,
+    }
+}
+
+/// 쉬는 기간의 길이 순서: 그날만(0) < 거래일 n일(n).
+fn rest_days(cooldown: Cooldown) -> u32 {
+    match cooldown {
+        Cooldown::RestOfDay => 0,
+        Cooldown::TradingDays(days) => days,
+    }
 }
 
 /// 고정 손절이 넓어졌는가: 사라졌거나, 아래 끝이 내려갔거나, 위 끝이 올라갔다.

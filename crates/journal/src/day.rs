@@ -36,7 +36,8 @@ pub struct TradeLine {
 /// 하루 정리(V12 · V50): 한 일 · 손익 · 복기 · 백업 완료 시각이 한 값에 있다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaySummary {
-    /// 그날 손댄 매매(`updated_at`이 하루 범위 안). 번호 순서다.
+    /// 그날 손댄 매매(만든 · 판단한 · 마지막으로 바뀐 시각 가운데 하나가 하루 범위 안). 번호 순서다.
+    /// 그 사이의 상태 바뀜 시각은 저장소에 없어 보지 못한다.
     pub done: Vec<TradeLine>,
     /// 손익 합.
     pub pnl: Amount,

@@ -235,6 +235,7 @@ impl Journal {
 
     /// 냉각중인 개선안을 다음 거래일 시작에 반영한다(E28). `at`이 `trading_day_start`보다 이르면
     /// [`Error::StillCooling`]이고 그대로 냉각중이다(같은 시각은 된다). 반영할 값도 상한을 다시 확인한다.
+    /// 개선안은 `after`로 통째로 바꾸는 것이라 `current`는 쓰지 않는다(위험 판정은 승인 때 지금 규칙과 견주어 끝났다).
     pub fn apply_cooled(
         &self,
         id: ProposalId,
@@ -267,7 +268,13 @@ impl Journal {
         let mut done = Vec::new();
         for state in TradeState::ALL {
             for trade in self.store.trades_in_state(state)? {
-                if in_day(trade.updated_at) {
+                // 뒤에 갱신돼(예: 다음 날 복기) `updated_at`이 바뀌어도 그날 만들거나 판단한 매매는 남긴다.
+                let touched = [
+                    Some(trade.created_at),
+                    trade.decided_at,
+                    Some(trade.updated_at),
+                ];
+                if touched.into_iter().flatten().any(in_day) {
                     done.push(trade);
                 }
             }
@@ -301,7 +308,6 @@ impl Journal {
         })
     }
 
-    /// 개선안을 읽고 반영할 값이 절대 상한 안인지 확인한다(상한 확인이 먼저다).
     /// 제안 때는 안전했지만 지금은 위험을 키우는 개선안: 위험 표시를 단 같은 내용의 개선안으로 바꿔 승인한다
     /// (저장소는 표시를 고칠 수 없다). 승인이 안 되면 새 개선안은 거절됨으로 닫고 원래 개선안은 그대로 둔다.
     fn approve_as_risky(
@@ -328,6 +334,7 @@ impl Journal {
         }
     }
 
+    /// 개선안을 읽고 반영할 값이 절대 상한 안인지 확인한다(상한 확인이 먼저다).
     fn checked_improvement(&self, id: ProposalId) -> Result<Improvement, Error> {
         let improvement = Improvement::from_proposal(&self.store.get_proposal(id)?)?;
         improve::check_caps(&improvement.after)?;
