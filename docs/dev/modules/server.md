@@ -105,3 +105,12 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - `POST /api/setup/backup`은 `/api/setup/keys`처럼 그 컴퓨터에서만 받는다(원격에서 공개키를 바꾸지 못한다).
 - 되살리기 중 꺼져 남은 작업 폴더는 다음 되살리기 · 켤 때 지운다.
 - notify 시험용 `redirect_to`를 시험 전용 feature로 묶는다(notify Cargo.toml에 feature, server는 dev-dependency에서만 켠다). notify 쪽 고침은 같은 차수에 notify 차수로 연다.
+
+### 6차 구현 메모
+테스트: `crates/server/tests/round13/`. 위 네 항목을 모두 처리했다.
+
+- `/keys` · `POST /api/remote/keys` HTTP 경로 시험: 세션 없이 401(확인기를 부르지 않음), 다른 출처 POST는 4xx, 세션이면 `{"registered": true}`만 돌려주고 키 값이 없다.
+- `POST /api/setup/backup`은 `/api/setup/keys`와 같은 장치(`pi_gate::local_only`)로 그 컴퓨터에서만 받는다. 원격 세션은 `GET`은 되고 `POST`는 403(`LOCAL_ONLY_STATUS`). 같은 경로를 `GET` 라우터와 `local_only`로 감싼 `POST` 라우터로 나눠 합친다.
+- 되살리기 작업 폴더(`<보관 폴더>.restore-work`)는 되살리기 앞뒤로 지우고, 켤 때(`App::assemble` 처음)도 지운다.
+- notify의 `redirect_to`는 `test-redirect` feature 뒤에 있고, server는 dev-dependency에서만 켠다(일반 의존성은 그대로).
+- 시험의 원격 세션은 저장소에 접속 키 해시를 직접 두고 그 키로 들어간다(dev-dependency `sha2`). 서버에는 아직 접속 키를 만드는 길이 없다(다음 차수 후보: 접속 키 발급 화면 · 명령).
