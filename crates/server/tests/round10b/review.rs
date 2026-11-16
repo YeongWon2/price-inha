@@ -1,7 +1,7 @@
 //! 개선안 승인 때의 위험 다시 판정(V21 · E28 · E35).
 
 use pi_store::{ProposalId, ProposalState, Store, TemplateId};
-use price_inha::{DemoTurn, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH};
+use price_inha::{DayPlan, DemoTurn, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
@@ -30,6 +30,13 @@ async fn propose(bench: &Bench, mistake: &str, change: Value) -> ProposalId {
     let reviewed = bench.crew().review_day().await.expect("복기한다");
     assert_eq!(reviewed.proposals.len(), 1, "같은 실수 2건이면 개선안 하나");
     reviewed.proposals[0]
+}
+
+/// 다음 거래일 아침으로 옮기고 그날도 매매하기로 한다(하루 매매 횟수 한도가 새로 시작한다).
+fn next_trading_day(bench: &Bench) {
+    let next = bench.now().date_naive().succ_opt().unwrap();
+    bench.set(kst(next, 10, 0));
+    bench.trading().decide_day(DayPlan::Trade).unwrap();
 }
 
 /// 개선안 목록에서 그 개선안의 승인 번호와 지문.
@@ -68,6 +75,7 @@ async fn 한도를_좁히는_개선안을_먼저_반영한_뒤_다른_개선안�
     let template = bench.ready().await;
     // 같은 규칙(위험 1 · 종목 비중 10)에서 둘 다 낸다. 둘 다 제안 때는 위험을 키우지 않는다.
     let narrow_risk = propose(&bench, "late_stop", json!({"risk_per_trade_pct": "0.5"})).await;
+    next_trading_day(&bench);
     let narrow_weight = propose(&bench, "chased_entry", json!({"symbol_weight_pct": "8"})).await;
     for id in [narrow_risk, narrow_weight] {
         assert!(!bench.store().get_proposal(id).unwrap().increases_risk);
