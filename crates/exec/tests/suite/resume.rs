@@ -31,7 +31,7 @@ async fn pending_sell_survives_a_restart() {
     bench.set_at(before[0].retry_at);
     bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "69000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "69000"))
         .await
         .unwrap();
 
@@ -58,7 +58,7 @@ async fn retries_of_one_sell_keep_the_same_key() {
     bench.set_at(bench.exec.pending_sells()[0].retry_at);
     let again = bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "71000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "71000"))
         .await;
     assert!(matches!(again, Err(Error::AnomalyStop(_))));
     assert_eq!(bench.exec.pending_sells()[0].attempts, 2);
@@ -68,7 +68,7 @@ async fn retries_of_one_sell_keep_the_same_key() {
     bench.set_at(bench.exec.pending_sells()[0].retry_at);
     bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "71000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "71000"))
         .await
         .unwrap();
 
@@ -93,7 +93,7 @@ async fn a_new_sell_starts_a_new_key() {
     bench.set_at(bench.exec.pending_sells()[0].retry_at);
     bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "71000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "71000"))
         .await
         .unwrap();
 
@@ -121,7 +121,7 @@ async fn finished_sell_stays_finished_after_a_restart() {
     bench.set_at(bench.exec.pending_sells()[0].retry_at);
     bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "71000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "71000"))
         .await
         .unwrap();
 

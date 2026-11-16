@@ -191,7 +191,7 @@ async fn reconcile_restores_the_stop_watch_of_holding_trades() {
 async fn permit_from_before_the_restart_is_not_accepted() {
     let mut bench = Bench::new().await;
     let id = bench.judged();
-    let old = bench.permit(Side::Buy, "10", "70000");
+    let old = bench.permit(id, Side::Buy, "10", "70000");
     bench.reopen(config());
     bench.exec.reconcile().await.unwrap();
     let submission = pi_exec::Submission {

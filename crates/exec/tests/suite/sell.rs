@@ -98,7 +98,7 @@ async fn buy_permit_on_the_sell_path_is_refused() {
     let bench = Bench::new().await;
     let id = bench.holding().await;
     let mut submission = bench.sell(id, SellPurpose::StopLoss, "10", "69000");
-    submission.permit = bench.permit(Side::Buy, "10", "69000");
+    submission.permit = bench.permit(id, Side::Buy, "10", "69000");
 
     let result = bench.exec.sell(submission).await;
 
@@ -169,7 +169,7 @@ async fn sell_is_not_sent_again_before_its_time() {
 
     let result = bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "69000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "69000"))
         .await;
 
     assert!(matches!(result, Err(Error::RetryNotDue { retry_at }) if retry_at == due));
@@ -194,7 +194,7 @@ async fn interval_doubles_up_to_the_longest() {
 
         let result = bench
             .exec
-            .retry_sell(id, bench.permit(Side::Sell, "10", "69000"))
+            .retry_sell(id, bench.permit(id, Side::Sell, "10", "69000"))
             .await;
 
         assert!(matches!(
@@ -225,7 +225,7 @@ async fn retry_with_different_content_is_refused() {
 
     let result = bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "68000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "68000"))
         .await;
 
     assert!(matches!(result, Err(Error::PermitMismatch)));
@@ -248,7 +248,7 @@ async fn retry_goes_through_once_the_broker_is_back() {
 
     let order_id = bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "69000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "69000"))
         .await
         .unwrap();
 
@@ -267,9 +267,40 @@ async fn retry_without_a_failed_sell_is_refused() {
 
     let result = bench
         .exec
-        .retry_sell(id, bench.permit(Side::Sell, "10", "69000"))
+        .retry_sell(id, bench.permit(id, Side::Sell, "10", "69000"))
         .await;
 
     assert!(matches!(result, Err(Error::NoPendingSell(t)) if t == id));
     assert!(bench.orders(OrderGroup::Open).await.is_empty());
+}
+
+// 검증: E33
+#[tokio::test]
+async fn unbound_permit_is_refused_on_the_sell_path() {
+    let bench = Bench::new().await;
+    let id = bench.holding().await;
+    let mut submission = bench.sell(id, SellPurpose::StopLoss, "10", "69000");
+    submission.permit = bench.unbound_permit(Side::Sell, "10", "69000");
+
+    let result = bench.exec.sell(submission).await;
+
+    assert!(matches!(result, Err(Error::PermitMismatch)));
+}
+
+// 검증: E33
+#[tokio::test]
+async fn unbound_permit_is_refused_on_the_sell_retry() {
+    let bench = Bench::new().await;
+    let id = bench.holding().await;
+    let _ = bench
+        .exec
+        .sell(bench.sell(id, SellPurpose::StopLoss, "10", "69000"))
+        .await;
+
+    let result = bench
+        .exec
+        .retry_sell(id, bench.unbound_permit(Side::Sell, "10", "69000"))
+        .await;
+
+    assert!(matches!(result, Err(Error::PermitMismatch)));
 }

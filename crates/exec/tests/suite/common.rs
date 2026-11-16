@@ -301,8 +301,20 @@ impl Bench {
         self.store.get_trade(id).unwrap()
     }
 
-    /// 이 계좌의 점검 통과 표시(삼성전자 지정가).
-    pub fn permit(&self, side: Side, quantity: &str, price: &str) -> CheckPermit {
+    /// 이 계좌의 점검 통과 표시(삼성전자 지정가). 그 매매에 묶인 표시다.
+    pub fn permit(
+        &self,
+        trade_id: TradeId,
+        side: Side,
+        quantity: &str,
+        price: &str,
+    ) -> CheckPermit {
+        self.authority
+            .approve_for_trade(trade_id.0, approved(side, quantity, price))
+    }
+
+    /// 어느 매매에도 묶이지 않은 점검 표시(옛 길).
+    pub fn unbound_permit(&self, side: Side, quantity: &str, price: &str) -> CheckPermit {
         self.authority.approve(approved(side, quantity, price))
     }
 
@@ -310,7 +322,7 @@ impl Bench {
     pub fn buy(&self, trade_id: TradeId, quantity: &str, price: &str) -> Submission {
         Submission {
             trade_id,
-            permit: self.permit(Side::Buy, quantity, price),
+            permit: self.permit(trade_id, Side::Buy, quantity, price),
             template_account: AccountKind::Paper,
             approval: None,
             timeout: UnfilledTimeout::SCALP,
@@ -327,7 +339,7 @@ impl Bench {
     ) -> SellSubmission {
         SellSubmission {
             trade_id,
-            permit: self.permit(Side::Sell, quantity, price),
+            permit: self.permit(trade_id, Side::Sell, quantity, price),
             purpose,
             timeout: UnfilledTimeout::SCALP,
         }

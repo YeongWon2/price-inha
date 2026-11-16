@@ -104,7 +104,7 @@ async fn permit_for_another_symbol_is_refused_before_saving() {
         account_kind: AccountKind::Paper,
     };
     let submission = Submission {
-        permit: bench.authority.approve(other),
+        permit: bench.authority.approve_for_trade(id.0, other),
         ..bench.buy(id, "10", "70000")
     };
 
@@ -121,7 +121,7 @@ async fn sell_permit_on_the_buy_path_is_refused() {
     let bench = Bench::new().await;
     let id = bench.judged();
     let submission = Submission {
-        permit: bench.permit(Side::Sell, "10", "70000"),
+        permit: bench.permit(id, Side::Sell, "10", "70000"),
         ..bench.buy(id, "10", "70000")
     };
 
@@ -139,7 +139,7 @@ async fn permit_from_another_account_is_rejected_by_the_broker() {
     let id = bench.judged();
     let (_other, foreign) = PaperBroker::open(config()).unwrap();
     let submission = Submission {
-        permit: foreign.approve(approved(Side::Buy, "10", "70000")),
+        permit: foreign.approve_for_trade(id.0, approved(Side::Buy, "10", "70000")),
         ..bench.buy(id, "10", "70000")
     };
 
@@ -272,4 +272,21 @@ async fn broker_silence_is_an_anomaly_stop() {
     assert!(bench.orders(OrderGroup::Open).await.is_empty());
     assert_eq!(bench.trade(id).state, TradeState::Blocked);
     assert!(bench.exec.guards().is_empty());
+}
+
+// 검증: E33
+#[tokio::test]
+async fn unbound_permit_is_refused_on_the_buy_path() {
+    let bench = Bench::new().await;
+    let id = bench.judged();
+    let submission = Submission {
+        permit: bench.unbound_permit(Side::Buy, "10", "70000"),
+        ..bench.buy(id, "10", "70000")
+    };
+
+    let result = bench.exec.submit(submission).await;
+
+    assert!(matches!(result, Err(Error::PermitMismatch)));
+    assert_eq!(bench.trade(id).state, TradeState::Judged);
+    assert!(bench.orders(OrderGroup::Open).await.is_empty());
 }
