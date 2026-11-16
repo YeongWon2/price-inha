@@ -58,6 +58,12 @@ pub struct SearchOutput {
 impl SearchOutput {
     /// 적중한 **매매 기록**(종류가 `trade`)의 기록 키를 순위 순서로, 겹치지 않게(V22: 담당의 판단 기록에 남길 것).
     pub fn trade_refs(&self) -> Vec<String> {
-        todo!()
+        let mut seen: Vec<String> = Vec::new();
+        for hit in self.results.iter().filter(|h| h.kind == "trade") {
+            if !seen.contains(&hit.record_ref) {
+                seen.push(hit.record_ref.clone());
+            }
+        }
+        seen
     }
 }

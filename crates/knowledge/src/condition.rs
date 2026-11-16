@@ -38,3 +38,21 @@ pub struct Condition {
     /// 가장 많이 줄 개수. `None`이면 설정의 기본 개수.
     pub max: Option<usize>,
 }
+
+impl Condition {
+    /// 매매가 모든 조건에 맞는가(정한 것만 본다. 손익 조건이 있는데 손익을 모르면 맞지 않는다).
+    pub(crate) fn matches(&self, trade: &TradeRecord) -> bool {
+        let symbol_ok = self.symbol.as_ref().is_none_or(|s| *s == trade.symbol);
+        let from_ok = self.from.is_none_or(|t| trade.closed_at.0 >= t.0);
+        let to_ok = self.to.is_none_or(|t| trade.closed_at.0 <= t.0);
+        let pnl_needed = self.min_pnl.is_some() || self.max_pnl.is_some();
+        let pnl_ok = match trade.pnl {
+            None => !pnl_needed,
+            Some(pnl) => {
+                self.min_pnl.is_none_or(|min| pnl >= min)
+                    && self.max_pnl.is_none_or(|max| pnl <= max)
+            }
+        };
+        symbol_ok && from_ok && to_ok && pnl_ok
+    }
+}
