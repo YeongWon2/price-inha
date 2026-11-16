@@ -18,9 +18,12 @@
 
 mod bundle;
 mod error;
+mod remote;
 mod restore;
 mod retention;
 mod run;
+mod sqlite;
+mod status;
 
 pub use bundle::{Bundle, BundleFile, Manifest, ManifestFile, open, seal, sha256_hex, verify};
 pub use error::{BackupError, BundleProblem, FailureKind};

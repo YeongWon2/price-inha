@@ -3,9 +3,9 @@
 use std::path::Path;
 
 use pi_secrets::SecretString;
-use pi_store::{RestoreOutcome, UnixMillis};
+use pi_store::{RestoreOutcome, Store, UnixMillis};
 
-use crate::{BackupError, Manifest};
+use crate::{BackupError, Manifest, SNAPSHOT_FILE, open, verify};
 
 /// 되살리기 결과. identity는 담지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,5 +32,50 @@ pub fn restore(
     target: &Path,
     at: UnixMillis,
 ) -> Result<RestoreReport, BackupError> {
-    todo!()
+    ensure_empty(target)?;
+    let bundle = open(encrypted, identity)?;
+    verify(&bundle)?;
+
+    std::fs::create_dir_all(target).map_err(|e| BackupError::io(target, e))?;
+    for file in &bundle.files {
+        // 검증에서 경로가 한 조각임을 확인했다.
+        let path = target.join(&file.path);
+        write_new(&path, &file.bytes)?;
+    }
+    let store = Store::open(target.join(SNAPSHOT_FILE))?;
+    let outcome = store.mark_restored(at)?;
+    Ok(RestoreReport {
+        manifest: bundle.manifest,
+        outcome,
+    })
+}
+
+/// 대상이 없거나 빈 폴더인가. 파일이거나 무언가 들어 있으면 [`BackupError::TargetNotEmpty`].
+fn ensure_empty(target: &Path) -> Result<(), BackupError> {
+    let meta = match std::fs::symlink_metadata(target) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(BackupError::io(target, e)),
+    };
+    if !meta.is_dir() {
+        return Err(BackupError::TargetNotEmpty(target.to_owned()));
+    }
+    let mut entries = std::fs::read_dir(target).map_err(|e| BackupError::io(target, e))?;
+    if entries.next().is_some() {
+        return Err(BackupError::TargetNotEmpty(target.to_owned()));
+    }
+    Ok(())
+}
+
+/// 새 파일로만 쓴다(있으면 덮어쓰지 않는다). Unix에서는 처음부터 0600이다.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(path).map_err(|e| BackupError::io(path, e))?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|e| BackupError::io(path, e))
 }

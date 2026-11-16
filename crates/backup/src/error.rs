@@ -103,6 +103,25 @@ pub enum FailureKind {
 impl BackupError {
     /// 이 오류의 실패 종류.
     pub fn kind(&self) -> FailureKind {
-        todo!()
+        match self {
+            BackupError::TokenMissing => FailureKind::TokenMissing,
+            BackupError::SecretFound => FailureKind::SecretFound,
+            BackupError::Store(_) | BackupError::InvalidBundle(_) => FailureKind::Snapshot,
+            BackupError::Encrypt => FailureKind::Encrypt,
+            BackupError::Remote { .. } | BackupError::InvalidRepo => FailureKind::Upload,
+            BackupError::SizeMismatch { .. } => FailureKind::SizeMismatch,
+            BackupError::Secrets(_)
+            | BackupError::Decrypt
+            | BackupError::TargetNotEmpty(_)
+            | BackupError::Io { .. } => FailureKind::Local,
+        }
+    }
+
+    /// 파일 오류를 만든다.
+    pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        BackupError::Io {
+            path: path.into(),
+            source,
+        }
     }
 }
