@@ -31,6 +31,7 @@ const UNKNOWN_FAILURE: &str = "unknown";
 /// 바꾸는 일은 한 번에 하나씩 차례로 한다(이벤트 번호의 순서가 바뀐 순서와 같다).
 /// 응답 객체는 그 이벤트가 나간 뒤에야 바뀐다: 포트가 실패하면 응답은 그대로다.
 /// 담당 모습은 "마지막으로 낸 모습"을 쥐므로, 내지 못한 모습은 다음 바꿈 때 다시 낸다.
+/// 말하기 · 생각 시작 · 끝내기는 응답 이벤트가 나갔으면 성공이다(담당 모습 이벤트가 실패해도 오류가 아니다).
 pub struct Office {
     sink: Arc<dyn EventSink>,
     clock: Arc<dyn Clock>,
@@ -161,6 +162,13 @@ impl Office {
         Ok(seqs)
     }
 
+    /// 응답 이벤트가 나간 뒤 담당 모습을 맞춘다. 응답은 이미 들어갔으므로 모습 이벤트가 실패해도
+    /// 오류로 돌려주지 않는다: "마지막으로 낸 모습"이 그대로라 다음 바꿈 때 다시 낸다.
+    /// `turn`을 쥔 채로 부른다.
+    async fn sync_views_after(&self, agents: &[Agent]) {
+        let _ = self.sync_views(agents).await;
+    }
+
     /// 응답 객체를 이벤트로 낸 뒤에 상태에 반영한다. `turn`을 쥔 채로 부른다.
     async fn publish_response(&self, response: &ChatResponse) -> Result<(), Error> {
         self.publish(EVENT_CHAT, response.to_json()).await?;
@@ -235,7 +243,7 @@ impl Office {
             }
         };
         self.publish_response(&response).await?;
-        self.sync_views(&[agent]).await?;
+        self.sync_views_after(&[agent]).await;
         Ok(response)
     }
 
@@ -263,7 +271,7 @@ impl Office {
         response.status = ChatStatus::Thinking;
         response.updated_at = next_stamp(self.clock.now(), response.updated_at);
         self.publish_response(&response).await?;
-        self.sync_views(&[agent]).await?;
+        self.sync_views_after(&[agent]).await;
         Ok(Some(response))
     }
 
@@ -284,7 +292,7 @@ impl Office {
     async fn finish(&self, mut response: ChatResponse) -> Result<ChatResponse, Error> {
         response.updated_at = next_stamp(self.clock.now(), response.updated_at);
         self.publish_response(&response).await?;
-        self.sync_views(&[response.agent]).await?;
+        self.sync_views_after(&[response.agent]).await;
         Ok(response)
     }
 

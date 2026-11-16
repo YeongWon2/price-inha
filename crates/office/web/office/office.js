@@ -105,7 +105,14 @@ function linesOf(key) {
   return state.lines.get(key);
 }
 
-function trim(lines) { if (lines.length > KEEP_LINES) { lines.splice(0, lines.length - KEEP_LINES); } }
+/** 줄이 넘치면 오래된 줄을 버린다. 버린 줄의 응답이 끝난 것(complete · failed)이면 응답 표에서도 지운다(오래 켠 탭). */
+function trim(lines) {
+  if (lines.length <= KEEP_LINES) { return; }
+  for (const line of lines.splice(0, lines.length - KEEP_LINES)) {
+    const status = line.kind === "resp" ? state.responses.get(line.requestId)?.status : null;
+    if (status === "complete" || status === "failed") { state.responses.delete(line.requestId); }
+  }
+}
 
 /** 응답 객체는 requestId별로 updatedAt이 크거나 같은 것만 받아 덮어쓴다(늦게 온 옛 상태는 버린다). */
 function applyChat(resp) {
