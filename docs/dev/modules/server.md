@@ -72,3 +72,9 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - `team/tools.rs`의 `submit_order_draft`가 `OrderDraft.ai_quantity` · `ai_price`를 rules 요청에 넘긴다(P7 작은 쪽, 지금은 None).
 - 실행 파일에 백업 설정(저장소 이름 · 수신자 공개키) 화면, 원격 기기의 키 입력용 작은 공개 쪽, 지식 검색을 에이전트 도구로 등록, 종목 → DART 고유번호 표 채우기.
 - V47 하루 시험에 tracing 출력과 백업 묶음도 넣는다. 사무실 채팅 간격 표(`sent`)를 오래된 것부터 지운다.
+
+### 후보 일괄 처리 때 다른 모듈에서 넘어온 것 (5차)
+- 손절 감시 조립: 시세마다 `exec.stop_hits` → `stop_draft` → `rules::check` → `issue` → `sell(StopLoss)`. 이상 감지 뒤 팀 상태 바꾸기.
+- 되살리기를 `pi_backup::restore_in`으로 옮겨 임시 폴더를 넘긴다.
+- journal · agent가 가린 글만 knowledge에 넘기는지 확인(M7). 자동 회상은 `recall_by_condition`.
+- 손절 주문 안은 시장가 · 상품 모름(exec 3차 결정). agent가 AI 손절값을 통화 최소 단위(미국 센트)로 넣는지 확인.
