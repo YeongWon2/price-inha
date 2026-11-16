@@ -143,10 +143,9 @@ pub struct Executor {
     state: Mutex<State>,
 }
 
-/// 표시가 다른 매매에 묶이지 않았는가(E33). 묶이지 않은 표시(`pi_rules::issue`)는 아직 받는다:
-/// 조립하는 쪽이 `pi_rules::issue_for_trade`로 옮기기 전까지의 옛 길이다.
+/// 표시가 이 매매에 묶여 있는가(E33). 묶이지 않은 표시도 받지 않는다.
 fn fits_trade(permit: &CheckPermit, trade: TradeId) -> bool {
-    permit.trade().is_none_or(|bound| bound == trade.0)
+    permit.trade() == Some(trade.0)
 }
 
 impl std::fmt::Debug for Executor {
