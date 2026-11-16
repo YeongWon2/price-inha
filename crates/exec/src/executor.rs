@@ -1,19 +1,23 @@
 //! 주문 실행기 (C10 · E12 · E13 · E16 · E25 · E29 · E30 · E33 · V6).
 
-use std::sync::Arc;
+mod run;
+
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use pi_market::{Clock, Market, Quote, Symbol};
 use pi_paper::{
-    AccountKind, ApprovedOrder, CheckAuthority, CheckPermit, OrderId, PaperBroker, PaperConfig,
-    UnfilledTimeout,
+    AccountKind, ApprovedOrder, Broker, CheckAuthority, CheckPermit, OrderGroup, OrderId,
+    PaperBroker, PaperConfig, Side, Snapshot, UnfilledTimeout,
 };
 use pi_rules::ApprovalGrant;
 use pi_store::{Amount, Store, TradeId, TradeState};
 use rust_decimal::Decimal;
 
 use crate::error::Error;
+use crate::track::{State, apply, block_unfilled, buy_key, millis, parse_key};
+use run::{SellAttempt, classify, order_request, paper_kind};
 
 /// 파는 주문이 실패한 뒤 처음 다시 낼 때까지의 간격(E30). 실패할 때마다 두 배가 된다.
 pub const SELL_RETRY_FIRST: Duration = Duration::from_secs(1);
@@ -124,6 +128,8 @@ pub struct Executor {
     store: Store,
     /// 시계.
     clock: Arc<dyn Clock>,
+    /// 안쪽 상태(준비됨 · 보유 장부 · 다시 낼 파는 주문 · 구독 · 마지막 스냅샷).
+    state: Mutex<State>,
 }
 
 impl std::fmt::Debug for Executor {
@@ -139,24 +145,44 @@ impl Executor {
     ///
     /// 연 직후에는 [`Executor::ready`]가 거짓이다. [`Executor::reconcile`]을 마쳐야 새 주문을 받는다.
     /// 스냅샷이 말이 안 되면 [`Error::Snapshot`]이고 새 계좌로 열지 않는다.
+    /// 되살릴 때 증권사를 부르지 않는다(계좌 상태가 스냅샷 그대로다).
     pub fn open(
         config: PaperConfig,
         store: Store,
         clock: Arc<dyn Clock>,
     ) -> Result<(Executor, CheckAuthority), Error> {
-        let _ = (config, store, clock);
-        todo!()
+        let (broker, authority, saved) = match store.latest_paper_snapshot()? {
+            Some(saved) => {
+                let snapshot: Snapshot = serde_json::from_value(saved.state)
+                    .map_err(|e| Error::Snapshot(e.to_string()))?;
+                let (broker, authority) = PaperBroker::restore(config, snapshot)
+                    .map_err(|e| Error::Snapshot(e.to_string()))?;
+                let restored = broker.snapshot();
+                (broker, authority, Some(restored))
+            }
+            None => {
+                let (broker, authority) = PaperBroker::open(config).map_err(Error::Rejected)?;
+                (broker, authority, None)
+            }
+        };
+        let events = broker.subscribe();
+        let executor = Executor {
+            broker: Arc::new(broker),
+            store,
+            clock,
+            state: Mutex::new(State::new(events, saved)),
+        };
+        Ok((executor, authority))
     }
 
     /// 모의계좌. 조립하는 쪽은 달력 · 기준가를 여기에 넣는다.
     pub fn broker(&self) -> &PaperBroker {
-        let _ = (&self.broker, &self.store, &self.clock);
-        todo!()
+        &self.broker
     }
 
     /// 새 주문을 받을 수 있는가(E16). 열고 나서 [`Executor::reconcile`]을 마치기 전에는 거짓이다.
     pub fn ready(&self) -> bool {
-        todo!()
+        self.lock().ready
     }
 
     /// 저장소의 주문됨 매매와 증권사 주문 목록을 맞춰 본다(E16). 끝나면 [`Executor::ready`]가 참이다.
@@ -166,7 +192,55 @@ impl Executor {
     /// - 증권사에 주문이 없거나 하나도 체결되지 않고 끝났으면 막힘(미체결 취소)으로 옮기고 이유를 남긴다.
     /// - 보유중인 매매의 손절 감시도 되살린다.
     pub async fn reconcile(&self) -> Result<Reconciled, Error> {
-        todo!()
+        let now = self.clock.now();
+        let at = millis(now);
+        let broker: &dyn Broker = self.broker.as_ref();
+        let mut orders = broker
+            .orders(OrderGroup::Open, None, now)
+            .await
+            .map_err(classify)?;
+        orders.extend(
+            broker
+                .orders(OrderGroup::Closed, None, now)
+                .await
+                .map_err(classify)?,
+        );
+        let mut result = Reconciled::default();
+        let mut changes = Vec::new();
+        let mut state = self.lock();
+        state.positions.clear();
+        for trade in self.store.trades_in_state(TradeState::Ordered)? {
+            let key = buy_key(trade.id);
+            let buy = orders
+                .iter()
+                .find(|o| o.client_order_id.as_deref() == Some(key.as_str()));
+            let Some(order) = buy else {
+                let detail = "미체결 취소: 다시 켠 뒤 맞춰 보니 증권사에 이 매매의 주문이 없음";
+                block_unfilled(&self.store, trade.id, detail.to_string(), at, &mut changes)?;
+                result.blocked.push(trade.id);
+                continue;
+            };
+            apply(&self.store, &mut state, order, at, &mut changes)?;
+            match self.store.get_trade(trade.id)?.state {
+                TradeState::Holding => result.holding.push(trade.id),
+                TradeState::Blocked => result.blocked.push(trade.id),
+                _ => result.open.push(trade.id),
+            }
+        }
+        for trade in self.store.trades_in_state(TradeState::Holding)? {
+            for side in [Side::Buy, Side::Sell] {
+                let mine = orders.iter().filter(|o| {
+                    o.client_order_id.as_deref().and_then(parse_key) == Some((trade.id, side))
+                });
+                for order in mine {
+                    apply(&self.store, &mut state, order, at, &mut changes)?;
+                }
+            }
+        }
+        state.ready = true;
+        drop(state);
+        self.persist()?;
+        Ok(result)
     }
 
     /// 사는 주문을 낸다(C10). 돌려주는 값은 증권사 주문 식별자다.
@@ -179,8 +253,45 @@ impl Executor {
     /// 증권사가 받지 않으면 매매를 막힘(미체결 취소, 이유 남김)으로 옮기고: 받지 않음 · 응답 없음은
     /// [`Error::AnomalyStop`](E13), 그 밖은 [`Error::Rejected`](점검 표시가 다름 E33 등).
     pub async fn submit(&self, submission: Submission) -> Result<OrderId, Error> {
-        let _ = submission;
-        todo!()
+        let now = self.clock.now();
+        if !self.ready() {
+            return Err(Error::NotReady);
+        }
+        let id = submission.trade_id;
+        let trade = self.store.get_trade(id)?;
+        let approved = submission.permit.approved().clone();
+        self.check_account(submission.template_account)?;
+        self.check_account(paper_kind(trade.account))?;
+        self.check_account(approved.account_kind)?;
+        if approved.symbol.as_str() != trade.symbol || approved.side != Side::Buy {
+            return Err(Error::PermitMismatch);
+        }
+        if trade.state == TradeState::AwaitingApproval && submission.approval.is_none() {
+            return Err(Error::ApprovalRequired);
+        }
+        self.store
+            .transition_trade(id, TradeState::Ordered, millis(now))?;
+        let confirm = submission.approval.is_some();
+        let request = order_request(
+            &approved,
+            buy_key(id),
+            submission.timeout,
+            confirm,
+            submission.permit,
+        );
+        let placed = self.broker.place_order(request, now).await;
+        match placed {
+            Ok(ack) => {
+                self.persist()?;
+                Ok(ack.order_id)
+            }
+            Err(e) => {
+                let detail = format!("미체결 취소: 증권사가 주문을 받지 않음({e})");
+                block_unfilled(&self.store, id, detail, millis(now), &mut Vec::new())?;
+                self.persist()?;
+                Err(classify(e))
+            }
+        }
     }
 
     /// 파는 주문을 낸다. 손절 · 청산은 먼저 같은 종목의 열린 파는 주문을 취소한다.
@@ -188,8 +299,28 @@ impl Executor {
     /// 증권사가 받지 않거나 응답하지 않으면 [`Error::AnomalyStop`]이고, 그 주문은 다시 내기를
     /// 기다리는 것([`Executor::pending_sells`])으로 남는다(E30). 매매는 보유중 그대로다.
     pub async fn sell(&self, submission: SellSubmission) -> Result<OrderId, Error> {
-        let _ = submission;
-        todo!()
+        if !self.ready() {
+            return Err(Error::NotReady);
+        }
+        let id = submission.trade_id;
+        let trade = self.store.get_trade(id)?;
+        if trade.state != TradeState::Holding {
+            return Err(Error::NotHolding(trade.state));
+        }
+        let approved = submission.permit.approved().clone();
+        self.check_account(paper_kind(trade.account))?;
+        self.check_account(approved.account_kind)?;
+        if approved.symbol.as_str() != trade.symbol || approved.side != Side::Sell {
+            return Err(Error::PermitMismatch);
+        }
+        let attempt = SellAttempt {
+            trade_id: id,
+            purpose: submission.purpose,
+            order: approved,
+            timeout: submission.timeout,
+            failed_before: 0,
+        };
+        self.send_sell(attempt, submission.permit).await
     }
 
     /// 실패한 파는 주문을 새 표시로 다시 낸다(E30). 표시 내용은 처음 내용과 같아야 한다.
@@ -204,18 +335,48 @@ impl Executor {
         trade_id: TradeId,
         permit: CheckPermit,
     ) -> Result<OrderId, Error> {
-        let _ = (trade_id, permit);
-        todo!()
+        if !self.ready() {
+            return Err(Error::NotReady);
+        }
+        let pending = self.lock().pending.get(&trade_id).cloned();
+        let Some((retry, timeout)) = pending else {
+            return Err(Error::NoPendingSell(trade_id));
+        };
+        if permit.approved() != &retry.order {
+            return Err(Error::PermitMismatch);
+        }
+        if self.clock.now() < retry.retry_at {
+            return Err(Error::RetryNotDue {
+                retry_at: retry.retry_at,
+            });
+        }
+        let state = self.store.get_trade(trade_id)?.state;
+        if state != TradeState::Holding {
+            self.lock().pending.remove(&trade_id);
+            return Err(Error::NotHolding(state));
+        }
+        let attempt = SellAttempt {
+            trade_id,
+            purpose: retry.purpose,
+            order: retry.order,
+            timeout,
+            failed_before: retry.attempts,
+        };
+        self.send_sell(attempt, permit).await
     }
 
     /// 다시 내기를 기다리는 파는 주문들. 매매 번호 순서다.
     pub fn pending_sells(&self) -> Vec<SellRetry> {
-        todo!()
+        self.lock()
+            .pending
+            .values()
+            .map(|(retry, _)| retry.clone())
+            .collect()
     }
 
     /// 손절 감시 자리들. 매매 번호 순서다.
     pub fn guards(&self) -> Vec<Guard> {
-        todo!()
+        self.lock().guards()
     }
 
     /// 시세를 모의계좌에 넘기고 생긴 체결 알림을 매매 전이로 옮긴다.
@@ -227,12 +388,15 @@ impl Executor {
     ///
     /// 바뀐 것이 있으면 계좌 스냅샷을 저장한다.
     pub fn on_quote(&self, quote: &Quote) -> Result<Vec<TradeChange>, Error> {
-        let _ = quote;
-        todo!()
+        let now = self.clock.now();
+        let events = self.broker.on_quote(quote, now);
+        self.absorb(events, now)
     }
 
     /// 시간이 흐른 것을 모의계좌에 알리고(마감 취소) 생긴 알림을 [`Executor::on_quote`]와 같이 옮긴다.
     pub fn on_time(&self) -> Result<Vec<TradeChange>, Error> {
-        todo!()
+        let now = self.clock.now();
+        let events = self.broker.on_time(now);
+        self.absorb(events, now)
     }
 }
