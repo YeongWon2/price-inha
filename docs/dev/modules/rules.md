@@ -66,3 +66,7 @@ AI 호출, 승인 요청 만들기(approval), 주문 내기(exec), 저장, 시�
 ## 필수 번호
 
 C9 E10 E11 E18 E20 E21 E23 E24 E31 E33 E34 N6 V17 V24 V25 V26 P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P12 P13
+
+## 3차 작업 (후보 일괄 처리)
+
+- 점검 통과 표시를 매매 번호에 묶는 길: `issue_for_trade(&CheckAuthority, Passed, 매매 번호) -> CheckPermit`. 내용은 `issue`와 같고 표시가 그 매매 번호를 지닌다(paper `CheckPermit::trade`). `OrderDraft`는 매매 번호를 받지 않는다(공개 칸을 더하면 기존 쓰는 곳이 깨진다). `issue`는 그대로 둔다.
