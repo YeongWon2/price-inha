@@ -19,6 +19,9 @@
 //! 3차(2차 검토의 참고):
 //! - `round3`: 3차 1~6 패닉한 깨우기 · 기다리지 않는 가져가기와 run의 비우기 · 중간에 빠진 tick의 되살릴 회차 ·
 //!   실행 중인 작업의 대기 계산 · 되살린 회차의 `pending_slot` · 시세를 받는 동안 쓰기 잠금
+//!
+//! 4차(3차 검토의 참고):
+//! - `round4`: 4차 1~3 바깥 작업 안의 패닉 · 취소된 `settle` · 일반 발사의 `pending_slot` 지우기
 
 mod support;
 
@@ -31,6 +34,7 @@ mod queue;
 mod restart;
 mod revive;
 mod round3;
+mod round4;
 mod schedule;
 mod store;
 mod timer;
