@@ -10,7 +10,7 @@ use crate::remote::Remote;
 use crate::{
     BackupError, Bundle, BundleFile, FailureKind, MANIFEST_VERSION, Manifest, ManifestFile,
     REMOTE_DIR, SNAPSHOT_FILE, backup_file_name, parse_backup_file_name, plan_retention, seal,
-    sha256_hex, status, verify,
+    sha256_hex, status,
 };
 
 /// 백업 설정. 저장소 이름과 토큰은 사용자가 화면에서 등록한다(결정 2026-11-16 23번).
@@ -119,13 +119,18 @@ impl Backup {
     /// 실패하면 상태에 실패와 "다시 올림"을 남기고 알림 요구와 함께 돌려준다. 오래된 백업은 지우지 않는다
     /// (온전한 백업 뒤에만 지운다).
     pub async fn run(&self, now: UnixMillis) -> Result<BackupReport, BackupFailure> {
-        let report = match self.attempt(now).await {
-            Ok(report) => report,
+        let (report, retention_failed) = match self.attempt(now).await {
+            Ok(done) => done,
             Err(error) => return Err(self.fail(now, error)),
         };
         let mut recorded = self.status().unwrap_or_default();
         recorded.last_success = Some(now);
         recorded.retry_pending = false;
+        // 올리기는 성공했다. 보존 지우기만 실패했으면 따로 남기고 다시 올리지 않는다.
+        recorded.last_retention_failure = retention_failed.then_some(LastFailure {
+            at: now,
+            kind: FailureKind::Retention,
+        });
         match status::write(&self.settings.local_dir, &recorded) {
             Ok(()) => Ok(report),
             Err(error) => Err(self.fail(now, error)),
@@ -151,7 +156,8 @@ impl Backup {
         }
     }
 
-    async fn attempt(&self, now: UnixMillis) -> Result<BackupReport, BackupError> {
+    /// 올리기까지 해낸 결과와, 보존 지우기가 실패했는지.
+    async fn attempt(&self, now: UnixMillis) -> Result<(BackupReport, bool), BackupError> {
         let token = self.token()?;
         let (manifest, sealed) = self.prepare(now)?;
         let remote = Remote::new(&self.settings.api_base, &self.settings.repo, token)?;
@@ -163,14 +169,18 @@ impl Backup {
             return Err(BackupError::SizeMismatch { sent, stored });
         }
         self.write_local(&name, &sealed)?;
-        let removed = self.apply_retention(&remote, now).await?;
-        Ok(BackupReport {
+        let (removed, retention_failed) = match self.apply_retention(&remote, now).await {
+            Ok(removed) => (removed, false),
+            Err(_) => (Vec::new(), true),
+        };
+        let report = BackupReport {
             at: now,
             remote_path,
             size: stored,
             manifest,
             removed,
-        })
+        };
+        Ok((report, retention_failed))
     }
 
     fn token(&self) -> Result<SecretString, BackupError> {
@@ -216,7 +226,7 @@ impl Backup {
         {
             return Err(BackupError::SecretFound);
         }
-        verify(&bundle)?;
+        crate::bundle::verify_in(&bundle, root)?;
         let sealed = seal(&bundle, &self.settings.recipient)?;
         Ok((bundle.manifest, sealed))
     }
@@ -240,7 +250,9 @@ impl Backup {
         times.extend(local_times);
         times.push(now);
         let plan = plan_retention(&times);
-        for &at in &plan.remove {
+        // 시계가 뒤로 가 더 새 이름의 파일이 있어도 이번에 올린 백업은 지우지 않는다.
+        let removable: Vec<UnixMillis> = plan.remove.into_iter().filter(|&at| at != now).collect();
+        for &at in &removable {
             for found in remote_backups.iter().filter(|b| b.at == at) {
                 remote.delete(&found.path, &found.sha).await?;
             }
@@ -251,7 +263,7 @@ impl Backup {
                 Err(e) => return Err(BackupError::io(local, e)),
             }
         }
-        Ok(plan.remove)
+        Ok(removable)
     }
 }
 

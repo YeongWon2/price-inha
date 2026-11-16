@@ -3,14 +3,18 @@
 //! 먼저 SQLite 파일 머리말(이름표 · 쪽 크기 · 파일 길이 · 첫 쪽 모양)을 보고, 통과하면 잠깐 만든 폴더에
 //! 사본을 두고 [`pi_store::Store::open`]으로 열어 본다. 사본 폴더는 끝나면 지운다.
 
+use std::path::Path;
+
 use pi_store::Store;
 
 const MAGIC: &[u8; 16] = b"SQLite format 3\0";
 const HEADER_LEN: usize = 100;
 
 /// 온전한 저장소 파일인가.
-pub(crate) fn is_sound(bytes: &[u8]) -> bool {
-    header_ok(bytes) && opens(bytes)
+///
+/// `temp_root`가 있으면 열어 보는 사본을 그 안(0700 폴더)에만 두고 끝나면 지운다. 없으면 시스템 임시 폴더.
+pub(crate) fn is_sound(bytes: &[u8], temp_root: Option<&Path>) -> bool {
+    header_ok(bytes) && opens(bytes, temp_root)
 }
 
 /// SQLite 파일 머리말과 길이가 맞는가.
@@ -39,8 +43,12 @@ fn header_ok(bytes: &[u8]) -> bool {
 }
 
 /// 잠깐 만든 폴더에 사본을 두고 저장소로 열린다.
-fn opens(bytes: &[u8]) -> bool {
-    let Ok(dir) = tempfile::tempdir() else {
+fn opens(bytes: &[u8], temp_root: Option<&Path>) -> bool {
+    let made = match temp_root {
+        Some(root) => tempfile::Builder::new().prefix("verify-").tempdir_in(root),
+        None => tempfile::tempdir(),
+    };
+    let Ok(dir) = made else {
         return false;
     };
     let path = dir.path().join(crate::SNAPSHOT_FILE);

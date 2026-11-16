@@ -15,6 +15,8 @@ struct WireStatus {
     last_success: Option<i64>,
     last_failure: Option<WireFailure>,
     retry_pending: bool,
+    #[serde(default)]
+    last_retention_failure: Option<WireFailure>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,27 +65,30 @@ pub(crate) fn read(dir: &Path) -> Result<BackupStatus, BackupError> {
             std::io::Error::new(std::io::ErrorKind::InvalidData, e),
         )
     })?;
+    let failure = |f: WireFailure| LastFailure {
+        at: UnixMillis(f.at),
+        kind: kind_from(&f.kind),
+    };
     Ok(BackupStatus {
         last_success: wire.last_success.map(UnixMillis),
-        last_failure: wire.last_failure.map(|f| LastFailure {
-            at: UnixMillis(f.at),
-            kind: kind_from(&f.kind),
-        }),
+        last_failure: wire.last_failure.map(failure),
         retry_pending: wire.retry_pending,
-        last_retention_failure: None,
+        last_retention_failure: wire.last_retention_failure.map(failure),
     })
 }
 
 /// 상태를 쓴다(임시 파일에 쓰고 바꿔 넣는다).
 pub(crate) fn write(dir: &Path, status: &BackupStatus) -> Result<(), BackupError> {
     std::fs::create_dir_all(dir).map_err(|e| BackupError::io(dir, e))?;
+    let failure = |f: LastFailure| WireFailure {
+        at: f.at.0,
+        kind: kind_code(f.kind).to_owned(),
+    };
     let wire = WireStatus {
         last_success: status.last_success.map(|t| t.0),
-        last_failure: status.last_failure.map(|f| WireFailure {
-            at: f.at.0,
-            kind: kind_code(f.kind).to_owned(),
-        }),
+        last_failure: status.last_failure.map(failure),
         retry_pending: status.retry_pending,
+        last_retention_failure: status.last_retention_failure.map(failure),
     };
     let bytes = serde_json::to_vec_pretty(&wire)
         .map_err(|e| BackupError::io(dir, std::io::Error::other(e)))?;
@@ -108,6 +113,7 @@ mod tests {
             FailureKind::Upload,
             FailureKind::SizeMismatch,
             FailureKind::Local,
+            FailureKind::Retention,
         ] {
             assert_eq!(kind_from(kind_code(kind)), kind);
         }

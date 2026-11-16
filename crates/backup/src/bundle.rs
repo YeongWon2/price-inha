@@ -94,10 +94,15 @@ pub fn open(encrypted: &[u8], identity: &SecretString) -> Result<Bundle, BackupE
 /// 판 번호 → 경로(상대 경로 한 조각만) → manifest가 말한 파일이 다 있는가 → manifest에 없는 파일이
 /// 없는가 → 크기 · SHA-256 → [`crate::SNAPSHOT_FILE`]이 있는가 → 그 스냅샷이 온전한 SQLite 저장소인가.
 pub fn verify(bundle: &Bundle) -> Result<(), BackupError> {
-    check(bundle).map_err(BackupError::InvalidBundle)
+    check(bundle, None).map_err(BackupError::InvalidBundle)
 }
 
-fn check(bundle: &Bundle) -> Result<(), BundleProblem> {
+/// [`verify`]와 같되 저장소 사본을 `temp_root` 안에만 둔다(시스템 임시 폴더에 평문을 두지 않는다).
+pub(crate) fn verify_in(bundle: &Bundle, temp_root: &Path) -> Result<(), BackupError> {
+    check(bundle, Some(temp_root)).map_err(BackupError::InvalidBundle)
+}
+
+fn check(bundle: &Bundle, temp_root: Option<&Path>) -> Result<(), BundleProblem> {
     let manifest = &bundle.manifest;
     if manifest.version != crate::MANIFEST_VERSION {
         return Err(BundleProblem::UnsupportedVersion(manifest.version));
@@ -138,7 +143,7 @@ fn check(bundle: &Bundle) -> Result<(), BundleProblem> {
     let Some(snapshot) = held.get(crate::SNAPSHOT_FILE) else {
         return Err(BundleProblem::MissingSnapshot);
     };
-    if !crate::sqlite::is_sound(&snapshot.bytes) {
+    if !crate::sqlite::is_sound(&snapshot.bytes, temp_root) {
         return Err(BundleProblem::CorruptDatabase);
     }
     Ok(())
