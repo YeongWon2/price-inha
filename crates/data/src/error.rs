@@ -91,8 +91,24 @@ pub enum DataError {
 }
 
 impl DataError {
-    /// 같은 요청을 나중에 다시 하면 될 수도 있는 실패인가 (뼈대: 구현은 N2).
+    /// 같은 요청을 나중에 다시 하면 될 수도 있는 실패인가 (조립 · trigger가 다시 시도를 가른다).
+    ///
+    /// `true`: 시간 초과 · 요청 한도 · 닿지 않음(연결 실패 · 5xx).
+    /// `false`: 다시 해도 같은 실패(키 없음 · 키 거절 · 거절 · 형식 · 요청 오류 · 잘림 · 키 읽기 오류 ·
+    /// 기본 주소 오류)와 주소 오류(404 · 3xx로 닿지 않음).
     pub fn is_retryable(&self) -> bool {
-        false
+        match self {
+            Self::Timeout { .. } | Self::RateLimited { .. } => true,
+            Self::Unreachable { detail, .. } => !is_address_error(detail),
+            _ => false,
+        }
     }
+}
+
+/// 닿지 않음의 `detail`이 주소를 고쳐야 풀리는 HTTP 상태(404 · 3xx)인가.
+fn is_address_error(detail: &str) -> bool {
+    detail
+        .strip_prefix("HTTP ")
+        .and_then(|code| code.parse::<u16>().ok())
+        .is_some_and(|code| code == 404 || (300..400).contains(&code))
 }

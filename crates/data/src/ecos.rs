@@ -149,6 +149,10 @@ pub(crate) async fn series(
         .ok_or_else(|| format_error(ORIGIN, "StatisticSearch.row가 없습니다"))?;
     let rows: Vec<Row> = serde_json::from_value(rows.clone())
         .map_err(|_| format_error(ORIGIN, "행 모양이 다릅니다"))?;
+    // 전체 행 수를 모르면(칸이 없거나 수가 아님) 받은 행이 상한과 같을 때 더 있을 수 있다고 본다.
+    if total.is_none() && u64::try_from(rows.len()).is_ok_and(|received| received >= MAX_ROWS) {
+        return Err(DataError::Truncated { origin: ORIGIN });
+    }
     let subject = format!("{}/{}", series.stat_code, series.item_code);
     let facts = rows
         .into_iter()
