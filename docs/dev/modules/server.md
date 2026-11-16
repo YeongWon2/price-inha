@@ -78,3 +78,7 @@ D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
 - 되살리기를 `pi_backup::restore_in`으로 옮겨 임시 폴더를 넘긴다.
 - journal · agent가 가린 글만 knowledge에 넘기는지 확인(M7). 자동 회상은 `recall_by_condition`.
 - 손절 주문 안은 시장가 · 상품 모름(exec 3차 결정). agent가 AI 손절값을 통화 최소 단위(미국 센트)로 넣는지 확인.
+- `Notifier::release_held()`를 조용한 시간이 끝날 때와 구독이 생길 때 부른다.
+- 폰 화면이 가정한 경로(/api/push/key, /api/push/subscribe, /api/notices, /api/approvals/{id}/approve|reject, /api/daily-summary)를 서버 경로와 맞춘다.
+- 사무실 스냅샷은 `last_seq`를 먼저 읽고 `agents()` · `pending_responses()`를 읽는다.
+- notify 시험용 `redirect_to`를 시험 전용 feature로 묶는다(server Cargo.toml · 시험).
