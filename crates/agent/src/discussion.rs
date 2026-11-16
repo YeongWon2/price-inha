@@ -89,7 +89,14 @@ pub enum WatchReason {
 impl WatchReason {
     /// 방 로그에 남기는 까닭 코드.
     pub fn code(&self) -> &'static str {
-        todo!()
+        match self {
+            WatchReason::MissingData(_) => "missing_data",
+            WatchReason::RoleUnavailable(_) => "role_unavailable",
+            WatchReason::DiscussionBounded => "discussion_bounded",
+            WatchReason::ConsensusBelow { .. } => "consensus_below",
+            WatchReason::RationaleIncomplete => "rationale_incomplete",
+            WatchReason::LeaderWatch { .. } => "leader_watch",
+        }
     }
 }
 

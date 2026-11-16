@@ -4,6 +4,8 @@
 
 use pi_store::RoleScore;
 
+use crate::action::find_object_with;
+
 /// 담당 점수의 가장 작은 값.
 pub const SCORE_MIN: i32 = 0;
 /// 담당 점수의 가장 큰 값.
@@ -14,20 +16,33 @@ pub const SCORE_MAX: i32 = 100;
 /// `reason`이 없거나 글이 아니거나 공백뿐이다.
 /// 되면 `(점수, 앞뒤 공백을 뗀 근거)`.
 pub fn parse_score(text: &str) -> Option<(i32, String)> {
-    let _ = text;
-    todo!()
+    let object = find_object_with(text, "score")?;
+    let score = object.get("score")?.as_i64()?;
+    if !(i64::from(SCORE_MIN)..=i64::from(SCORE_MAX)).contains(&score) {
+        return None;
+    }
+    let reason = object.get("reason")?.as_str()?.trim();
+    if reason.is_empty() {
+        return None;
+    }
+    Some((i32::try_from(score).ok()?, reason.to_string()))
 }
 
 /// 합의 점수: 담당 점수를 모두 더한 값("담당들이 매긴 점수를 합쳐", spec 조건표).
 /// 점수가 하나도 없으면 `None`(합의 불가).
 pub fn consensus(scores: &[RoleScore]) -> Option<i32> {
-    let _ = scores;
-    todo!()
+    if scores.is_empty() {
+        return None;
+    }
+    Some(
+        scores
+            .iter()
+            .fold(0i32, |sum, scored| sum.saturating_add(scored.score)),
+    )
 }
 
 /// 합의 점수가 템플릿 기준을 넘는가. 넘어야(`consensus > required`) 참이다.
 /// 같으면 넘지 못한 것이다(E27, 보수적으로 읽음).
 pub fn exceeds_threshold(consensus: i32, required: i32) -> bool {
-    let _ = (consensus, required);
-    todo!()
+    consensus > required
 }

@@ -7,11 +7,15 @@
 mod action;
 mod discussion;
 pub mod error;
+mod floor;
 mod ports;
+mod prompt;
 mod role;
+mod roomlog;
 mod score;
 mod team;
 mod turn;
+mod verdict;
 
 pub use action::{ActionCall, Reply, find_object_with, parse_reply};
 pub use discussion::{

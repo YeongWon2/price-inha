@@ -40,13 +40,20 @@ impl Role {
 
     /// 담당 id(`scout` · `strategy` · `risk` · `review` · `trader` · `leader`).
     pub fn id(self) -> &'static str {
-        todo!()
+        match self {
+            Role::Scout => "scout",
+            Role::Strategy => "strategy",
+            Role::Risk => "risk",
+            Role::Review => "review",
+            Role::Trader => "trader",
+            Role::Leader => "leader",
+        }
     }
 
     /// id로 담당을 찾는다. 앞뒤 공백 · 대소문자는 보지 않는다. 모르는 id면 `None`.
     pub fn from_id(id: &str) -> Option<Role> {
-        let _ = id;
-        todo!()
+        let wanted = id.trim().to_ascii_lowercase();
+        Role::ALL.into_iter().find(|role| role.id() == wanted)
     }
 }
 
@@ -83,8 +90,10 @@ impl TimeLimits {
 
     /// 자리에 맞는 시간 제한.
     pub fn for_mode(mode: TurnMode) -> TimeLimits {
-        let _ = mode;
-        todo!()
+        match mode {
+            TurnMode::Market => TimeLimits::MARKET,
+            TurnMode::Chat => TimeLimits::CHAT,
+        }
     }
 }
 
@@ -107,7 +116,12 @@ impl RoleConfig {
     /// 기본값으로 만든다: SOUL 빈 글, 반복 상한 [`DEFAULT_MAX_ITERATIONS`],
     /// 최대 토큰 [`DEFAULT_MAX_TOKENS`].
     pub fn new(role: Role, model: impl Into<String>) -> RoleConfig {
-        let _ = (role, model.into());
-        todo!()
+        RoleConfig {
+            role,
+            model: model.into(),
+            soul: String::new(),
+            max_iterations: DEFAULT_MAX_ITERATIONS,
+            max_tokens: DEFAULT_MAX_TOKENS,
+        }
     }
 }
