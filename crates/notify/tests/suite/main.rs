@@ -5,6 +5,7 @@ mod common;
 
 mod crypto;
 mod kind;
+mod link;
 mod notices;
 mod phone;
 mod quiet;
@@ -12,5 +13,6 @@ mod quiet_send;
 mod redact;
 mod send;
 mod send_fail;
+mod ssrf;
 mod subs;
 mod vapid;

@@ -54,6 +54,18 @@ impl HttpTransport {
         })
     }
 
+    /// [`HttpTransport::new`]와 같되 이름 해석기를 받는다(`new`는 [`crate::SystemResolver`]).
+    /// 보낼 때마다 [`crate::pin_endpoint`]로 구독 주소를 검사하고, 내부망이면 보내지 않고
+    /// [`Error::InternalAddress`]를 돌려준다. 접속은 검사한 주소로만 한다(reqwest `resolve_to_addrs`).
+    /// 리다이렉트는 따라가지 않는다.
+    pub fn with_resolver(
+        request_timeout: Duration,
+        resolver: std::sync::Arc<dyn crate::Resolver>,
+    ) -> Result<HttpTransport, Error> {
+        let _ = (request_timeout, resolver);
+        todo!()
+    }
+
     /// 시험용: 모든 요청의 scheme · host · port를 `base`로 바꿔 보낸다(경로 · 쿼리는 `endpoint` 것 그대로).
     /// 구독의 `endpoint`는 `https://`여야 하므로, 로컬 가짜 서버(http)로 보내려면 이 길이 필요하다.
     pub fn redirect_to(self, base: Url) -> HttpTransport {

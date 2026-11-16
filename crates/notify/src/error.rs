@@ -30,4 +30,7 @@ pub enum Error {
     /// 푸시 서비스로 보내는 길의 오류(연결 · 읽기). 응답 상태 코드는 오류가 아니다.
     #[error("보내기 오류: {0}")]
     Transport(String),
+    /// 구독 주소가 내부망(루프백 · 사설 · 링크 로컬 · ULA 등)을 가리켜 보내지 않았다(SSRF 막기).
+    #[error("내부망 주소라 보내지 않는다: {0}")]
+    InternalAddress(String),
 }

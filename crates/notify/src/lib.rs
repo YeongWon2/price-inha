@@ -8,6 +8,7 @@ pub mod error;
 
 mod clock;
 mod dispatch;
+mod guard;
 mod kind;
 mod notifier;
 mod phone;
@@ -18,10 +19,12 @@ mod webpush;
 
 pub use clock::{Clock, NoRedaction, Redactor};
 pub use error::Error;
+pub use guard::{PinnedTarget, Resolver, SystemResolver, is_internal_ip, pin_endpoint};
 pub use kind::{NoticeKind, Urgency};
 pub use notifier::{
     Attempt, AttemptOutcome, Delivery, FIRST_ATTEMPT_WITHIN_MS, HoldReason, MAX_PUSH_BODY_CHARS,
-    MAX_PUSH_TITLE_CHARS, NewNotice, NewSubscription, NoticeRecord, Notifier, NotifierConfig,
+    MAX_PUSH_LINK_CHARS, MAX_PUSH_TITLE_CHARS, NewNotice, NewSubscription, NoticeRecord, Notifier,
+    NotifierConfig,
 };
 pub use phone::{Asset, phone_asset, phone_assets};
 pub use quiet::QuietHours;

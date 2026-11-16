@@ -21,6 +21,12 @@ pub const MAX_PUSH_TITLE_CHARS: usize = 100;
 /// (이벤트에는 가린 전체 글이 남는다).
 pub const MAX_PUSH_BODY_CHARS: usize = 200;
 
+/// 푸시 주소(`link`, 글자 수)의 상한. 가린 주소가 이보다 길면 푸시에는 `link` 칸을 싣지 않는다
+/// (반쯤 자른 주소는 엉뚱한 곳을 연다). 이벤트에는 가린 전체 주소가 남는다.
+/// 제목 · 본문 · 주소가 모두 상한이고 글자마다 JSON 이스케이프가 가장 길어도(6바이트)
+/// 한 레코드([`crate::MAX_PLAINTEXT`])에 들어간다.
+pub const MAX_PUSH_LINK_CHARS: usize = 300;
+
 /// 보낼 알림 하나.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewNotice {
@@ -218,7 +224,8 @@ impl Notifier {
     /// 4. 아니면 모든 구독으로 **동시에** 한 번씩 보낸다. 지금(시계)을 첫 시도 시각으로 남긴다(구독이 없으면 `None`).
     ///    본문(암호화 전)은 JSON `{"kind","title","body","seq"}`에 주소가 있으면 `"link"`를 더한 것이다.
     ///    `kind`는 [`NoticeKind::name`], `seq`는 이벤트 번호, 제목 · 본문은 각각
-    ///    [`MAX_PUSH_TITLE_CHARS`] · [`MAX_PUSH_BODY_CHARS`]글자까지.
+    ///    [`MAX_PUSH_TITLE_CHARS`] · [`MAX_PUSH_BODY_CHARS`]글자까지. 주소가 [`MAX_PUSH_LINK_CHARS`]글자를
+    ///    넘으면 푸시에는 `link` 칸을 싣지 않는다.
     ///    머리글: `Authorization`(VAPID) · `Content-Encoding: aes128gcm` · `Content-Type: application/octet-stream`
     ///    · `TTL`(초, 양의 정수) · `Urgency`([`NoticeKind::urgency`]).
     ///    구독 하나가 느려도 다른 구독의 첫 시도를 늦추지 않는다.

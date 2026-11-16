@@ -170,3 +170,31 @@ fn 매니페스트는_설치할_수_있는_모양이고_아이콘이_묶음_안�
         assert!(phone_asset(src).is_some(), "{src}가 묶음에 없다");
     }
 }
+
+// 검증: V10
+#[test]
+fn 승인은_숫자를_치지_않고_카드의_지문을_그대로_보낸다() {
+    // 결정 4번: 지문 앞 6자리는 카드에 보이기만 하고, 사용자가 치지 않는다.
+    let html = text("index.html");
+    let js = text("app.js");
+    let field = html
+        .lines()
+        .find(|line| line.contains("<input") && line.contains("data-field=\"code\""))
+        .expect("6자리 코드 칸이 없다");
+    assert!(
+        field.contains("readonly"),
+        "코드 칸은 보이기만 한다: {field}"
+    );
+    assert!(!field.contains("one-time-code"), "입력을 받는 칸이 아니다");
+    assert!(!field.contains("pattern="), "입력 검사를 하지 않는다");
+    assert!(
+        !js.contains("[0-9]{6}"),
+        "6자리 숫자 입력을 강제하지 않는다"
+    );
+    assert!(!js.contains(".value.trim()"), "칸에 친 글자를 읽지 않는다");
+    assert!(js.contains("slice(0, 6)"), "지문 앞 6자리를 보인다");
+    assert!(
+        js.contains("fingerprint: card.dataset.fingerprint"),
+        "카드의 지문을 그대로 보낸다"
+    );
+}

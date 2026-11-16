@@ -137,3 +137,38 @@ fn 정한_임시_키와_소금의_길이가_틀리면_거절한다() {
         Err(Error::InvalidKey(_))
     ));
 }
+
+/// RFC 8291 부록 A의 값(base64url, 패딩 없음).
+mod rfc8291_appendix_a {
+    pub const PLAINTEXT: &str = "V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24";
+    pub const AS_PUBLIC: &str =
+        "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+    pub const AS_PRIVATE: &str = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
+    pub const UA_PUBLIC: &str =
+        "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+    pub const SALT: &str = "DGv6ra1nlYgDCS1FRnbzlw";
+    pub const AUTH_SECRET: &str = "BTBZMqHH6r4Tts7J_aSIgg";
+    pub const BODY: &str = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN";
+}
+
+// 검증: N5
+#[test]
+fn 표준_부록_a의_시험값과_한_바이트도_다르지_않다() {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use rfc8291_appendix_a as a;
+
+    let b64 = |text: &str| URL_SAFE_NO_PAD.decode(text).unwrap();
+    let plaintext = b64(a::PLAINTEXT);
+    assert_eq!(plaintext, b"When I grow up, I want to be a watermelon");
+    let body = encrypt_aes128gcm_with(
+        &plaintext,
+        &b64(a::UA_PUBLIC),
+        &b64(a::AUTH_SECRET),
+        &b64(a::AS_PRIVATE),
+        &b64(a::SALT),
+    )
+    .unwrap();
+    assert_eq!(URL_SAFE_NO_PAD.encode(&body), a::BODY);
+    assert_eq!(&body[21..86], b64(a::AS_PUBLIC).as_slice());
+}

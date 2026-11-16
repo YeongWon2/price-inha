@@ -44,6 +44,8 @@ impl VapidKey {
     /// (폴더가 없으면 만든다). 있으면 그대로 읽고 파일을 바꾸지 않는다(다시 열어도 같은 키).
     /// 권한이 0600보다 넓으면 0600으로 좁힌다. 파일 내용이 키가 아니면 [`Error::InvalidKey`]이고
     /// 파일을 덮어쓰지 않는다. 읽고 쓰지 못하면 [`Error::KeyFile`].
+    /// 새 키는 같은 폴더의 임시 파일(0600)에 다 쓴 뒤 이름을 바꿔 둔다(쓰다 꺼져도 빈 키 파일이 남지 않는다).
+    /// 키 파일이 비었거나 공백뿐이면(예전에 쓰다 꺼진 흔적) 없는 것으로 보고 새로 만든다.
     pub fn load_or_create(secret_dir: &Path) -> Result<VapidKey, Error> {
         fs::create_dir_all(secret_dir)
             .map_err(|e| Error::KeyFile(format!("비밀 폴더를 만들지 못했다: {}", e.kind())))?;

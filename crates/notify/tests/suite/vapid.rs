@@ -149,3 +149,51 @@ fn 디버그_출력에_비밀_값이_나오지_않는다() {
     assert!(!secret.is_empty());
     assert!(!format!("{key:?}").contains(secret));
 }
+
+// 검증: N5
+#[test]
+fn 쓰다_꺼져_빈_키_파일이_남았으면_새로_만들고_다시_켜면_같은_키다() {
+    for leftover in ["", "\n", "  \n"] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(VAPID_KEY_FILE);
+        fs::write(&file, leftover).unwrap();
+        let first = VapidKey::load_or_create(dir.path()).unwrap();
+        let written = fs::read_to_string(&file).unwrap();
+        assert!(!written.trim().is_empty(), "새 키를 썼다");
+        let second = VapidKey::load_or_create(dir.path()).unwrap();
+        assert_eq!(first.public_key(), second.public_key());
+    }
+}
+
+#[cfg(unix)]
+// 검증: N5
+#[test]
+fn 빈_키_파일을_새로_채워도_0600이다() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(VAPID_KEY_FILE);
+    fs::write(&file, "").unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    VapidKey::load_or_create(dir.path()).unwrap();
+    assert_eq!(
+        fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+// 검증: N5
+#[test]
+fn 키를_만든_뒤_비밀_폴더에는_키_파일_하나만_남는다() {
+    let dir = tempfile::tempdir().unwrap();
+    VapidKey::load_or_create(dir.path()).unwrap();
+    let names: Vec<String> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec![VAPID_KEY_FILE.to_owned()],
+        "임시 파일이 남지 않는다"
+    );
+}
