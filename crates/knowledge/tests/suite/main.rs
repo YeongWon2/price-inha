@@ -7,5 +7,6 @@ mod index;
 mod keyword;
 mod recall;
 mod reindex;
+mod repair;
 mod semantic;
 mod tool;

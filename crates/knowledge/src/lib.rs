@@ -201,6 +201,15 @@ impl Knowledge {
         })
     }
 
+    /// 자동 회상용 조건 찾기. [`Knowledge::search_by_condition`]과 같되 바깥 자료는 나오지 않는다(M7).
+    pub fn recall_by_condition(
+        &self,
+        condition: &Condition,
+        catalog: &dyn TradeCatalog,
+    ) -> Result<SearchOutput, Error> {
+        self.search_by_condition(condition, catalog)
+    }
+
     /// 뜻 검색. 임베딩 포트가 없으면 오류가 아니라 빈 결과와 [`SemanticStatus::Unavailable`]
     /// (`code = "no_embedder"`)를 돌려주고 바깥 요청을 하지 않는다(V23).
     pub async fn semantic_search(
