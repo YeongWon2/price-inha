@@ -92,7 +92,7 @@ impl Crew {
             .map(|quote| format!(" · 현재가 {}", quote.price.normalize()))
             .unwrap_or_default();
         let mut data = gathered.items.clone();
-        data.extend(self.recall(symbol, topic, trade.id));
+        data.extend(self.recall(symbol, topic, trade.id).await);
         let request = DiscussionRequest {
             room: format!("{TRADE_ROOM_PREFIX}{}", trade.id.0),
             trade: trade.id,

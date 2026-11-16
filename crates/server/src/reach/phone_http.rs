@@ -101,7 +101,12 @@ async fn subscribe(State(phone): State<Arc<Phone>>, body: Bytes) -> Response {
         device: text("device").chars().take(60).collect(),
     };
     match phone.linked.notifier.subscribe(new) {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            // 구독이 없어 못 보낸 미룬 알림을 이 구독으로 보낸다.
+            let linked = Arc::clone(&phone.linked);
+            tokio::spawn(async move { linked.release_held().await });
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(_) => refuse(StatusCode::BAD_REQUEST, "invalid_input"),
     }
 }

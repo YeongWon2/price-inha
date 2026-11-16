@@ -213,6 +213,7 @@ impl Trading {
             marks: Mutex::new(marks),
             days: Mutex::new(days),
             waiting: Mutex::new(HashMap::new()),
+            stops: Mutex::new(HashMap::new()),
             team_turn: Mutex::new(()),
             publisher: OnceLock::new(),
             hooks: OnceLock::new(),

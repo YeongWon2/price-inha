@@ -16,7 +16,8 @@ use tokio::task::JoinHandle;
 use super::App;
 use crate::feed::StaleHook;
 use crate::reach::{
-    Linked, LockNotices, OfficeDesk, Phone, daily_summary, office_routes, phone_routes,
+    Linked, LockNotices, OfficeDesk, Phone, backup_routes, daily_summary, office_routes,
+    phone_routes,
 };
 use crate::team::CrewLinks;
 use crate::trading::Hooks;
@@ -24,6 +25,8 @@ use crate::{AppError, Crew, Launch, Reach, Settings, Trading, Wiring};
 
 /// 사무실이 팀 상태를 다시 보는 간격.
 const OFFICE_SYNC: Duration = Duration::from_millis(100);
+/// 미뤄 둔 알림을 다시 보내 볼 간격(앱 시계 기준). 조용한 시간이 끝나면 이 간격 안에 보낸다.
+const HELD_RELEASE_MS: i64 = 60_000;
 
 /// 3차 조립의 부품을 연다(`reach`가 없으면 없다).
 pub(super) fn open_linked(
@@ -59,7 +62,11 @@ pub(super) fn session_parts(
     });
     let alert: Arc<dyn LockAlert> = Arc::new(LockNotices(Arc::clone(linked)));
     (
-        Some(office_routes(desk).merge(phone_routes(phone))),
+        Some(
+            office_routes(desk)
+                .merge(phone_routes(phone))
+                .merge(backup_routes(Arc::clone(linked))),
+        ),
         Some(alert),
     )
 }
@@ -92,7 +99,7 @@ fn close_hook(
     Box::new(move |_date| {
         let (linked, trading, crew) = (Arc::clone(&linked), trading.clone(), crew.clone());
         tokio::spawn(async move {
-            if linked.backup.is_some()
+            if linked.backup().is_some()
                 && let Err(error) = linked.back_up().await
             {
                 tracing::warn!(%error, "마감 뒤 백업이 실패했습니다");
@@ -146,7 +153,8 @@ pub(super) fn stale_hook(linked: &Arc<Linked>) -> StaleHook {
     Arc::new(move |notice| linked.on_stale(notice))
 }
 
-/// 팀 상태가 바뀌면 사무실 모습을 맞춘다(V15). `stop`이 참이 되면 끝난다.
+/// 팀 상태가 바뀌면 사무실 모습을 맞춘다(V15). 조용한 시간이 끝났으면 미뤄 둔 알림을 보낸다
+/// ([`HELD_RELEASE_MS`]마다 본다, `Notifier::release_held`). `stop`이 참이 되면 끝난다.
 pub(super) fn spawn_office_sync(
     linked: &Arc<Linked>,
     store: Store,
@@ -155,7 +163,13 @@ pub(super) fn spawn_office_sync(
     let linked = Arc::clone(linked);
     tokio::spawn(async move {
         let mut shown = store.team_state().ok();
+        let mut released: Option<i64> = None;
         loop {
+            let now = linked.now().0;
+            if released.is_none_or(|at| now - at >= HELD_RELEASE_MS) {
+                released = Some(now);
+                linked.release_held().await;
+            }
             if let Ok(state) = store.team_state()
                 && shown != Some(state)
             {

@@ -16,16 +16,21 @@ use serde_json::{Value, json};
 use zeroize::Zeroize;
 
 use crate::desk::Desk;
-use crate::{SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal};
+use crate::{
+    REMOTE_KEYS_PATH, SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal,
+};
 
 /// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 더 읽지 않고
 /// 413 `body_too_large`로 거부한다(5차, 원본 Hermes api_server).
 const MAX_BODY_BYTES: usize = 16 * 1024;
 
-/// 세션이 있어야 열리는 경로: 설정 상태. `GateBuilder::protected_routes`에 끼운다.
+/// 세션이 있어야 열리는 경로: 설정 상태와 다른 기기의 키 등록([`REMOTE_KEYS_PATH`], 몸통 · 상한 · 답은
+/// [`SETUP_KEYS_PATH`]와 같다: 답은 등록 여부뿐, 키 값은 다시 보여 주지 않는다).
+/// `GateBuilder::protected_routes`에 끼운다.
 pub(crate) fn status_routes(desk: Arc<Desk>) -> Router {
     Router::new()
         .route(SETUP_PATH, get(status))
+        .route(REMOTE_KEYS_PATH, post(register_key))
         .with_state(desk)
 }
 

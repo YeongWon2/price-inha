@@ -25,7 +25,8 @@
 //!   (V22). 담당 도구 [`KNOWLEDGE_TOOL`]은 [`crate::Crew::search_knowledge`]와 같은 길이다. 바깥 요청은 없다(V23).
 //! - 백업(`pi_backup::Backup`, `reach.backup`이 있을 때): 하루 마감([`crate::KIND_DAY_CLOSE`])을 남긴 뒤 한 번
 //!   올린다(V48). 실패하면 백업 실패 알림을 내고 다음 마감에 다시 한다(E15). 토큰은 비밀 보관소의
-//!   `KeySlot::BackupGithubToken`이다. 되살리기는 `pi_backup::restore`로 빈 폴더에 하고, 되살린 폴더로 띄우면
+//!   `KeySlot::BackupGithubToken`이다. 저장소 · 공개키는 설정 화면([`SETUP_BACKUP_PATH`])이 바꾼다. 되살리기는
+//!   [`restore_backup`](`pi_backup::restore_in`, 작업 폴더는 그 옆)으로 빈 폴더에 하고, 되살린 폴더로 띄우면
 //!   팀은 전체 정지 · 승인은 만료이며 키를 다시 넣고 [`crate::TEAM_RESTART_PATH`]를 누르기 전에는 팀이 돌지
 //!   않는다(V51 · V52, C8 · C16).
 //!
@@ -42,7 +43,8 @@ mod phone_http;
 mod summary;
 
 pub(crate) use assets::routes as asset_routes;
-pub use backup_http::{SETUP_BACKUP_PATH, restore_backup};
+pub(crate) use backup_http::routes as backup_routes;
+pub use backup_http::{BACKUP_SETTINGS_FILE, SETUP_BACKUP_PATH, restore_backup};
 pub(crate) use linked::{Linked, LockNotices};
 pub(crate) use office_http::{OfficeDesk, routes as office_routes};
 pub(crate) use phone_http::{Phone, routes as phone_routes};

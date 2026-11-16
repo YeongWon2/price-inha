@@ -13,6 +13,7 @@ use pi_rules::{
 };
 use pi_store::{BlockReason, Trade, TradeId, TradeState};
 use pi_template::{RiskParams, UnfilledCancel};
+use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
 use super::answer::Waiting;
@@ -130,6 +131,11 @@ impl Trading {
         let trade = self.trade(request.trade_id)?;
         let now = self.clock.now();
         let purpose = request.draft.purpose;
+        if purpose == Purpose::StopLoss
+            && let Some(id) = self.stop_sent(trade.id).await
+        {
+            return Ok(Placed::Ordered(id));
+        }
         if let Some(reason) = self.rest_reason(now)
             && !matches!(purpose, Purpose::StopLoss | Purpose::Liquidation)
         {
@@ -147,7 +153,13 @@ impl Trading {
             Outcome::NeedsApproval(pending) => {
                 self.ask_approval(&trade, request, pending, &inputs.calendar)
             }
-            Outcome::Pass(passed) => self.execute(trade.id, purpose, passed, &params).await,
+            Outcome::Pass(passed) => {
+                let placed = self.execute(trade.id, purpose, passed, &params).await?;
+                if purpose == Purpose::StopLoss {
+                    self.note_stop(trade.id, &placed);
+                }
+                Ok(placed)
+            }
         }
     }
 
@@ -218,7 +230,8 @@ impl Trading {
         Ok(Placed::Blocked(blocked))
     }
 
-    /// 점검을 지난 주문을 낸다: 점검 통과 표시는 규칙 엔진의 길(`pi_rules::issue`)로만 받는다.
+    /// 점검을 지난 주문을 낸다: 점검 통과 표시는 규칙 엔진의 길(`pi_rules::issue_for_trade`)로만 받고
+    /// 그 매매에 묶는다(E33). 사는 주문은 규칙 엔진이 정한 수량을 매매에 남긴다(실행기가 대조한다).
     pub(super) async fn execute(
         &self,
         trade: TradeId,
@@ -227,9 +240,11 @@ impl Trading {
         params: &RiskParams,
     ) -> Result<Placed, TradingError> {
         let approval = passed.approval().cloned();
-        let permit = pi_rules::issue(&self.authority, passed);
+        let quantity = passed.order().quantity;
+        let permit = pi_rules::issue_for_trade(&self.authority, passed, trade.0);
         let timeout = timeout_of(params.unfilled_cancel);
         let sent = if purpose.is_buy() {
+            self.keep_quantity(trade, quantity)?;
             let submission = Submission {
                 trade_id: trade,
                 permit,
@@ -254,6 +269,20 @@ impl Trading {
                 Err(TradingError::Broker(error.to_string()))
             }
             Err(error) => Err(exec_text(error)),
+        }
+    }
+
+    /// 사는 수량을 매매에 남긴다. 승인이 붙어 바꿀 수 없으면 그대로 둔다(승인의 수량을 실행기가 대조한다).
+    fn keep_quantity(&self, trade: TradeId, quantity: Decimal) -> Result<(), TradingError> {
+        let Some(quantity) = quantity.trunc().to_u64() else {
+            return Ok(());
+        };
+        if self.store.trade_quantity(trade)? == Some(quantity) {
+            return Ok(());
+        }
+        match self.store.set_trade_quantity(trade, quantity) {
+            Ok(()) | Err(pi_store::StoreError::QuantityLocked { .. }) => Ok(()),
+            Err(error) => Err(error.into()),
         }
     }
 

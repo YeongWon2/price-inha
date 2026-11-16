@@ -121,6 +121,16 @@
       <span id="m-data" class="msg" aria-live="polite"></span>
       <p class="hint">아직 등록할 수 없음: 확인할 곳이 아직 없어 지금은 등록되지 않습니다. 없어도 시작합니다.</p>
     </div>
+    <div class="item">
+      <h3>백업 (선택) <span id="reg-backup" class="badge"></span></h3>
+      <label for="f-backup-repo">비공개 GitHub 저장소 (소유자/이름)</label>
+      <input id="f-backup-repo" data-backup="repo" type="text" autocomplete="off" spellcheck="false">
+      <label for="f-backup-recipient">age 수신자 공개키 (age1…)</label>
+      <input id="f-backup-recipient" data-backup="recipient" type="text" autocomplete="off" spellcheck="false">
+      <button id="b-backup" type="button">백업 설정 저장</button>
+      <span id="m-backup" class="msg" aria-live="polite"></span>
+      <p class="hint">GitHub 토큰은 키처럼 따로 등록합니다. 공개키만 넣고 비밀키는 넣지 않습니다.</p>
+    </div>
   </section>
 
   <section id="main-view">
@@ -154,6 +164,7 @@
   var SETUP_KEYS_PATH = "/api/setup/keys";
   var SETUP_SYMBOLS_PATH = "/api/setup/symbols";
   var SETUP_AI_PATH = "/api/setup/ai";
+  var SETUP_BACKUP_PATH = "/api/setup/backup";
   var RETRY_MIN_MS = 1000;
   var RETRY_MAX_MS = 10000;
   var MAX_EVENTS = 20;
@@ -551,7 +562,56 @@
     });
   }
 
+  function showBackup(view) {
+    var $repo = document.getElementById("f-backup-repo");
+    var $recipient = document.getElementById("f-backup-recipient");
+    if (view && view.configured) {
+      $repo.value = view.repo || "";
+      $recipient.value = view.recipient || "";
+    }
+    setText(document.getElementById("reg-backup"), view && view.configured ? "설정됨" : "설정 안 됨");
+  }
+
+  function loadBackup() {
+    fetch(SETUP_BACKUP_PATH, { credentials: "same-origin" })
+      .then(function (reply) { return reply.ok ? reply.json() : null; })
+      .then(function (view) { if (view) { showBackup(view); } })
+      .catch(function () { /* 다음에 다시 읽는다 */ });
+  }
+
+  function wireBackup() {
+    var $button = document.getElementById("b-backup");
+    var $message = document.getElementById("m-backup");
+    $button.addEventListener("click", function () {
+      var body = {
+        repo: document.getElementById("f-backup-repo").value.trim(),
+        recipient: document.getElementById("f-backup-recipient").value.trim()
+      };
+      $button.disabled = true;
+      fetch(SETUP_BACKUP_PATH, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      })
+        .then(function (reply) {
+          return reply.json().catch(function () { return null; }).then(function (data) {
+            if (reply.ok && data) {
+              showBackup(data);
+              setText($message, "저장했습니다");
+            } else {
+              setText($message, "저장소 이름(소유자/이름)이나 공개키(age1…)를 확인하세요");
+            }
+          });
+        })
+        .catch(function () { setText($message, "서버에 닿지 못했습니다"); })
+        .then(function () { $button.disabled = false; });
+    });
+    loadBackup();
+  }
+
   function wireSetup() {
+    wireBackup();
     wireKey("b-broker", "m-broker", "broker",
       { client_id: "f-client-id", client_secret: "f-client-secret" });
     wireKey("b-ai-key", "m-ai-key", "ai_api_key", { api_key: "f-api-key" });

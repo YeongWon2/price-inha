@@ -139,6 +139,8 @@ impl OfficeDesk {
         let now = self.linked.now();
         let gap = i64::try_from(OFFICE_SEND_INTERVAL.as_millis()).unwrap_or(i64::MAX);
         let mut sent = lock(&self.sent);
+        // 간격이 지난 기기는 지운다(오래된 것부터 쌓이지 않게).
+        sent.retain(|_, last| now.0 - last.0 < gap);
         if sent.get(&device).is_some_and(|last| now.0 - last.0 < gap) {
             return false;
         }

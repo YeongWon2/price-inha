@@ -118,10 +118,36 @@ impl Crew {
     }
 
     /// 종목 · 계기로 지난 매매 기록을 자동 회상해 논의 자료로 만든다(V22). 지금 매매는 뺀다.
-    pub(super) fn recall(&self, symbol: &str, topic: &str, current: TradeId) -> Vec<DataItem> {
+    ///
+    /// 먼저 같은 종목의 팔린 매매를 조건으로 찾고(`recall_by_condition`, 최근 것부터), 모자라면 종목 ·
+    /// 계기 낱말로 자동 회상(키워드)한다. 둘 다 바깥 자료의 조각은 넘기지 않는다(M7).
+    pub(super) async fn recall(
+        &self,
+        symbol: &str,
+        topic: &str,
+        current: TradeId,
+    ) -> Vec<DataItem> {
         let Some(links) = self.links.get() else {
             return Vec::new();
         };
+        let mut hits = Vec::new();
+        match self.trading.sold_records().await {
+            Ok(records) => {
+                let condition = Condition {
+                    symbol: Some(symbol.to_string()),
+                    max: Some(RECALL_MAX + 1),
+                    ..Condition::default()
+                };
+                match links
+                    .knowledge
+                    .recall_by_condition(&condition, &Records(records))
+                {
+                    Ok(found) => hits.extend(found.results),
+                    Err(error) => tracing::warn!(%error, "지난 매매를 조건으로 찾지 못했다"),
+                }
+            }
+            Err(error) => tracing::warn!(%error, "팔린 매매를 읽지 못했다"),
+        }
         let request = SearchRequest {
             text: format!("{symbol} {topic}"),
             kinds: vec![KnowledgeKind::Trade, KnowledgeKind::Review],
@@ -129,15 +155,12 @@ impl Crew {
             auto_recall: true,
             max: Some(RECALL_MAX * 2),
         };
-        let found = match links.knowledge.search(&request, self.now_ms()) {
-            Ok(found) => found,
-            Err(error) => {
-                tracing::warn!(%error, "지난 매매를 찾지 못했다");
-                return Vec::new();
-            }
-        };
+        match links.knowledge.search(&request, self.now_ms()) {
+            Ok(found) => hits.extend(found.results),
+            Err(error) => tracing::warn!(%error, "지난 매매를 찾지 못했다"),
+        }
         let mut items: Vec<DataItem> = Vec::new();
-        for hit in found.results {
+        for hit in hits {
             let name = format!("{RECALL_SOURCE_PREFIX}{}", hit.record_ref);
             if hit.record_ref == current.0.to_string() || items.iter().any(|i| i.name == name) {
                 continue;

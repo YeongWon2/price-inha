@@ -95,6 +95,11 @@ use crate::{AiStatus, AppError, SetupRefusal};
 pub const SETUP_PATH: &str = "/api/setup";
 /// 키를 등록하는 경로(`POST`). 세션 · 같은 출처 · 그 컴퓨터여야 한다.
 pub const SETUP_KEYS_PATH: &str = "/api/setup/keys";
+/// 다른 기기에서 키를 등록하는 경로(`POST`, 몸통은 [`SETUP_KEYS_PATH`]와 같다). 세션(TOTP 로그인) ·
+/// 같은 출처면 원격에서도 열린다. 답은 등록 여부뿐이고 키 값을 다시 보여 주지 않는다.
+pub const REMOTE_KEYS_PATH: &str = "/api/remote/keys";
+/// 다른 기기에서 키만 넣는 작은 화면(`GET`). 세션이 있어야 열린다(공개 경로가 아니다).
+pub const KEYS_PAGE_PATH: &str = "/keys";
 /// 지켜볼 종목을 등록하는 경로(`POST`). 세션 · 같은 출처 · 그 컴퓨터여야 한다.
 pub const SETUP_SYMBOLS_PATH: &str = "/api/setup/symbols";
 

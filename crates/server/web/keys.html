@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가격인하 · 키 등록</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 28rem; padding: 1rem; }
+  label { display: block; margin-top: .75rem; font-size: .9rem; }
+  input { box-sizing: border-box; width: 100%; padding: .5rem; font-size: 1rem; }
+  button { margin-top: .75rem; padding: .5rem 1rem; font-size: 1rem; }
+  .item { border-top: 1px solid #ddd; margin-top: 1rem; padding-top: .5rem; }
+  .msg { display: block; margin-top: .5rem; font-size: .9rem; }
+  .hint { color: #666; font-size: .85rem; }
+</style>
+</head>
+<body>
+  <h1>키 등록</h1>
+  <p class="hint">이 화면은 키를 저장만 합니다. 등록한 키 값은 다시 보여 주지 않습니다.</p>
+
+  <div class="item">
+    <h2>증권사 키</h2>
+    <label for="k-client-id">client_id</label>
+    <input id="k-client-id" type="password" autocomplete="new-password" spellcheck="false">
+    <label for="k-client-secret">client_secret</label>
+    <input id="k-client-secret" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-broker" type="button">증권사 키 등록</button>
+    <span id="k-broker-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>AI 키</h2>
+    <label for="k-api-key">api_key</label>
+    <input id="k-api-key" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-ai" type="button">AI 키 등록</button>
+    <span id="k-ai-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  var REMOTE_KEYS_PATH = "/api/remote/keys";
+  var REASONS = {
+    key_rejected: "키가 맞지 않습니다",
+    unreachable: "확인할 곳에 닿지 못했습니다",
+    invalid_input: "칸을 다시 확인하세요",
+    body_too_large: "값이 너무 깁니다",
+    save_failed: "저장하지 못했습니다"
+  };
+
+  function say(node, text) { node.textContent = String(text); }
+
+  function wire(buttonId, messageId, item, fields) {
+    var $button = document.getElementById(buttonId);
+    var $message = document.getElementById(messageId);
+    $button.addEventListener("click", function () {
+      var values = {};
+      var inputs = [];
+      Object.keys(fields).forEach(function (name) {
+        var input = document.getElementById(fields[name]);
+        values[name] = input.value;
+        inputs.push(input);
+      });
+      $button.disabled = true;
+      fetch(REMOTE_KEYS_PATH, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item: item, fields: values })
+      })
+        .then(function (reply) {
+          return reply.json().catch(function () { return null; }).then(function (data) {
+            if (reply.ok && data && data.registered) {
+              say($message, "등록했습니다");
+            } else if (reply.status === 401) {
+              say($message, "먼저 로그인하세요");
+            } else {
+              say($message, (data && REASONS[data.error]) || "등록하지 못했습니다");
+            }
+          });
+        })
+        .catch(function () { say($message, "서버에 닿지 못했습니다"); })
+        .then(function () {
+          inputs.forEach(function (input) { input.value = ""; });
+          values = null;
+          $button.disabled = false;
+        });
+    });
+  }
+
+  wire("k-broker", "k-broker-msg", "broker",
+    { client_id: "k-client-id", client_secret: "k-client-secret" });
+  wire("k-ai", "k-ai-msg", "ai_api_key", { api_key: "k-api-key" });
+})();
+</script>
+</body>
+</html>

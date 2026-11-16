@@ -210,12 +210,13 @@ impl Trading {
         }
     }
 
-    /// [`Trading::on_quote`]의 몸통: 모의계좌 체결 → 매매 상태 → 장부 → 손실 · 멈춤 판단.
+    /// [`Trading::on_quote`]의 몸통: 모의계좌 체결 → 매매 상태 → 손절 감시 → 장부 → 손실 · 멈춤 판단.
     pub(super) async fn take_quote(&self, quote: Quote) -> Result<(), TradingError> {
         self.remember(&quote);
         let now = self.clock.now();
         let _ = self.calendar(now);
         self.executor.on_quote(&quote).map_err(exec_text)?;
+        self.watch_stops(&quote).await;
         let books = self.books(now).await?;
         self.judge_losses(&books)
     }

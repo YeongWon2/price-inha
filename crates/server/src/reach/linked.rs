@@ -1,7 +1,7 @@
 //! 3차 조립의 부품 묶음: 알림 · 사무실 · 백업과 그 자리들(사무실 이벤트 포트 · 잠금 알림 · 이상 알림).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use async_trait::async_trait;
 use chrono::{FixedOffset, TimeZone};
@@ -14,7 +14,7 @@ use pi_secrets::SecretStore;
 use pi_store::{Store, UnixMillis};
 use serde_json::Value;
 
-use super::{BackupWiring, DEFAULT_PUSH_SUBJECT, PUSH_TIMEOUT, Reach};
+use super::{BackupWiring, DEFAULT_PUSH_SUBJECT, PUSH_TIMEOUT, Reach, backup_http};
 use crate::AppError;
 
 /// 시계 한 개를 여러 모듈의 시계 자리에 끼운다.
@@ -79,7 +79,9 @@ pub(crate) struct Linked {
     pub(crate) notifier: Arc<Notifier>,
     pub(crate) office: Arc<Office>,
     pub(crate) sink: Arc<LateSink>,
-    pub(crate) backup: Option<Backup>,
+    /// 백업 조립 값과 백업(설정 화면이 바꾼다).
+    backup: Mutex<Option<(BackupWiring, Arc<Backup>)>>,
+    store: Store,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) secrets: Arc<SecretStore>,
     /// 지켜보는 종목 가운데 늦은 것이 있다고 알렸는가.
@@ -141,15 +143,18 @@ impl Linked {
         let team = store.team_state()?;
         let office_sink: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
         let office = Office::new(team, office_sink, Arc::new(Clocked(Arc::clone(clock))));
-        let backup = reach
-            .backup
-            .map(|wiring| backup_of(wiring, store, secrets))
+        let backup = backup_http::effective(secrets.dir(), reach.backup)
+            .map(|wiring| {
+                let backup = backup_of(wiring.clone(), store, secrets)?;
+                Ok::<_, AppError>((wiring, Arc::new(backup)))
+            })
             .transpose()?;
         Ok(Linked {
             notifier: Arc::new(notifier),
             office: Arc::new(office),
             sink,
-            backup,
+            backup: Mutex::new(backup),
+            store: store.clone(),
             clock: Arc::clone(clock),
             secrets: Arc::clone(secrets),
             stale: AtomicBool::new(false),
@@ -221,9 +226,49 @@ impl Linked {
         self.notice_later(NoticeKind::Anomaly, "시세 이상".to_string(), body, None);
     }
 
+    /// 조용한 시간이 아니면 미뤄 둔 알림을 보낸다(구독이 생겼을 때 · 조용한 시간이 끝났을 때).
+    pub(crate) async fn release_held(&self) {
+        match self.notifier.release_held().await {
+            Ok(sent) if !sent.is_empty() => {
+                tracing::info!(count = sent.len(), "미뤄 둔 알림을 보냈습니다")
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "미뤄 둔 알림을 보내지 못했습니다"),
+        }
+    }
+
+    /// 지금의 백업(설정했으면).
+    pub(crate) fn backup(&self) -> Option<Arc<Backup>> {
+        let backup = self.backup.lock().unwrap_or_else(PoisonError::into_inner);
+        backup.as_ref().map(|(_, backup)| Arc::clone(backup))
+    }
+
+    /// 지금의 백업 조립 값(설정했으면).
+    pub(crate) fn backup_wiring(&self) -> Option<BackupWiring> {
+        let backup = self.backup.lock().unwrap_or_else(PoisonError::into_inner);
+        backup.as_ref().map(|(wiring, _)| wiring.clone())
+    }
+
+    /// 설정 화면이 저장소 · 공개키를 바꾼다: 파일에 남기고 다음 백업부터 쓴다. 값은 부르는 쪽이 검사했다.
+    pub(crate) fn set_backup(&self, repo: &str, recipient: &str) -> Result<BackupWiring, AppError> {
+        let api_base = self
+            .backup_wiring()
+            .map_or_else(|| backup_http::GITHUB_API_BASE.to_string(), |w| w.api_base);
+        let wiring = BackupWiring {
+            api_base,
+            repo: repo.to_string(),
+            recipient: recipient.to_string(),
+        };
+        let backup = backup_of(wiring.clone(), &self.store, &self.secrets)?;
+        backup_http::save(self.secrets.dir(), repo, recipient)?;
+        let mut held = self.backup.lock().unwrap_or_else(PoisonError::into_inner);
+        *held = Some((wiring.clone(), Arc::new(backup)));
+        Ok(wiring)
+    }
+
     /// 지금 한 번 백업한다. 실패하면 백업 실패 알림을 낸다(E15).
     pub(crate) async fn back_up(&self) -> Result<BackupReport, AppError> {
-        let backup = self.backup.as_ref().ok_or(AppError::BackupNotConfigured)?;
+        let backup = self.backup().ok_or(AppError::BackupNotConfigured)?;
         match backup.run(self.now()).await {
             Ok(report) => Ok(report),
             Err(failure) => {
@@ -238,7 +283,7 @@ impl Linked {
 
     /// 백업 상태.
     pub(crate) fn backup_status(&self) -> Result<BackupStatus, AppError> {
-        let backup = self.backup.as_ref().ok_or(AppError::BackupNotConfigured)?;
+        let backup = self.backup().ok_or(AppError::BackupNotConfigured)?;
         backup.status().map_err(|e| AppError::Backup(e.to_string()))
     }
 }

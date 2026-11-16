@@ -110,6 +110,7 @@ impl Crew {
             trading: Arc::clone(&trading),
             demo: demo.is_some(),
             placed: Mutex::new(HashMap::new()),
+            crew: std::sync::OnceLock::new(),
         });
         let ports = Ports {
             ai,
@@ -126,7 +127,7 @@ impl Crew {
         let client = DataClient::new(wiring.data.clone(), keys, data_clock)
             .map_err(|error| TeamError::Agent(error.to_string()))?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
-        Ok(Arc::new(Crew {
+        let crew = Arc::new(Crew {
             journal: Journal::new(store.clone()),
             store,
             clock,
@@ -144,7 +145,9 @@ impl Crew {
             review_turn: tokio::sync::Mutex::new(()),
             scan_turn: tokio::sync::Mutex::new(()),
             links: std::sync::OnceLock::new(),
-        }))
+        });
+        let _ = crew.tools.crew.set(Arc::downgrade(&crew));
+        Ok(crew)
     }
 
     /// 그 담당의 설정.

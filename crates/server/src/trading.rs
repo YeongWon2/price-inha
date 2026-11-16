@@ -20,6 +20,7 @@ mod http;
 mod link;
 mod marks;
 mod order;
+mod stop;
 mod templates;
 
 use std::collections::HashMap;
@@ -219,6 +220,8 @@ pub struct Trading {
     days: Mutex<DayLog>,
     /// 승인을 기다리는 주문 안(승인 번호 → 다시 점검할 것).
     waiting: Mutex<HashMap<String, Waiting>>,
+    /// 손절로 낸 파는 주문(매매 번호 → 주문 번호). 같은 매매의 손절을 두 번 내지 않는다(E30).
+    stops: Mutex<HashMap<TradeId, OrderId>>,
     /// 팀 상태를 읽고 바꾸는 일을 한 줄로 세운다.
     team_turn: Mutex<()>,
     /// 저장되는 이벤트를 내보내는 손잡이(접속 관문이 뜬 뒤에 붙는다).

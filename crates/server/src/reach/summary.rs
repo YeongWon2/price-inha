@@ -22,8 +22,7 @@ pub(crate) async fn daily_summary(
         None => Vec::new(),
     };
     let backup_at = linked
-        .backup
-        .as_ref()
+        .backup()
         .and_then(|_| linked.backup_status().ok())
         .and_then(|status| status.last_success);
     let backup = backup_at

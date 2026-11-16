@@ -118,13 +118,27 @@ pub struct TeamWiring {
     pub model: String,
 }
 
+/// 공식 조립이 아는 종목 → DART 고유번호(시가총액이 큰 국내 종목). 표에 없는 종목은 공시 · 재무를 받지
+/// 않는다(자료가 비어 지켜보기, E32). 다른 종목은 [`TeamWiring::corp_codes`]에 더한다.
+pub fn known_corp_codes() -> HashMap<Symbol, CorpCode> {
+    // 확인한 값만 둔다(틀린 번호는 다른 회사의 공시를 가져온다). 다른 종목은 corpCode.xml에서 찾아 더한다.
+    const KNOWN: [(&str, &str); 2] = [
+        ("005930", "00126380"), // 삼성전자
+        ("000660", "00164779"), // SK하이닉스
+    ];
+    KNOWN
+        .iter()
+        .filter_map(|(symbol, corp)| Some((Symbol::new(*symbol), CorpCode::parse(corp).ok()?)))
+        .collect()
+}
+
 impl TeamWiring {
-    /// 공식 주소 · 빈 고유번호 표 · 한국은행 기준금리(722Y001/0101000, 월) · 원/달러 환율(731Y001/0000001, 일) ·
+    /// 공식 주소 · 큰 종목의 고유번호 표([`known_corp_codes`]) · 한국은행 기준금리(722Y001/0101000, 월) · 원/달러 환율(731Y001/0000001, 일) ·
     /// 공시 7일 · [`DEFAULT_CONSENSUS_REQUIRED`] · 기본 일정 간격 · 모델 [`DEFAULT_TEAM_MODEL`].
     pub fn official() -> TeamWiring {
         TeamWiring {
             data: DataConfig::official(),
-            corp_codes: HashMap::new(),
+            corp_codes: known_corp_codes(),
             korea_rate: series("722Y001", "0101000", EcosCycle::Month),
             korea_fx: series("731Y001", "0000001", EcosCycle::Day),
             disclosure_days: 7,
