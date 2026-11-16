@@ -18,7 +18,7 @@ use pi_store::{Amount, Store, TradeId, TradeState};
 use rust_decimal::Decimal;
 
 use crate::error::Error;
-use crate::track::{State, apply, block_unfilled, buy_key, millis, parse_key};
+use crate::track::{State, adopt, apply, block_unfilled, buy_key, millis, parse_key};
 use crate::{grant, keep};
 use run::{SellAttempt, classify, order_request, paper_kind};
 
@@ -167,15 +167,26 @@ impl Executor {
                 let restored = keep::split(saved.state)?;
                 let (broker, authority) = PaperBroker::restore(config, restored.snapshot)
                     .map_err(|e| Error::Snapshot(e.to_string()))?;
-                let doc = keep::document(&broker.snapshot(), restored.seq, &restored.pending)?;
+                let doc = keep::document(
+                    &broker.snapshot(),
+                    restored.seq,
+                    &restored.pending,
+                    &restored.positions,
+                )?;
                 let events = broker.subscribe();
-                let state = State::new(events, Some(doc), restored.seq, restored.pending);
+                let state = State::new(
+                    events,
+                    Some(doc),
+                    restored.seq,
+                    restored.pending,
+                    restored.positions,
+                );
                 (broker, authority, state)
             }
             None => {
                 let (broker, authority) = PaperBroker::open(config).map_err(Error::Rejected)?;
                 let events = broker.subscribe();
-                let state = State::new(events, None, 0, Default::default());
+                let state = State::new(events, None, 0, Default::default(), Default::default());
                 (broker, authority, state)
             }
         };
@@ -209,6 +220,7 @@ impl Executor {
         let now = self.clock.now();
         let at = millis(now);
         let broker: &dyn Broker = self.broker.as_ref();
+        let holdings = broker.holdings(None, now).await.map_err(classify)?;
         let mut orders = broker
             .orders(OrderGroup::Open, None, now)
             .await
@@ -222,7 +234,6 @@ impl Executor {
         let mut result = Reconciled::default();
         let mut changes = Vec::new();
         let mut state = self.lock();
-        state.positions.clear();
         for trade in self.store.trades_in_state(TradeState::Ordered)? {
             let key = buy_key(trade.id);
             let buy = orders
@@ -241,7 +252,8 @@ impl Executor {
                 _ => result.open.push(trade.id),
             }
         }
-        for trade in self.store.trades_in_state(TradeState::Holding)? {
+        let held = self.store.trades_in_state(TradeState::Holding)?;
+        for trade in &held {
             for side in [Side::Buy, Side::Sell] {
                 let mine = orders.iter().filter(|o| {
                     o.client_order_id.as_deref().and_then(parse_key) == Some((trade.id, side))
@@ -251,6 +263,16 @@ impl Executor {
                 }
             }
         }
+        // 장부는 스냅샷에서 되살린 것 위에 더한다. 보유중이 아닌 매매의 장부는 버리고, 장부가 없는
+        // 보유 매매는 증권사 보유로 만든다(끝난 주문을 덜어 낸 뒤에도 감시가 남게).
+        state
+            .positions
+            .retain(|id, _| held.iter().any(|t| t.id == *id));
+        let orphans: Vec<_> = held
+            .into_iter()
+            .filter(|t| !state.positions.contains_key(&t.id))
+            .collect();
+        adopt(&mut state, &orphans, &holdings);
         state.ready = true;
         drop(state);
         self.persist()?;
@@ -335,11 +357,10 @@ impl Executor {
         }
         let key = {
             let mut state = self.lock();
-            // 장부에 없는 보유(맞춰 보기가 사는 주문을 못 찾은 것)는 막지 않는다: 손절은 어떤
-            // 멈춤에서도 받아야 하고, 계좌보다 많이 파는 것은 모의계좌가 막는다.
-            if let Some(remaining) = state.remaining(id)
-                && approved.quantity > remaining
-            {
+            // 장부는 스냅샷에서 되살리고, 없으면 맞춰 볼 때 증권사 보유로 만든다(3차). 그래도 없으면
+            // 남은 수량 0으로 본다(다른 매매 몫까지 팔지 않게).
+            let remaining = state.remaining(id).unwrap_or(Decimal::ZERO);
+            if approved.quantity > remaining {
                 return Err(Error::SellTooLarge { remaining });
             }
             state.sell_key(id, self.clock.now())

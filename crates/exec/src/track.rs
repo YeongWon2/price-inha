@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use pi_market::{Market, Symbol};
-use pi_paper::{CloseReason, Order, OrderEvent, OrderStatus, Side};
+use pi_paper::{CloseReason, Holding, Order, OrderEvent, OrderStatus, Side};
 use pi_store::{
     Amount, BlockKind, BlockReason, Store, StoreError, Trade, TradeId, TradeState, UnixMillis,
 };
@@ -23,23 +23,23 @@ use crate::keep::Pending;
 const KEY_PREFIX: &str = "pi-exec-";
 
 /// 보유중인 매매 하나의 수량 장부.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Position {
     /// 시장.
-    market: Market,
+    pub(crate) market: Market,
     /// 종목.
-    symbol: Symbol,
+    pub(crate) symbol: Symbol,
     /// 매매 근거의 손절값.
-    stop: Option<Amount>,
+    pub(crate) stop: Option<Amount>,
     /// 사는 주문의 누적 체결 수량.
-    bought: Decimal,
+    pub(crate) bought: Decimal,
     /// 파는 주문마다의 누적 체결 수량(주문 식별자 글자로).
-    sells: BTreeMap<String, Decimal>,
+    pub(crate) sells: BTreeMap<String, Decimal>,
 }
 
 impl Position {
     /// 체결된(아직 팔지 않은) 수량.
-    fn remaining(&self) -> Decimal {
+    pub(crate) fn remaining(&self) -> Decimal {
         self.bought - self.sells.values().copied().sum::<Decimal>()
     }
 }
@@ -68,10 +68,11 @@ impl State {
         saved: Option<serde_json::Value>,
         seq: u64,
         pending: BTreeMap<TradeId, Pending>,
+        positions: BTreeMap<TradeId, Position>,
     ) -> Self {
         Self {
             ready: false,
-            positions: BTreeMap::new(),
+            positions,
             pending,
             events,
             saved,
@@ -112,6 +113,37 @@ impl State {
             self.seq
         )
     }
+}
+
+/// 장부가 없는 보유 매매의 장부를 증권사 보유로 만든다(3차: 2차 이전 문서 · 끝난 주문을 덜어 낸 뒤).
+///
+/// 그 종목의 보유 수량에서 같은 종목의 장부 몫(남은 수량)을 뺀 것을 산 수량으로 본다(0 아래면 0).
+/// 장부가 없는 매매가 한 종목에 여럿이면 각자 그 남은 것 전부를 상한으로 본다(손절 감시가 사라지지
+/// 않게. 계좌보다 많이 파는 것은 모의계좌가 막는다).
+pub(crate) fn adopt(state: &mut State, orphans: &[Trade], holdings: &[Holding]) {
+    let mut fresh = Vec::new();
+    for trade in orphans {
+        let Some(held) = holdings.iter().find(|h| h.symbol.as_str() == trade.symbol) else {
+            continue;
+        };
+        let ledgered: Decimal = state
+            .positions
+            .values()
+            .filter(|p| p.market == held.market && p.symbol == held.symbol)
+            .map(Position::remaining)
+            .sum();
+        fresh.push((
+            trade.id,
+            Position {
+                market: held.market,
+                symbol: held.symbol.clone(),
+                stop: trade.rationale.stop,
+                bought: (held.quantity - ledgered).max(Decimal::ZERO),
+                sells: BTreeMap::new(),
+            },
+        ));
+    }
+    state.positions.extend(fresh);
 }
 
 /// 사는 주문 키.

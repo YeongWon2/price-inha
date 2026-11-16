@@ -1,20 +1,22 @@
 //! 저장소에 남기는 계좌 스냅샷 문서(V6 · E30).
 //!
 //! 문서는 모의계좌의 [`Snapshot`] JSON에 이 실행기의 몫을 `"pi_exec"` 이름 하나로 더한 것이다:
-//! 파는 주문 키의 순번과 다시 내기를 기다리는 파는 주문들(멱등성 키 포함). 되살릴 때 이 이름을
-//! 떼어 내고 나머지를 모의계좌 스냅샷으로 읽는다. 이름이 없으면(1차 문서) 기다리는 것이 없다.
+//! 파는 주문 키의 순번과 다시 내기를 기다리는 파는 주문들(멱등성 키 포함), 보유 장부(3차). 되살릴
+//! 때 이 이름을 떼어 내고 나머지를 모의계좌 스냅샷으로 읽는다. 이름이 없으면(1차 문서) 기다리는
+//! 것이 없고, 장부가 없으면(2차 문서) 맞춰 볼 때 증권사 보유로 만든다.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use pi_market::{Market, Symbol};
 use pi_paper::{AccountKind, ApprovedOrder, OrderType, Side, Snapshot, UnfilledTimeout};
-use pi_store::TradeId;
+use pi_store::{Amount, TradeId};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use crate::error::Error;
 use crate::executor::{SellPurpose, SellRetry};
+use crate::track::Position;
 
 /// 문서 안에서 이 실행기 몫의 이름.
 const EXEC_KEY: &str = "pi_exec";
@@ -38,6 +40,8 @@ pub(crate) struct Restored {
     pub(crate) seq: u64,
     /// 다시 내기를 기다리는 파는 주문들.
     pub(crate) pending: BTreeMap<TradeId, Pending>,
+    /// 보유 장부.
+    pub(crate) positions: BTreeMap<TradeId, Position>,
 }
 
 fn broken(what: &str) -> Error {
@@ -49,6 +53,7 @@ pub(crate) fn document(
     snapshot: &Snapshot,
     seq: u64,
     pending: &BTreeMap<TradeId, Pending>,
+    positions: &BTreeMap<TradeId, Position>,
 ) -> Result<Value, Error> {
     let mut doc = serde_json::to_value(snapshot).map_err(|e| Error::Snapshot(e.to_string()))?;
     let Value::Object(fields) = &mut doc else {
@@ -60,7 +65,14 @@ pub(crate) fn document(
     for item in pending.values() {
         list.push(encode(item)?);
     }
-    fields.insert(EXEC_KEY.to_string(), json!({"seq": seq, "pending": list}));
+    let mut ledger = Vec::new();
+    for (id, position) in positions {
+        ledger.push(encode_position(*id, position)?);
+    }
+    fields.insert(
+        EXEC_KEY.to_string(),
+        json!({"seq": seq, "pending": list, "positions": ledger}),
+    );
     Ok(doc)
 }
 
@@ -76,6 +88,7 @@ pub(crate) fn split(mut doc: Value) -> Result<Restored, Error> {
         snapshot,
         seq: 0,
         pending: BTreeMap::new(),
+        positions: BTreeMap::new(),
     };
     let Some(mine) = mine else {
         return Ok(restored);
@@ -92,18 +105,71 @@ pub(crate) fn split(mut doc: Value) -> Result<Restored, Error> {
         let pending = decode(item).ok_or_else(|| broken("pending"))?;
         restored.pending.insert(pending.retry.trade_id, pending);
     }
+    if let Some(ledger) = mine.get("positions") {
+        for item in ledger.as_array().ok_or_else(|| broken("positions"))? {
+            let (id, position) = decode_position(item).ok_or_else(|| broken("positions"))?;
+            restored.positions.insert(id, position);
+        }
+    }
     Ok(restored)
+}
+
+fn market_code(market: Market) -> Result<&'static str, Error> {
+    match market {
+        Market::Kr => Ok("kr"),
+        Market::Us => Ok("us"),
+        other => Err(Error::Snapshot(format!("모르는 시장: {other:?}"))),
+    }
+}
+
+fn market_from(code: &str) -> Option<Market> {
+    match code {
+        "kr" => Some(Market::Kr),
+        "us" => Some(Market::Us),
+        _ => None,
+    }
+}
+
+fn encode_position(id: TradeId, position: &Position) -> Result<Value, Error> {
+    let sells: serde_json::Map<String, Value> = position
+        .sells
+        .iter()
+        .map(|(order, filled)| (order.clone(), Value::String(filled.to_string())))
+        .collect();
+    Ok(json!({
+        "trade_id": id.0,
+        "market": market_code(position.market)?,
+        "symbol": position.symbol.as_str(),
+        "stop": position.stop.map(|a| a.0),
+        "bought": position.bought.to_string(),
+        "sells": sells,
+    }))
+}
+
+fn decode_position(item: &Value) -> Option<(TradeId, Position)> {
+    let stop = match item.get("stop")? {
+        Value::Null => None,
+        other => Some(Amount(other.as_i64()?)),
+    };
+    let mut sells = BTreeMap::new();
+    for (order, filled) in item.get("sells")?.as_object()? {
+        sells.insert(order.clone(), filled.as_str()?.parse::<Decimal>().ok()?);
+    }
+    let position = Position {
+        market: market_from(item.get("market")?.as_str()?)?,
+        symbol: Symbol::new(item.get("symbol")?.as_str()?),
+        stop,
+        bought: item.get("bought")?.as_str()?.parse().ok()?,
+        sells,
+    };
+    Some((TradeId(item.get("trade_id")?.as_i64()?), position))
 }
 
 fn encode(item: &Pending) -> Result<Value, Error> {
     let retry = &item.retry;
     let order = &retry.order;
     let timeout = serde_json::to_value(item.timeout).map_err(|e| Error::Snapshot(e.to_string()))?;
-    let market = match order.market {
-        Market::Kr => "kr",
-        Market::Us => "us",
-        other => return Err(Error::Snapshot(format!("모르는 시장: {other:?}"))),
-    };
+    let market = market_code(order.market)?;
     Ok(json!({
         "trade_id": retry.trade_id.0,
         "purpose": purpose_code(retry.purpose),
@@ -131,11 +197,7 @@ fn decode(item: &Value) -> Option<Pending> {
         other => Some(other.as_str()?.parse::<Decimal>().ok()?),
     };
     let approved = ApprovedOrder {
-        market: match text(order, "market")?.as_str() {
-            "kr" => Market::Kr,
-            "us" => Market::Us,
-            _ => return None,
-        },
+        market: market_from(&text(order, "market")?)?,
         symbol: Symbol::new(text(order, "symbol")?),
         side: match text(order, "side")?.as_str() {
             "buy" => Side::Buy,
@@ -203,5 +265,21 @@ mod tests {
         }
         assert_eq!(purpose_from("hold"), None);
         assert!(decode(&json!({"trade_id": 1})).is_none());
+    }
+
+    #[test]
+    fn positions_round_trip() {
+        let mut sells = BTreeMap::new();
+        sells.insert("o-2".to_string(), Decimal::new(4, 0));
+        let position = Position {
+            market: Market::Us,
+            symbol: Symbol::new("AAPL"),
+            stop: Some(Amount(15_050)),
+            bought: Decimal::new(105, 1),
+            sells,
+        };
+        let encoded = encode_position(TradeId(3), &position).unwrap();
+        assert_eq!(decode_position(&encoded), Some((TradeId(3), position)));
+        assert!(decode_position(&json!({"trade_id": 3})).is_none());
     }
 }

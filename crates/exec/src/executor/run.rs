@@ -44,7 +44,7 @@ impl Executor {
     pub(super) fn persist(&self) -> Result<(), Error> {
         let snapshot = self.broker.snapshot();
         let mut state = self.lock();
-        let doc = keep::document(&snapshot, state.seq, &state.pending)?;
+        let doc = keep::document(&snapshot, state.seq, &state.pending, &state.positions)?;
         if state.saved.as_ref() == Some(&doc) {
             return Ok(());
         }
