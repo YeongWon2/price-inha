@@ -292,6 +292,7 @@ async fn unbound_permit_is_refused_on_the_sell_path() {
 async fn unbound_permit_is_refused_on_the_sell_retry() {
     let bench = Bench::new().await;
     let id = bench.holding().await;
+    bench.exec.broker().set_fault(Some(Fault::RejectOrders));
     let _ = bench
         .exec
         .sell(bench.sell(id, SellPurpose::StopLoss, "10", "69000"))
