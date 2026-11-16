@@ -2053,6 +2053,7 @@ dependencies = [
  "pi-paper",
  "pi-rules",
  "pi-store",
+ "rusqlite",
  "rust_decimal",
  "serde_json",
  "tempfile",

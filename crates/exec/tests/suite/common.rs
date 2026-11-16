@@ -179,7 +179,7 @@ impl pi_approval::Clock for FixedMillis {
 
 /// 실행기 · 저장소 · 시계 · 권한을 함께 쥔 책상.
 pub struct Bench {
-    _dir: TempDir,
+    dir: TempDir,
     pub store: Store,
     clock: Arc<TestClock>,
     pub exec: Executor,
@@ -210,7 +210,7 @@ impl Bench {
             Executor::open(config, store.clone(), clock.clone() as Arc<dyn Clock>).unwrap();
         prepare(&exec);
         Self {
-            _dir: dir,
+            dir,
             store,
             clock,
             exec,
@@ -243,6 +243,11 @@ impl Bench {
     /// 시계를 그 시각으로.
     pub fn set_at(&self, now: DateTime<Utc>) {
         *self.clock.now.lock().unwrap() = now;
+    }
+
+    /// 저장소 파일의 자리(다른 연결로 잠가 볼 때 쓴다).
+    pub fn db_path(&self) -> std::path::PathBuf {
+        self.dir.path().join("pi.db")
     }
 
     /// 지금 시각.
