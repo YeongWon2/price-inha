@@ -16,6 +16,8 @@
 //! - 공급자 오류는 [`TurnFailure::Provider`].
 //! - 어느 실패든 [`Error::RoleUnavailable`](E6)로 돌려준다.
 //! - 공급자로 나가는 시스템 글 · 대화 글은 모두 [`Redactor`]를 거친다(E38).
+//!   세션에 저장하는 글(받은 글 · 답 · 도구 인자 · 도구 결과)과 돌려주는 최종 답도 가린 것이다.
+//! - 빈 답을 다 쓰면 원본처럼 [`EMPTY_MARK`] 표식을 assistant 행으로 남기고 실패로 끝난다.
 
 use std::sync::Arc;
 
@@ -34,6 +36,8 @@ pub const MAX_UNKNOWN_TOOL_REPLIES: u32 = 3;
 pub const MAX_MALFORMED_REPLIES: u32 = 3;
 /// 빈 답의 연속 상한(원본 그대로).
 pub const MAX_EMPTY_REPLIES: u32 = 3;
+/// 빈 답을 다 쓴 턴이 세션에 남기는 표식 글(원본 그대로).
+pub const EMPTY_MARK: &str = "(empty)";
 
 /// 실행기가 받는 포트 묶음.
 #[derive(Clone)]
@@ -53,7 +57,7 @@ pub struct Ports {
 /// 끝난 턴.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnOutcome {
-    /// 최종 답 글.
+    /// 최종 답 글(가린 것).
     pub text: String,
     /// 공급자를 부른 횟수.
     pub iterations: u32,
@@ -125,11 +129,12 @@ impl TurnRunner {
         let now = self.ports.clock.now();
         let session = store.open_session(config.role.id(), title, now)?.id;
         let mut history = to_conversation(&store.session_messages(session)?);
+        let input = self.ports.redactor.redact(input);
         store.append_messages(
             session,
-            &[new_message(MessageRole::User, input.to_string(), now)],
+            &[new_message(MessageRole::User, input.clone(), now)],
         )?;
-        push(&mut history, AiRole::User, input.to_string());
+        push(&mut history, AiRole::User, input);
         Ok((session, history))
     }
 }
@@ -165,6 +170,7 @@ impl Turn<'_> {
             let reply = self.ask(limits).await?;
             match parse_reply(&reply) {
                 Reply::Final(text) => {
+                    let text = self.ports.redactor.redact(&text);
                     self.persist(vec![assistant(text.clone(), Vec::new(), self.now())])?;
                     return Ok(text);
                 }
@@ -190,6 +196,8 @@ impl Turn<'_> {
                         ..Streaks::default()
                     };
                     if self.streaks.empty >= MAX_EMPTY_REPLIES {
+                        let mark = assistant(EMPTY_MARK.into(), Vec::new(), self.now());
+                        self.persist(vec![mark])?;
                         return Err(TurnFailure::EmptyReply);
                     }
                 }
@@ -276,7 +284,13 @@ impl Turn<'_> {
         self.ports.clock.now()
     }
 
+    /// 가린 뒤 저장한다.
     fn persist(&self, messages: Vec<NewMessage>) -> Result<(), TurnFailure> {
+        let redactor = self.ports.redactor.as_ref();
+        let messages: Vec<NewMessage> = messages
+            .into_iter()
+            .map(|message| redacted(redactor, message))
+            .collect();
         self.ports
             .store
             .append_messages(self.session, &messages)
@@ -313,6 +327,15 @@ fn push(messages: &mut Vec<AiMessage>, role: AiRole, content: String) {
         }
         _ => messages.push(AiMessage { role, content }),
     }
+}
+
+/// 저장할 메시지의 글 · 도구 인자를 가린다.
+fn redacted(redactor: &dyn Redactor, mut message: NewMessage) -> NewMessage {
+    message.content = message.content.map(|text| redactor.redact(&text));
+    for call in &mut message.tool_calls {
+        call.arguments = redactor.redact(&call.arguments);
+    }
+    message
 }
 
 fn new_message(role: MessageRole, content: String, at: pi_store::UnixMillis) -> NewMessage {

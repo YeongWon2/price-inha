@@ -10,7 +10,8 @@
 //!    - 0라운드는 지명된 담당, 1라운드부터는 앞선 글에서 다른 담당이 `@<id>`로 부른 뒤
 //!      아직 글을 내지 않은 담당만 답한다. 자기 멘션 · 명단 밖 멘션은 무시한다.
 //!    - 라운드마다 응답자를 명단 순서로 놓고 라운드 번호만큼 왼쪽으로 돌린다.
-//!    - 답이 비었거나 `(pass)`(대소문자 무시)면 넘김이다: 글을 쓰지 않는다.
+//!    - 답이 비었거나 `(pass)`(대소문자 무시)면 넘김이다: 글을 쓰지 않는다. 턴 실행기가 빈 답을
+//!      다 써서 실패한 것([`TurnFailure::EmptyReply`])도 넘김이다(원본).
 //!      다만 0라운드에 지명된 담당의 넘김은 응답 실패다.
 //!    - 글은 방 로그 `message.member`(쓴 쪽 `Member`, id는 담당 id)로 남는다. 내용은
 //!      `{"text": <글>, "round": <라운드>, "handoff": [<부른 담당 id>, …]}`다.
@@ -34,7 +35,8 @@
 //!
 //! 지켜보기로 끝나면 매매는 논의중 그대로이고(판단을 저장하지 않는다) 주문 안을 만들지 않는다.
 //! 그때 방 로그에 `room.activity`(쓴 쪽 `Gateway`, 내용 `{"status": "watch", "reason_code": <코드>}`)를
-//! 하나 남긴다. 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
+//! 하나 남긴다. 방 로그 · 판단 · 주문 안에 남는 글은 모두 가린 것이다(E38).
+//! 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -48,7 +50,7 @@ use crate::floor::{Floor, is_pass, mentions};
 use crate::ports::{OrderDraft, Side};
 use crate::prompt;
 use crate::role::{Role, RoleConfig, TimeLimits};
-use crate::roomlog::RoomLog;
+use crate::roomlog::{RoomLog, Writer};
 use crate::score::{consensus, exceeds_threshold, parse_score};
 use crate::turn::{Ports, TurnOutcome, TurnRunner};
 use crate::verdict::{Verdict, is_complete, parse_draft, parse_verdict};
@@ -68,8 +70,8 @@ pub struct Team {
 enum Spoken {
     /// 답했다.
     Text(String),
-    /// 답하지 못했다(E6). 까닭 글.
-    Failed(String),
+    /// 답하지 못했다(E6). 그 까닭.
+    Failed(TurnFailure),
 }
 
 /// 논의 하나를 도는 동안 함께 들고 다니는 것.
@@ -111,11 +113,14 @@ impl Team {
         let session = Session {
             request: &request,
             room: RoomLog::new(
-                &self.ports.store,
-                self.ports.clock.as_ref(),
+                Writer {
+                    store: &self.ports.store,
+                    clock: self.ports.clock.as_ref(),
+                    redactor: self.ports.redactor.as_ref(),
+                },
                 &request.room,
                 request.trade,
-            ),
+            )?,
             briefing: prompt::briefing(&request, &trade.symbol),
         };
         let missing: Vec<String> = request
@@ -218,7 +223,7 @@ impl Team {
     async fn speak(&self, session: &Session<'_>, role: Role, input: &str) -> Result<Spoken, Error> {
         match self.turn(role, session.request.trade, input).await {
             Ok(out) => Ok(Spoken::Text(out.text)),
-            Err(Error::RoleUnavailable { cause, .. }) => Ok(Spoken::Failed(cause.to_string())),
+            Err(Error::RoleUnavailable { cause, .. }) => Ok(Spoken::Failed(cause)),
             Err(other) => Err(other),
         }
     }
@@ -252,7 +257,8 @@ impl Team {
                 let input = prompt::discussion_turn(briefing, round, &floor.unseen(role));
                 let text = match self.speak(session, role, &input).await? {
                     Spoken::Text(text) => text,
-                    Spoken::Failed(reason) => return failed(session, role, &reason),
+                    Spoken::Failed(TurnFailure::EmptyReply) => String::new(),
+                    Spoken::Failed(cause) => return failed(session, role, &cause.to_string()),
                 };
                 if is_pass(&text) {
                     if round == 0 {
@@ -286,7 +292,7 @@ impl Team {
             let parsed = match self.speak(session, role, &prompt::score_turn()).await? {
                 Spoken::Text(text) => parse_score(&text)
                     .ok_or_else(|| TurnFailure::InvalidStructuredReply.to_string()),
-                Spoken::Failed(reason) => Err(reason),
+                Spoken::Failed(cause) => Err(cause.to_string()),
             };
             match parsed {
                 Ok((score, reason)) => scores.push(RoleScore {
@@ -324,7 +330,8 @@ impl Team {
                     return failed_scored(session, Role::Leader, &reason, scores, total);
                 }
             },
-            Spoken::Failed(reason) => {
+            Spoken::Failed(cause) => {
+                let reason = cause.to_string();
                 return failed_scored(session, Role::Leader, &reason, scores, total);
             }
         };
@@ -346,7 +353,7 @@ impl Team {
         let judgment = Judgment {
             decided_at: self.ports.clock.now(),
             rationale,
-            sources: sources(&session.request.data),
+            sources: sources(&session.request.data, self.ports.redactor.as_ref()),
             scores: scores.clone(),
             consensus_score: total,
         };
@@ -402,11 +409,11 @@ fn check_members(request: &DiscussionRequest) -> Result<(), Error> {
     Ok(())
 }
 
-/// 판단의 자료: 요청의 자료 이름과 알게 된 시각.
-fn sources(data: &[DataItem]) -> Vec<SourceRef> {
+/// 판단의 자료: 요청의 자료 이름(가린 것)과 알게 된 시각.
+fn sources(data: &[DataItem], redactor: &dyn pi_ai::Redactor) -> Vec<SourceRef> {
     data.iter()
         .map(|item| SourceRef {
-            name: item.name.clone(),
+            name: redactor.redact(&item.name),
             known_at: item.known_at,
         })
         .collect()
