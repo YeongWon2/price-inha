@@ -191,3 +191,8 @@ M1 M2 M5 C2 E3 M6 V6 D6 E12 E36 M3 M4 V29 V30 C11 V36 D10 M7 V51
 - `knowledge_chunks_no_replace`는 `id` 충돌만 막는다. `UNIQUE(kind, record_ref, ordinal)`에 걸리는 `INSERT OR REPLACE`는 옛 줄을 트리거 없이 지워 FTS 줄과 임베딩이 고아로 남는다(store 코드는 이 SQL을 쓰지 않음). 트리거에 같은 (kind, record_ref, ordinal) 검사를 더한다.
 - `snapshot_to`는 백업 동안 연결 잠금을 쥔다. 파일이 크면 쓰기가 오래 기다린다.
 - 매매 방향(사기/팔기)을 저장한다(agent 2차 검토): 지금은 팔기 판단이 agent 메모리에만 있어 재시작하면 사라진다(rules · 승인이 막아 안전하지만 기록이 없다).
+
+### 후보 일괄 처리 때 다른 모듈에서 넘어온 것
+- 판단에 방향(사기 · 팔기) 칸: 서버를 다시 띄운 뒤에도 agent가 팔기 매매의 `draft_order`를 막을 수 있게 한다.
+- 매매 상태 바뀜 이력 조회 API(journal 하루 정리가 중간 바뀜을 본다).
+- 개선안 위험 표시 갱신 API(journal `approve_as_risky` 우회를 없앤다).

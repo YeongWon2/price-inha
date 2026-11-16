@@ -44,3 +44,10 @@ C6 M4 E17 E28 E35 V12 V16 V18 V19 V20 V21 V50
 - `approve_as_risky`가 승인 성공 뒤 원래 개선안 거절에 실패하면 원래 것이 제안됨으로 남는다(다시 승인돼도 냉각으로 감). store에 "위험 표시 갱신" API가 생기면 이 우회를 걷어낸다.
 - `checked_improvement` 문서 주석이 `approve_as_risky` 위로 어긋나 있다.
 - 연속 손실 정지 횟수 증가 · 쉬는 기간 단축, ATR Some→None도 위험 증가로 셀지 정한다.
+
+## 3차 작업 (후보 일괄 처리)
+
+- `increases_risk`: 연속 손실 정지의 손실 횟수 증가 · 쉬는 기간 단축(그날만 < 거래일 n일), ATR 손절 Some→None도 위험 증가로 센다.
+- `daily_summary`의 한 일: 만든 · 판단한 · 마지막으로 바뀐 시각 가운데 하나가 그날이면 남긴다(다음 날 복기돼도 그날 판 매매가 빠지지 않음). 중간 상태 바뀜 시각은 store에 없어 못 본다.
+- `checked_improvement` 문서 주석 자리 바로잡음. `apply_cooled`의 `current`는 쓰지 않는 까닭을 문서로 남김(잠긴 테스트가 `after` 통째 반영 뜻).
+- 남김(store 몫): 위험 표시 갱신 API가 생기면 `approve_as_risky` 우회 걷어내기, 매매 상태 바뀜 이력.
