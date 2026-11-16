@@ -89,15 +89,14 @@ async fn 한도를_좁히는_개선안을_먼저_반영한_뒤_다른_개선안�
     // 둘째의 값은 한 매매 위험이 1이라, 지금 규칙(0.5)보다 넓어진다.
     let second = approve(&bench, narrow_weight).await;
     assert_eq!(second["result"], json!("cooling"), "{second}");
-    // journal은 제안 때 안전했던 개선안을 위험 표시를 단 같은 내용의 개선안으로 바꿔 냉각에 올리고 원래 것은 닫는다.
-    assert_eq!(state_of(&bench, narrow_weight), ProposalState::Rejected);
-    let original = bench.store().get_proposal(narrow_weight).unwrap();
+    // journal은 제안 때 안전했던 개선안에 위험 표시를 올려 같은 번호 그대로 냉각에 올린다(journal 4차).
+    assert_eq!(state_of(&bench, narrow_weight), ProposalState::Cooling);
     let cooling = bench
         .store()
         .proposals_in_state(ProposalState::Cooling)
         .unwrap();
     assert_eq!(cooling.len(), 1, "냉각중인 개선안은 하나다");
-    assert_eq!(cooling[0].content, original.content);
+    assert_eq!(cooling[0].id, narrow_weight);
     assert!(cooling[0].increases_risk);
     assert_eq!(
         limits(&bench.store(), template),
