@@ -13,6 +13,7 @@ mod kind;
 mod notifier;
 mod phone;
 mod quiet;
+mod release;
 mod transport;
 mod vapid;
 mod webpush;
@@ -28,6 +29,7 @@ pub use notifier::{
 };
 pub use phone::{Asset, phone_asset, phone_assets};
 pub use quiet::QuietHours;
+pub use release::HELD_RELEASE_WINDOW_MS;
 pub use transport::{HttpTransport, PushRequest, PushResponse, PushTransport};
 pub use vapid::{VAPID_KEY_FILE, VapidKey};
 pub use webpush::{MAX_PLAINTEXT, encrypt_aes128gcm, encrypt_aes128gcm_with};
