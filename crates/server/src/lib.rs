@@ -3,6 +3,7 @@
 //! 조립 로직은 여기에 있고 `main.rs`는 얇다: 설정을 읽고([`Settings::from_process`]),
 //! 띄우고([`App::start`]), Ctrl+C를 기다렸다가 끈다([`App::shutdown`]).
 
+mod access_http;
 mod ai_link;
 mod app;
 mod demo;
@@ -20,6 +21,7 @@ mod setup_http;
 mod team;
 mod trading;
 
+pub use access_http::{ACCESS_KEY_PATH, ACCESS_LOG_PATH, ACCESS_UNLOCK_PATH};
 pub use ai_link::{
     AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_CHECKING, CLI_COMMON_LOCATIONS,
     CLI_CONCURRENCY, CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED, CLI_NOT_LOGGED_IN,
