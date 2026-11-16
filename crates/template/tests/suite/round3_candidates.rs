@@ -1,15 +1,12 @@
 //! 3차 후보: 승격 임계값의 아래쪽 경계, 손절 방식이 모두 꺼진 조합 거부(C14 · E5 · M3 · P14).
 
+use crate::common::d;
 use pi_template::{
     Change, Error, Invalid, InvalidReason, MaxHolding, OverCap, ParamField, PromotionCriteria,
     RiskParams, StopRule, Style, Template, adjust, preset,
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 fn rejected(current: &RiskParams, changes: &[Change]) -> OverCap {
     let before = current.clone();

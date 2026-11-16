@@ -1,5 +1,6 @@
 //! 2차 1 · 3번: 아래쪽 경계 · 범위 모양 · 업종 대 종목 비중을 거부한다(C14 · E5 · V28 · M3 · N2 · N4).
 
+use crate::common::d;
 use std::time::Duration;
 
 use pi_template::{
@@ -9,10 +10,6 @@ use pi_template::{
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 /// 거부되어야 하는 조정. 지금 값이 그대로인지도 본다.
 fn rejected(current: &RiskParams, changes: &[Change]) -> OverCap {

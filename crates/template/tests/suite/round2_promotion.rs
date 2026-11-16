@@ -1,11 +1,8 @@
 //! 2차 2번: 승격 낙폭 기준은 그 템플릿의 지금 최대 낙폭 한도의 절반에서 센다(E26 · P14 · 결정 30번).
 
+use crate::common::d;
 use pi_template::{Change, Criterion, PromotionStats, Style, Verdict, adjust, preset};
 use rust_decimal::Decimal;
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 /// 낙폭 말고 모든 기본 기준(30건 · 20일 · 손익 > 0 · 표본 밖 > 0)을 넘는 결과.
 fn stats(max_drawdown_pct: &str) -> PromotionStats {

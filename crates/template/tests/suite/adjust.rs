@@ -1,5 +1,6 @@
 //! 절대 상한과 값 맞추기(C14 · E5 · V28 · M3).
 
+use crate::common::d;
 use std::time::Duration;
 
 use pi_template::{
@@ -7,10 +8,6 @@ use pi_template::{
     adjust, preset,
 };
 use rust_decimal::Decimal;
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 // 검증: M3
 #[test]

@@ -3,6 +3,7 @@
 //! 기대값 출처: `docs/research/stock-investing-principles.md` 9장 표, `dev.md` N2 · N4,
 //! `docs/dev/decisions.md` 2026-11-16 30번. 표와 끝자리까지 비교한다.
 
+use crate::common::d;
 use std::time::Duration;
 
 use pi_template::{
@@ -10,10 +11,6 @@ use pi_template::{
     MaxHolding, PctRange, PromotionStats, Style, TriggerKind, UnfilledCancel, Verdict, preset,
 };
 use rust_decimal::Decimal;
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 // 검증: C4, V27
 #[test]

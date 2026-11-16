@@ -1,11 +1,8 @@
 //! 승격 기준 판정(E26 · P14 · M3).
 
+use crate::common::d;
 use pi_template::{Criterion, PromotionCriteria, PromotionStats, Verdict};
 use rust_decimal::Decimal;
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 fn criteria() -> PromotionCriteria {
     PromotionCriteria {

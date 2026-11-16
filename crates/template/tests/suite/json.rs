@@ -1,12 +1,9 @@
 //! 판 번호가 붙은 JSON(만드는 것 7 · C4 · E5).
 
+use crate::common::d;
 use pi_template::{Change, Error, FORMAT_VERSION, Style, Template, TemplateState, adjust, preset};
 use rust_decimal::Decimal;
 use serde_json::Value;
-
-fn d(s: &str) -> Decimal {
-    s.parse().unwrap()
-}
 
 // 검증: C4, V27
 #[test]
@@ -125,4 +122,50 @@ fn state_names_serialize_as_snake_case() {
     );
     let back: TemplateState = serde_json::from_value(Value::from("live")).unwrap();
     assert_eq!(back, TemplateState::Live);
+}
+
+// 검증: C4, E5 (이번 차수: 옛 JSON 에서 승격 낙폭 칸이 빠져도 읽힘)
+#[test]
+fn json_without_promotion_drawdown_fills_half_of_the_limit() {
+    for style in Style::ALL {
+        let t = Template::new(style);
+        let mut v: Value = serde_json::from_str(&t.to_json()).unwrap();
+        v["params"]["promotion"]
+            .as_object_mut()
+            .unwrap()
+            .remove("max_drawdown_pct");
+        let back = Template::from_json(&v.to_string()).unwrap();
+        assert_eq!(back, t);
+        assert_eq!(
+            back.params.promotion.max_drawdown_pct,
+            back.params.max_drawdown_pct / d("2")
+        );
+    }
+}
+
+// 검증: C4
+#[test]
+fn json_with_promotion_drawdown_keeps_the_given_value() {
+    let t = Template::new(Style::Swing);
+    let mut v: Value = serde_json::from_str(&t.to_json()).unwrap();
+    v["params"]["promotion"]["max_drawdown_pct"] = Value::from("3.5");
+    let back = Template::from_json(&v.to_string()).unwrap();
+    assert_eq!(back.params.promotion.max_drawdown_pct, d("3.5"));
+}
+
+// 검증: C4
+#[test]
+fn json_without_the_drawdown_limit_itself_is_still_an_error() {
+    let t = Template::new(Style::Swing);
+    let mut v: Value = serde_json::from_str(&t.to_json()).unwrap();
+    let params = v["params"].as_object_mut().unwrap();
+    params.remove("max_drawdown_pct");
+    params["promotion"]
+        .as_object_mut()
+        .unwrap()
+        .remove("max_drawdown_pct");
+    assert!(matches!(
+        Template::from_json(&v.to_string()),
+        Err(Error::Json(_))
+    ));
 }
