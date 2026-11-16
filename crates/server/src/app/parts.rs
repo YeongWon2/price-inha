@@ -11,6 +11,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::{CLI_CHECK_GRACE, Wiring};
+use crate::access_http::{self, AccessSlot};
 use crate::ai_link::Leftovers;
 use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
@@ -102,7 +103,7 @@ pub(super) async fn open_desk(
 
 /// 접속 관문을 연다. 공개 경로는 첫 화면과 웹 자산(사무실 · 폰), 세션 경로는 설정 상태와 `protected`
 /// (주문 길 · 팀 · 3차 경로), 그 컴퓨터에서만 열리는 경로는 키 · 종목 등록이다. 가리기 자리에는 비밀
-/// 보관소를, 잠금 알림 자리에는 `lock_alert`(있으면)를 끼운다.
+/// 보관소를, 잠금 알림 자리에는 `lock_alert`(있으면)를 끼운다. (7차) 접속 키 경로도 여기서 잇는다.
 pub(super) async fn open_gate(
     settings: &Settings,
     wiring: &Wiring,
@@ -116,6 +117,7 @@ pub(super) async fn open_gate(
         bind: SocketAddr::new(settings.bind, settings.port),
         ..GateConfig::default()
     };
+    let access: AccessSlot = Arc::default();
     let mut builder = Gate::builder(store.clone(), config)
         .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
         .redactor(Arc::new(SecretsRedactor::new(Arc::clone(secrets))))
@@ -125,14 +127,23 @@ pub(super) async fn open_gate(
         .protected_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
-        .local_routes(setup_http::register_routes(Arc::clone(desk)));
+        .local_routes(setup_http::register_routes(Arc::clone(desk)))
+        // (7차) 접속 키 발급 · 잠금 풀기는 그 컴퓨터에서만, 접속 기록 보기는 세션이면.
+        .local_routes(access_http::local_routes(Arc::clone(&access)))
+        .protected_routes(access_http::session_routes(
+            Arc::clone(&access),
+            store.clone(),
+        ));
     if let Some(alert) = lock_alert {
         builder = builder.lock_alert(alert);
     }
     if let Some(peer) = wiring.peer_override.clone() {
         builder = builder.peer_override(peer);
     }
-    Ok(builder.build().serve().await?)
+    let gate = builder.build().serve().await?;
+    // 관문을 연 뒤에야 접속 키 손잡이를 얻는다. 자리는 여기서 한 번만 채운다.
+    let _ = access.set(gate.access_keys());
+    Ok(gate)
 }
 
 /// 세션 경로: 주문 길, 팀(있으면), 3차 경로(있으면).
