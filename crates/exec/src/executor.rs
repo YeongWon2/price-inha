@@ -143,6 +143,12 @@ pub struct Executor {
     state: Mutex<State>,
 }
 
+/// 표시가 다른 매매에 묶이지 않았는가(E33). 묶이지 않은 표시(`pi_rules::issue`)는 아직 받는다:
+/// 조립하는 쪽이 `pi_rules::issue_for_trade`로 옮기기 전까지의 옛 길이다.
+fn fits_trade(permit: &CheckPermit, trade: TradeId) -> bool {
+    permit.trade().is_none_or(|bound| bound == trade.0)
+}
+
 impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Executor").finish_non_exhaustive()
@@ -299,7 +305,16 @@ impl Executor {
         self.check_account(submission.template_account)?;
         self.check_account(paper_kind(trade.account))?;
         self.check_account(approved.account_kind)?;
-        if approved.symbol.as_str() != trade.symbol || approved.side != Side::Buy {
+        if approved.symbol.as_str() != trade.symbol
+            || approved.side != Side::Buy
+            || !fits_trade(&submission.permit, id)
+        {
+            return Err(Error::PermitMismatch);
+        }
+        // 저장소에 매매 수량이 있으면 표시의 수량이 그것과 같아야 한다(승인 내용은 아래에서 표시와 대조).
+        if let Some(quantity) = self.store.trade_quantity(id)?
+            && approved.quantity != Decimal::from(quantity)
+        {
             return Err(Error::PermitMismatch);
         }
         match &submission.approval {
@@ -352,7 +367,10 @@ impl Executor {
         let approved = submission.permit.approved().clone();
         self.check_account(paper_kind(trade.account))?;
         self.check_account(approved.account_kind)?;
-        if approved.symbol.as_str() != trade.symbol || approved.side != Side::Sell {
+        if approved.symbol.as_str() != trade.symbol
+            || approved.side != Side::Sell
+            || !fits_trade(&submission.permit, id)
+        {
             return Err(Error::PermitMismatch);
         }
         let key = {
@@ -400,7 +418,7 @@ impl Executor {
         else {
             return Err(Error::NoPendingSell(trade_id));
         };
-        if permit.approved() != &retry.order {
+        if permit.approved() != &retry.order || !fits_trade(&permit, trade_id) {
             return Err(Error::PermitMismatch);
         }
         if self.clock.now() < retry.retry_at {
