@@ -32,9 +32,37 @@ pub fn restore(
     target: &Path,
     at: UnixMillis,
 ) -> Result<RestoreReport, BackupError> {
+    restore_with(encrypted, identity, target, None, at)
+}
+
+/// [`restore`]와 같되 검증 사본을 `temp_root` 안(0700 폴더)에만 두고 끝나면 지운다
+/// (시스템 임시 폴더에 평문을 두지 않는다). `temp_root`가 없으면 만든다.
+pub fn restore_in(
+    encrypted: &[u8],
+    identity: &SecretString,
+    target: &Path,
+    temp_root: &Path,
+    at: UnixMillis,
+) -> Result<RestoreReport, BackupError> {
+    restore_with(encrypted, identity, target, Some(temp_root), at)
+}
+
+fn restore_with(
+    encrypted: &[u8],
+    identity: &SecretString,
+    target: &Path,
+    temp_root: Option<&Path>,
+    at: UnixMillis,
+) -> Result<RestoreReport, BackupError> {
     ensure_empty(target)?;
     let bundle = open(encrypted, identity)?;
-    verify(&bundle)?;
+    match temp_root {
+        Some(root) => {
+            std::fs::create_dir_all(root).map_err(|e| BackupError::io(root, e))?;
+            crate::bundle::verify_in(&bundle, root)?;
+        }
+        None => verify(&bundle)?,
+    }
 
     std::fs::create_dir_all(target).map_err(|e| BackupError::io(target, e))?;
     for file in &bundle.files {
@@ -48,17 +76,6 @@ pub fn restore(
         manifest: bundle.manifest,
         outcome,
     })
-}
-
-/// [`restore`]와 같되 검증 사본을 `temp_root` 안에만 둔다(시스템 임시 폴더에 평문을 두지 않는다).
-pub fn restore_in(
-    encrypted: &[u8],
-    identity: &SecretString,
-    target: &Path,
-    _temp_root: &Path,
-    at: UnixMillis,
-) -> Result<RestoreReport, BackupError> {
-    restore(encrypted, identity, target, at)
 }
 
 /// 대상이 없거나 빈 폴더인가. 파일이거나 무언가 들어 있으면 [`BackupError::TargetNotEmpty`].

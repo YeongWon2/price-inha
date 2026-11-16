@@ -169,10 +169,11 @@ impl Backup {
             return Err(BackupError::SizeMismatch { sent, stored });
         }
         self.write_local(&name, &sealed)?;
-        let (removed, retention_failed) = match self.apply_retention(&remote, now).await {
-            Ok(removed) => (removed, false),
-            Err(_) => (Vec::new(), true),
-        };
+        let mut removed = Vec::new();
+        let retention_failed = self
+            .apply_retention(&remote, now, &mut removed)
+            .await
+            .is_err();
         let report = BackupReport {
             at: now,
             remote_path,
@@ -239,11 +240,13 @@ impl Backup {
     }
 
     /// 로컬과 원격의 백업 시각을 합쳐 한 계획을 세우고 양쪽에서 같게 지운다.
+    /// 양쪽에서 다 지운 시각은 그때마다 `removed`에 담는다(중간에 실패해도 그때까지 지운 것은 남는다).
     async fn apply_retention(
         &self,
         remote: &Remote,
         now: UnixMillis,
-    ) -> Result<Vec<UnixMillis>, BackupError> {
+        removed: &mut Vec<UnixMillis>,
+    ) -> Result<(), BackupError> {
         let remote_backups = remote.list(REMOTE_DIR).await?;
         let local_times = local_backups(&self.settings.local_dir)?;
         let mut times: Vec<UnixMillis> = remote_backups.iter().map(|b| b.at).collect();
@@ -251,8 +254,8 @@ impl Backup {
         times.push(now);
         let plan = plan_retention(&times);
         // 시계가 뒤로 가 더 새 이름의 파일이 있어도 이번에 올린 백업은 지우지 않는다.
-        let removable: Vec<UnixMillis> = plan.remove.into_iter().filter(|&at| at != now).collect();
-        for &at in &removable {
+        let removable = plan.remove.into_iter().filter(|&at| at != now);
+        for at in removable {
             for found in remote_backups.iter().filter(|b| b.at == at) {
                 remote.delete(&found.path, &found.sha).await?;
             }
@@ -262,8 +265,9 @@ impl Backup {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(BackupError::io(local, e)),
             }
+            removed.push(at);
         }
-        Ok(removable)
+        Ok(())
     }
 }
 
