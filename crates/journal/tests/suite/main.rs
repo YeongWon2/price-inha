@@ -5,3 +5,4 @@ mod common;
 mod day;
 mod improve;
 mod review;
+mod risk;
