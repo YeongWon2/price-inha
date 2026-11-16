@@ -1408,12 +1408,12 @@ fn 다시_열어도_자료와_붙인_근거가_그대로이고_번호가_이어�
 // 검증: D6, C11, V36
 #[test]
 fn 스키마_버전은_6이고_새_저장소의_새_표는_비어_있고_바로_쓸_수_있다() {
-    assert_eq!(SCHEMA_VERSION, 8);
+    assert_eq!(SCHEMA_VERSION, 9);
     let (_dir, path, store) = temp_store();
-    assert_eq!(store.info().unwrap().schema_version, 8);
+    assert_eq!(store.info().unwrap().schema_version, 9);
     assert_new_tables_empty_and_usable(&store, "새 파일");
     drop(store);
-    assert_eq!(raw_user_version(&path), 8);
+    assert_eq!(raw_user_version(&path), 9);
 }
 
 // 검증: D6, C11, V36
@@ -1423,10 +1423,10 @@ fn 옛_파일을_열면_지우지_않고_6으로_올라가고_새_표를_바로_
         let (_dir, path) = copy_of(name);
         let before_tables = tables(&path);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 8, "{name}");
+        assert_eq!(store.info().unwrap().schema_version, 9, "{name}");
         assert_new_tables_empty_and_usable(&store, name);
         drop(store);
-        assert_eq!(raw_user_version(&path), 8, "{name}");
+        assert_eq!(raw_user_version(&path), 9, "{name}");
         let after_tables = tables(&path);
         for table in &before_tables {
             assert!(after_tables.contains(table), "{name}: {table}");
@@ -1443,7 +1443,7 @@ fn 버전_5_파일을_6으로_올려도_있던_줄이_글자까지_그대로이�
     let before = dump(&path, &names);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 8);
+    assert_eq!(store.info().unwrap().schema_version, 9);
     assert_eq!(store.legacy_envelope_until().unwrap(), Some(10));
     let events = store.read_after(0, 100).unwrap();
     assert_eq!(events.len(), 14);
@@ -1507,7 +1507,7 @@ fn 올린_파일을_다시_열어도_6이고_새_표의_자료와_보호가_그�
     let before = dump(&path, &names);
     for _ in 0..2 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 8);
+        assert_eq!(store.info().unwrap().schema_version, 9);
         assert_eq!(store.session_messages(session.id).unwrap().len(), 1);
         drop(store);
         // 이전을 되풀이하지 않는다: 어떤 줄도 바뀌지 않았다.
