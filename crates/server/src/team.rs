@@ -91,8 +91,8 @@ pub const TRADE_ROOM_PREFIX: &str = "trade-";
 /// 전략 · 리스크)의 평균 60점을 넘어야 한다(합 180 초과, E27).
 pub const DEFAULT_CONSENSUS_REQUIRED: i32 = 180;
 
-/// 담당이 쓰는 모델 이름의 기본값. 지시서 · 스펙에 정해진 값이 없어 조립이 정했다(사람 확인 필요).
-pub const DEFAULT_TEAM_MODEL: &str = "claude-sonnet-4-5";
+/// 담당이 쓰는 모델 이름의 기본값. 조정자 결정, docs/dev/modules/server.md 2차 보강.
+pub const DEFAULT_TEAM_MODEL: &str = "claude-sonnet-5-5";
 
 /// 투자 팀 조립의 바깥 값. [`crate::Launch::team`]에 준다.
 #[derive(Debug, Clone)]

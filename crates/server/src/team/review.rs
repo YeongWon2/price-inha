@@ -1,6 +1,6 @@
 //! 복기 · 규칙 개선안 잇기(T15, V19~V21 · E17 · E28 · E35).
 //!
-//! 승인은 승인 모듈이 소비에 성공한 뒤에만 반영한다(`pi_approval::Approvals::approve_proposal`).
+//! 승인은 승인 모듈이 소비에 성공한 뒤에만 반영한다(`pi_approval::Approvals::with_proposal_approval`).
 
 use chrono::{DateTime, Utc};
 use pi_agent::Role;
@@ -21,6 +21,18 @@ const READ_PAGE: usize = 1_000;
 
 fn millis(at: DateTime<Utc>) -> UnixMillis {
     UnixMillis(at.timestamp_millis())
+}
+
+/// 개선안 승인 길의 실패: 승인 모듈의 거부이거나 journal의 실패.
+enum ApproveFail {
+    Approval(pi_approval::Error),
+    Journal(pi_journal::Error),
+}
+
+impl From<pi_approval::Error> for ApproveFail {
+    fn from(error: pi_approval::Error) -> Self {
+        ApproveFail::Approval(error)
+    }
 }
 
 /// 복기 담당의 답.
@@ -230,9 +242,9 @@ impl Crew {
         let decision = Decision::from_wire(body["answer"].as_str().unwrap_or_default());
         let approval_error = |error: pi_approval::Error| TeamError::Approval(error.to_string());
         if decision == Decision::Reject {
-            let _ = self
-                .approvals
-                .answer(&number, fingerprint, Decision::Reject);
+            self.approvals
+                .answer(&number, fingerprint, Decision::Reject)
+                .map_err(approval_error)?;
             return Ok(self.reject(id));
         }
         let answer = self
@@ -242,17 +254,27 @@ impl Crew {
         if let Answer::Rejected(reason) = answer {
             return Ok(answered("rejected", Some(reject_word(reason))));
         }
-        let proposal = match self.approvals.approve_proposal(&number, id) {
-            Ok(proposal) => proposal,
-            Err(pi_approval::Error::Denied(reason)) => {
+        let Ok(Some(current)) = self.trading.params() else {
+            return Ok(answered("rejected", Some("not_found")));
+        };
+        // 승인 소비는 승인 모듈이 하고, 반영 판정(지금 규칙으로 위험을 다시 본다)은 journal이 한다.
+        let outcome = self
+            .approvals
+            .with_proposal_approval(&number, id, |using, at| {
+                self.journal
+                    .approve(id, Some(using), &current, at)
+                    .map_err(ApproveFail::Journal)
+            });
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(ApproveFail::Approval(pi_approval::Error::Denied(reason))) => {
                 return Ok(answered("rejected", Some(reject_word(reason))));
             }
-            Err(other) => return Err(approval_error(other)),
+            Err(ApproveFail::Approval(other)) => return Err(approval_error(other)),
+            Err(ApproveFail::Journal(error)) => return Err(TeamError::Journal(error.to_string())),
         };
-        if proposal.state == ProposalState::Applied {
-            let improvement = Improvement::from_proposal(&proposal)
-                .map_err(|error| TeamError::Journal(error.to_string()))?;
-            self.trading.apply_params(improvement.after)?;
+        if outcome.proposal.state == ProposalState::Applied {
+            self.trading.apply_params(outcome.rules)?;
             return Ok(answered("applied", None));
         }
         Ok(answered("cooling", None))
