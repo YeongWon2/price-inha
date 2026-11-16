@@ -89,3 +89,10 @@ pub enum DataError {
         origin: SourceName,
     },
 }
+
+impl DataError {
+    /// 같은 요청을 나중에 다시 하면 될 수도 있는 실패인가 (뼈대: 구현은 N2).
+    pub fn is_retryable(&self) -> bool {
+        false
+    }
+}
