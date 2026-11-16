@@ -26,8 +26,8 @@
 //!    - 사기 · 팔기: `{"decision": "buy"|"sell", "hypothesis": 글, "trigger": 글, "entry": 정수,
 //!      "stop": 정수, "target": 정수, "expected_value": 정수}`.
 //!      사기 · 팔기 모두 근거 칸이 하나라도 비었거나 금액 칸이 0 · 음수면 지켜보기([`WatchReason::RationaleIncomplete`], P9).
-//!      아니면 `judge_trade`로 근거 · 자료(요청의 자료 이름과 알게 된 시각) · 담당 점수 · 합의 점수를
-//!      남긴다(판단 시각은 시계). 매매는 판단됨이 된다(V3, M2).
+//!      아니면 `judge_trade_with_side`로 근거 · 자료(요청의 자료 이름과 알게 된 시각) · 담당 점수 · 합의 점수와
+//!      방향을 함께 남긴다(판단 시각은 시계). 매매는 판단됨이 된다(V3, M2).
 //!    - 지켜보기: `{"decision": "watch", "reason": 글, "revisit": 글}` → [`WatchReason::LeaderWatch`].
 //!    - 모양이 틀리면 팀장 응답 실패로 지켜보기.
 //!    - 판단은 방 로그 `message.member`(쓴 쪽 팀장)로 남고 내용에 `"decision": "buy"|"sell"|"watch"`가 있다.
@@ -38,10 +38,7 @@
 //! 하나 남긴다. 방 로그 · 판단 · 주문 안에 남는 글은 모두 가린 것이다(E38).
 //! 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-
-use pi_store::{Judgment, RoleScore, SourceRef, TradeId, TradeState};
+use pi_store::{Judgment, RoleScore, SourceRef, TradeId, TradeSide, TradeState};
 use serde_json::json;
 
 use crate::discussion::{DataItem, Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
@@ -62,8 +59,6 @@ pub struct Team {
     ports: Ports,
     roles: Vec<RoleConfig>,
     limits: TimeLimits,
-    /// 팔기로 판단된 매매들. 사기 주문 안을 내지 않는다.
-    sold: Arc<Mutex<HashSet<TradeId>>>,
 }
 
 /// 한 담당 턴의 끝.
@@ -97,7 +92,6 @@ impl Team {
             ports,
             roles,
             limits,
-            sold: Arc::default(),
         })
     }
 
@@ -175,6 +169,7 @@ impl Team {
     /// - 매매 담당의 답은 `side` 칸이 있는 객체 하나다: `{"side": "buy", "note": 글}`.
     ///   다른 칸(수량 · 가격 등)은 버린다(P7). `side`가 `buy`가 아니거나 모양이 틀리면
     ///   매매 담당 응답 실패([`Error::RoleUnavailable`]).
+    /// - 저장소에 남은 방향이 팔기면 [`Error::TradeNotBuy`]다(다시 띄운 팀도 같다). AI를 부르지 않는다.
     /// - 주문 안의 종목은 매매의 종목이다.
     pub async fn draft_order(&self, trade: TradeId) -> Result<OrderDraft, Error> {
         let found = self.ports.store.get_trade(trade)?;
@@ -184,7 +179,7 @@ impl Team {
                 state: found.state,
             });
         }
-        if self.sold.lock().is_ok_and(|sold| sold.contains(&trade)) {
+        if self.ports.store.trade_side(trade)? == Some(TradeSide::Sell) {
             return Err(Error::TradeNotBuy { trade });
         }
         let out = self
@@ -357,16 +352,15 @@ impl Team {
             scores: scores.clone(),
             consensus_score: total,
         };
+        let stored_side = match side {
+            Side::Buy => TradeSide::Buy,
+            Side::Sell => TradeSide::Sell,
+        };
         self.ports
             .store
-            .judge_trade(session.request.trade, judgment)?;
+            .judge_trade_with_side(session.request.trade, judgment, stored_side)?;
         let (decision, order) = match side {
-            Side::Sell => {
-                if let Ok(mut sold) = self.sold.lock() {
-                    sold.insert(session.request.trade);
-                }
-                (Decision::Sell, None)
-            }
+            Side::Sell => (Decision::Sell, None),
             Side::Buy => (Decision::Buy, self.order_after_judgment(session).await?),
         };
         Ok(DiscussionOutcome {
