@@ -1,8 +1,9 @@
 //! 보낼 때 내부망 막기(SSRF). 구독 주소의 이름을 한 번 해석해 검사하고, 검사한 IP로만 접속한다.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use async_trait::async_trait;
+use url::{Host, Url};
 
 use crate::Error;
 
@@ -21,8 +22,10 @@ pub struct SystemResolver;
 #[async_trait]
 impl Resolver for SystemResolver {
     async fn resolve(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, Error> {
-        let _ = (host, port);
-        todo!()
+        let found = tokio::net::lookup_host((host, port)).await.map_err(|e| {
+            Error::Transport(format!("구독 주소의 이름을 찾지 못했다: {}", e.kind()))
+        })?;
+        Ok(found.collect())
     }
 }
 
@@ -40,8 +43,34 @@ pub struct PinnedTarget {
 /// · 공유 주소(100.64/10) · 지정 안 됨(0.0.0.0, ::) · 브로드캐스트 · 멀티캐스트 · ULA(fc00::/7).
 /// IPv4를 담은 IPv6(`::ffff:a.b.c.d`)는 안의 IPv4로 본다.
 pub fn is_internal_ip(ip: IpAddr) -> bool {
-    let _ = ip;
-    todo!()
+    match ip {
+        IpAddr::V4(v4) => is_internal_v4(v4),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => is_internal_v4(v4),
+            None => is_internal_v6(v6),
+        },
+    }
+}
+
+fn is_internal_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || a == 0
+        || (a == 100 && (64..128).contains(&b))
+}
+
+fn is_internal_v6(ip: Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || (first & 0xfe00) == 0xfc00
+        || (first & 0xffc0) == 0xfe80
 }
 
 /// 구독 주소를 보내기 전에 검사한다.
@@ -51,6 +80,27 @@ pub fn is_internal_ip(ip: IpAddr) -> bool {
 /// - 하나라도 내부망이면 [`Error::InternalAddress`]. 해석 결과가 비었거나 해석이 실패하면
 ///   [`Error::Transport`]. 주소 모양이 아니면 [`Error::Transport`].
 pub async fn pin_endpoint(endpoint: &str, resolver: &dyn Resolver) -> Result<PinnedTarget, Error> {
-    let _ = (endpoint, resolver);
-    todo!()
+    let not_url = || Error::Transport("구독 주소가 주소 모양이 아니다".to_owned());
+    let url = Url::parse(endpoint).map_err(|_| not_url())?;
+    let port = url.port_or_known_default().unwrap_or(443);
+    let (host, addrs) = match url.host().ok_or_else(not_url)? {
+        Host::Ipv4(ip) => (ip.to_string(), vec![SocketAddr::new(IpAddr::V4(ip), port)]),
+        Host::Ipv6(ip) => (ip.to_string(), vec![SocketAddr::new(IpAddr::V6(ip), port)]),
+        Host::Domain(name) => {
+            let addrs = resolver.resolve(name, port).await?;
+            (name.to_owned(), addrs)
+        }
+    };
+    if addrs.is_empty() {
+        return Err(Error::Transport(
+            "구독 주소의 이름이 어떤 주소로도 풀리지 않았다".to_owned(),
+        ));
+    }
+    if let Some(bad) = addrs.iter().find(|a| is_internal_ip(a.ip())) {
+        return Err(Error::InternalAddress(format!(
+            "{host}가 {}로 풀렸다",
+            bad.ip()
+        )));
+    }
+    Ok(PinnedTarget { host, addrs })
 }

@@ -110,7 +110,8 @@ async function showApproval(id) {
     card.querySelector('[data-part="summary"]').textContent = approval.summary || '';
     card.querySelector('[data-part="fingerprint"]').textContent = approval.fingerprint || '';
     card.querySelector('[data-part="result"]').textContent = '';
-    card.querySelector('[data-field="code"]').value = '';
+    // 결정 4번: 지문 앞 6자리를 보이기만 한다. 사용자가 치지 않는다.
+    card.querySelector('[data-field="code"]').value = (approval.fingerprint || '').slice(0, 6);
     card.hidden = false;
   } catch (error) {
     card.hidden = true;
@@ -119,15 +120,14 @@ async function showApproval(id) {
 
 async function decide(verb) {
   const card = $('[data-card="approval"]');
-  const code = card.querySelector('[data-field="code"]').value.trim();
   const result = card.querySelector('[data-part="result"]');
-  if (!/^[0-9]{6}$/.test(code)) {
-    result.textContent = '6자리 숫자를 넣어 주세요.';
+  if (!card.dataset.approvalId || !card.dataset.fingerprint) {
+    result.textContent = '승인 내용을 아직 받지 못했어요.';
     return;
   }
   try {
+    // 화면이 받은 승인 카드의 지문을 그대로 보낸다(서버가 지금 내용의 지문과 비교한다).
     await postJson(API.decide(card.dataset.approvalId, verb), {
-      code,
       fingerprint: card.dataset.fingerprint,
     });
     result.textContent = verb === 'approve' ? '승인했어요.' : '거절했어요.';

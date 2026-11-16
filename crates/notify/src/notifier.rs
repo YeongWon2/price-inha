@@ -274,7 +274,7 @@ impl Notifier {
             "body": truncate_chars(&body, MAX_PUSH_BODY_CHARS),
             "seq": seq,
         });
-        if let Some(link) = link {
+        if let Some(link) = link.filter(|l| l.chars().count() <= MAX_PUSH_LINK_CHARS) {
             push["link"] = serde_json::Value::from(link);
         }
         let attempts = send_all(

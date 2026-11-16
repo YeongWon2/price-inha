@@ -54,11 +54,13 @@ impl VapidKey {
             restrict_permissions(&path)?;
             let text = fs::read_to_string(&path)
                 .map_err(|e| Error::KeyFile(format!("키 파일을 읽지 못했다: {}", e.kind())))?;
-            return Self::from_text(&text);
+            if !text.trim().is_empty() {
+                return Self::from_text(&text);
+            }
         }
         let key = Self::generate();
         let text = format!("{}\n", URL_SAFE_NO_PAD.encode(key.secret.to_bytes()));
-        write_new_private_file(&path, text.as_bytes())?;
+        write_private_file_atomically(&path, text.as_bytes())?;
         Ok(key)
     }
 
@@ -138,21 +140,40 @@ fn restrict_permissions(_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// 새 파일을 만든다(이미 있으면 실패). Unix에서는 처음부터 0600이다.
-fn write_new_private_file(path: &Path, contents: &[u8]) -> Result<(), Error> {
+/// 같은 폴더의 임시 파일(Unix에서는 처음부터 0600)에 다 쓰고 맞춘 뒤 이름을 바꿔 `path`에 둔다.
+/// 쓰다 꺼져도 `path`에는 빈 파일이 남지 않는다. 실패하면 임시 파일을 지운다.
+fn write_private_file_atomically(path: &Path, contents: &[u8]) -> Result<(), Error> {
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let result = write_and_rename(&tmp, path, contents);
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+fn write_and_rename(tmp: &Path, path: &Path, contents: &[u8]) -> Result<(), Error> {
     let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
     let mut file = options
-        .open(path)
-        .map_err(|e| Error::KeyFile(format!("키 파일을 만들지 못했다: {}", e.kind())))?;
+        .open(tmp)
+        .map_err(|e| Error::KeyFile(format!("임시 키 파일을 만들지 못했다: {}", e.kind())))?;
+    restrict_permissions(tmp)?;
     file.write_all(contents)
         .and_then(|()| file.sync_all())
         .map_err(|e| Error::KeyFile(format!("키 파일을 쓰지 못했다: {}", e.kind())))?;
+    drop(file);
+    fs::rename(tmp, path)
+        .map_err(|e| Error::KeyFile(format!("키 파일을 두지 못했다: {}", e.kind())))?;
+    if let Some(dir) = path.parent()
+        && let Ok(handle) = fs::File::open(dir)
+    {
+        let _ = handle.sync_all();
+    }
     restrict_permissions(path)
 }
 
