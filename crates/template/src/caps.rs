@@ -269,6 +269,10 @@ fn invalid_fields(p: &RiskParams) -> Vec<Invalid> {
         add(ParamField::Promotion, InvalidReason::NotPositive);
     }
     share(ParamField::Promotion, promo.max_drawdown_pct, &mut add);
+    // 임계값 하한: 비용 뺀 손익이 음수여도 통과하는 기준은 승격 기준이 아니다(P14).
+    if promo.net_pnl_above < zero || promo.out_of_sample_pnl_above.is_some_and(|v| v < zero) {
+        add(ParamField::Promotion, InvalidReason::NotPositive);
+    }
     out
 }
 
@@ -281,6 +285,16 @@ fn invalid_rules(p: &RiskParams, add: &mut dyn FnMut(ParamField, InvalidReason))
     }
     if stop.atr.is_some_and(|a| a.multiple <= zero) {
         add(ParamField::Stop, InvalidReason::NotPositive);
+    }
+
+    // 손절 방식이 하나도 없으면(보유 기간 제한도 없음) 손실을 끊을 길이 없다.
+    if stop.fixed_loss_pct.is_none()
+        && stop.atr.is_none()
+        && !stop.thesis_break
+        && !stop.flatten_before_close
+        && matches!(p.max_holding, MaxHolding::Unlimited)
+    {
+        add(ParamField::Stop, InvalidReason::NoStopMethod);
     }
 
     let tp: &TakeProfitRule = &p.take_profit;
