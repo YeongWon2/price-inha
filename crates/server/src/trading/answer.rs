@@ -38,7 +38,7 @@ fn rejected(reason: &'static str) -> Answered {
     }
 }
 
-fn reject_word(reason: RejectReason) -> &'static str {
+pub(crate) fn reject_word(reason: RejectReason) -> &'static str {
     match reason {
         RejectReason::UserRejected => "user_rejected",
         RejectReason::NotFound => ANSWER_NOT_FOUND,

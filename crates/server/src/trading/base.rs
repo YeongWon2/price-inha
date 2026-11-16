@@ -227,7 +227,7 @@ impl Trading {
     }
 
     /// 이벤트를 저장한다(접속 관문이 붙어 있으면 화면에도 보낸다).
-    pub(super) async fn record(&self, kind: &str, payload: Value) -> Result<(), TradingError> {
+    pub(crate) async fn record(&self, kind: &str, payload: Value) -> Result<(), TradingError> {
         match self.publisher.get() {
             Some(publisher) => publisher
                 .publish(kind, payload)
@@ -243,12 +243,12 @@ impl Trading {
     }
 
     /// 그 시각의 시장 날짜.
-    pub(super) fn date_of(&self, at: DateTime<Utc>) -> NaiveDate {
+    pub(crate) fn date_of(&self, at: DateTime<Utc>) -> NaiveDate {
         crate::feed::market_date(self.market, at)
     }
 
     /// 오늘(시장 날짜)의 달력. 모르면 없음. 날짜가 바뀌면 모의계좌에도 넣는다.
-    pub(super) fn calendar(&self, now: DateTime<Utc>) -> Option<MarketCalendar> {
+    pub(crate) fn calendar(&self, now: DateTime<Utc>) -> Option<MarketCalendar> {
         let date = self.date_of(now);
         let calendar = match &self.calendars {
             Calendars::Fixed(calendar) => calendar(date),
@@ -276,7 +276,7 @@ impl Trading {
         lock(&self.quotes).insert(quote.symbol.as_str().to_string(), quote.clone());
     }
 
-    pub(super) fn last_quote(&self, symbol: &str) -> Option<Quote> {
+    pub(crate) fn last_quote(&self, symbol: &str) -> Option<Quote> {
         lock(&self.quotes).get(symbol).cloned()
     }
 
@@ -400,7 +400,7 @@ impl Trading {
     }
 
     /// 지금 쓰는 템플릿 값: 가장 나중에 고른 모의중 템플릿. 없거나 읽을 수 없으면 없음.
-    pub(super) fn params(&self) -> Result<Option<RiskParams>, TradingError> {
+    pub(crate) fn params(&self) -> Result<Option<RiskParams>, TradingError> {
         let chosen = self
             .store
             .templates_in_state(TemplateState::Simulating)?

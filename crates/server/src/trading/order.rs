@@ -151,7 +151,7 @@ impl Trading {
         }
     }
 
-    pub(super) fn trade(&self, id: TradeId) -> Result<Trade, TradingError> {
+    pub(crate) fn trade(&self, id: TradeId) -> Result<Trade, TradingError> {
         match self.store.get_trade(id) {
             Ok(trade) => Ok(trade),
             Err(pi_store::StoreError::TradeNotFound(..)) => Err(TradingError::TradeNotFound),

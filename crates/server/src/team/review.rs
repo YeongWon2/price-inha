@@ -1,0 +1,300 @@
+//! 복기 · 규칙 개선안 잇기(T15, V19~V21 · E17 · E28 · E35).
+//!
+//! 승인은 승인 모듈이 소비에 성공한 뒤에만 반영한다(`pi_approval::Approvals::approve_proposal`).
+
+use chrono::{DateTime, Utc};
+use pi_agent::Role;
+use pi_approval::{Answer, ApprovalNumber, Ask, Decision, Subject};
+use pi_journal::{Improvement, Mistake};
+use pi_store::{Proposal, ProposalId, ProposalState, Trade, UnixMillis};
+use pi_template::Change;
+use rust_decimal::Decimal;
+use serde_json::{Map, Value, json};
+
+use super::demo_ai::REVIEW_HEAD;
+use super::{Crew, KIND_PROPOSAL, Reviewed};
+use crate::TeamError;
+use crate::trading::{change_of, reject_word};
+
+/// 이벤트를 한 번에 읽는 개수.
+const READ_PAGE: usize = 1_000;
+
+fn millis(at: DateTime<Utc>) -> UnixMillis {
+    UnixMillis(at.timestamp_millis())
+}
+
+/// 복기 담당의 답.
+struct ReviewReply {
+    mistakes: Vec<Mistake>,
+    note: String,
+    changes: Vec<Change>,
+}
+
+/// 실수 글자.
+pub(super) fn mistake_word(mistake: &Mistake) -> String {
+    match mistake {
+        Mistake::ChasedEntry => "chased_entry".into(),
+        Mistake::LateStop => "late_stop".into(),
+        Mistake::OversizedPosition => "oversized_position".into(),
+        Mistake::NoRationale => "no_rationale".into(),
+        Mistake::PanicExit => "panic_exit".into(),
+        Mistake::Other(text) => text.clone(),
+    }
+}
+
+fn mistake_of(word: &str) -> Mistake {
+    match word.trim() {
+        "chased_entry" => Mistake::ChasedEntry,
+        "late_stop" => Mistake::LateStop,
+        "oversized_position" => Mistake::OversizedPosition,
+        "no_rationale" => Mistake::NoRationale,
+        "panic_exit" => Mistake::PanicExit,
+        other => Mistake::Other(other.to_string()),
+    }
+}
+
+fn changes_of(change: Option<&Map<String, Value>>) -> Vec<Change> {
+    change
+        .into_iter()
+        .flatten()
+        .filter_map(|(field, value)| {
+            let value: Decimal = value.as_str()?.trim().parse().ok()?;
+            change_of(field, value)
+        })
+        .collect()
+}
+
+fn parse_review(text: &str) -> Option<ReviewReply> {
+    let object = pi_agent::find_object_with(text, "mistakes")?;
+    let mistakes = object
+        .get("mistakes")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|word| !word.trim().is_empty())
+        .map(mistake_of)
+        .collect();
+    Some(ReviewReply {
+        mistakes,
+        note: object.get("note")?.as_str()?.to_string(),
+        changes: changes_of(object.get("change").and_then(Value::as_object)),
+    })
+}
+
+/// 답 하나의 결과.
+pub(super) struct Answered {
+    pub(super) result: &'static str,
+    pub(super) reason: Option<&'static str>,
+}
+
+fn answered(result: &'static str, reason: Option<&'static str>) -> Answered {
+    Answered { result, reason }
+}
+
+impl Crew {
+    /// 아직 복기하지 못한 팔린 매매를 복기한다.
+    pub(super) async fn review_pending(&self) -> Result<Reviewed, TeamError> {
+        let journal_error = |error: pi_journal::Error| TeamError::Journal(error.to_string());
+        let mut reviewed = Reviewed::default();
+        for trade in self.journal.pending_reviews().map_err(journal_error)? {
+            let Some(reply) = self.ask_review(&trade).await else {
+                continue;
+            };
+            let now = self.clock.now();
+            let record = self
+                .journal
+                .review_trade(trade.id, reply.mistakes, &reply.note, millis(now))
+                .map_err(journal_error)?;
+            if !reply.changes.is_empty() {
+                for mistake in &record.mistakes {
+                    if let Some(id) = self.propose(mistake, &reply.changes).await? {
+                        reviewed.proposals.push(id);
+                    }
+                }
+            }
+            reviewed.reviews.push(record);
+        }
+        Ok(reviewed)
+    }
+
+    /// 복기 담당 턴. 답하지 못했거나 모양이 틀리면 없음(다음 마감에 다시 본다, E17).
+    async fn ask_review(&self, trade: &Trade) -> Option<ReviewReply> {
+        let input = format!(
+            "{REVIEW_HEAD} 매매 {} · 종목 {}\n{}\n답은 JSON 객체 하나다: {{\"mistakes\": [\"chased_entry\" | \
+             \"late_stop\" | \"oversized_position\" | \"no_rationale\" | \"panic_exit\" | <자유 글>], \
+             \"note\": \"<복기 글>\", \"change\": {{\"<규칙 칸>\": \"<십진수>\"}} (없으면 빼기)}}",
+            trade.id.0,
+            trade.symbol,
+            pi_journal::plain_summary(trade)
+        );
+        let title = format!("review-{}", trade.id.0);
+        let limits = pi_agent::TimeLimits::MARKET;
+        let config = self.role(Role::Review);
+        match self
+            .team
+            .runner()
+            .run_turn(config, limits, &title, &input)
+            .await
+        {
+            Ok(outcome) => parse_review(&outcome.text),
+            Err(error) => {
+                tracing::warn!(%error, "복기 담당이 답하지 못했다. 다음 마감에 다시 본다");
+                None
+            }
+        }
+    }
+
+    /// 개선안을 내고 승인 요청을 만든다. 생기지 않았으면 없음.
+    async fn propose(
+        &self,
+        mistake: &Mistake,
+        changes: &[Change],
+    ) -> Result<Option<ProposalId>, TeamError> {
+        let Some(current) = self.trading.params()? else {
+            return Ok(None);
+        };
+        let now = millis(self.clock.now());
+        let proposal = match self.journal.propose(mistake, &current, changes, now) {
+            Ok(Some(proposal)) => proposal,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                tracing::warn!(%error, "개선안을 만들지 못했다");
+                return Ok(None);
+            }
+        };
+        let requested = self
+            .approvals
+            .request(Ask {
+                subject: Subject::RuleImprovement {
+                    proposal: proposal.id,
+                },
+                reason: format!(
+                    "반복된 실수({})로 규칙을 바꾸자는 개선안",
+                    mistake_word(mistake)
+                ),
+            })
+            .map_err(|error| TeamError::Approval(error.to_string()))?;
+        let payload = json!({
+            "id": proposal.id.0,
+            "number": requested.number.as_str(),
+            "fingerprint": requested.fingerprint.as_str(),
+            "mistake": mistake_word(mistake),
+        });
+        self.trading.record(KIND_PROPOSAL, payload).await?;
+        Ok(Some(proposal.id))
+    }
+
+    /// 개선안마다 남긴 승인 요청 이벤트(개선안 번호 → 내용).
+    pub(super) fn proposal_notices(&self) -> Result<Vec<Value>, TeamError> {
+        let mut found = Vec::new();
+        let mut after = 0;
+        loop {
+            let events = self.store.read_after(after, READ_PAGE)?;
+            let Some(last) = events.last() else {
+                return Ok(found);
+            };
+            after = last.seq;
+            found.extend(
+                events
+                    .into_iter()
+                    .filter(|event| event.kind == KIND_PROPOSAL)
+                    .map(|event| event.payload),
+            );
+        }
+    }
+
+    /// 개선안 목록(번호 순서).
+    pub(super) fn proposal_list(&self) -> Result<Vec<Value>, TeamError> {
+        let notices = self.proposal_notices()?;
+        let mut all: Vec<Proposal> = Vec::new();
+        for state in [
+            ProposalState::Proposed,
+            ProposalState::Cooling,
+            ProposalState::Applied,
+            ProposalState::Rejected,
+        ] {
+            all.extend(self.store.proposals_in_state(state)?);
+        }
+        all.sort_by_key(|proposal| proposal.id);
+        Ok(all
+            .iter()
+            .map(|proposal| view(proposal, &notices))
+            .collect())
+    }
+
+    /// 개선안에 답한다([`super::PROPOSAL_ANSWER_PATH`]).
+    pub(super) fn answer_proposal(&self, body: &Value) -> Result<Answered, TeamError> {
+        let id = ProposalId(body["id"].as_i64().unwrap_or_default());
+        let number = ApprovalNumber::new(body["number"].as_str().unwrap_or_default());
+        let fingerprint = body["fingerprint"].as_str().unwrap_or_default();
+        let decision = Decision::from_wire(body["answer"].as_str().unwrap_or_default());
+        let approval_error = |error: pi_approval::Error| TeamError::Approval(error.to_string());
+        if decision == Decision::Reject {
+            let _ = self
+                .approvals
+                .answer(&number, fingerprint, Decision::Reject);
+            return Ok(self.reject(id));
+        }
+        let answer = self
+            .approvals
+            .answer(&number, fingerprint, Decision::Approve)
+            .map_err(approval_error)?;
+        if let Answer::Rejected(reason) = answer {
+            return Ok(answered("rejected", Some(reject_word(reason))));
+        }
+        let proposal = match self.approvals.approve_proposal(&number, id) {
+            Ok(proposal) => proposal,
+            Err(pi_approval::Error::Denied(reason)) => {
+                return Ok(answered("rejected", Some(reject_word(reason))));
+            }
+            Err(other) => return Err(approval_error(other)),
+        };
+        if proposal.state == ProposalState::Applied {
+            let improvement = Improvement::from_proposal(&proposal)
+                .map_err(|error| TeamError::Journal(error.to_string()))?;
+            self.trading.apply_params(improvement.after)?;
+            return Ok(answered("applied", None));
+        }
+        Ok(answered("cooling", None))
+    }
+
+    fn reject(&self, id: ProposalId) -> Answered {
+        let now = millis(self.clock.now());
+        let current = match self.trading.params() {
+            Ok(Some(current)) => current,
+            _ => return answered("rejected", Some("not_found")),
+        };
+        match self.journal.reject(id, &current, now) {
+            Ok(_) => answered("rejected", Some("user_rejected")),
+            Err(_) => answered("rejected", Some("already_resolved")),
+        }
+    }
+}
+
+fn state_word(state: ProposalState) -> &'static str {
+    match state {
+        ProposalState::Proposed => "proposed",
+        ProposalState::Cooling => "cooling",
+        ProposalState::Applied => "applied",
+        ProposalState::Rejected => "rejected",
+    }
+}
+
+fn view(proposal: &Proposal, notices: &[Value]) -> Value {
+    let notice = notices
+        .iter()
+        .find(|notice| notice["id"] == json!(proposal.id.0));
+    let field = |name: &str| notice.map_or(Value::Null, |n| n[name].clone());
+    let mistake = Improvement::from_proposal(proposal)
+        .map(|improvement| mistake_word(&improvement.mistake))
+        .unwrap_or_default();
+    json!({
+        "id": proposal.id.0,
+        "state": state_word(proposal.state),
+        "mistake": mistake,
+        "increases_risk": proposal.increases_risk,
+        "evidence": proposal.evidence.iter().map(|trade| trade.0).collect::<Vec<_>>(),
+        "number": field("number"),
+        "fingerprint": field("fingerprint"),
+    })
+}

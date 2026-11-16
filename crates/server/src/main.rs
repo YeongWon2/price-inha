@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use pi_secrets::SecretStore;
 use price_inha::{
-    App, AppError, RedactingWriter, Settings, SettingsError, TradingWiring, Wiring, announce_addr,
+    App, AppError, Launch, RedactingWriter, Settings, SettingsError, TeamWiring, TradingWiring,
+    Wiring, announce_addr,
 };
 
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
@@ -32,7 +33,7 @@ fn say(text: &str) {
 /// 기록(tracing)을 표준 오류로 낸다. 보관 폴더의 비밀 보관소를 열 수 있으면 그 값들을 가린 뒤에만 낸다
 /// ([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
 ///
-/// 연 보관소는 앱에도 그대로 준다([`App::start_with_secrets`]): 띄운 뒤 등록한 키도 가리게.
+/// 연 보관소는 앱에도 그대로 준다([`App::launch`]): 띄운 뒤 등록한 키도 가리게.
 fn init_tracing(settings: Option<&Settings>) -> Option<Arc<SecretStore>> {
     let secrets = settings
         .and_then(|s| SecretStore::open(s.home.clone()).ok())
@@ -76,18 +77,13 @@ async fn run(
     let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
     // 보관소를 열지 못했으면 앱이 다시 열어 보고 그 오류를 알린다.
-    let started = match secrets {
-        Some(secrets) => {
-            App::start_with_secrets(
-                settings,
-                Wiring::default(),
-                TradingWiring::default(),
-                secrets,
-            )
-            .await
-        }
-        None => App::start(settings, Wiring::default()).await,
+    // (W5 2차) 실행 파일은 투자 팀(에이전트 · 자료 · 트리거 · 복기)까지 잇는다.
+    let launch = Launch {
+        trading: TradingWiring::default(),
+        team: Some(TeamWiring::official()),
+        secrets,
     };
+    let started = App::launch(settings, Wiring::default(), launch).await;
     let app = started.map_err(Failure::App)?;
     let mode = if demo {
         " (시연용 가짜 시세)"

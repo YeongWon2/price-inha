@@ -261,3 +261,10 @@ impl pi_gate::Redactor for SecretsRedactor {
         self.store.redact(text)
     }
 }
+
+/// (W5 2차) 에이전트 실행기의 가리기 자리(`pi_ai::Redactor`)에도 같은 보관소를 끼운다.
+impl pi_ai::Redactor for SecretsRedactor {
+    fn redact(&self, text: &str) -> String {
+        self.store.redact(text)
+    }
+}

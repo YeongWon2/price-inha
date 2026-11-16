@@ -16,19 +16,34 @@
 //!   개선안을 내고 승인 요청을 만든다(V20). 답은 [`PROPOSAL_ANSWER_PATH`](V21 · E35 · E28).
 //! - 다른 모듈의 로직을 다시 만들지 않는다(조립만 한다). 시각은 [`crate::Wiring::clock`]에서만 읽는다.
 
+mod build;
+mod day;
 mod demo_ai;
+mod facts;
+mod guard;
+mod http;
+mod review;
+mod talk;
+mod tools;
+mod wake;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pi_agent::DiscussionOutcome;
-use pi_data::{CorpCode, DataConfig, EcosCycle, EcosSeries};
-use pi_journal::ReviewRecord;
-use pi_market::Symbol;
-use pi_store::{ProposalId, TradeId};
+use pi_agent::{DiscussionOutcome, RoleConfig, Team};
+use pi_approval::Approvals;
+use pi_data::{CorpCode, DataAdapter, DataConfig, EcosCycle, EcosSeries};
+use pi_journal::{Journal, ReviewRecord};
+use pi_market::{Clock, Symbol};
+use pi_store::{ProposalId, Store, TradeId};
 use pi_trigger::ScheduleTimes;
 
-use crate::{DayPlan, Placed, TeamError};
+use crate::desk::Desk;
+use crate::{DayPlan, Placed, SecretsRedactor, TeamError, Trading};
+
+pub(crate) use build::CrewParts;
+pub(crate) use http::routes;
+pub(crate) use wake::spawn_trigger;
 
 pub use demo_ai::{DemoAi, DemoTurn};
 
@@ -76,6 +91,9 @@ pub const TRADE_ROOM_PREFIX: &str = "trade-";
 /// 전략 · 리스크)의 평균 60점을 넘어야 한다(합 180 초과, E27).
 pub const DEFAULT_CONSENSUS_REQUIRED: i32 = 180;
 
+/// 담당이 쓰는 모델 이름의 기본값. 지시서 · 스펙에 정해진 값이 없어 조립이 정했다(사람 확인 필요).
+pub const DEFAULT_TEAM_MODEL: &str = "claude-sonnet-4-5";
+
 /// 투자 팀 조립의 바깥 값. [`crate::Launch::team`]에 준다.
 #[derive(Debug, Clone)]
 pub struct TeamWiring {
@@ -94,11 +112,13 @@ pub struct TeamWiring {
     pub consensus_required: i32,
     /// 일정 간격(장 시작 전 브리핑 · 마감 뒤).
     pub schedule: ScheduleTimes,
+    /// 담당 6명이 쓰는 모델 이름(고른 AI 연결에 그대로 넘긴다).
+    pub model: String,
 }
 
 impl TeamWiring {
     /// 공식 주소 · 빈 고유번호 표 · 한국은행 기준금리(722Y001/0101000, 월) · 원/달러 환율(731Y001/0000001, 일) ·
-    /// 공시 7일 · [`DEFAULT_CONSENSUS_REQUIRED`] · 기본 일정 간격.
+    /// 공시 7일 · [`DEFAULT_CONSENSUS_REQUIRED`] · 기본 일정 간격 · 모델 [`DEFAULT_TEAM_MODEL`].
     pub fn official() -> TeamWiring {
         TeamWiring {
             data: DataConfig::official(),
@@ -108,6 +128,7 @@ impl TeamWiring {
             disclosure_days: 7,
             consensus_required: DEFAULT_CONSENSUS_REQUIRED,
             schedule: ScheduleTimes::default(),
+            model: DEFAULT_TEAM_MODEL.to_string(),
         }
     }
 }
@@ -146,13 +167,29 @@ pub struct Reviewed {
 /// 조립된 투자 팀. [`crate::App::crew`]로 받는다. 트리거가 장 시작 · 마감 뒤에 아래 일을 부르고,
 /// 테스트는 같은 일을 직접 부를 수도 있다.
 pub struct Crew {
-    _private: (),
+    store: Store,
+    clock: Arc<dyn Clock>,
+    trading: Arc<Trading>,
+    desk: Arc<Desk>,
+    team: Team,
+    roles: Vec<RoleConfig>,
+    tools: Arc<tools::CrewTools>,
+    data: Arc<dyn DataAdapter>,
+    wiring: TeamWiring,
+    demo: Option<Arc<DemoAi>>,
+    redactor: Arc<SecretsRedactor>,
+    approvals: Approvals,
+    journal: Journal,
+    /// 하루 판단 · 복기 · 공시 보기를 한 줄로 세운다(트리거와 부르는 쪽이 겹쳐도 한 번씩).
+    day_turn: tokio::sync::Mutex<()>,
+    review_turn: tokio::sync::Mutex<()>,
+    scan_turn: tokio::sync::Mutex<()>,
 }
 
 impl Crew {
     /// 시연 모드의 가짜 AI. 시연 모드가 아니면 `None`.
     pub fn demo_ai(&self) -> Option<Arc<DemoAi>> {
-        todo!()
+        self.demo.clone()
     }
 
     /// 팀장의 하루 운용 판단(V5): 팀장 턴 하나로 오늘 매매할지 쉴지 정하고 [`crate::Trading::decide_day`]에 넘긴다.
@@ -160,15 +197,20 @@ impl Crew {
     ///
     /// 팀장의 답은 `{"plan": "trade"}` 또는 `{"plan": "rest", "reason": 글}`이다. 모양이 틀리거나 팀장이 답하지 못하면
     /// 쉬기(이유는 답하지 못했다는 말)로 본다(보수적으로, E6). 냉각중인 개선안 가운데 다음 거래일 시작이 지난 것은
-    /// 이때 반영한다(E28).
+    /// 이때 반영한다(E28). 그날의 하루 시작([`crate::KIND_DAY_START`])을 먼저 남긴 뒤에 묻는다. 팀이 멈춰 있어 매매를 시작하지 못하면 판단만 남기고 상태는 그대로다.
     pub async fn plan_day(&self) -> Result<DayPlan, TeamError> {
-        todo!()
+        let _turn = self.day_turn.lock().await;
+        // 하루 시작(하루 한도 멈춤 풀기 · 그날 시작 평가액)을 먼저 남긴다: 판단은 그 뒤다.
+        self.trading.tick().await;
+        self.apply_cooled()?;
+        self.decide_today().await
     }
 
     /// 지켜볼 종목마다 새 공시를 본다(V2): 고유번호가 있는 종목의 공시를 받아, 아직 논의하지 않은 공시가 있으면
     /// [`Crew::discuss`]로 논의한다. 공시가 없는 종목은 논의하지 않는다. 같은 공시(접수번호)는 두 번 논의하지 않는다.
     pub async fn scan(&self) -> Result<Vec<Discussed>, TeamError> {
-        todo!()
+        let _turn = self.scan_turn.lock().await;
+        self.scan_watched().await
     }
 
     /// 종목 하나를 논의한다(T9 · T10): 논의중 매매를 만들고, 자료(공시 · 재무 · 금리 · 환율)를 받아 저장하고,
@@ -178,8 +220,7 @@ impl Crew {
     /// - 판단되면 받은 자료를 그 매매에 붙인다(판단 시각보다 늦게 안 자료는 붙지 않는다, V36).
     /// - 하나라도 비거나 받지 못한 자료가 있으면 지켜보기(E32)이고 주문 안이 없다.
     pub async fn discuss(&self, symbol: &str, topic: &str) -> Result<Discussed, TeamError> {
-        let _ = (symbol, topic);
-        todo!()
+        self.discuss_symbol(symbol, topic).await
     }
 
     /// 하루 복기(V19 · V20): 아직 복기하지 못한 팔린 매매마다 복기 담당 턴으로 실수와 복기 글을 받아
@@ -191,6 +232,7 @@ impl Crew {
     /// 그 밖의 글은 자유 글 실수다. 칸 이름은 [`crate::TEMPLATE_ADJUST_PATH`]와 같다.
     /// 답하지 못한 매매는 그대로 두고 다음 마감에 다시 본다(E17).
     pub async fn review_day(&self) -> Result<Reviewed, TeamError> {
-        todo!()
+        let _turn = self.review_turn.lock().await;
+        self.review_pending().await
     }
 }

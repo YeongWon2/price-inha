@@ -40,8 +40,10 @@ use answer::Waiting;
 use base::{Calendars, DayLog};
 use marks::Marks;
 
+pub(crate) use answer::reject_word;
 pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use http::routes;
+pub(crate) use templates::change_of;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
 /// `{"state": 팀 상태 글자, "plan": "trade" | "rest" | null, "reason": 쉬는 이유 | null}`.
@@ -255,5 +257,28 @@ impl Trading {
     /// 저장소에 한다(하루 한도 멈춤: `TeamCause::DailyLossLimit`, 전체 정지: `TeamCause::MaxLoss`).
     pub async fn on_quote(&self, quote: Quote) -> Result<(), TradingError> {
         self.take_quote(quote).await
+    }
+
+    /// (W5 2차) 이 주문 길의 시장.
+    pub(crate) fn market(&self) -> Market {
+        self.market
+    }
+
+    /// (W5 2차) 그 날짜의 달력(조립하는 쪽이 준 것, 아니면 시세 흐름이 받은 그 날짜의 것). 모르면 없음.
+    pub(crate) fn calendar_on(&self, date: NaiveDate) -> Option<MarketCalendar> {
+        match &self.calendars {
+            Calendars::Fixed(calendar) => Some(calendar(date)),
+            Calendars::Feed(held) => base::lock(held).clone().filter(|c| c.today.date == date),
+        }
+    }
+
+    /// (W5 2차) 오늘(시장 달력의 날짜) 이미 정한 하루 판단.
+    pub(crate) fn plan_today(&self) -> Option<DayPlan> {
+        let today = self.date_of(self.clock.now());
+        let days = base::lock(&self.days);
+        days.plan
+            .as_ref()
+            .filter(|(date, _)| *date == today)
+            .map(|(_, plan)| plan.clone())
     }
 }
