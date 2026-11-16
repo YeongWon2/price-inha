@@ -15,11 +15,15 @@ chrono = "0.4.45"
 pi-agent = { version = "0.1.0", path = "../agent" }
 pi-ai = { version = "0.1.0", path = "../ai" }
 pi-approval = { version = "0.1.0", path = "../approval" }
+pi-backup = { version = "0.1.0", path = "../backup" }
 pi-data = { version = "0.1.0", path = "../data" }
 pi-exec = { version = "0.1.0", path = "../exec" }
 pi-gate = { version = "0.1.0", path = "../gate" }
 pi-journal = { version = "0.1.0", path = "../journal" }
+pi-knowledge = { version = "0.1.0", path = "../knowledge" }
 pi-market = { version = "0.1.0", path = "../market" }
+pi-notify = { version = "0.1.0", path = "../notify" }
+pi-office = { version = "0.1.0", path = "../office" }
 pi-paper = { version = "0.1.0", path = "../paper" }
 pi-rules = { version = "0.1.0", path = "../rules" }
 pi-secrets = { version = "0.1.0", path = "../secrets" }
@@ -35,6 +39,8 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 zeroize = "1.9.1"
 
 [dev-dependencies]
+age = "0.12.1"
+base64 = "0.23.1"
 chrono = "0.4.45"
 futures = "0.3.34"
 reqwest = { version = "0.13.5", default-features = false }
@@ -42,4 +48,5 @@ rusqlite = { version = "0.42.0", features = ["bundled"] }
 tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 tokio-tungstenite = "0.30.0"
+url = "2.5.8"
 wiremock = "0.6.5"

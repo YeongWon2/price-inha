@@ -37,6 +37,8 @@ pub enum DemoTurn {
     DayPlan,
     /// 복기 담당의 복기. 기본 `{"mistakes": [], "note": …}`.
     Review,
+    /// (W5 3차) 사무실 채팅에서 그 담당에게 물은 답(V14). 기본: 그 담당 이름이 들어간 짧은 답.
+    Chat(Role),
 }
 
 /// 시연 모드의 가짜 AI. 턴마다 정해진 답을 돌려준다. [`DemoAi::script`]로 답을 바꾼다.
@@ -133,6 +135,7 @@ fn default_reply(turn: DemoTurn, conversation: &str) -> String {
         DemoTurn::Draft => json!({"side": "buy", "note": "시연 주문 안"}).to_string(),
         DemoTurn::DayPlan => json!({"plan": "trade"}).to_string(),
         DemoTurn::Review => json!({"mistakes": [], "note": "시연 복기"}).to_string(),
+        DemoTurn::Chat(_) => todo!("W5 3차: 채팅 기본 답"),
     }
 }
 

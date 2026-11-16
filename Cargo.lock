@@ -2326,18 +2326,24 @@ dependencies = [
 name = "price-inha"
 version = "0.1.0"
 dependencies = [
+ "age",
  "async-trait",
  "axum",
+ "base64 0.23.1",
  "chrono",
  "futures",
  "pi-agent",
  "pi-ai",
  "pi-approval",
+ "pi-backup",
  "pi-data",
  "pi-exec",
  "pi-gate",
  "pi-journal",
+ "pi-knowledge",
  "pi-market",
+ "pi-notify",
+ "pi-office",
  "pi-paper",
  "pi-rules",
  "pi-secrets",
@@ -2354,6 +2360,7 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-subscriber",
+ "url",
  "wiremock",
  "zeroize",
 ]

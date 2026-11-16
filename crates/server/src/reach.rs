@@ -1,0 +1,179 @@
+//! (W5 3차) 검색 · 백업 · 사무실 · 폰 잇기: T16 · T19 · T20 · T21 · T22 연결.
+//!
+//! 작업 지시서: `docs/dev/modules/server.md` "3차"와 "사무실 화면을 조립할 때".
+//!
+//! [`App::launch_with`]가 2차까지의 조립([`App::launch`])에 더해 아래를 잇는다. [`App::launch`]는 2차까지와
+//! 같게 동작하고(이벤트 · 알림을 더 내지 않는다), 웹 자산 경로만 함께 단다.
+//!
+//! - 웹 자산(공개 경로, 세션 없이 열린다 · Host와 상대 주소 확인은 받는다):
+//!   `pi_office::web_assets()`는 [`OFFICE_ASSETS_PREFIX`] 아래(`GET /office/`는 `index.html`),
+//!   `pi_notify::phone_assets()`는 [`PHONE_ASSETS_PREFIX`] 아래(`GET /phone/`는 `index.html`)에 단다.
+//!   `Content-Type`은 파일 끝으로 정하고(폰 묶음은 묶음이 준 값), 없는 파일은 404다.
+//! - 사무실(`pi_office::Office`): 이벤트 포트는 접속 관문의 `Publisher::publish`(번호 있는 이벤트, E37),
+//!   시계는 [`crate::Wiring::clock`]. 팀 상태가 바뀌면 `set_team_state`, 논의에 든 담당은
+//!   `Activity::Discussing`(끝나면 `Working`)으로 알린다(V13 · V15). 경로 [`OFFICE_PATH`] · [`OFFICE_CHAT_PATH`].
+//! - 알림(`pi_notify::Notifier`): VAPID 키는 비밀 보관소 폴더의 `pi_notify::VAPID_KEY_FILE`(0600), 가리기는
+//!   비밀 보관소, 시계는 [`crate::Wiring::clock`]. 알림을 내는 일:
+//!   승인 요청(주문이 승인을 기다리면, 주소 `/phone/#/approvals/<승인 번호>`, V10),
+//!   이상(지켜보는 종목의 시세 늦음이 없음 → 있음으로 바뀔 때, V11 · N5),
+//!   접속 잠금(`pi_gate::LockAlert`, E2 · V39), 백업 실패(E15), 하루 정리(하루 마감 뒤, V12).
+//!   경로 [`PUSH_KEY_PATH`] · [`PUSH_SUBSCRIBE_PATH`] · [`NOTICES_PATH`] · [`APPROVAL_PATH`] ·
+//!   [`APPROVAL_DECIDE_PATH`] · [`DAILY_SUMMARY_PATH`].
+//! - 지식 검색(`pi_knowledge::Knowledge`, 임베딩 없음): 복기가 남으면 그 매매의 기록(종류 `trade`)과 복기
+//!   (종류 `review`)를 **가린 글로** 색인한다(기록 키는 매매 번호 글자). 논의를 시작할 때 종목 · 계기로 자동
+//!   회상해 찾은 지난 매매를 논의 자료로 넣는다: 판단 기록의 자료 이름은 [`RECALL_SOURCE_PREFIX`]`<매매 번호>`
+//!   (V22). 담당 도구 [`KNOWLEDGE_TOOL`]은 [`crate::Crew::search_knowledge`]와 같은 길이다. 바깥 요청은 없다(V23).
+//! - 백업(`pi_backup::Backup`, `reach.backup`이 있을 때): 하루 마감([`crate::KIND_DAY_CLOSE`])을 남긴 뒤 한 번
+//!   올린다(V48). 실패하면 백업 실패 알림을 내고 다음 마감에 다시 한다(E15). 토큰은 비밀 보관소의
+//!   `KeySlot::BackupGithubToken`이다. 되살리기는 `pi_backup::restore`로 빈 폴더에 하고, 되살린 폴더로 띄우면
+//!   팀은 전체 정지 · 승인은 만료이며 키를 다시 넣고 [`crate::TEAM_RESTART_PATH`]를 누르기 전에는 팀이 돌지
+//!   않는다(V51 · V52, C8 · C16).
+//!
+//! 새 API 경로는 모두 세션 · Origin 확인을 받는다(`protected_routes`).
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::{App, AppError, Launch, Settings, Wiring};
+
+/// 사무실 화면 자산을 다는 자리. `GET /office/`는 `index.html`, `GET /office/<경로>`는 그 파일.
+pub const OFFICE_ASSETS_PREFIX: &str = "/office/";
+
+/// 폰 화면 자산을 다는 자리(묶음 manifest의 `id`와 같다). `GET /phone/`는 `index.html`.
+pub const PHONE_ASSETS_PREFIX: &str = "/phone/";
+
+/// 사무실 접속 스냅샷. `GET` → `{"agents": [{"agent", "place", "work"}], "pending": [응답 객체],
+/// "last_seq": 수}`. 마지막 번호를 **먼저** 읽고 모습 · 끝나지 않은 응답을 읽는다(그 뒤의 이벤트는
+/// `/ws?last_seq=`로 받는다, E3). 담당 id는 `pi_office::Agent::id`(`news` · `strategy` · `risk` · `review` ·
+/// `trader` · `leader`)다.
+pub const OFFICE_PATH: &str = "/api/office";
+
+/// 담당에게 말하기(C5). `POST` `{"room": "team" | "direct", "agent": 담당 id, "text": 글,
+/// "sourceMessageId": 글 번호}` → 200 응답 객체(queued, `office.chat`과 같은 모양).
+///
+/// - 글이 비었거나 모르는 방 · 담당이면 400 `{"error": `[`OFFICE_BAD_INPUT`]`}`.
+/// - 글이 [`OFFICE_TEXT_MAX`]자를 넘거나 `sourceMessageId`가 비었거나 [`OFFICE_SOURCE_ID_MAX`]자를 넘으면
+///   400 `{"error": `[`OFFICE_TOO_LONG`]`}`(빈 번호는 [`OFFICE_BAD_INPUT`]).
+/// - 같은 기기(상대 IP)가 [`OFFICE_SEND_INTERVAL`] 안에 또 보내면 429 `{"error": `[`OFFICE_TOO_FAST`]`}`.
+///   간격은 [`crate::Wiring::clock`]으로 잰다.
+/// - 담당의 대기열이 차면 429 `{"error": "queue_full"}`.
+/// - 팀 방의 글은 [`KIND_OFFICE_MESSAGE`] 이벤트로도 낸다.
+/// - 답은 뒤에서 그 담당의 AI 턴으로 만든다(시연 모드는 `DemoTurn::Chat`). thinking → complete,
+///   답하지 못하면 failed(E6). 무응답 [`CHAT_IDLE_TIMEOUT`] · 전체 [`CHAT_TOTAL_TIMEOUT`]이면 failed다.
+pub const OFFICE_CHAT_PATH: &str = "/api/office/chat";
+
+/// 사무실 글 길이 상한(원본 DeskRPG `npc:chat` 500자).
+pub const OFFICE_TEXT_MAX: usize = 500;
+/// `sourceMessageId` 길이 상한. 원본은 UUID(36자)를 쓴다. 넉넉히 128자로 정했다.
+pub const OFFICE_SOURCE_ID_MAX: usize = 128;
+/// 같은 기기가 글을 보내는 가장 짧은 간격(원본 2초).
+pub const OFFICE_SEND_INTERVAL: Duration = Duration::from_secs(2);
+/// 채팅 답의 무응답 시간 제한.
+pub const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+/// 채팅 답의 전체 시간 제한.
+pub const CHAT_TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
+/// 저장되는 이벤트 종류: 팀 방의 사용자 글. 내용 `{"room": "team", "agent": 담당 id, "text": 가린 글,
+/// "sourceMessageId": 글 번호}`.
+pub const KIND_OFFICE_MESSAGE: &str = "office.message";
+/// 사무실 거부: 입력이 잘못됐다.
+pub const OFFICE_BAD_INPUT: &str = "invalid_input";
+/// 사무실 거부: 너무 길다.
+pub const OFFICE_TOO_LONG: &str = "too_long";
+/// 사무실 거부: 너무 자주 보낸다.
+pub const OFFICE_TOO_FAST: &str = "too_fast";
+
+/// VAPID 공개키. `GET` → `{"key": base64url}`.
+pub const PUSH_KEY_PATH: &str = "/api/push/key";
+
+/// 웹 푸시 구독. `POST` `{"endpoint", "p256dh", "auth", "device"}` → 204.
+///
+/// - 키 모양이 틀렸거나 주소가 `https://`가 아니면 400 `{"error": "invalid_input"}`.
+/// - 주소의 이름이 내부망이면 400 `{"error": `[`SUBSCRIBE_REFUSED`]`}`(SSRF 막기, 해석 전 글자로 본다):
+///   `localhost` · `*.localhost` · `*.local` · `*.internal`, 루프백 · 사설 · 링크 로컬 · 지정되지 않은 IP,
+///   IPv6 고유 로컬(`fc00::/7`) · 링크 로컬 · 루프백.
+pub const PUSH_SUBSCRIBE_PATH: &str = "/api/push/subscribe";
+/// 구독 거부: 내부망 주소.
+pub const SUBSCRIBE_REFUSED: &str = "endpoint_not_allowed";
+
+/// 알림 목록. `GET ?after=<번호>&max=<개수>` → `[{"seq", "kind", "title", "body", "link"?, "at"}]`
+/// (번호 순서, `max` 기본 50 · 최대 200). 가린 글이다.
+pub const NOTICES_PATH: &str = "/api/notices";
+
+/// 승인 카드 읽기. `GET /api/approvals/{id}` → `{"number", "summary", "fingerprint"(64자), "short_code"(6자),
+/// "status"}`. 없는 번호는 404 `{"error": "not_found"}`.
+pub const APPROVAL_PATH: &str = "/api/approvals/{id}";
+
+/// 폰의 승인 · 거절. `POST /api/approvals/{id}/approve | reject` `{"fingerprint", "code"?}`.
+/// `code`(6자리)는 읽지 않는다(결정 4번: 사용자가 치지 않는다, 지문으로 견준다). 처리는
+/// [`crate::APPROVAL_ANSWER_PATH`]와 같고 몸통 `{"result", "reason"}`도 같다. 승인을 눌렀는데 결과가 거절이면
+/// 409, 그 밖은 200이다. 다른 동사는 404.
+pub const APPROVAL_DECIDE_PATH: &str = "/api/approvals/{id}/{verb}";
+
+/// 하루 정리(V12 · V50). `GET` → `{"date": "YYYY-MM-DD", "done": 글, "pnl": 글, "review": 글,
+/// "orders": 그날 체결된 주문 수, "pnl_krw": 그날 시작 평가액에서 지금까지의 손익(십진수 글자),
+/// "reviews": 그날 남긴 복기 수, "backup_at": 마지막 백업 성공 시각(유닉스 밀리초) | null}`.
+/// 날짜는 시장 달력의 오늘이다. 백업이 있으면 `done`에 "백업 완료"와 그 시각이 들어간다.
+pub const DAILY_SUMMARY_PATH: &str = "/api/daily-summary";
+
+/// 담당이 쓰는 지식 검색 도구의 이름(T16).
+pub const KNOWLEDGE_TOOL: &str = "knowledge_search";
+
+/// 자동 회상으로 꺼낸 지난 매매가 판단 기록의 자료 이름에 붙는 머리. 뒤에 매매 번호가 온다(V22).
+pub const RECALL_SOURCE_PREFIX: &str = "지난 매매 #";
+
+/// 웹 푸시 요청 하나의 시간 제한(실제 길).
+pub const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// VAPID `sub`(연락처) 기본값.
+pub const DEFAULT_PUSH_SUBJECT: &str = "mailto:owner@price-inha.invalid";
+
+/// (W5 3차) 백업의 바깥 값. 토큰은 비밀 보관소의 `KeySlot::BackupGithubToken`이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupWiring {
+    /// GitHub API 기본 주소(시험은 로컬 가짜 서버).
+    pub api_base: String,
+    /// 비공개 저장소 `소유자/이름`.
+    pub repo: String,
+    /// age 수신자 공개키(`age1…`).
+    pub recipient: String,
+}
+
+/// (W5 3차) 검색 · 백업 · 사무실 · 폰을 잇는 바깥 값. [`App::launch_with`]에 준다.
+#[derive(Clone, Default)]
+pub struct Reach {
+    /// 웹 푸시를 보내는 길. `None`이면 실제 길(`pi_notify::HttpTransport`, [`PUSH_TIMEOUT`]).
+    pub push: Option<Arc<dyn pi_notify::PushTransport>>,
+    /// 백업. `None`이면 백업하지 않는다(백업 경로 · 하루 정리의 `backup_at`은 `null`).
+    pub backup: Option<BackupWiring>,
+}
+
+impl App {
+    /// (W5 3차) [`App::launch`]가 하는 일에 더해 사무실 · 알림 · 지식 검색 · 백업을 잇는다(모듈 문서).
+    /// 실행 파일은 이것으로 띄운다.
+    pub async fn launch_with(
+        settings: Settings,
+        wiring: Wiring,
+        launch: Launch,
+        reach: Reach,
+    ) -> Result<App, AppError> {
+        let _ = (settings, wiring, launch, reach);
+        todo!("W5 3차: launch_with")
+    }
+
+    /// (W5 3차) 지식 검색 창구(같은 저장소). 임베딩은 없다.
+    pub fn knowledge(&self) -> Arc<pi_knowledge::Knowledge> {
+        todo!("W5 3차: knowledge")
+    }
+
+    /// (W5 3차) 지금 한 번 백업한다(하루 마감 뒤에 하는 것과 같은 길). 시각은 [`crate::Wiring::clock`].
+    /// 백업을 잇지 않았으면 [`AppError::BackupNotConfigured`], 실패하면 백업 실패 알림을 내고
+    /// [`AppError::Backup`].
+    pub async fn back_up_now(&self) -> Result<pi_backup::BackupReport, AppError> {
+        todo!("W5 3차: back_up_now")
+    }
+
+    /// (W5 3차) 백업 상태. 백업을 잇지 않았으면 [`AppError::BackupNotConfigured`].
+    pub fn backup_status(&self) -> Result<pi_backup::BackupStatus, AppError> {
+        todo!("W5 3차: backup_status")
+    }
+}

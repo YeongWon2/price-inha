@@ -12,6 +12,7 @@ mod feed;
 mod keys;
 mod log;
 mod page;
+mod reach;
 mod retry;
 mod settings;
 mod setup;
@@ -35,6 +36,14 @@ pub use app::{
 pub use error::{AppError, SettingsError, SetupRefusal, TeamError, TradingError};
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
 pub use log::{RedactedLine, RedactingWriter};
+pub use reach::{
+    APPROVAL_DECIDE_PATH, APPROVAL_PATH, BackupWiring, CHAT_IDLE_TIMEOUT, CHAT_TOTAL_TIMEOUT,
+    DAILY_SUMMARY_PATH, DEFAULT_PUSH_SUBJECT, KIND_OFFICE_MESSAGE, KNOWLEDGE_TOOL, NOTICES_PATH,
+    OFFICE_ASSETS_PREFIX, OFFICE_BAD_INPUT, OFFICE_CHAT_PATH, OFFICE_PATH, OFFICE_SEND_INTERVAL,
+    OFFICE_SOURCE_ID_MAX, OFFICE_TEXT_MAX, OFFICE_TOO_FAST, OFFICE_TOO_LONG, PHONE_ASSETS_PREFIX,
+    PUSH_KEY_PATH, PUSH_SUBSCRIBE_PATH, PUSH_TIMEOUT, RECALL_SOURCE_PREFIX, Reach,
+    SUBSCRIBE_REFUSED,
+};
 pub use settings::{
     DEFAULT_CALENDAR_RETRY, DEFAULT_QUOTE_INTERVAL, DEFAULT_REGISTER_ATTEMPTS,
     DEFAULT_REGISTER_WINDOW, DEFAULT_RETRY_INITIAL, DEFAULT_RETRY_MAX, DEFAULT_SYMBOLS_ATTEMPTS,

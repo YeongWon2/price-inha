@@ -61,6 +61,15 @@ pub enum AppError {
     /// (W5 2차) 투자 팀(에이전트 · 자료 · 트리거)을 잇지 못했다.
     #[error("투자 팀 오류: {0}")]
     Team(#[from] TeamError),
+    /// (W5 3차) 백업을 잇지 않았다(`Reach::backup`이 없다).
+    #[error("백업을 설정하지 않았습니다")]
+    BackupNotConfigured,
+    /// (W5 3차) 백업이 실패했다. 글에 비밀 값은 없다.
+    #[error("백업 오류: {0}")]
+    Backup(String),
+    /// (W5 3차) 알림(VAPID 키 · 푸시 길)을 준비하지 못했다.
+    #[error("알림 오류: {0}")]
+    Notify(String),
 }
 
 /// 설정 요청(키 등록 · 종목 등록)을 거부한 까닭. **받은 값은 어디에도 싣지 않는다.**
@@ -211,4 +220,7 @@ pub enum TeamError {
     /// 저장소 오류.
     #[error("저장소 오류: {0}")]
     Store(#[from] pi_store::StoreError),
+    /// (W5 3차) 지식 검색 오류 · 도구 입력이 잘못됨(가린 글).
+    #[error("지식 검색 오류: {0}")]
+    Knowledge(String),
 }

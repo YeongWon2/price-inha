@@ -235,4 +235,21 @@ impl Crew {
         let _turn = self.review_turn.lock().await;
         self.review_pending().await
     }
+
+    /// (W5 3차) 지식 검색 도구([`crate::KNOWLEDGE_TOOL`], T16). 담당이 도구로 부르는 것과 같은 길이다.
+    /// 시각은 [`crate::Wiring::clock`]이다. 입력:
+    ///
+    /// - `{"mode": "keyword", "query": 글, "max"?: 수}`: 키워드 검색(명시 검색, 두 글자 낱말도 찾는다).
+    /// - `{"mode": "condition", "symbol"?: 종목, "max_pnl"?: 십진수 글자, "min_pnl"?: 십진수 글자, "max"?: 수}`:
+    ///   팔린 매매(손익 = 판 금액 − 산 금액)에서 조건으로 찾는다. 기록 키는 매매 번호 글자다.
+    /// - `{"mode": "semantic", "query": 글}`: 뜻 검색. 임베딩이 없어 결과는 비고 쓸 수 없음(`no_embedder`)이다.
+    ///
+    /// 모드가 없거나 모르는 모드 · 빈 질의 · 읽을 수 없는 값이면 [`TeamError::Knowledge`]. 바깥 요청은 없다(V23).
+    pub async fn search_knowledge(
+        &self,
+        input: &serde_json::Value,
+    ) -> Result<pi_knowledge::SearchOutput, TeamError> {
+        let _ = input;
+        todo!("W5 3차: search_knowledge")
+    }
 }
