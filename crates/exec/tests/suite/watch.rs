@@ -46,6 +46,7 @@ async fn hit_carries_only_what_is_left_after_a_partial_sale() {
         .sell(bench.sell(id, SellPurpose::TakeProfit, "4", "70000"))
         .await
         .unwrap();
+    bench.set_at(bench.now() + chrono::Duration::seconds(1));
     bench.exec.on_quote(&bench.quote("70000")).unwrap();
 
     assert_eq!(

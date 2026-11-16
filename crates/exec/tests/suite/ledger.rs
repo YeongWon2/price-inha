@@ -50,6 +50,7 @@ async fn partial_sale_survives_a_restart_after_orders_are_archived() {
         .sell(bench.sell(id, SellPurpose::TakeProfit, "4", "70000"))
         .await
         .unwrap();
+    bench.set_at(bench.now() + chrono::Duration::seconds(1));
     bench.exec.on_quote(&bench.quote("70000")).unwrap();
     archive_all(&bench);
 
