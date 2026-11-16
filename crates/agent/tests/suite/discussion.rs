@@ -8,8 +8,10 @@ use serde_json::json;
 use crate::common::{Env, Step, of_kind, request, say, script_after_discussion, watch_codes};
 
 fn members_said(env: &Env) -> Vec<(String, u64)> {
+    // 논의 글(라운드가 있는 글)만 모은다. 팀장 판단 글은 judgment.rs가 본다.
     of_kind(&env.room("room-1"), "message.member")
         .iter()
+        .filter(|e| e.payload.get("round").is_some())
         .map(|e| {
             (
                 e.actor_id.clone(),
