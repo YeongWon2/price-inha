@@ -7,6 +7,7 @@
 pub mod error;
 
 mod clock;
+mod dispatch;
 mod kind;
 mod notifier;
 mod phone;

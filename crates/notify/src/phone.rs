@@ -24,13 +24,33 @@ pub struct Asset {
     pub body: &'static [u8],
 }
 
+/// `web/phone/`의 파일 하나를 실행 파일에 넣는다.
+macro_rules! asset {
+    ($path:literal, $content_type:literal) => {
+        Asset {
+            path: $path,
+            content_type: $content_type,
+            body: include_bytes!(concat!("../web/phone/", $path)),
+        }
+    };
+}
+
+/// 폰 묶음.
+static ASSETS: [Asset; 6] = [
+    asset!("index.html", "text/html; charset=utf-8"),
+    asset!("app.js", "text/javascript; charset=utf-8"),
+    asset!("sw.js", "text/javascript; charset=utf-8"),
+    asset!("manifest.webmanifest", "application/manifest+json"),
+    asset!("icon-192.png", "image/png"),
+    asset!("icon-512.png", "image/png"),
+];
+
 /// 폰 묶음의 모든 파일.
 pub fn phone_assets() -> &'static [Asset] {
-    todo!()
+    &ASSETS
 }
 
 /// 경로로 파일 하나를 찾는다. 없으면 `None`.
 pub fn phone_asset(path: &str) -> Option<&'static Asset> {
-    let _ = path;
-    todo!()
+    ASSETS.iter().find(|asset| asset.path == path)
 }

@@ -36,28 +36,64 @@ pub trait PushTransport: Send + Sync {
 /// reqwest(rustls)로 보내는 실제 길.
 #[derive(Debug, Clone)]
 pub struct HttpTransport {
-    _private: (),
+    client: reqwest::Client,
+    redirect: Option<Url>,
 }
 
 impl HttpTransport {
     /// 만든다. `request_timeout`은 요청 하나의 제한 시간이다.
     pub fn new(request_timeout: Duration) -> Result<HttpTransport, Error> {
-        let _ = request_timeout;
-        todo!()
+        let client = reqwest::Client::builder()
+            .timeout(request_timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Transport(e.without_url().to_string()))?;
+        Ok(HttpTransport {
+            client,
+            redirect: None,
+        })
     }
 
     /// 시험용: 모든 요청의 scheme · host · port를 `base`로 바꿔 보낸다(경로 · 쿼리는 `endpoint` 것 그대로).
     /// 구독의 `endpoint`는 `https://`여야 하므로, 로컬 가짜 서버(http)로 보내려면 이 길이 필요하다.
     pub fn redirect_to(self, base: Url) -> HttpTransport {
-        let _ = base;
-        todo!()
+        HttpTransport {
+            redirect: Some(base),
+            ..self
+        }
+    }
+}
+
+impl HttpTransport {
+    /// 실제로 보낼 주소. `redirect_to`가 있으면 scheme · host · port만 바꾼다.
+    fn target(&self, endpoint: &str) -> Result<Url, Error> {
+        let url = Url::parse(endpoint)
+            .map_err(|_| Error::Transport("구독 주소가 주소 모양이 아니다".to_owned()))?;
+        let Some(base) = &self.redirect else {
+            return Ok(url);
+        };
+        let mut target = base.clone();
+        target.set_path(url.path());
+        target.set_query(url.query());
+        Ok(target)
     }
 }
 
 #[async_trait]
 impl PushTransport for HttpTransport {
     async fn post(&self, request: PushRequest) -> Result<PushResponse, Error> {
-        let _ = request;
-        todo!()
+        let target = self.target(&request.endpoint)?;
+        let mut builder = self.client.post(target);
+        for (name, value) in &request.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+        let response = builder
+            .body(request.body)
+            .send()
+            .await
+            .map_err(|e| Error::Transport(e.without_url().to_string()))?;
+        Ok(PushResponse {
+            status: response.status().as_u16(),
+        })
     }
 }
