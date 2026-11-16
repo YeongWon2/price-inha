@@ -73,6 +73,12 @@ pub enum Error {
         /// 그 매매의 지금 상태.
         state: TradeState,
     },
+    /// 팔기로 판단된 매매로 사기 주문 안을 내려 했다(V4).
+    #[error("팔기로 판단된 매매({trade:?})로는 사기 주문 안을 내지 않습니다")]
+    TradeNotBuy {
+        /// 매매 번호.
+        trade: TradeId,
+    },
     /// 주문 안을 도구 포트로 보내지 못했다.
     #[error("{0}")]
     Tool(#[from] ToolError),

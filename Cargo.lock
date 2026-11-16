@@ -1968,6 +1968,7 @@ dependencies = [
  "async-trait",
  "pi-ai",
  "pi-store",
+ "rust_decimal",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",

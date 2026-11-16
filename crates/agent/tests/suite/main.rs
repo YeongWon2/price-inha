@@ -8,5 +8,6 @@ mod order;
 mod principles;
 mod role;
 mod score;
+mod second;
 mod turn;
 mod turn_limits;

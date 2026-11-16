@@ -185,6 +185,8 @@ impl Team {
             symbol: found.symbol,
             side: Side::Buy,
             note,
+            ai_quantity: None,
+            ai_price: None,
         };
         self.ports.tools.submit_order_draft(&draft).await?;
         Ok(draft)

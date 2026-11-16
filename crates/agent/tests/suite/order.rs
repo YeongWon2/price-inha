@@ -2,6 +2,7 @@
 
 use pi_agent::{Decision, Error, OrderDraft, Role, Side, TurnFailure};
 use pi_store::{BlockKind, BlockReason, Judgment, Rationale, TradeId, TradeState, UnixMillis};
+use rust_decimal::Decimal;
 
 use crate::common::{Env, NOW, SYMBOL, Step, request, say, script_after_discussion, trader_buy};
 
@@ -29,6 +30,8 @@ async fn 사기로_정하면_주문_안이_생긴다() {
         symbol: SYMBOL.into(),
         side: Side::Buy,
         note: "공시 뒤 사기".into(),
+        ai_quantity: None,
+        ai_price: None,
     };
     assert_eq!(out.decision, Decision::Buy);
     assert_eq!(out.order, Some(draft.clone()));
@@ -36,7 +39,7 @@ async fn 사기로_정하면_주문_안이_생긴다() {
     assert_eq!(env.ai.calls(Role::Trader), 1);
 }
 
-// 검증: P7 V4 (수량 · 가격은 주문 안에 담지 않는다)
+// 검증: P7 V4 (수량 · 가격은 정한 값으로 담지 않고 참고값으로만 담는다. 그 밖의 칸은 버린다)
 #[tokio::test]
 async fn 매매_담당이_적은_수량과_가격은_버린다() {
     let env = Env::new();
@@ -51,6 +54,8 @@ async fn 매매_담당이_적은_수량과_가격은_버린다() {
         symbol: SYMBOL.into(),
         side: Side::Buy,
         note: "분할 매수".into(),
+        ai_quantity: Some(Decimal::from(1000)),
+        ai_price: Some(Decimal::from(71000)),
     };
     assert_eq!(draft, expected);
     assert_eq!(env.tools.drafts(), [expected]);
