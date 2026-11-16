@@ -5,6 +5,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc, Weekday};
+use pi_approval::{
+    Approvals, Ask, Decision, OrderSubject, OrderType as SubjectOrderType, Side as SubjectSide,
+    SignalKind, Subject, WaitTimes,
+};
 use pi_exec::{Error, Executor, Guard, SellPurpose, SellSubmission, Submission};
 use pi_market::{
     Clock, Currency, Market, MarketCalendar, Quote, Session, SessionKind, StalePolicy, Symbol,
@@ -16,6 +20,7 @@ use pi_paper::{
     ProceedsUsable, RoundingMode, SessionRules, Settlement, Side, Snapshot, TickBand,
     UnfilledTimeout,
 };
+use pi_rules::ApprovalGrant;
 use pi_store::{
     AccountKind as StoreAccount, Amount, Judgment, NewTrade, Rationale, RoleScore, SourceRef,
     Store, Trade, TradeId, UnixMillis,
@@ -161,6 +166,15 @@ impl Clock for TestClock {
     }
 
     async fn sleep(&self, _duration: Duration) {}
+}
+
+/// 승인 모듈에 줄 멈춘 시계.
+struct FixedMillis(UnixMillis);
+
+impl pi_approval::Clock for FixedMillis {
+    fn now(&self) -> UnixMillis {
+        self.0
+    }
 }
 
 /// 실행기 · 저장소 · 시계 · 권한을 함께 쥔 책상.
@@ -332,6 +346,51 @@ impl Bench {
         self.set_at(self.now() + chrono::Duration::seconds(1));
         self.exec.on_quote(&self.quote("70000")).unwrap();
         id
+    }
+
+    /// 그 매매의 삼성전자 지정가 사기를 승인 모듈로 요청 · 승인하고(`consume`이면 소비까지) 만든 증표.
+    /// 승인한 내용의 신호 id는 `trade-<매매 번호>`다(조립하는 쪽의 약속).
+    pub fn grant(
+        &self,
+        trade_id: TradeId,
+        quantity: u64,
+        price: &str,
+        consume: bool,
+    ) -> ApprovalGrant {
+        let now = UnixMillis(self.now().timestamp_millis());
+        let approvals = Approvals::new(
+            self.store.clone(),
+            Arc::new(FixedMillis(now)),
+            WaitTimes::default(),
+        );
+        let subject = Subject::Order(OrderSubject {
+            account: StoreAccount::Paper,
+            symbol: SAM.to_string(),
+            side: SubjectSide::Buy,
+            quantity,
+            price: d(price),
+            order_type: SubjectOrderType::Limit,
+            signal_id: format!("trade-{}", trade_id.0),
+            signal_kind: SignalKind::Buy,
+            signal_valid_until: UnixMillis(now.0 + 3_600_000),
+        });
+        let requested = approvals
+            .request(Ask {
+                subject: subject.clone(),
+                reason: "큰 금액".to_string(),
+            })
+            .unwrap();
+        approvals
+            .answer(
+                &requested.number,
+                requested.fingerprint.as_str(),
+                Decision::Approve,
+            )
+            .unwrap();
+        if consume {
+            approvals.consume(&requested.number, &subject).unwrap();
+        }
+        ApprovalGrant::new(requested.number.as_str(), requested.fingerprint.as_str())
     }
 
     /// 증권사의 주문 목록.

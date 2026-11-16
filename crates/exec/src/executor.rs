@@ -35,6 +35,11 @@ pub struct Submission {
     /// 이 매매를 낸 템플릿의 계좌 종류(E25). 증권사의 계좌 종류와 같아야 한다.
     pub template_account: AccountKind,
     /// 승인 소비 결과. 승인대기인 매매는 있어야 한다. 있으면 큰 금액 확인을 한 것으로 낸다.
+    ///
+    /// 있으면 저장소의 승인 기록(`pi-approval`이 남긴 것)과 대조한다: 그 번호의 승인이 승인됨 ·
+    /// 소비됨이고, 지문이 같고, 승인한 주문 내용이 이 매매(신호 id `trade-<매매 번호>` · 종목 ·
+    /// 계좌)와 점검 통과 표시(방향 · 수량 · 값 · 호가 유형)와 같아야 한다. 아니면
+    /// [`Error::ApprovalMismatch`].
     pub approval: Option<ApprovalGrant>,
     /// 미체결 취소 시간(템플릿의 보유 기간에서 정한다).
     pub timeout: UnfilledTimeout,
@@ -56,7 +61,8 @@ pub enum SellPurpose {
 pub struct SellSubmission {
     /// 매매 번호. 보유중이어야 한다.
     pub trade_id: TradeId,
-    /// 점검 통과 표시. 내용의 종목은 매매의 종목과 같고 방향은 팔기여야 한다.
+    /// 점검 통과 표시. 내용의 종목은 매매의 종목과 같고 방향은 팔기여야 한다. 수량은 그 매매의
+    /// 남은 수량 이하여야 한다(아니면 [`Error::SellTooLarge`]).
     pub permit: CheckPermit,
     /// 목적.
     pub purpose: SellPurpose,
@@ -372,6 +378,15 @@ impl Executor {
             .values()
             .map(|(retry, _)| retry.clone())
             .collect()
+    }
+
+    /// 다시 내기를 기다리는 파는 주문의 멱등성 키(`client_order_id`). 기다리는 것이 없으면 없음.
+    ///
+    /// 한 시도 묶음(처음 낸 것과 그 다시 내기들)은 같은 키를 쓴다. 키는 스냅샷에 함께 남아
+    /// 다시 켠 뒤에도 같다(E30). 되면 그 주문의 `client_order_id`가 이 키다.
+    pub fn pending_sell_key(&self, trade_id: TradeId) -> Option<String> {
+        let _ = trade_id;
+        todo!()
     }
 
     /// 손절 감시 자리들. 매매 번호 순서다.

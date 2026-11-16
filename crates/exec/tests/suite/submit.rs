@@ -5,7 +5,6 @@ use pi_market::{Market, Symbol};
 use pi_paper::{
     AccountKind, ApprovedOrder, BrokerError, Fault, OrderGroup, OrderType, PaperBroker, Side,
 };
-use pi_rules::ApprovalGrant;
 use pi_store::{
     AccountKind as StoreAccount, BlockKind, NewTrade, StoreError, TradeState, UnixMillis,
 };
@@ -186,7 +185,7 @@ async fn awaiting_approval_with_grant_is_ordered() {
         .transition_trade(id, TradeState::AwaitingApproval, UnixMillis(1))
         .unwrap();
     let submission = Submission {
-        approval: Some(ApprovalGrant::new("a1b2", "c3d4")),
+        approval: Some(bench.grant(id, 10, "70000", true)),
         ..bench.buy(id, "10", "70000")
     };
 
