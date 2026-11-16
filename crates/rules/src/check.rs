@@ -138,6 +138,5 @@ pub fn issue(authority: &CheckAuthority, passed: Passed) -> CheckPermit {
 /// 쪽은 [`CheckPermit::trade`]가 그 매매의 번호인지 대조한다. 같은 종목 · 방향의 다른 매매에
 /// 이 표시를 쓰지 못하게 한다.
 pub fn issue_for_trade(authority: &CheckAuthority, passed: Passed, trade: i64) -> CheckPermit {
-    let _ = (authority, trade);
-    todo!("issue_for_trade: {:?}", passed.order())
+    authority.approve_for_trade(trade, passed.into_order())
 }
