@@ -5,8 +5,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::Connection;
 use rusqlite::backup::{Backup, StepResult};
+use rusqlite::{Connection, OpenFlags};
 
 use crate::approval::ApprovalId;
 use crate::model::{TeamStateRecord, UnixMillis};
@@ -38,11 +38,7 @@ impl Store {
         drop(file);
         // 이 손잡이의 연결 잠금을 쥐지 않는다: 따로 연 연결의 읽기 묶음 하나(WAL)에서 한 번에 뜬다.
         // 그동안 이 손잡이의 쓰기는 기다리지 않고, 뜬 파일에는 한 시점의 자료만 들어간다.
-        let _ = &self.path;
-        let done = {
-            let conn = self.lock();
-            copy_to(&conn, path)
-        };
+        let done = open_source(&self.path).and_then(|source| copy_to(&source, path));
         if done.is_err() {
             // 우리가 만든 파일이다. 반쯤 쓴 것을 남기지 않는다.
             let _ = fs::remove_file(path);
@@ -89,6 +85,17 @@ fn create_private(path: &Path) -> Result<fs::File, StoreError> {
             source: err,
         },
     })
+}
+
+/// 스냅샷의 원본으로 쓸 연결을 저장 파일에 따로 연다(파일을 만들지 않는다).
+fn open_source(path: &Path) -> Result<Connection, StoreError> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(Duration::from_secs(5))?;
+    conn.pragma_update(None, "query_only", true)?;
+    Ok(conn)
 }
 
 /// 백업 API로 `path`에 복사하고, 딸린 파일이 남지 않게 저널을 DELETE로 바꿔 닫는다.

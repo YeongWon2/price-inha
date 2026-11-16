@@ -11,4 +11,77 @@
 //! - `proposals_fixed`: 위험 표시는 제안됨인 동안 거짓 → 참으로만 바뀐다(낮추는 쪽은 냉각을 건너뛰게 하므로 막는다).
 
 /// 버전 7에서 8로 올리는 SQL.
-pub(super) const V8: &str = "";
+pub(super) const V8: &str = "
+CREATE TABLE trade_plans (
+    trade_id INTEGER PRIMARY KEY REFERENCES trades (id),
+    side     TEXT    CHECK (side IS NULL OR side IN ('buy', 'sell')),
+    quantity INTEGER CHECK (quantity IS NULL OR quantity > 0)
+);
+CREATE TRIGGER trade_plans_no_replace BEFORE INSERT ON trade_plans
+WHEN EXISTS (SELECT 1 FROM trade_plans WHERE trade_id = NEW.trade_id)
+BEGIN SELECT RAISE(ABORT, 'trade_plans rows are kept'); END;
+CREATE TRIGGER trade_plans_no_delete BEFORE DELETE ON trade_plans
+BEGIN SELECT RAISE(ABORT, 'trade_plans rows are kept'); END;
+CREATE TRIGGER trade_plans_side_fixed BEFORE UPDATE ON trade_plans
+WHEN NEW.trade_id IS NOT OLD.trade_id
+  OR (OLD.side IS NOT NULL AND NEW.side IS NOT OLD.side)
+BEGIN SELECT RAISE(ABORT, 'trade side is fixed'); END;
+CREATE TRIGGER trade_plans_quantity_locked_insert BEFORE INSERT ON trade_plans
+WHEN NEW.quantity IS NOT NULL AND EXISTS (
+  SELECT 1 FROM trades WHERE id = NEW.trade_id
+    AND (approval_number IS NOT NULL
+         OR state NOT IN ('discussing', 'judged', 'awaiting_approval')))
+BEGIN SELECT RAISE(ABORT, 'trade quantity is locked'); END;
+CREATE TRIGGER trade_plans_quantity_locked_update BEFORE UPDATE ON trade_plans
+WHEN NEW.quantity IS NOT OLD.quantity AND EXISTS (
+  SELECT 1 FROM trades WHERE id = OLD.trade_id
+    AND (approval_number IS NOT NULL
+         OR state NOT IN ('discussing', 'judged', 'awaiting_approval')))
+BEGIN SELECT RAISE(ABORT, 'trade quantity is locked'); END;
+
+CREATE TABLE trade_state_changes (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id   INTEGER NOT NULL REFERENCES trades (id),
+    from_state TEXT,
+    to_state   TEXT    NOT NULL,
+    at         INTEGER NOT NULL
+);
+CREATE INDEX trade_state_changes_by_trade ON trade_state_changes (trade_id, seq);
+CREATE INDEX trade_state_changes_by_at ON trade_state_changes (at, seq);
+CREATE TRIGGER trade_state_changes_no_replace BEFORE INSERT ON trade_state_changes
+WHEN EXISTS (SELECT 1 FROM trade_state_changes WHERE seq = NEW.seq)
+BEGIN SELECT RAISE(ABORT, 'trade_state_changes is append-only'); END;
+CREATE TRIGGER trade_state_changes_no_update BEFORE UPDATE ON trade_state_changes
+BEGIN SELECT RAISE(ABORT, 'trade_state_changes is append-only'); END;
+CREATE TRIGGER trade_state_changes_no_delete BEFORE DELETE ON trade_state_changes
+BEGIN SELECT RAISE(ABORT, 'trade_state_changes is append-only'); END;
+CREATE TRIGGER trades_record_created AFTER INSERT ON trades
+BEGIN
+    INSERT INTO trade_state_changes (trade_id, from_state, to_state, at)
+    VALUES (NEW.id, NULL, NEW.state, NEW.created_at);
+END;
+CREATE TRIGGER trades_record_state AFTER UPDATE OF state ON trades
+WHEN NEW.state IS NOT OLD.state
+BEGIN
+    INSERT INTO trade_state_changes (trade_id, from_state, to_state, at)
+    VALUES (NEW.id, OLD.state, NEW.state, NEW.updated_at);
+END;
+
+DROP TRIGGER knowledge_chunks_no_replace;
+CREATE TRIGGER knowledge_chunks_no_replace BEFORE INSERT ON knowledge_chunks
+WHEN EXISTS (SELECT 1 FROM knowledge_chunks
+             WHERE id = NEW.id
+                OR (kind = NEW.kind AND record_ref = NEW.record_ref AND ordinal = NEW.ordinal))
+BEGIN SELECT RAISE(ABORT, 'knowledge_chunks rows are replaced by re-indexing'); END;
+
+DROP TRIGGER proposals_fixed;
+CREATE TRIGGER proposals_fixed BEFORE UPDATE ON proposals
+WHEN NEW.id IS NOT OLD.id OR NEW.content IS NOT OLD.content
+  OR (NEW.increases_risk IS NOT OLD.increases_risk AND NOT (
+        OLD.state = 'proposed' AND NEW.state = 'proposed'
+        AND OLD.increases_risk = 0 AND NEW.increases_risk = 1))
+  OR NEW.created_at IS NOT OLD.created_at
+  OR (OLD.approval_id IS NOT NULL AND NEW.approval_id IS NOT OLD.approval_id)
+  OR (OLD.applied_at IS NOT NULL AND NEW.applied_at IS NOT OLD.applied_at)
+BEGIN SELECT RAISE(ABORT, 'proposal is fixed'); END;
+";
