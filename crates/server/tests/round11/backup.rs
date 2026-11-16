@@ -134,7 +134,16 @@ async fn 되살리면_팀이_멈추고_승인은_만료되며_키를_넣고_다�
         answer.body["result"], "rejected",
         "만료된 승인은 실행하지 않는다"
     );
-    let state = bench.trading().decide_day(DayPlan::Trade).unwrap();
+    // 전체 정지에서는 하루 운용을 시작하지 못한다(V9): 멈춤 오류가 나고 상태는 그대로다.
+    let refused = bench.trading().decide_day(DayPlan::Trade);
+    assert!(
+        matches!(
+            refused,
+            Err(price_inha::TradingError::Halted(TeamState::FullStop))
+        ),
+        "{refused:?}"
+    );
+    let state = bench.store().team_state().unwrap();
     assert_eq!(
         state,
         TeamState::FullStop,
