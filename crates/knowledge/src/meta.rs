@@ -35,11 +35,19 @@ pub(crate) struct ChunkOrigin {
     pub(crate) record_ref: String,
 }
 
+/// 조각 메타 키의 앞붙이. 키는 이 뒤에 조각 번호가 붙는다.
+pub(crate) const CHUNK_KEY_PREFIX: &str = "chunk.";
+
 fn chunk_key(id: ChunkId) -> String {
-    format!("chunk.{}", id.0)
+    format!("{CHUNK_KEY_PREFIX}{}", id.0)
 }
 
-/// 조각을 올릴 때 줄 범위와 기록을 남긴다.
+/// 조각 메타의 값: 줄 범위와 기록.
+pub(crate) fn chunk_value(kind: KnowledgeKind, record_ref: &str, lines: (u32, u32)) -> String {
+    format!("{}:{}:{}:{record_ref}", lines.0, lines.1, kind_code(kind))
+}
+
+/// 조각을 올릴 때 줄 범위와 기록을 남긴다(이미 올라온 조각의 빠진 메타를 채울 때).
 pub(crate) fn remember_chunk(
     store: &Store,
     id: ChunkId,
@@ -47,16 +55,7 @@ pub(crate) fn remember_chunk(
     record_ref: &str,
     lines: (u32, u32),
 ) -> Result<(), Error> {
-    let value = format!("{}:{}:{}:{record_ref}", lines.0, lines.1, kind_code(kind));
-    store.set_knowledge_meta(&chunk_key(id), &value)?;
-    Ok(())
-}
-
-/// 지운 조각의 줄 범위 메타를 비운다(저장소에 메타를 지우는 길이 없어 빈 값으로 둔다. 빈 값은 "없음"이다).
-pub(crate) fn forget_chunk(store: &Store, id: ChunkId) -> Result<(), Error> {
-    if store.knowledge_meta(&chunk_key(id))?.is_some() {
-        store.set_knowledge_meta(&chunk_key(id), "")?;
-    }
+    store.set_knowledge_meta(&chunk_key(id), &chunk_value(kind, record_ref, lines))?;
     Ok(())
 }
 

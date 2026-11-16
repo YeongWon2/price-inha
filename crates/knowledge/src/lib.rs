@@ -153,20 +153,22 @@ impl Knowledge {
             }
             return Ok(existing.iter().map(|c| c.id).collect());
         }
-        let ids = self.store.index_record(NewKnowledgeRecord {
-            kind: record.kind,
-            source: record.source,
-            record_ref: record.record_ref.clone(),
-            chunks: chunks.iter().map(|c| c.text.clone()).collect(),
-            at: record.at,
-        })?;
-        for old in existing.iter().filter(|old| !ids.contains(&old.id)) {
-            meta::forget_chunk(&self.store, old.id)?;
-        }
-        for (id, chunk) in ids.iter().zip(&chunks) {
-            let lines = (chunk.start_line, chunk.end_line);
-            meta::remember_chunk(&self.store, *id, record.kind, &record.record_ref, lines)?;
-        }
+        // 조각과 줄 범위 메타를 한 묶음에서 올린다. 사라진 조각의 메타 키도 같은 묶음에서 지운다.
+        let values: Vec<String> = chunks
+            .iter()
+            .map(|c| meta::chunk_value(record.kind, &record.record_ref, (c.start_line, c.end_line)))
+            .collect();
+        let ids = self.store.index_record_with_meta(
+            NewKnowledgeRecord {
+                kind: record.kind,
+                source: record.source,
+                record_ref: record.record_ref.clone(),
+                chunks: chunks.iter().map(|c| c.text.clone()).collect(),
+                at: record.at,
+            },
+            meta::CHUNK_KEY_PREFIX,
+            &values,
+        )?;
         Ok(ids)
     }
 
