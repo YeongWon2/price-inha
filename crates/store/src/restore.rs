@@ -98,17 +98,30 @@ fn open_source(path: &Path) -> Result<Connection, StoreError> {
     Ok(conn)
 }
 
+/// 복사가 BUSY · LOCKED로 막혀 다시 시도하는 횟수의 상한(5ms 간격이라 약 30초). 시계를 읽지 않는다.
+const COPY_RETRY_LIMIT: u32 = 6_000;
+
 /// 백업 API로 `path`에 복사하고, 딸린 파일이 남지 않게 저널을 DELETE로 바꿔 닫는다.
 fn copy_to(source: &Connection, path: &Path) -> Result<(), StoreError> {
     let mut target = Connection::open(path)?;
     {
         let backup = Backup::new(source, &mut target)?;
         // 모든 쪽을 한 단계(원본의 읽기 묶음 하나)로 뜬다: 중간에 다른 연결이 써도 다시 시작하지 않는다.
+        let mut retries: u32 = 0;
         loop {
             match backup.step(-1)? {
                 StepResult::Done => break,
                 StepResult::More => {}
-                _ => std::thread::sleep(Duration::from_millis(5)),
+                _ => {
+                    retries += 1;
+                    if retries >= COPY_RETRY_LIMIT {
+                        return Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+                            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                            Some("스냅샷 복사가 잠금 때문에 시간 안에 끝나지 않았다".to_string()),
+                        )));
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
             }
         }
     }
