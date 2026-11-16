@@ -31,10 +31,11 @@ use crate::{AppError, CLI_COMMON_LOCATIONS, Crew, Settings, Trading, Upstreams};
 /// 사람이 시작이 늦다고 느끼지 않는 값이다.
 const CLI_CHECK_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
+mod link;
 mod parts;
 
 pub use parts::announce_addr;
-use parts::{check_cli_briefly, open_desk, open_gate, spawn_feed};
+use parts::{check_cli_briefly, open_desk, open_gate, session_routes, spawn_feed};
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -156,6 +157,34 @@ pub struct App {
     /// (W5 2차) 투자 팀과 깨우기 엔진(팀을 잇지 않았으면 없다).
     crew: Option<Arc<Crew>>,
     trigger: Option<JoinHandle<()>>,
+    /// (W5 3차) 지식 검색 창구.
+    knowledge: Arc<pi_knowledge::Knowledge>,
+    /// (W5 3차) 알림 · 사무실 · 백업([`App::launch_with`]로 띄웠을 때만).
+    linked: Option<Arc<crate::reach::Linked>>,
+    /// (W5 3차) 사무실이 팀 상태를 따라가는 일.
+    office_sync: Option<JoinHandle<()>>,
+}
+
+/// 투자 팀을 잇는다(`team`이 없으면 잇지 않는다).
+fn open_crew(
+    team: Option<crate::TeamWiring>,
+    store: &Store,
+    wiring: &Wiring,
+    trading: &Arc<Trading>,
+    desk: &Arc<Desk>,
+    secrets: &Arc<SecretStore>,
+) -> Result<Option<Arc<Crew>>, AppError> {
+    let Some(team) = team else {
+        return Ok(None);
+    };
+    Ok(Some(Crew::open(CrewParts {
+        store: store.clone(),
+        clock: Arc::clone(&wiring.clock),
+        trading: Arc::clone(trading),
+        desk: Arc::clone(desk),
+        secrets: Arc::clone(secrets),
+        wiring: team,
+    })?))
 }
 
 impl App {
@@ -218,6 +247,17 @@ impl App {
         wiring: Wiring,
         launch: Launch,
     ) -> Result<App, AppError> {
+        // 띄우기의 미래 값이 커서 힙에 둔다(부르는 쪽의 미래 값을 작게).
+        Box::pin(App::assemble(settings, wiring, launch, None)).await
+    }
+
+    /// 띄우기의 몸통. `reach`가 있으면 3차 조립까지 한다([`App::launch_with`]).
+    pub(super) async fn assemble(
+        settings: Settings,
+        wiring: Wiring,
+        launch: Launch,
+        reach: Option<crate::Reach>,
+    ) -> Result<App, AppError> {
         let secrets = match launch.secrets {
             Some(secrets) => secrets,
             // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
@@ -231,36 +271,30 @@ impl App {
             );
         }
         let desk = open_desk(&settings, &wiring, &secrets).await?;
-        let trading = Trading::open(TradingParts {
+        let parts = TradingParts {
             store: store.clone(),
             clock: Arc::clone(&wiring.clock),
             market: settings.market,
             desk: Arc::clone(&desk),
             wiring: launch.trading,
-        })
-        .await?;
-        let crew = match launch.team {
-            Some(team) => Some(Crew::open(CrewParts {
-                store: store.clone(),
-                clock: Arc::clone(&wiring.clock),
-                trading: Arc::clone(&trading),
-                desk: Arc::clone(&desk),
-                secrets: Arc::clone(&secrets),
-                wiring: team,
-            })?),
-            None => None,
         };
+        let trading = Trading::open(parts).await?;
+        let crew = open_crew(launch.team, &store, &wiring, &trading, &desk, &secrets)?;
+        let knowledge = Arc::new(pi_knowledge::Knowledge::new(
+            store.clone(),
+            Default::default(),
+        ));
+        let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
+        let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);
+        let protected = session_routes(&trading, crew.as_ref(), extra);
         let gate = open_gate(
-            &settings,
-            &wiring,
-            &store,
-            &secrets,
-            &desk,
-            &trading,
-            crew.as_ref(),
-        );
-        let gate = gate.await?;
+            &settings, &wiring, &store, &secrets, &desk, protected, alert,
+        )
+        .await?;
         trading.attach(gate.publisher());
+        if let Some(linked) = &linked {
+            link::attach(linked, &gate, &trading, crew.as_ref(), &knowledge);
+        }
         let ai_check = check_cli_briefly(&desk).await;
         // 띄운 그때 이미 그 날 세션 안이면 하루 시작을 바로 남긴다.
         trading.tick().await;
@@ -272,7 +306,12 @@ impl App {
             }
             None => None,
         };
-        let feed = spawn_feed(&settings, wiring, secrets, &gate, &desk, &trading, stopping);
+        let office_sync = linked
+            .as_ref()
+            .map(|l| link::spawn_office_sync(l, store.clone(), stop.subscribe()));
+        let stale = linked.as_ref().map(link::stale_hook);
+        let feeding = (&trading, stale);
+        let feed = spawn_feed(&settings, wiring, secrets, &gate, &desk, feeding, stopping);
         Ok(App {
             gate,
             desk,
@@ -284,6 +323,9 @@ impl App {
             days,
             crew,
             trigger,
+            knowledge,
+            linked,
+            office_sync,
         })
     }
 
@@ -343,6 +385,10 @@ impl App {
         if let Some(trigger) = self.trigger {
             let _ = trigger.await;
         }
+        if let Some(sync) = self.office_sync {
+            let _ = sync.await;
+        }
+        drop(self.linked);
         drop(self.crew);
         // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),
         // 쥔 CLI 공급자의 자식을 끝낸다.

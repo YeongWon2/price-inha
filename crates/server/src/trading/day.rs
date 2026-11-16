@@ -125,11 +125,14 @@ impl Trading {
         self.record(KIND_DAY_CLOSE, json!({ "date": date_text(date) }))
             .await?;
         lock(&self.days).closed = Some(date);
-        let _turn = lock(&self.team_turn);
-        if self.store.team_state()? == TeamState::Operating {
-            let cause = TeamCause::MarketClose;
-            self.change_team(TeamState::Resting, cause, false, "장 마감")?;
+        {
+            let _turn = lock(&self.team_turn);
+            if self.store.team_state()? == TeamState::Operating {
+                let cause = TeamCause::MarketClose;
+                self.change_team(TeamState::Resting, cause, false, "장 마감")?;
+            }
         }
+        self.announce_close(date);
         Ok(())
     }
 

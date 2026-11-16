@@ -78,6 +78,23 @@ pub(super) fn failure_state(error: &MarketError) -> &'static str {
     }
 }
 
+/// (W5 3차) 늦은 종목 알림(`{"symbols", "hours_unknown"}`)을 받는 자리(이상 알림).
+pub(crate) type StaleHook = std::sync::Arc<dyn Fn(&serde_json::Value) + Send + Sync>;
+
+impl super::Feed {
+    /// (W5 1차) 받은 시세를 [`crate::Trading::on_quote`]로, 받은 달력을 주문 길에 넘긴다.
+    pub(crate) fn feeding(mut self, trading: std::sync::Arc<crate::Trading>) -> Self {
+        self.trading = Some(trading);
+        self
+    }
+
+    /// (W5 3차) 늦은 종목 알림을 `hook`에도 넘긴다.
+    pub(crate) fn watching(mut self, hook: Option<StaleHook>) -> Self {
+        self.stale_hook = hook;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

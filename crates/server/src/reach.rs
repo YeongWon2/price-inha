@@ -34,7 +34,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{App, AppError, Launch, Settings, Wiring};
+mod assets;
+mod linked;
+mod office_http;
+mod phone_http;
+mod summary;
+
+pub(crate) use assets::routes as asset_routes;
+pub(crate) use linked::{Linked, LockNotices};
+pub(crate) use office_http::{OfficeDesk, routes as office_routes};
+pub(crate) use phone_http::{Phone, routes as phone_routes};
+pub(crate) use summary::daily_summary;
 
 /// 사무실 화면 자산을 다는 자리. `GET /office/`는 `index.html`, `GET /office/<경로>`는 그 파일.
 pub const OFFICE_ASSETS_PREFIX: &str = "/office/";
@@ -55,7 +65,7 @@ pub const OFFICE_PATH: &str = "/api/office";
 /// - 글이 [`OFFICE_TEXT_MAX`]자를 넘거나 `sourceMessageId`가 비었거나 [`OFFICE_SOURCE_ID_MAX`]자를 넘으면
 ///   400 `{"error": `[`OFFICE_TOO_LONG`]`}`(빈 번호는 [`OFFICE_BAD_INPUT`]).
 /// - 같은 기기(상대 IP)가 [`OFFICE_SEND_INTERVAL`] 안에 또 보내면 429 `{"error": `[`OFFICE_TOO_FAST`]`}`.
-///   간격은 [`crate::Wiring::clock`]으로 잰다.
+///   간격은 [`crate::Wiring::clock`]으로 재고, 거부한 글은 간격에 세지 않는다.
 /// - 담당의 대기열이 차면 429 `{"error": "queue_full"}`.
 /// - 팀 방의 글은 [`KIND_OFFICE_MESSAGE`] 이벤트로도 낸다.
 /// - 답은 뒤에서 그 담당의 AI 턴으로 만든다(시연 모드는 `DemoTurn::Chat`). thinking → complete,
@@ -145,35 +155,4 @@ pub struct Reach {
     pub push: Option<Arc<dyn pi_notify::PushTransport>>,
     /// 백업. `None`이면 백업하지 않는다(백업 경로 · 하루 정리의 `backup_at`은 `null`).
     pub backup: Option<BackupWiring>,
-}
-
-impl App {
-    /// (W5 3차) [`App::launch`]가 하는 일에 더해 사무실 · 알림 · 지식 검색 · 백업을 잇는다(모듈 문서).
-    /// 실행 파일은 이것으로 띄운다.
-    pub async fn launch_with(
-        settings: Settings,
-        wiring: Wiring,
-        launch: Launch,
-        reach: Reach,
-    ) -> Result<App, AppError> {
-        let _ = (settings, wiring, launch, reach);
-        todo!("W5 3차: launch_with")
-    }
-
-    /// (W5 3차) 지식 검색 창구(같은 저장소). 임베딩은 없다.
-    pub fn knowledge(&self) -> Arc<pi_knowledge::Knowledge> {
-        todo!("W5 3차: knowledge")
-    }
-
-    /// (W5 3차) 지금 한 번 백업한다(하루 마감 뒤에 하는 것과 같은 길). 시각은 [`crate::Wiring::clock`].
-    /// 백업을 잇지 않았으면 [`AppError::BackupNotConfigured`], 실패하면 백업 실패 알림을 내고
-    /// [`AppError::Backup`].
-    pub async fn back_up_now(&self) -> Result<pi_backup::BackupReport, AppError> {
-        todo!("W5 3차: back_up_now")
-    }
-
-    /// (W5 3차) 백업 상태. 백업을 잇지 않았으면 [`AppError::BackupNotConfigured`].
-    pub fn backup_status(&self) -> Result<pi_backup::BackupStatus, AppError> {
-        todo!("W5 3차: backup_status")
-    }
 }

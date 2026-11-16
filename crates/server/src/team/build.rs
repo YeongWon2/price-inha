@@ -143,6 +143,7 @@ impl Crew {
             day_turn: tokio::sync::Mutex::new(()),
             review_turn: tokio::sync::Mutex::new(()),
             scan_turn: tokio::sync::Mutex::new(()),
+            links: std::sync::OnceLock::new(),
         }))
     }
 

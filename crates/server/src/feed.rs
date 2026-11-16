@@ -31,7 +31,7 @@ use late::Board;
 use step::{Rested, Step, failure_state, millis};
 
 pub(crate) use late::market_date;
-pub(crate) use step::{Pace, Source};
+pub(crate) use step::{Pace, Source, StaleHook};
 
 /// 필수 설정이 그대로인지 다시 보는 간격(키 파일만 읽는다. 바깥으로 나가지 않는다).
 /// 화면에서 한 등록은 이 간격을 기다리지 않고 흐름을 바로 깨운다. 이것은 키 파일이
@@ -77,6 +77,7 @@ pub(crate) struct Feed {
     calendar_log: LogGate,
     /// (W5 1차) 받은 시세 · 달력을 넘길 주문 길.
     trading: Option<Arc<Trading>>,
+    stale_hook: Option<StaleHook>,
 }
 
 impl Feed {
@@ -106,13 +107,8 @@ impl Feed {
             quotes_log: LogGate::new(LOG_EVERY),
             calendar_log: LogGate::new(LOG_EVERY),
             trading: None,
+            stale_hook: None,
         }
-    }
-
-    /// (W5 1차) 받은 시세를 [`Trading::on_quote`]로, 받은 달력을 주문 길에 넘긴다.
-    pub(crate) fn feeding(mut self, trading: Arc<Trading>) -> Self {
-        self.trading = Some(trading);
-        self
     }
 
     /// 받은 시세를 주문 길에 넘긴다(체결 · 손실 판단까지 마친 뒤 돌아온다).
@@ -486,6 +482,9 @@ impl Feed {
         let now = self.clock.now();
         let notice = self.board.stale_notice(&self.symbols, &self.rejected, now);
         if let Some(notice) = notice {
+            if let Some(hook) = &self.stale_hook {
+                hook(&notice);
+            }
             self.publisher.publish_transient(KIND_QUOTES_STALE, notice);
         }
     }

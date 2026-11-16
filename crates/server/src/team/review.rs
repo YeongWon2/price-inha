@@ -117,6 +117,7 @@ impl Crew {
                 .journal
                 .review_trade(trade.id, reply.mistakes, &reply.note, millis(now))
                 .map_err(journal_error)?;
+            self.index_review(&trade, &record);
             if !reply.changes.is_empty() {
                 for mistake in &record.mistakes {
                     if let Some(id) = self.propose(mistake, &reply.changes).await? {

@@ -276,6 +276,7 @@ impl Trading {
             pending.amount(),
             pending.limit()
         );
+        let summary = format!("{} · {reason}", trade.symbol);
         let ask = Ask {
             subject: subject.clone(),
             reason,
@@ -290,6 +291,7 @@ impl Trading {
             subject,
         };
         lock(&self.waiting).insert(requested.number.as_str().to_string(), waiting);
+        self.announce_approval(&requested.number, &summary);
         Ok(Placed::AwaitingApproval {
             number: requested.number,
             fingerprint: requested.fingerprint,

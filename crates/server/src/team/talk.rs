@@ -10,7 +10,7 @@ use super::{Crew, Discussed, TRADE_ROOM_PREFIX};
 use crate::TeamError;
 
 /// 논의에 나오는 담당(명단 순서). 매매 담당은 판단 뒤 주문 안 턴에만 나온다.
-const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, Role::Leader];
+pub(super) const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, Role::Leader];
 
 impl Crew {
     fn now_millis(&self) -> UnixMillis {
@@ -91,17 +91,21 @@ impl Crew {
             .last_quote(symbol)
             .map(|quote| format!(" · 현재가 {}", quote.price.normalize()))
             .unwrap_or_default();
+        let mut data = gathered.items.clone();
+        data.extend(self.recall(symbol, topic, trade.id));
         let request = DiscussionRequest {
             room: format!("{TRADE_ROOM_PREFIX}{}", trade.id.0),
             trade: trade.id,
             topic: format!("{topic} · 종목 {symbol}{price}"),
             members: MEMBERS.to_vec(),
             nominated: vec![Role::Scout],
-            data: gathered.items.clone(),
+            data,
             consensus_required: self.wiring.consensus_required,
             limits: DiscussionLimits::default(),
         };
+        self.at_table(true).await;
         let result = self.team.discuss(request).await;
+        self.at_table(false).await;
         self.attach(trade.id, &gathered)?;
         let outcome = result.map_err(|error| TeamError::Agent(error.to_string()))?;
         Ok(Discussed {

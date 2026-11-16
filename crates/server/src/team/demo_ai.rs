@@ -18,6 +18,8 @@ use serde_json::json;
 pub(crate) const DAY_PLAN_HEAD: &str = "[하루 판단]";
 /// 복기 턴의 머리.
 pub(crate) const REVIEW_HEAD: &str = "[복기]";
+/// (W5 3차) 사무실 채팅 턴의 머리.
+pub(crate) const CHAT_HEAD: &str = "[사무실 채팅]";
 
 /// 가짜 AI가 답하는 턴.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,7 +88,9 @@ fn turn_of(request: &CompletionRequest, last: &str) -> DemoTurn {
         .and_then(|rest| rest.split_whitespace().next())
         .and_then(Role::from_id)
         .unwrap_or(Role::Leader);
-    if last.contains(DAY_PLAN_HEAD) {
+    if last.contains(CHAT_HEAD) {
+        DemoTurn::Chat(role)
+    } else if last.contains(DAY_PLAN_HEAD) {
         DemoTurn::DayPlan
     } else if last.contains(REVIEW_HEAD) {
         DemoTurn::Review
@@ -135,7 +139,9 @@ fn default_reply(turn: DemoTurn, conversation: &str) -> String {
         DemoTurn::Draft => json!({"side": "buy", "note": "시연 주문 안"}).to_string(),
         DemoTurn::DayPlan => json!({"plan": "trade"}).to_string(),
         DemoTurn::Review => json!({"mistakes": [], "note": "시연 복기"}).to_string(),
-        DemoTurn::Chat(_) => todo!("W5 3차: 채팅 기본 답"),
+        DemoTurn::Chat(role) => {
+            format!("{} 담당입니다. 지금은 따로 알릴 일이 없습니다.", role.id())
+        }
     }
 }
 

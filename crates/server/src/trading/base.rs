@@ -215,6 +215,7 @@ impl Trading {
             waiting: Mutex::new(HashMap::new()),
             team_turn: Mutex::new(()),
             publisher: OnceLock::new(),
+            hooks: OnceLock::new(),
         });
         let now = trading.clock.now();
         trading.books(now).await?;

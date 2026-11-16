@@ -22,6 +22,7 @@ mod demo_ai;
 mod facts;
 mod guard;
 mod http;
+mod link;
 mod review;
 mod talk;
 mod tools;
@@ -43,6 +44,7 @@ use crate::{DayPlan, Placed, SecretsRedactor, TeamError, Trading};
 
 pub(crate) use build::CrewParts;
 pub(crate) use http::routes;
+pub(crate) use link::{CrewLinks, role_of};
 pub(crate) use wake::spawn_trigger;
 
 pub use demo_ai::{DemoAi, DemoTurn};
@@ -184,6 +186,8 @@ pub struct Crew {
     day_turn: tokio::sync::Mutex<()>,
     review_turn: tokio::sync::Mutex<()>,
     scan_turn: tokio::sync::Mutex<()>,
+    /// (W5 3차) 지식 검색 · 사무실(3차 조립이 붙인다).
+    links: std::sync::OnceLock<CrewLinks>,
 }
 
 impl Crew {
@@ -249,7 +253,6 @@ impl Crew {
         &self,
         input: &serde_json::Value,
     ) -> Result<pi_knowledge::SearchOutput, TeamError> {
-        let _ = input;
-        todo!("W5 3차: search_knowledge")
+        self.search_tool(input).await
     }
 }

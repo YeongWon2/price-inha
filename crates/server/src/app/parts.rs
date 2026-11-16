@@ -14,7 +14,7 @@ use super::{CLI_CHECK_GRACE, Wiring};
 use crate::ai_link::Leftovers;
 use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
-use crate::feed::{Feed, Pace, Source};
+use crate::feed::{Feed, Pace, Source, StaleHook};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::{
     AiChoice, AppError, BrokerKeys, Crew, KeyVerifier, SecretsRedactor, Settings, Trading,
@@ -100,16 +100,17 @@ pub(super) async fn open_desk(
     Ok(desk)
 }
 
-/// 접속 관문을 연다. 공개 경로는 첫 화면, 세션 경로는 설정 상태와 주문 길, 그 컴퓨터에서만 열리는
-/// 경로는 키 · 종목 등록이다. 가리기 자리에는 비밀 보관소를 끼운다.
+/// 접속 관문을 연다. 공개 경로는 첫 화면과 웹 자산(사무실 · 폰), 세션 경로는 설정 상태와 `protected`
+/// (주문 길 · 팀 · 3차 경로), 그 컴퓨터에서만 열리는 경로는 키 · 종목 등록이다. 가리기 자리에는 비밀
+/// 보관소를, 잠금 알림 자리에는 `lock_alert`(있으면)를 끼운다.
 pub(super) async fn open_gate(
     settings: &Settings,
     wiring: &Wiring,
     store: &Store,
     secrets: &Arc<SecretStore>,
     desk: &Arc<Desk>,
-    trading: &Arc<Trading>,
-    crew: Option<&Arc<Crew>>,
+    protected: axum::Router,
+    lock_alert: Option<Arc<dyn pi_gate::LockAlert>>,
 ) -> Result<GateServer, AppError> {
     let config = GateConfig {
         bind: SocketAddr::new(settings.bind, settings.port),
@@ -119,17 +120,34 @@ pub(super) async fn open_gate(
         .clock(Arc::new(GateClock(Arc::clone(&wiring.clock))))
         .redactor(Arc::new(SecretsRedactor::new(Arc::clone(secrets))))
         .public_routes(page::routes())
+        .public_routes(crate::reach::asset_routes())
         .protected_routes(setup_http::status_routes(Arc::clone(desk)))
-        .protected_routes(crate::trading::routes(Arc::clone(trading)))
+        .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
         .local_routes(setup_http::register_routes(Arc::clone(desk)));
-    if let Some(crew) = crew {
-        builder = builder.protected_routes(crate::team::routes(Arc::clone(crew)));
+    if let Some(alert) = lock_alert {
+        builder = builder.lock_alert(alert);
     }
     if let Some(peer) = wiring.peer_override.clone() {
         builder = builder.peer_override(peer);
     }
     Ok(builder.build().serve().await?)
+}
+
+/// 세션 경로: 주문 길, 팀(있으면), 3차 경로(있으면).
+pub(super) fn session_routes(
+    trading: &Arc<Trading>,
+    crew: Option<&Arc<Crew>>,
+    extra: Option<axum::Router>,
+) -> axum::Router {
+    let mut routes = crate::trading::routes(Arc::clone(trading));
+    if let Some(crew) = crew {
+        routes = routes.merge(crate::team::routes(Arc::clone(crew)));
+    }
+    if let Some(extra) = extra {
+        routes = routes.merge(extra);
+    }
+    routes
 }
 
 /// 연결을 먼저 받고(관문은 이미 떠 있다), CLI 확인은 짧게만 기다린 뒤 뒤에서 이어 간다
@@ -150,9 +168,10 @@ pub(super) fn spawn_feed(
     secrets: Arc<SecretStore>,
     gate: &GateServer,
     desk: &Arc<Desk>,
-    trading: &Arc<Trading>,
+    feeding: (&Arc<Trading>, Option<StaleHook>),
     mut stopping: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
+    let (trading, stale) = feeding;
     let source = if settings.demo {
         let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
         Source::Demo(Arc::new(demo))
@@ -175,7 +194,8 @@ pub(super) fn spawn_feed(
         Arc::clone(desk),
         pace,
     )
-    .feeding(Arc::clone(trading));
+    .feeding(Arc::clone(trading))
+    .watching(stale);
     tokio::spawn(async move {
         tokio::select! {
             // 알리는 쪽이 사라져도 멈춘다.

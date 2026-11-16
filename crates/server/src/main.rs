@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use pi_secrets::SecretStore;
 use price_inha::{
-    App, AppError, Launch, RedactingWriter, Settings, SettingsError, TeamWiring, TradingWiring,
-    Wiring, announce_addr,
+    App, AppError, Launch, Reach, RedactingWriter, Settings, SettingsError, TeamWiring,
+    TradingWiring, Wiring, announce_addr,
 };
 
 /// 설정을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
@@ -33,7 +33,7 @@ fn say(text: &str) {
 /// 기록(tracing)을 표준 오류로 낸다. 보관 폴더의 비밀 보관소를 열 수 있으면 그 값들을 가린 뒤에만 낸다
 /// ([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
 ///
-/// 연 보관소는 앱에도 그대로 준다([`App::launch`]): 띄운 뒤 등록한 키도 가리게.
+/// 연 보관소는 앱에도 그대로 준다([`App::launch_with`]): 띄운 뒤 등록한 키도 가리게.
 fn init_tracing(settings: Option<&Settings>) -> Option<Arc<SecretStore>> {
     let secrets = settings
         .and_then(|s| SecretStore::open(s.home.clone()).ok())
@@ -83,7 +83,8 @@ async fn run(
         team: Some(TeamWiring::official()),
         secrets,
     };
-    let started = App::launch(settings, Wiring::default(), launch).await;
+    // (W5 3차) 사무실 · 폰 알림 · 지식 검색까지 잇는다. 백업 저장소는 아직 고를 화면이 없어 잇지 않는다.
+    let started = App::launch_with(settings, Wiring::default(), launch, Reach::default()).await;
     let app = started.map_err(Failure::App)?;
     let mode = if demo {
         " (시연용 가짜 시세)"

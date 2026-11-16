@@ -17,6 +17,7 @@ mod answer;
 mod base;
 mod day;
 mod http;
+mod link;
 mod marks;
 mod order;
 mod templates;
@@ -43,6 +44,7 @@ use marks::Marks;
 pub(crate) use answer::reject_word;
 pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use http::routes;
+pub(crate) use link::{ApprovalHook, CloseHook, Hooks, approval_status_word};
 pub(crate) use templates::change_of;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
@@ -221,6 +223,8 @@ pub struct Trading {
     team_turn: Mutex<()>,
     /// 저장되는 이벤트를 내보내는 손잡이(접속 관문이 뜬 뒤에 붙는다).
     publisher: OnceLock<Publisher>,
+    /// (W5 3차) 승인 요청 · 하루 마감을 알리는 자리(3차 조립이 붙인다).
+    hooks: OnceLock<Hooks>,
 }
 
 impl Trading {
