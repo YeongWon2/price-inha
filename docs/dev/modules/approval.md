@@ -48,3 +48,11 @@
 ## 필수 번호
 
 C7 C12 M5 E7 E8 E22 N2 V42 V43 V44 V45 P18 P19 P20
+
+## 3차 작업: 개선안 승인을 journal 판정에 맡기기 (server W5 2차 보강에서 나옴)
+
+조정자 결정(2026-11-16): 개선안 승인은 승인 소비를 이 모듈에 두되, 반영 판정(지금 규칙과 비교한 위험 재판정 → 냉각)은 journal의 `Journal::approve`가 하게 한다. 그러려면 소비한 승인(`ApprovalUse`)을 정해진 범위 안에서만 내준다.
+
+- `Approvals::with_proposal_approval(number, proposal_id, f)` 같은 공개 메서드: 승인 번호의 기다림 · 지문(개선안 번호와 판) 확인 → 소비 → `f(ApprovalUse, at)` 호출 → `f`의 결과를 돌려준다. `ApprovalUse`는 이 호출 안에서만 쓰이고, `f`가 실패하면 소비를 되돌리지 않고(이미 쓴 승인) 오류를 돌려준다 — 기존 `approve_proposal`의 실패 규칙과 같게.
+- 기존 `approve_proposal`은 그대로 둔다.
+- 시험: 지문이 다른 개선안 · 이미 쓴 승인 · 거절된 승인으로는 `f`가 불리지 않는다; `f` 안에서 받은 `ApprovalUse`로 `Journal::approve`를 부르면 위험한 경우 냉각중이 된다(테스트 dev-dependency로 pi-journal 사용 가능).
