@@ -258,6 +258,8 @@ impl App {
         launch: Launch,
         reach: Option<crate::Reach>,
     ) -> Result<App, AppError> {
+        // 되살리기 중 꺼져 남은 작업 폴더(보관 폴더 옆)를 지운다.
+        crate::reach::clear_restore_leftover(&settings.home);
         let secrets = match launch.secrets {
             Some(secrets) => secrets,
             // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).

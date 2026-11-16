@@ -4,7 +4,8 @@
 //!   토큰은 비밀 보관소의 `KeySlot::BackupGithubToken`). 다시 켜면 되읽어 `reach.backup`의 저장소 ·
 //!   공개키보다 앞선다(GitHub 주소는 `reach.backup`의 것, 없으면 [`GITHUB_API_BASE`]).
 //! - 되살리기([`restore_backup`])는 빈 폴더에 하고, 검증 사본은 그 옆의 작업 폴더에만 두었다가 지운다
-//!   (시스템 임시 폴더에 평문을 두지 않는다, `pi_backup::restore_in`).
+//!   (시스템 임시 폴더에 평문을 두지 않는다, `pi_backup::restore_in`). 되살리기 중 꺼져 남은 작업 폴더는
+//!   다음 되살리기와 켤 때 지운다.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{get, post};
 use pi_backup::{Bundle, Manifest, RestoreReport};
 use pi_secrets::SecretString;
 use pi_store::UnixMillis;
@@ -27,7 +28,7 @@ use crate::AppError;
 
 /// 백업 설정. `GET` → `{"repo", "recipient", "configured"}`(정하지 않았으면 `repo` · `recipient`는 `null`),
 /// `POST` 몸통 `{"repo": "소유자/이름", "recipient": "age1…"}` → 200 같은 모양. 틀린 값은 400
-/// `{"error": "invalid_input"}`이고 그대로 둔다. 세션 · Origin 확인을 받는다.
+/// `{"error": "invalid_input"}`이고 그대로 둔다. 세션 · Origin 확인을 받고, `POST`는 그 컴퓨터에서만 받는다.
 pub const SETUP_BACKUP_PATH: &str = "/api/setup/backup";
 
 /// 보관 폴더 안 백업 설정 파일 이름.
@@ -125,11 +126,16 @@ async fn change(State(linked): State<Arc<Linked>>, body: Bytes) -> Response {
     }
 }
 
-/// `GateBuilder::protected_routes`에 끼운다.
+/// `GateBuilder::protected_routes`에 끼운다. 읽기는 세션이면 되고, 바꾸기는 키 등록처럼 그 컴퓨터에서만
+/// 받는다(`pi_gate::local_only`, 원격 세션은 [`pi_gate::LOCAL_ONLY_STATUS`]).
 pub(crate) fn routes(linked: Arc<Linked>) -> Router {
+    let change = Router::new()
+        .route(SETUP_BACKUP_PATH, post(change))
+        .with_state(Arc::clone(&linked));
     Router::new()
-        .route(SETUP_BACKUP_PATH, get(show).post(change))
+        .route(SETUP_BACKUP_PATH, get(show))
         .with_state(linked)
+        .merge(pi_gate::local_only(change))
 }
 
 /// `target` 옆의 작업 폴더(`<이름>.restore-work`).
@@ -143,6 +149,7 @@ fn work_dir(target: &Path) -> PathBuf {
 
 /// 암호문을 없거나 빈 폴더 `target`에 되살린다(F9 1a). 팀은 전체 정지가 되고 기다리던 승인은
 /// 만료된다(`at` 기준). 검증 사본은 `target` 옆의 작업 폴더에만 두고, 끝나면 그 폴더째 지운다.
+/// 시작 전에 지난 되살리기가 남긴 작업 폴더도 지운다.
 /// `identity`는 인자로만 쓰고 파일 · 기록 · 오류 어디에도 남기지 않는다.
 pub fn restore_backup(
     encrypted: &[u8],
@@ -151,13 +158,22 @@ pub fn restore_backup(
     at: UnixMillis,
 ) -> Result<RestoreReport, AppError> {
     let work = work_dir(target);
-    let existed = work.exists();
+    clear_work(&work);
     let restored = pi_backup::restore_in(encrypted, identity, target, &work, at);
-    if !existed
-        && work.exists()
-        && let Err(error) = std::fs::remove_dir_all(&work)
+    clear_work(&work);
+    restored.map_err(|error| AppError::Backup(error.to_string()))
+}
+
+/// 보관 폴더 `home` 옆에 지난 되살리기가 (중간에 꺼져) 남긴 작업 폴더를 지운다. 켤 때 부른다.
+pub(crate) fn clear_restore_leftover(home: &Path) {
+    clear_work(&work_dir(home));
+}
+
+/// 작업 폴더가 있으면 통째로 지운다. 지우지 못하면 기록만 남긴다(다음에 다시 지운다).
+fn clear_work(work: &Path) {
+    if work.exists()
+        && let Err(error) = std::fs::remove_dir_all(work)
     {
         tracing::warn!(%error, "되살리기 작업 폴더를 지우지 못했습니다");
     }
-    restored.map_err(|error| AppError::Backup(error.to_string()))
 }

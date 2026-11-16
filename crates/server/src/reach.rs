@@ -43,8 +43,8 @@ mod phone_http;
 mod summary;
 
 pub(crate) use assets::routes as asset_routes;
-pub(crate) use backup_http::routes as backup_routes;
 pub use backup_http::{BACKUP_SETTINGS_FILE, SETUP_BACKUP_PATH, restore_backup};
+pub(crate) use backup_http::{clear_restore_leftover, routes as backup_routes};
 pub(crate) use linked::{Linked, LockNotices};
 pub(crate) use office_http::{OfficeDesk, routes as office_routes};
 pub(crate) use phone_http::{Phone, routes as phone_routes};
