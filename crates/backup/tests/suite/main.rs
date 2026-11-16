@@ -2,8 +2,10 @@
 
 mod common;
 mod failure;
+mod late_retention;
 mod refuse;
 mod restore;
 mod retention;
+mod temp_root;
 mod upload;
 mod verify;

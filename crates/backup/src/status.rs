@@ -32,6 +32,7 @@ fn kind_code(kind: FailureKind) -> &'static str {
         FailureKind::Upload => "upload",
         FailureKind::SizeMismatch => "size_mismatch",
         FailureKind::Local => "local",
+        FailureKind::Retention => "retention",
     }
 }
 
@@ -43,6 +44,7 @@ fn kind_from(code: &str) -> FailureKind {
         "encrypt" => FailureKind::Encrypt,
         "upload" => FailureKind::Upload,
         "size_mismatch" => FailureKind::SizeMismatch,
+        "retention" => FailureKind::Retention,
         _ => FailureKind::Local,
     }
 }
@@ -68,6 +70,7 @@ pub(crate) fn read(dir: &Path) -> Result<BackupStatus, BackupError> {
             kind: kind_from(&f.kind),
         }),
         retry_pending: wire.retry_pending,
+        last_retention_failure: None,
     })
 }
 

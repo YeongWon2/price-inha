@@ -98,6 +98,8 @@ pub enum FailureKind {
     SizeMismatch,
     /// 로컬 파일 오류.
     Local,
+    /// 올리기는 성공했지만 원격 · 로컬 보존 규칙 적용(오래된 백업 지우기)이 실패했다.
+    Retention,
 }
 
 impl BackupError {

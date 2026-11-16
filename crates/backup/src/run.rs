@@ -86,6 +86,8 @@ pub struct BackupStatus {
     pub last_failure: Option<LastFailure>,
     /// 마지막 시도가 실패해 다음 장 마감에 다시 올려야 하는가(E15).
     pub retry_pending: bool,
+    /// 마지막으로 올리기는 성공했지만 보존 규칙 적용(지우기)만 실패한 기록. 올리기 실패와 따로 둔다.
+    pub last_retention_failure: Option<LastFailure>,
 }
 
 impl Backup {

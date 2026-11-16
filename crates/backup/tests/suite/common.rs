@@ -52,6 +52,7 @@ impl Verifier for AcceptAll {
 struct RemoteState {
     files: BTreeMap<String, Vec<u8>>,
     fail_put: Option<u16>,
+    fail_delete: Option<u16>,
     lie_size: bool,
 }
 
@@ -124,6 +125,9 @@ impl Handler {
     }
 
     fn delete(&self, state: &mut RemoteState, path: &str, body: &Value) -> ResponseTemplate {
+        if let Some(status) = state.fail_delete {
+            return reply(status, json!({ "message": "Server Error" }));
+        }
         let Some(bytes) = state.files.get(path) else {
             return reply(404, json!({ "message": "Not Found" }));
         };
@@ -202,6 +206,10 @@ impl FakeGithub {
         self.state.lock().unwrap().fail_put = Some(status);
     }
 
+    pub fn fail_deletes(&self, status: u16) {
+        self.state.lock().unwrap().fail_delete = Some(status);
+    }
+
     pub fn lie_about_size(&self) {
         self.state.lock().unwrap().lie_size = true;
     }
@@ -209,6 +217,7 @@ impl FakeGithub {
     pub fn heal(&self) {
         let mut state = self.state.lock().unwrap();
         state.fail_put = None;
+        state.fail_delete = None;
         state.lie_size = false;
     }
 
@@ -245,7 +254,17 @@ impl Env {
 
     /// 자료 키만 등록되고 백업 토큰은 없는 환경.
     pub async fn without_token() -> Env {
-        let dir = tempfile::tempdir().unwrap();
+        Env::build(tempfile::tempdir().unwrap()).await
+    }
+
+    /// 시스템 임시 폴더를 쓰지 않고 `base` 아래에 만든 환경(토큰 · 자료 키 등록).
+    pub async fn new_in(base: &Path) -> Env {
+        let env = Env::build(tempfile::tempdir_in(base).unwrap()).await;
+        register(&env.secrets, KeySlot::BackupGithubToken, "token", TOKEN).await;
+        env
+    }
+
+    async fn build(dir: TempDir) -> Env {
         let home = dir.path().join("home");
         std::fs::create_dir(&home).unwrap();
         let store = Store::open(home.join(pi_backup::SNAPSHOT_FILE)).unwrap();
