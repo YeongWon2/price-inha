@@ -294,6 +294,36 @@ impl App {
         })
     }
 
+    /// (W5 1차) 주문 길까지 이어 서버를 띄운다: [`App::start`]가 하는 일에 더해
+    ///
+    /// - 저장소로 주문 실행기(`pi_exec::Executor::open`, 계좌 스냅샷이 있으면 되살림)를 열고 맞춰 본다
+    ///   (`reconcile`). 실행기가 준 점검 권한은 규칙 엔진의 길에만 건넨다.
+    /// - 승인 관리자(`pi_approval::Approvals`)를 같은 저장소 · 시계로 연다.
+    /// - [`crate::TEAM_PATH`] · [`crate::TEAM_RESTART_PATH`] · [`crate::APPROVAL_ANSWER_PATH`] ·
+    ///   [`crate::TEMPLATE_PATH`] · [`crate::TEMPLATE_ADJUST_PATH`]를 세션이 있어야 열리는 경로에 단다.
+    /// - 시세 흐름이 받은 시세를 [`crate::Trading::on_quote`]로 넘기고, 하루 시작 · 마감
+    ///   ([`crate::KIND_DAY_START`] · [`crate::KIND_DAY_CLOSE`])을 시계로 뒤에서 돌린다.
+    ///
+    /// [`App::start`]는 이것을 기본 주문 길 값으로 부른 것과 같다.
+    pub async fn start_with(
+        settings: Settings,
+        wiring: Wiring,
+        trading: crate::TradingWiring,
+    ) -> Result<App, AppError> {
+        let _ = (settings, wiring, trading);
+        todo!()
+    }
+
+    /// (W5 1차) 이 앱의 저장소(같은 연결을 나눠 쓴다).
+    pub fn store(&self) -> Store {
+        self.store.clone()
+    }
+
+    /// (W5 1차) 주문 길.
+    pub fn trading(&self) -> Arc<crate::Trading> {
+        todo!()
+    }
+
     /// 실제로 연 주소.
     pub fn local_addr(&self) -> SocketAddr {
         self.gate.local_addr()
@@ -324,6 +354,9 @@ impl App {
     ///
     /// (8차 3번) 맨 먼저 꺼지기 시작 표시를 세운다(고르기 잠금을 기다리기 전에). 그 뒤에 고르기 잠금을
     /// 얻은 AI 고르기는 거부되고, 공급자 끝내기는 고르기와 같은 잠금을 잡고 한다.
+    ///
+    /// (gate 8차 검토의 참고) 끄기가 늦어질 수 있는 상한: 도는 AI 고르기의 CLI 확인(최대 30초)만큼
+    /// 끄기가 늦어질 수 있다. 끄기는 고르기 잠금을 기다리므로, 그 잠금을 쥔 고르기가 CLI 확인을 끝낼 때까지다.
     pub async fn shutdown(self) -> Result<(), AppError> {
         self.desk.begin_closing();
         self.stop.send_replace(true);

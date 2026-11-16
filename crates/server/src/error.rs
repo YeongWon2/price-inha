@@ -152,3 +152,30 @@ impl SetupRefusal {
         }
     }
 }
+
+/// (W5 1차) 주문 길([`crate::Trading`])의 오류. 비밀 값을 담지 않는다.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TradingError {
+    /// 필수 설정(증권사 · AI 키, 종목)이 빠져 있어 운용하지 않는다(V31). 시연 모드에서는 나지 않는다.
+    #[error("필수 설정이 빠져 있어 운용하지 않습니다")]
+    SetupRequired,
+    /// 고른 템플릿이 없다(C4 먼저).
+    #[error("고른 템플릿이 없습니다")]
+    NoTemplate,
+    /// 팀이 멈춰 있어 오늘 매매를 시작할 수 없다. 지금 상태를 담는다.
+    #[error("팀이 멈춰 있습니다: {0:?}")]
+    Halted(pi_store::TeamState),
+    /// 저장소에 그 매매가 없다.
+    #[error("매매를 찾을 수 없습니다")]
+    TradeNotFound,
+    /// 증권사(모의계좌)가 주문을 받지 않거나 응답하지 않았다(E13). 팀은 이상 감지 멈춤이 됐다.
+    #[error("증권사 주문 실패(이상 감지 멈춤): {0}")]
+    Broker(String),
+    /// 주문 실행기의 그 밖의 오류.
+    #[error("주문 실행기 오류: {0}")]
+    Exec(String),
+    /// 저장소 오류.
+    #[error("저장소 오류: {0}")]
+    Store(#[from] pi_store::StoreError),
+}

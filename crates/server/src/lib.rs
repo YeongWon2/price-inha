@@ -10,11 +10,13 @@ mod desk;
 mod error;
 mod feed;
 mod keys;
+mod log;
 mod page;
 mod retry;
 mod settings;
 mod setup;
 mod setup_http;
+mod trading;
 
 pub use ai_link::{
     AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_CHECKING, CLI_COMMON_LOCATIONS,
@@ -29,8 +31,9 @@ pub use app::{
     FEED_LIVE, FEED_NO_BROKER_KEY, FEED_REQUEST_REJECTED, FEED_SETUP_REQUIRED, KIND_FEED_STATUS,
     KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Wiring, announce_addr,
 };
-pub use error::{AppError, SettingsError, SetupRefusal};
+pub use error::{AppError, SettingsError, SetupRefusal, TradingError};
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
+pub use log::{RedactedLine, RedactingWriter};
 pub use settings::{
     DEFAULT_CALENDAR_RETRY, DEFAULT_QUOTE_INTERVAL, DEFAULT_REGISTER_ATTEMPTS,
     DEFAULT_REGISTER_WINDOW, DEFAULT_RETRY_INITIAL, DEFAULT_RETRY_MAX, DEFAULT_SYMBOLS_ATTEMPTS,
@@ -43,4 +46,11 @@ pub use setup::{
     KEY_DATA, KIND_SETUP, KeyRequest, MAX_WATCH_SYMBOLS, SETUP_ITEMS, SETUP_KEYS_PATH, SETUP_PATH,
     SETUP_REQUIRED, SETUP_STARTED, SETUP_SYMBOLS_PATH, SetupItem, SetupItemSpec, SetupStatus,
     SymbolsSource, WATCHLIST_FILE, load_watchlist, parse_symbols, save_watchlist,
+};
+pub use trading::{
+    ANSWER_CONTENT_CHANGED, ANSWER_FINGERPRINT_MISMATCH, ANSWER_NOT_FOUND, APPROVAL_ANSWER_PATH,
+    CalendarFn, DayPlan, KIND_DAY_CLOSE, KIND_DAY_PLAN, KIND_DAY_START, OrderRequest, Placed,
+    RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED, TEAM_ANOMALY_HALT, TEAM_DAILY_LIMIT_HALT,
+    TEAM_FULL_STOP, TEAM_OPERATING, TEAM_PATH, TEAM_RESTART_PATH, TEAM_RESTING,
+    TEMPLATE_ADJUST_PATH, TEMPLATE_OVER_CAP, TEMPLATE_PATH, Trading, TradingWiring,
 };
