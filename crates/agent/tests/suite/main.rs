@@ -4,6 +4,7 @@ mod action;
 mod common;
 mod discussion;
 mod judgment;
+mod longroom;
 mod order;
 mod principles;
 mod role;
