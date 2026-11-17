@@ -137,3 +137,34 @@ async fn access_log(State(state): State<LogState>) -> Response {
         json!({ "entries": entries, "locked": locked }),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty() -> AccessSlot {
+        Arc::default()
+    }
+
+    /// (8차) 관문을 열기 전(자리를 채우기 전)에는 세 경로 모두 503 `not_ready`이고 아무것도 하지 않는다.
+    #[tokio::test]
+    async fn 채우기_전에는_발급_풀기_기록_모두_503이다() {
+        let issued = issue(State(empty())).await;
+        assert_eq!(issued.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = Bytes::from_static(br#"{"device": "100.64.0.7"}"#);
+        let unlocked = unlock(State(empty()), body).await;
+        assert_eq!(unlocked.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("test.db")).unwrap();
+        let state = LogState {
+            slot: empty(),
+            store,
+        };
+        let log = access_log(State(state)).await;
+        assert_eq!(log.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            log.headers().get(CACHE_CONTROL).map(|v| v.as_bytes()),
+            Some(&b"no-store"[..])
+        );
+    }
+}
