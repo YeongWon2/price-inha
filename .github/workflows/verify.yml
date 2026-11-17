@@ -29,7 +29,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # red/<모듈> 태그로 잠긴 테스트를 대조한다(4번 검사)
       - name: red 태그 받기
@@ -38,7 +38,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: 시험용 git 이름(검사기 자체 시험이 가짜 저장소에 커밋한다)
