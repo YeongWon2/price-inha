@@ -21,7 +21,12 @@ env:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # D1: 집 PC · 미니 PC의 모든 운영체제에서 돌아야 한다. Linux와 macOS에서 같이 돌린다.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

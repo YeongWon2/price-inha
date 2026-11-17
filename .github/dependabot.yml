@@ -6,6 +6,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # 큰 버전 올림은 API가 바뀌어 모듈 파이프라인(테스트 → 구현)으로 따로 한다.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       cargo:
         patterns: ["*"]
