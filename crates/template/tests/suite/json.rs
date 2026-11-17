@@ -2,7 +2,6 @@
 
 use crate::common::d;
 use pi_template::{Change, Error, FORMAT_VERSION, Style, Template, TemplateState, adjust, preset};
-use rust_decimal::Decimal;
 use serde_json::Value;
 
 // 검증: C4, V27

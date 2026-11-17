@@ -7,7 +7,6 @@ use pi_template::{
     AbsoluteCaps, ApprovalWait, CappedField, Change, MaxHolding, Style, UnfilledCancel, Violation,
     adjust, preset,
 };
-use rust_decimal::Decimal;
 
 // 검증: M3
 #[test]

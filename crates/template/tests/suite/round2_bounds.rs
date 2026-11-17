@@ -8,7 +8,6 @@ use pi_template::{
     MaxHolding, OverCap, ParamField, PctRange, Rebalance, RiskParams, Style, Template,
     UnfilledCancel, adjust, preset,
 };
-use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 /// 거부되어야 하는 조정. 지금 값이 그대로인지도 본다.
