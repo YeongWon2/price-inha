@@ -9,6 +9,7 @@ mod command;
 mod groups;
 mod output;
 mod process;
+mod spawn;
 
 use std::fmt;
 use std::path::PathBuf;
