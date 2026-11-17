@@ -81,6 +81,14 @@ async fn 쉬는_중에는_모두_침대에_있고_운용이_시작되면_자기_
 async fn 논의할_때는_논의_탁자에_모이고_끝나면_자리로_돌아간다() {
     let bench = Bench::start(kst(monday(), 9, 5)).await;
     bench.ready().await;
+    // 사무실은 팀 상태를 100ms마다 읽어 맞춘다. 운용 중이 사무실에 보인 뒤에 논의한다
+    // (느린 기계에서 논의가 그 사이에 끝나면 모이는 모습이 나오지 않는다).
+    wait_for("모두 자기 자리로 간다(이벤트)", || {
+        ["news", "strategy", "risk"]
+            .iter()
+            .all(|a| places(&bench, a).last().is_some_and(|p| p == "desk"))
+    })
+    .await;
     bench.discuss_buy(HYNIX).await;
     for agent in ["news", "strategy", "risk"] {
         let seen = places(&bench, agent);
