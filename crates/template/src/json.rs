@@ -2,6 +2,7 @@
 //!
 //! 모양: `{"version": 1, "style": "<스타일>", "params": { <RiskParams 칸들> }}`.
 
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -54,7 +55,8 @@ impl Template {
         if version != FORMAT_VERSION {
             return Err(Error::UnsupportedVersion { found: version });
         }
-        let doc: Doc = serde_json::from_value(value).map_err(json_error)?;
+        let doc: Doc =
+            serde_json::from_value(fill_promotion_drawdown(value)).map_err(json_error)?;
         check(&doc.params)?;
         Ok(Template {
             style: doc.style,
@@ -76,6 +78,25 @@ struct DocRef<'a> {
 struct Doc {
     style: Style,
     params: RiskParams,
+}
+
+/// 옛 JSON 에서 `params.promotion.max_drawdown_pct` 칸이 빠졌으면 평가가 쓰는 값
+/// (지금 최대 낙폭 한도의 절반)으로 채운다. 값이 있으면 그대로 둔다.
+/// 한도(`params.max_drawdown_pct`)가 없거나 읽히지 않으면 손대지 않아 평소 오류가 난다.
+fn fill_promotion_drawdown(mut value: Value) -> Value {
+    let limit = value
+        .pointer("/params/max_drawdown_pct")
+        .and_then(|v| serde_json::from_value::<Decimal>(v.clone()).ok());
+    let promotion = value
+        .pointer_mut("/params/promotion")
+        .and_then(Value::as_object_mut);
+    if let (Some(limit), Some(promotion)) = (limit, promotion)
+        && !promotion.contains_key("max_drawdown_pct")
+        && let Ok(half) = serde_json::to_value(limit / Decimal::TWO)
+    {
+        promotion.insert("max_drawdown_pct".to_owned(), half);
+    }
+    value
 }
 
 fn json_error(e: serde_json::Error) -> Error {
