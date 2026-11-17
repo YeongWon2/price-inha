@@ -1,0 +1,5 @@
+# cargo audit 설정(.github/workflows/audit.yml).
+[advisories]
+# RUSTSEC-2026-0387: crypto-bigint 0.5.5의 상수 시간 연산 문제. age 0.12.1(최신) → hpke → p256 경로로만 들어온다.
+# 백업(crates/backup)은 age의 x25519 받는이만 쓰고 P-256은 쓰지 않는다. age가 고친 버전을 내면 이 줄을 지운다.
+ignore = ["RUSTSEC-2026-0387"]

@@ -1,0 +1,27 @@
+# 의존성 보안 공지(RustSec)를 매주 · Cargo.lock이 바뀔 때 확인한다.
+name: audit
+
+on:
+  schedule:
+    - cron: "0 0 * * 1" # 매주 월요일 09:00 KST
+  push:
+    branches: [main]
+    paths: [Cargo.lock, Cargo.toml, "crates/*/Cargo.toml"]
+  pull_request:
+    paths: [Cargo.lock, Cargo.toml, "crates/*/Cargo.toml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit

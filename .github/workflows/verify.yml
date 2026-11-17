@@ -1,0 +1,46 @@
+# 끝났다는 기준(scripts/verify.sh)을 push · PR마다 기계로 다시 돌린다.
+# 검사기 자체 시험(selftest.py)을 먼저 통과시켜야 verify.sh 0번 검사가 통과한다.
+# 실제 증권사 · AI 서버를 부르지 않는다(테스트는 로컬 가짜 서버만 쓴다). 비밀값을 쓰지 않는다.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # red/<모듈> 태그로 잠긴 테스트를 대조한다(4번 검사)
+      - name: red 태그 받기
+        run: git fetch --force --tags origin
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 시험용 git 이름(검사기 자체 시험이 가짜 저장소에 커밋한다)
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@localhost"
+      - name: 검사기 자체 시험
+        run: python scripts/selftest.py
+      - name: verify.sh (전체)
+        run: bash scripts/verify.sh
