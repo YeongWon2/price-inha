@@ -35,7 +35,7 @@ mod link;
 mod parts;
 
 pub use parts::announce_addr;
-use parts::{check_cli_briefly, open_desk, open_gate, session_routes, spawn_feed};
+use parts::{check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, spawn_feed};
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -272,7 +272,8 @@ impl App {
                 "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
             );
         }
-        let desk = open_desk(&settings, &wiring, &secrets).await?;
+        let verifier = key_verifier(&wiring, launch.team.as_ref(), reach.as_ref());
+        let desk = open_desk(&settings, &wiring, &secrets, verifier).await?;
         let parts = TradingParts {
             store: store.clone(),
             clock: Arc::clone(&wiring.clock),

@@ -14,12 +14,13 @@ use pi_secrets::{KeyKind, SecretStore, SecretsError, VerifyFailure};
 use tokio::sync::Notify;
 
 mod ai;
+mod keys;
 
 use crate::ai_link::Leftovers;
 use crate::keys::KeyPresence;
 use crate::setup::{
-    AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, KeyRequest, SETUP_ITEMS,
-    SetupItem, SetupStatus, SymbolsSource, parse_symbols, save_watchlist,
+    AttemptLimit, ITEM_AI, ITEM_BROKER, ITEM_DATA, ITEM_SYMBOLS, SETUP_ITEMS, SetupItem,
+    SetupStatus, SymbolsSource, parse_symbols, save_watchlist,
 };
 use crate::{
     AiChoice, AiMethod, AiStatus, AppError, KeyVerifier, SetupRefusal, cli_refusal, find_claude,
@@ -299,34 +300,6 @@ impl Desk {
     /// 등록이 있을 때까지 기다린다. 기다리기 전에 있었던 등록도 한 번은 알려 준다.
     pub(crate) async fn woken(&self) {
         self.wake.notified().await;
-    }
-
-    /// 키를 등록한다: 입력 검사 → 시도 횟수 → 확인 → 저장. 성공하면 시세 흐름을 깨운다.
-    ///
-    /// 받은 값은 `pi-secrets`로만 넘긴다. 돌려주는 것은 까닭뿐이다.
-    /// 받은 본문은 읽은 뒤 바로 0으로 덮는다([`KeyRequest::parse_wiping`]).
-    pub(crate) async fn register_key(&self, body: &mut [u8]) -> Result<(), SetupRefusal> {
-        let request = KeyRequest::parse_wiping(body)?;
-        if !allow(&self.limit) {
-            tracing::warn!("키 등록 시도가 너무 많아 확인하지 않고 거부합니다");
-            return Err(SetupRefusal::TooManyAttempts);
-        }
-        let kind = request.kind;
-        let registering = self.secrets.register(kind, request.values, &self.verifier);
-        let outcome = match tokio::time::timeout(VERIFY_TIMEOUT, registering).await {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(error)) => Err(refusal(&error)),
-            Err(_) => Err(SetupRefusal::Unreachable),
-        };
-        match outcome {
-            Ok(()) => {
-                tracing::info!(?kind, "키를 등록했습니다");
-                self.wake.notify_one();
-            }
-            // 까닭만 남긴다(값도 요청 본문도 남기지 않는다).
-            Err(why) => tracing::warn!(?kind, %why, "키를 등록하지 못했습니다"),
-        }
-        outcome
     }
 
     /// (6차) AI 연결을 고른다: 입력 검사 → 시도 횟수(7차: API 키도 든다) → 작업 폴더 준비 · 저장

@@ -17,7 +17,8 @@ use zeroize::Zeroize;
 
 use crate::desk::Desk;
 use crate::{
-    REMOTE_KEYS_PATH, SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_SYMBOLS_PATH, SetupRefusal,
+    REMOTE_KEYS_PATH, SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_SLOTS_PATH,
+    SETUP_SYMBOLS_PATH, SetupRefusal,
 };
 
 /// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 더 읽지 않고
@@ -30,6 +31,7 @@ const MAX_BODY_BYTES: usize = 16 * 1024;
 pub(crate) fn status_routes(desk: Arc<Desk>) -> Router {
     Router::new()
         .route(SETUP_PATH, get(status))
+        .route(SETUP_SLOTS_PATH, get(slot_status))
         .route(REMOTE_KEYS_PATH, post(register_key))
         .with_state(desk)
 }
@@ -92,6 +94,14 @@ async fn body_of(request: Request) -> Result<Vec<u8>, SetupRefusal> {
 
 async fn status(State(desk): State<Arc<Desk>>) -> Response {
     reply(StatusCode::OK, desk.status().to_json())
+}
+
+/// (8차) 바깥 키 칸별 등록 여부([`crate::slots`]).
+async fn slot_status(State(desk): State<Arc<Desk>>) -> Response {
+    reply(
+        StatusCode::OK,
+        crate::slots::slots_json(&desk.slot_status()),
+    )
 }
 
 async fn register_key(State(desk): State<Arc<Desk>>, request: Request) -> Response {

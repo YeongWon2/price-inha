@@ -61,7 +61,9 @@ pub use setup::{
     SetupItem, SetupItemSpec, SetupStatus, SymbolsSource, WATCHLIST_FILE, load_watchlist,
     parse_symbols, save_watchlist,
 };
-pub use slots::{KEY_BACKUP_GITHUB_TOKEN, KEY_DART, KEY_ECOS, KEY_FRED, SETUP_SLOTS_PATH};
+pub use slots::{
+    KEY_BACKUP_GITHUB_TOKEN, KEY_DART, KEY_ECOS, KEY_FRED, KEY_SLOTS, SETUP_SLOTS_PATH,
+};
 pub use team::{
     Crew, DAY_ROOM, DEFAULT_CONSENSUS_REQUIRED, DemoAi, DemoTurn, Discussed, KIND_DAY_DISCUSSION,
     KIND_PROPOSAL, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH, Reviewed, TEAM_MEMBERS_PATH,

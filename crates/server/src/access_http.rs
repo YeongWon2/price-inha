@@ -122,14 +122,12 @@ async fn access_log(State(state): State<LogState>) -> Response {
         .map(|d| json!({ "device": d.device.to_string(), "until": d.until.0 }))
         .collect();
     let store = state.store.clone();
-    let read = tokio::task::spawn_blocking(move || store.access_log()).await;
+    let read = tokio::task::spawn_blocking(move || store.access_recent(ACCESS_LOG_LIMIT)).await;
     let Ok(Ok(records)) = read else {
         return refuse(StatusCode::INTERNAL_SERVER_ERROR, "read_failed");
     };
     let entries: Vec<Value> = records
         .iter()
-        .rev()
-        .take(ACCESS_LOG_LIMIT)
         .map(|r| json!({ "seq": r.seq, "at": r.at.0, "origin": r.origin, "action": r.action }))
         .collect();
     reply(

@@ -72,6 +72,7 @@ pub(super) async fn open_desk(
     settings: &Settings,
     wiring: &Wiring,
     secrets: &Arc<SecretStore>,
+    verifier: KeyVerifier,
 ) -> Result<Arc<Desk>, AppError> {
     let (symbols, source) = watched_symbols(settings)?;
     // 고른 것이 없으면 API 키다. 읽을 수 없으면 고르지 않은 쪽으로 넘어가지 않고 띄우지 않는다.
@@ -82,7 +83,7 @@ pub(super) async fn open_desk(
         .map_err(|_| AppError::Task)??;
     let desk = Arc::new(Desk::new(DeskParts {
         secrets: Arc::clone(secrets),
-        verifier: KeyVerifier::new(wiring.upstreams.clone()),
+        verifier,
         home: settings.home.clone(),
         demo: settings.demo,
         symbols,
@@ -99,6 +100,27 @@ pub(super) async fn open_desk(
         work,
     }));
     Ok(desk)
+}
+
+/// (8차) 키 확인기: 바깥 서버 설정에 더해, 팀이 있으면 그 자료 주소로 자료 칸을, 3차 조립이 있으면
+/// 백업 설정의 GitHub 주소(없으면 기본 주소)로 토큰을 확인한다. 없는 쪽 칸은 확인하지 않아 저장되지 않는다.
+pub(super) fn key_verifier(
+    wiring: &Wiring,
+    team: Option<&crate::TeamWiring>,
+    reach: Option<&crate::Reach>,
+) -> KeyVerifier {
+    let mut verifier = KeyVerifier::new(wiring.upstreams.clone());
+    if let Some(team) = team {
+        verifier = verifier.with_data(team.data.clone());
+    }
+    if let Some(reach) = reach {
+        let api_base = reach.backup.as_ref().map_or_else(
+            || crate::reach::GITHUB_API_BASE.to_string(),
+            |backup| backup.api_base.clone(),
+        );
+        verifier = verifier.with_github(api_base);
+    }
+    verifier
 }
 
 /// 접속 관문을 연다. 공개 경로는 첫 화면과 웹 자산(사무실 · 폰), 세션 경로는 설정 상태와 `protected`

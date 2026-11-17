@@ -281,26 +281,46 @@ impl KeyRequest {
 
     /// 읽은 JSON에서 요청을 꺼낸다. 값은 [`Credentials`]로 옮기고 JSON 쪽은 부른 쪽이 지운다.
     fn from_value(request: &Value) -> Result<KeyRequest, SetupRefusal> {
-        let (kind, fields) = key_request_parts(request).ok_or(SetupRefusal::InvalidInput)?;
-        let names = kind.fields();
-        if fields.len() != names.len() {
-            return Err(SetupRefusal::InvalidInput);
-        }
-        let mut values = Credentials::new();
-        for &name in names {
-            let value = fields
-                .get(name)
-                .and_then(Value::as_str)
-                .and_then(usable_secret)
-                .ok_or(SetupRefusal::InvalidInput)?;
-            values = values.with(name, value);
-        }
+        let (item, fields) = key_request_parts(request).ok_or(SetupRefusal::InvalidInput)?;
+        let kind = kind_named(item).ok_or(SetupRefusal::InvalidInput)?;
+        let values = read_fields(kind.fields(), fields)?;
         Ok(KeyRequest { kind, values })
     }
 }
 
+/// `item` 이름의 키 종류. (8차) 바깥 키 칸 이름은 [`crate::slots`]가 따로 읽는다.
+pub(crate) fn kind_named(item: &str) -> Option<KeyKind> {
+    match item {
+        KEY_BROKER => Some(KeyKind::Broker),
+        KEY_AI_API_KEY => Some(KeyKind::AiApiKey),
+        KEY_DATA => Some(KeyKind::Data),
+        _ => None,
+    }
+}
+
+/// 칸 묶음이 `names`와 꼭 같으면 값을 [`Credentials`]로 옮긴다(앞뒤 공백을 뗀다).
+/// 빠진 칸 · 모르는 칸 · 글자가 아닌 값 · 쓸 수 없는 값은 [`SetupRefusal::InvalidInput`].
+pub(crate) fn read_fields(
+    names: &[&str],
+    fields: &serde_json::Map<String, Value>,
+) -> Result<Credentials, SetupRefusal> {
+    if fields.len() != names.len() {
+        return Err(SetupRefusal::InvalidInput);
+    }
+    let mut values = Credentials::new();
+    for &name in names {
+        let value = fields
+            .get(name)
+            .and_then(Value::as_str)
+            .and_then(usable_secret)
+            .ok_or(SetupRefusal::InvalidInput)?;
+        values = values.with(name, value);
+    }
+    Ok(values)
+}
+
 /// JSON 값 안의 모든 글자를 0으로 덮고 비운다(받은 키 값이 든 중간 값을 남기지 않는다).
-fn wipe_value(value: &mut Value) {
+pub(crate) fn wipe_value(value: &mut Value) {
     match value {
         Value::String(text) => text.zeroize(),
         Value::Array(items) => items.iter_mut().for_each(wipe_value),
@@ -309,19 +329,16 @@ fn wipe_value(value: &mut Value) {
     }
 }
 
-/// 본문에서 종류와 칸 묶음을 꺼낸다. 본문은 `item`과 `fields` 두 칸뿐인 JSON 객체여야 한다.
-fn key_request_parts(request: &Value) -> Option<(KeyKind, &serde_json::Map<String, Value>)> {
+/// 본문에서 `item` 이름과 칸 묶음을 꺼낸다. 본문은 `item`과 `fields` 두 칸뿐인 JSON 객체여야 한다.
+pub(crate) fn key_request_parts(
+    request: &Value,
+) -> Option<(&str, &serde_json::Map<String, Value>)> {
     let request = request.as_object()?;
-    let kind = match request.get("item")?.as_str()? {
-        KEY_BROKER => KeyKind::Broker,
-        KEY_AI_API_KEY => KeyKind::AiApiKey,
-        KEY_DATA => KeyKind::Data,
-        _ => return None,
-    };
+    let item = request.get("item")?.as_str()?;
     let Some(Value::Object(fields)) = request.get("fields") else {
         return None;
     };
-    (request.len() == 2).then_some((kind, fields))
+    (request.len() == 2).then_some((item, fields))
 }
 
 /// 등록할 수 있는 값이면 앞뒤 공백을 뗀 글자를 준다(붙여 넣다 딸려 온 공백은 값이 아니다).

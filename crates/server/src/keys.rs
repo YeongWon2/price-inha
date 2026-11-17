@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use pi_ai::AnthropicConfig;
+use pi_data::DataConfig;
 use pi_market::TossConfig;
-use pi_secrets::{Credentials, KeyKind, SecretStore, Verifier, VerifyFailure};
+use pi_secrets::{Credentials, KeyKind, KeySlot, SecretStore, Verifier, VerifyFailure};
 
 use crate::retry::{LOG_EVERY, LogGate};
 
@@ -187,16 +188,38 @@ impl pi_ai::CredentialSource for NoKeys {
 /// | [`KeyKind::Broker`] | `pi_market::verify`(토큰 발급 한 번) | 연결 실패는 [`VerifyFailure::Unreachable`], 인증 실패는 [`VerifyFailure::Rejected`] |
 /// | [`KeyKind::AiApiKey`] | `AnthropicProvider::verify`(`ApiKey`) | 연결 실패 · 시간 초과는 `Unreachable`, 인증 실패는 `Rejected` |
 /// | [`KeyKind::Data`] | 확인할 곳이 아직 없다 | 언제나 실패(저장하지 않는다) |
+/// | (8차) `KeySlot::{Dart, Ecos, Fred}` | `pi_data::verify_slot`([`KeyVerifier::with_data`]의 주소) | 주소가 없으면 `Unreachable` |
+/// | (8차) `KeySlot::BackupGithubToken` | `pi_backup::verify_token`([`KeyVerifier::with_github`]의 주소) | 주소가 없으면 `Unreachable` |
 ///
 /// 그 밖의 실패(한도 초과 · 장애 등)도 `Ok`가 아니다(확인하지 못한 키는 저장하지 않는다, E4).
 pub struct KeyVerifier {
     upstreams: Upstreams,
+    /// (8차) 자료 출처 주소. 없으면 자료 칸은 확인하지 않는다(어느 서버로도 보내지 않고 저장하지 않는다).
+    data: Option<DataConfig>,
+    /// (8차) GitHub API 주소. 없으면 토큰은 확인하지 않는다.
+    github_api_base: Option<String>,
 }
 
 impl KeyVerifier {
     /// 바깥 서버 설정으로 만든다.
     pub fn new(upstreams: Upstreams) -> Self {
-        Self { upstreams }
+        Self {
+            upstreams,
+            data: None,
+            github_api_base: None,
+        }
+    }
+
+    /// (8차) 자료 칸(DART · ECOS · FRED)을 이 주소로 확인한다(앱의 자료 설정과 같은 주소).
+    pub fn with_data(mut self, data: DataConfig) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    /// (8차) 백업 GitHub 토큰을 이 API 주소로 확인한다(백업 설정의 주소).
+    pub fn with_github(mut self, api_base: impl Into<String>) -> Self {
+        self.github_api_base = Some(api_base.into());
+        self
     }
 
     async fn verify_broker(&self, values: &Credentials) -> Result<(), VerifyFailure> {
@@ -241,6 +264,23 @@ impl Verifier for KeyVerifier {
             // 어느 서버로도 보내지 않는다.
             KeyKind::Data => Err(VerifyFailure::Unreachable),
         }
+    }
+
+    async fn verify_slot(&self, slot: KeySlot, values: &Credentials) -> Result<(), VerifyFailure> {
+        if slot == KeySlot::BackupGithubToken {
+            let api_base = self
+                .github_api_base
+                .as_deref()
+                .ok_or(VerifyFailure::Unreachable)?;
+            let token = slot
+                .fields()
+                .first()
+                .and_then(|name| values.get(name))
+                .ok_or(VerifyFailure::Rejected)?;
+            return pi_backup::verify_token(api_base, token).await;
+        }
+        let data = self.data.as_ref().ok_or(VerifyFailure::Unreachable)?;
+        pi_data::verify_slot(data, slot, values).await
     }
 }
 

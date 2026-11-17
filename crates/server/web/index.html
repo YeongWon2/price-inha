@@ -122,6 +122,38 @@
       <p class="hint">아직 등록할 수 없음: 확인할 곳이 아직 없어 지금은 등록되지 않습니다. 없어도 시작합니다.</p>
     </div>
     <div class="item">
+      <h3>바깥 키 (선택)</h3>
+      <p class="hint">자료 출처 키와 백업 토큰입니다. 등록할 때 그곳에 한 번 확인하고, 맞아야 저장합니다. 등록 여부만 보이고 값은 다시 보여 주지 않습니다. 없어도 시작합니다.</p>
+      <div class="slot">
+        <h4>DART 키 (공시 · 재무) <span id="reg-slot-dart" class="badge"></span></h4>
+        <label for="f-slot-dart">api_key</label>
+        <input id="f-slot-dart" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-dart" type="button">등록</button>
+        <span id="m-slot-dart" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>ECOS 키 (한국은행 통계) <span id="reg-slot-ecos" class="badge"></span></h4>
+        <label for="f-slot-ecos">api_key</label>
+        <input id="f-slot-ecos" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-ecos" type="button">등록</button>
+        <span id="m-slot-ecos" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>FRED 키 (미국 금리) <span id="reg-slot-fred" class="badge"></span></h4>
+        <label for="f-slot-fred">api_key</label>
+        <input id="f-slot-fred" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-fred" type="button">등록</button>
+        <span id="m-slot-fred" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>백업 GitHub 토큰 <span id="reg-slot-backup_github_token" class="badge"></span></h4>
+        <label for="f-slot-backup_github_token">token</label>
+        <input id="f-slot-backup_github_token" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-backup_github_token" type="button">등록</button>
+        <span id="m-slot-backup_github_token" class="msg" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="item">
       <h3>백업 (선택) <span id="reg-backup" class="badge"></span></h3>
       <label for="f-backup-repo">비공개 GitHub 저장소 (소유자/이름)</label>
       <input id="f-backup-repo" data-backup="repo" type="text" autocomplete="off" spellcheck="false">
@@ -181,6 +213,11 @@
   var ACCESS_KEY_PATH = "/api/access/key";
   var ACCESS_UNLOCK_PATH = "/api/access/unlock";
   var ACCESS_LOG_PATH = "/api/access/log";
+  var SETUP_SLOTS_PATH = "/api/setup/slots";
+  // 바깥 키 칸: item 이름 → 칸 이름(KeySlot::fields).
+  var SLOT_FIELDS = { dart: "api_key", ecos: "api_key", fred: "api_key", backup_github_token: "token" };
+  // 발급한 접속 키를 화면에 보여 두는 시간. 지나면 화면(DOM)에서 지운다.
+  var ACCESS_KEY_SHOW_MS = 60000;
   var RETRY_MIN_MS = 1000;
   var RETRY_MAX_MS = 10000;
   var MAX_EVENTS = 20;
@@ -391,6 +428,23 @@
       .then(function (reply) { return reply.ok ? reply.json() : null; })
       .then(showSetupStatus)
       .catch(function () { /* 다음 설정 알림이나 다시 이을 때 다시 읽는다 */ });
+    loadSlots();
+  }
+
+  // 바깥 키 칸별 등록 여부(이름과 등록 여부만 온다).
+  function loadSlots() {
+    fetch(SETUP_SLOTS_PATH, { credentials: "same-origin", cache: "no-store" })
+      .then(function (reply) { return reply.ok ? reply.json() : null; })
+      .then(function (view) {
+        if (!view || !Array.isArray(view.slots)) { return; }
+        view.slots.forEach(function (slot) {
+          var badge = slot && document.getElementById("reg-slot-" + slot.name);
+          if (!badge) { return; }
+          setText(badge, slot.registered === true ? "등록됨" : "등록 안 됨");
+          badge.className = "badge " + (slot.registered === true ? "ok" : "warn");
+        });
+      })
+      .catch(function () { /* 다음 설정 읽기에서 다시 읽는다 */ });
   }
 
   // 설정 알림: 시작했으면 본 화면으로, 필수 항목이 빠졌으면 설정 화면으로.
@@ -685,17 +739,23 @@
     var $message = document.getElementById("m-access-key");
     var $once = document.getElementById("access-key-once");
     var $value = document.getElementById("access-key-value");
-    $button.addEventListener("click", function () {
-      $button.disabled = true;
+    var hideTimer = null;
+    function hideAccessKey() {
+      if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
       $once.hidden = true;
       setText($value, "");
+    }
+    $button.addEventListener("click", function () {
+      $button.disabled = true;
+      hideAccessKey();
       postJson(ACCESS_KEY_PATH, {})
         .then(function (reply) {
           return reply.json().catch(function () { return null; }).then(function (data) {
             if (reply.ok && data && data.access_key) {
               setText($value, data.access_key);
               $once.hidden = false;
-              setText($message, "만들었습니다");
+              hideTimer = setTimeout(hideAccessKey, ACCESS_KEY_SHOW_MS);
+              setText($message, "만들었습니다 (1분 뒤 화면에서 지웁니다)");
               loadAccess();
             } else if (reply.status === 403) {
               setText($message, "이 컴퓨터에서만 만들 수 있습니다");
@@ -719,6 +779,11 @@
     wireKey("b-ai-key", "m-ai-key", "ai_api_key", { api_key: "f-api-key" });
     wireAi();
     wireKey("b-data", "m-data", "data", { api_key: "f-data-key" });
+    Object.keys(SLOT_FIELDS).forEach(function (item) {
+      var fields = {};
+      fields[SLOT_FIELDS[item]] = "f-slot-" + item;
+      wireKey("b-slot-" + item, "m-slot-" + item, item, fields);
+    });
     document.getElementById("open-setup").addEventListener("click", function () { openSetup(null); });
     document.getElementById("close-setup").addEventListener("click", closeSetup);
     document.getElementById("fix-symbols").addEventListener("click", function () { openSetup("f-symbols"); });
