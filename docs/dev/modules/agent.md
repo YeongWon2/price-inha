@@ -76,3 +76,8 @@ M2 E6 E20 E27 E32 E38 V2 V3 V4 P7 P9 P21
 
 ### 5차 구현 메모
 - 팀장 판단 입력(`prompt::leader_turn`)에 금액 단위 안내를 넣었다: entry · stop · target · expected_value는 통화의 최소 단위 정수(국내 원, 미국 센트). Trade에 시장 칸이 없어 두 시장을 함께 적는다. 시험: `tests/suite/unit.rs`.
+
+## 8차 작업 (후보 일괄 처리)
+- 방 줄 id에 넣는 방의 마지막 번호를 store `room_last_seq(room)`로 바로 읽는다(500줄씩 읽어 세던 것을 없앴다). 줄 id 모양(`trade-<매매>-<시각>-<마지막 번호>-<순번>`)은 그대로다.
+- 시험: `tests/suite/longroom.rs`(1203줄 방에서 마지막 번호가 id에 들어감 · 줄을 읽어 세지 않음).
+- 3차 검토 참고의 "마지막 번호 조회 API" 항목과 4차의 "남김"은 이로써 처리했다.
