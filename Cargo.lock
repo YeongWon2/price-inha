@@ -2066,7 +2066,7 @@ name = "pi-gate"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures",
  "pi-store",
  "rand 0.9.5",
