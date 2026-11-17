@@ -15,7 +15,16 @@ pub(super) const SPAWN_BUSY_STEP: Duration = Duration::from_millis(20);
 /// `spawn`을 부르고, 실행 파일이 바쁘다는 오류면 잠깐 쉬고 다시 부른다.
 /// 다른 오류는 바로 돌려준다. [`SPAWN_ATTEMPTS`]번 모두 바쁘면 마지막 오류를 돌려준다.
 pub(super) async fn spawn_retrying<T>(mut spawn: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    spawn()
+    let mut attempt = 1;
+    loop {
+        match spawn() {
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy && attempt < SPAWN_ATTEMPTS => {
+                tokio::time::sleep(SPAWN_BUSY_STEP * attempt).await;
+                attempt += 1;
+            }
+            done => return done,
+        }
+    }
 }
 
 #[cfg(test)]

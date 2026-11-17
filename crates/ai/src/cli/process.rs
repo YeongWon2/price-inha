@@ -65,7 +65,9 @@ pub(super) async fn run_once(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = cmd.spawn().map_err(|e| spawn_error(&e))?;
+    let mut child = super::spawn::spawn_retrying(|| cmd.spawn())
+        .await
+        .map_err(|e| spawn_error(&e))?;
     let held = held_outputs(&child);
     let mut stdin = child.stdin.take();
     let stdout = child.stdout.take();

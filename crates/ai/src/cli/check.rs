@@ -175,7 +175,7 @@ async fn probe(
         .stderr(Stdio::null())
         .process_group(0)
         .kill_on_drop(false);
-    let mut child = match cmd.spawn() {
+    let mut child = match super::spawn::spawn_retrying(|| cmd.spawn()).await {
         Ok(child) => child,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Probe::Missing,
         Err(_) => return Probe::Failed,
