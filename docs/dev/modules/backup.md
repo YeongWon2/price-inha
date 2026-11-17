@@ -59,3 +59,7 @@ D7 C13 E15 E39 N8 V48 V49 V51 P22
 - 되살리기에도 임시 폴더를 넘긴다: `restore_in(암호문, identity, 대상, temp_root, 시각)`. 검증 사본은 `temp_root` 안(0700)에만 두고 끝나면 지운다. 기존 `restore`는 그대로 둔다(server가 `restore_in`으로 옮긴다). 시험: `TMPDIR`를 쓰기 막아도 되살리기가 되고 `temp_root`가 비어 있다.
 - 보존 지우기가 중간에 실패해도 그때까지 원격 · 로컬 양쪽에서 지운 시각은 `removed`에 담는다. 시험: 지우기 3번 뒤 실패 → `removed` 3개, 그 셋은 양쪽에 없고 나머지는 양쪽에 남는다.
 - 건너뜀: 실제 GitHub 크기 제한 · 같은 이름 충돌은 로컬 가짜 서버로 확인할 수 없다(실제 서비스 호출 금지).
+
+## 4차 작업 (마무리)
+
+- GitHub 토큰 확인 함수 `verify_token(api_base, &SecretString) -> Result<(), VerifyFailure>`(공개). `GET {api_base}/user`를 한 번만 보낸다(다시 시도 없음 · 리다이렉트 안 따라감 · 시간 제한 10초). 200은 받아들임, 401 · 403은 `Rejected`, 그 밖(닿지 않음 · 시간 초과 · 5xx · 리다이렉트)은 `Unreachable`. 토큰 · 주소는 기록 · 오류 글에 넣지 않는다. 시험은 로컬 가짜 서버.
