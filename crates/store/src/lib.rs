@@ -401,8 +401,8 @@ impl Store {
     }
 
     /// 접속 기록 최근 `max`줄. 새것(큰 번호)부터 준다.
-    pub fn access_recent(&self, _max: usize) -> Result<Vec<AccessRecord>, StoreError> {
-        todo!("14차 뼈대")
+    pub fn access_recent(&self, max: usize) -> Result<Vec<AccessRecord>, StoreError> {
+        self.read(|conn| log::access_recent(conn, max))
     }
 
     // ───────────── 안에서만 쓰는 것 ─────────────

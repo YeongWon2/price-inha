@@ -152,8 +152,16 @@ impl Store {
     }
 
     /// 방의 마지막 번호. 이벤트가 없거나 없는 방이면 0이다.
-    pub fn room_last_seq(&self, _room: &str) -> Result<u64, StoreError> {
-        todo!("14차 뼈대")
+    pub fn room_last_seq(&self, room: &str) -> Result<u64, StoreError> {
+        self.read(|conn| {
+            let last: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM room_events WHERE room = ?1",
+                [room],
+                |row| row.get(0),
+            )?;
+            u64::try_from(last)
+                .map_err(|_| StoreError::Incompatible(format!("방 번호가 이상하다: {last}")))
+        })
     }
 }
 

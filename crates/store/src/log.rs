@@ -182,6 +182,27 @@ pub(crate) fn access_log(conn: &Connection) -> Result<Vec<AccessRecord>, StoreEr
     Ok(out)
 }
 
+/// 접속 기록 최근 `max`줄, 큰 번호부터.
+pub(crate) fn access_recent(
+    conn: &Connection,
+    max: usize,
+) -> Result<Vec<AccessRecord>, StoreError> {
+    let max = i64::try_from(max).unwrap_or(i64::MAX);
+    let mut stmt =
+        conn.prepare("SELECT seq, at, origin, action FROM access_log ORDER BY seq DESC LIMIT ?1")?;
+    let mut rows = stmt.query([max])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(AccessRecord {
+            seq: codec::seq(row, 0)?,
+            at: UnixMillis(row.get(1)?),
+            origin: row.get(2)?,
+            action: row.get(3)?,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
