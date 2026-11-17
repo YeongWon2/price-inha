@@ -135,3 +135,19 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 - `access_log`가 기록 전체를 읽고 200줄로 자른다(store에 최근 n줄 조회).
 - 발급한 키가 다음 동작 · 새로 읽기 전까지 화면(DOM)에 남는다(일정 시간 뒤 지우기).
 - 채우기 전 503 경로 시험이 없다.
+
+## 8차 작업 (바깥 키 칸 등록 · 접속 키 다듬기)
+
+사용자 말: "외부에서 가져와야 되는 키값들은 설정에 비밀값으로 넣을 수 있게 기능을 만들면 돼."
+
+- 키 등록 경로(`/api/setup/keys` 그 컴퓨터 · `/api/remote/keys` 세션)에 `item` `dart` · `ecos` · `fred` · `backup_github_token`(공개 상수 `KEY_DART` 등 · `KEY_SLOTS`)을 더했다. 칸 이름은 `KeySlot::fields()`, 몸통 · 상한 · 공백 떼기 · 값 지우기 · 답(등록 여부뿐) · 시도 횟수는 기존 키와 같다. 저장은 `SecretStore::register_slot`.
+- 확인: `KeyVerifier::verify_slot` — 자료 칸은 `pi_data::verify_slot`(팀 조립의 `TeamWiring.data` 주소), 토큰은 `pi_backup::verify_token`(3차 조립 `reach.backup.api_base`, 없으면 GitHub 기본 주소). 주소가 없는 쪽(팀 · 3차 조립 없이 띄움)은 확인하지 않아 저장되지 않는다(`Unreachable`). `KeyVerifier::new(Upstreams)`는 그대로 두고 `with_data` · `with_github`를 더했다(앞 차수 시험이 `Upstreams`를 글자 그대로 만든다).
+- 칸별 상태: `GET /api/setup/slots`(세션) → `{"slots": [{"name", "registered"}]}`. **`GET /api/setup`에 넣지 않은 까닭**: 앞 차수 잠긴 시험(setup/mod.rs)이 그 답의 칸을 못 박아 둔다. 자료 키 · 토큰은 시작 조건이 아니다.
+- 화면: 설정 화면 "바깥 키 (선택)" 칸과 `/keys` 화면에 칸마다 입력(password · new-password · spellcheck=false) · 등록 단추 · 등록 여부. 성공하면 입력을 비운다.
+- `access_log`는 `Store::access_recent(200)`을 쓴다(전체를 읽지 않는다).
+- 발급한 접속 키는 60초(`ACCESS_KEY_SHOW_MS`) 뒤 화면에서 지운다(다시 만들면 앞 타이머를 지운다).
+- 접속 키 자리를 채우기 전 503: `access_http.rs` 안 단위 시험(관문을 연 뒤 바로 채워 HTTP로는 그 틈을 만들 수 없다).
+- 시험: `tests/round15`(가짜 자료 · GitHub 서버, 가짜 값).
+
+### 8차 검토 참고
+- 옛 `item` `data`(`KeyKind::Data`, 확인할 곳 없음)는 그대로 둔다. 새 칸과 겹치므로 다음 차수에 화면에서 뺄지 정한다(물음).
