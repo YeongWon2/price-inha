@@ -38,6 +38,13 @@
 2. 손절 방식이 모두 꺼진 조합 거부: 고정 % · ATR · 논리 · 장 마감 청산이 모두 없고 최대 보유 기간도 정하지 않음이면 거부한다(`ParamField::Stop`, 새 이유 `InvalidReason::NoStopMethod`, `non_exhaustive`라 더하기다). 보유 기간 제한(시간 손절)이 있으면 받는다.
 3. 넘김(하지 않음): `promotion.max_drawdown_pct`를 `Option`으로 바꾸거나 없애는 것은 공개 API 변경이라 하지 않았다(평가는 이미 지금 한도의 절반을 쓴다).
 
+## 8차 작업 (후보 일괄 처리)
+
+3차 후보 1번(`promotion.max_drawdown_pct` 낡을 수 있음)을 공개 타입을 바꾸지 않고 처리했다.
+
+1. 템플릿 JSON 읽기: `params.promotion.max_drawdown_pct` 칸이 빠져도 읽힌다. 빠지면 평가가 쓰는 값(`params.max_drawdown_pct / 2`)으로 채운다. 칸이 있는 옛 JSON은 그대로이고, 최대 낙폭 한도(`params.max_drawdown_pct`) 자체가 빠지면 지금처럼 `Error::Json`이다. 쓰기는 그대로 칸을 담는다.
+2. 테스트를 `tests/suite/main.rs` 한 바이너리로 옮기고 `d()` 도우미를 `suite/common.rs` 하나로 모았다.
+
 ## 하지 않는 것
 
 저장, 승인, 주문 점검(rules), 실전 계좌, 화면.
