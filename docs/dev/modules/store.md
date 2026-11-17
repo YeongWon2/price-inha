@@ -221,3 +221,8 @@ M1 M2 M5 C2 E3 M6 V6 D6 E12 E36 M3 M4 V29 V30 C11 V36 D10 M7 V51
 
 ### 13차 검토 참고
 - 복사 다시 시도 상한에 걸려 실패하면 반쯤 복사된 대상 파일을 지우는지 확인한다.
+
+## 14차 작업 (후보 일괄 처리)
+1. **`Store::room_last_seq(room: &str) -> Result<u64, StoreError>`**: 방의 마지막 번호 한 줄 읽기. 이벤트가 없거나 없는 방이면 0. agent가 500줄씩 읽던 것을 대신한다.
+2. **`Store::access_recent(max: usize) -> Result<Vec<AccessRecord>, StoreError>`**: 접속 기록 최근 `max`줄을 새것(큰 번호)부터 준다. `max`가 0이면 빈 목록. server `access_log`가 전체를 읽고 자르던 것을 대신한다.
+기존 `room_events` · `access_log`는 그대로다. 시험 `tests/round14.rs`.
