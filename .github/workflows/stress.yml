@@ -1,5 +1,6 @@
 # 간헐 실패 찾기: 고른 패키지의 테스트를 여러 번 돌려 실패한 판의 실패 줄만 모은다(손으로만 시작).
 # 예: gh workflow run stress.yml -f package=pi-ai -f runs=40 -f os=ubuntu-latest
+#     gh workflow run stress.yml -f package=price-inha -f args='--test round11' -f os=macos-latest
 name: stress
 
 on:
@@ -7,6 +8,9 @@ on:
     inputs:
       package:
         description: "cargo -p 이름(비우면 전체)"
+        default: ""
+      args:
+        description: "cargo test 에 더할 인자(예: --test round11)"
         default: ""
       runs:
         description: "몇 번 돌릴까"
@@ -32,8 +36,10 @@ jobs:
         env:
           PKG: ${{ inputs.package }}
           RUNS: ${{ inputs.runs }}
+          ARGS: ${{ inputs.args }}
         run: |
           if [ -n "$PKG" ]; then sel="-p $PKG"; else sel="--workspace"; fi
+          sel="$sel $ARGS"
           cargo test $sel --no-run -q
           fails=0
           for i in $(seq 1 "$RUNS"); do
