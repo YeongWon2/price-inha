@@ -12,9 +12,6 @@ use crate::role::Role;
 /// 실행기가 쓰는 줄의 쓴 쪽 id(`Gateway`).
 const GATEWAY_ID: &str = "agent";
 
-/// 방의 마지막 번호를 찾을 때 한 번에 읽는 줄 수.
-const PAGE: usize = 500;
-
 /// 실행기가 쓰는 줄이 거치는 것: 저장소 · 시계 · 가리기.
 pub(crate) struct Writer<'a> {
     pub(crate) store: &'a Store,
@@ -40,7 +37,7 @@ impl<'a> RoomLog<'a> {
         room: &'a str,
         trade: TradeId,
     ) -> Result<RoomLog<'a>, StoreError> {
-        let last = last_seq(writer.store, room)?;
+        let last = writer.store.room_last_seq(room)?;
         let prefix = format!("trade-{}-{}-{last}", trade.0, writer.clock.now().0);
         Ok(RoomLog {
             writer,
@@ -87,20 +84,5 @@ impl<'a> RoomLog<'a> {
             at: self.writer.clock.now(),
         };
         self.writer.store.append_room_event(event).map(|_| ())
-    }
-}
-
-/// 방의 마지막 줄 번호. 빈 방이면 0이다.
-fn last_seq(store: &Store, room: &str) -> Result<u64, StoreError> {
-    let mut last = 0;
-    loop {
-        let page = store.room_events(room, last, PAGE)?;
-        let Some(end) = page.last() else {
-            return Ok(last);
-        };
-        last = end.seq;
-        if page.len() < PAGE {
-            return Ok(last);
-        }
     }
 }
