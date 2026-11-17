@@ -24,6 +24,7 @@ mod retention;
 mod run;
 mod sqlite;
 mod status;
+mod token;
 
 pub use bundle::{Bundle, BundleFile, Manifest, ManifestFile, open, seal, sha256_hex, verify};
 pub use error::{BackupError, BundleProblem, FailureKind};
@@ -32,6 +33,7 @@ pub use retention::{RetentionPlan, backup_file_name, parse_backup_file_name, pla
 pub use run::{
     Backup, BackupFailure, BackupNotice, BackupReport, BackupSettings, BackupStatus, LastFailure,
 };
+pub use token::verify_token;
 
 /// manifest 판 번호. [`verify`]는 이것과 다른 판을 거부한다.
 pub const MANIFEST_VERSION: u32 = 1;

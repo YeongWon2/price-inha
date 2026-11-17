@@ -9,5 +9,6 @@ mod restore;
 mod restore_temp_root;
 mod retention;
 mod temp_root;
+mod token_verify;
 mod upload;
 mod verify;
