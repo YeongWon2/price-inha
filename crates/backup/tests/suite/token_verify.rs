@@ -96,11 +96,10 @@ async fn 리다이렉트는_따라가지_않고_닿지_않음이다() {
 // 검증: E4
 #[tokio::test]
 async fn 서버가_닫혀_있으면_닿지_않음이다() {
-    let server = MockServer::start().await;
-    let base = server.uri();
-    drop(server);
+    // 아무도 듣지 않는 포트. MockServer 는 drop 하면 풀로 돌아가 다른 시험이 다시 쓰므로 닫힌 서버가 아니다.
+    let base = "http://127.0.0.1:1";
 
-    let found = verify_token(&base, &token()).await;
+    let found = verify_token(base, &token()).await;
 
     assert_eq!(found, Err(VerifyFailure::Unreachable));
 }
