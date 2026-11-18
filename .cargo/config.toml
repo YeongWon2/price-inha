@@ -1,0 +1,4 @@
+# 증분 컴파일 캐시(target/*/incremental)를 쌓지 않는다.
+# 빌드를 반복하면 이 캐시가 수십 GB까지 불어난다.
+[build]
+incremental = false
