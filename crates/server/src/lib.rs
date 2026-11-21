@@ -42,7 +42,8 @@ pub use cli::{
     CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE, LAUNCHD_LABEL, Os, RestoreRequest,
     RestoreSummary, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, SYSTEMD_UNIT, Service,
     ServiceAction, ServiceDefinition, ServiceReport, ServiceSetup, ServiceStatus, ShownAccessKey,
-    SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, doctor, restore,
+    SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor,
+    restore,
 };
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,

@@ -10,7 +10,7 @@ mod restore;
 mod runner;
 mod service;
 
-pub use access::{AccessKeyRequest, ShownAccessKey, access_key};
+pub use access::{AccessKeyRequest, ShownAccessKey, access_key, access_key_with};
 pub use command::{Command, ServiceAction, VERSION};
 pub use doctor::{Check, CheckItem, DoctorReport, doctor};
 pub use restore::{RestoreRequest, RestoreSummary, restore};

@@ -13,6 +13,7 @@ use pi_gate::{Gate, GateConfig};
 use pi_secrets::SecretStore;
 use pi_store::Store;
 
+use super::service::Service;
 use crate::error::CliError;
 use crate::{ACCESS_KEY_PATH, AppError, DB_FILE, Settings};
 
@@ -104,6 +105,30 @@ pub async fn access_key(
         generation,
         text,
     })
+}
+
+/// (10차 10a 0번) 서비스 정의도 보고 접속 키를 만든다. 실행 파일의 `access-key`는 이 길을 쓴다.
+///
+/// [`access_key`]와 같되, 직접 만들기 전에 도는 서버를 더 찾는다(V41 — 앞 세대 원격 세션 · WebSocket이 남지 않게):
+///
+/// 1. 설정의 포트의 루프백([`access_key`]와 같다).
+/// 2. `service`의 정의가 이 보관 폴더(`settings.home`)를 가리키면([`Service::installed_home`]) 그 정의에 실린
+///    `--bind` · `--port` 인자의 루프백 포트. 다른 홈을 가리키는 정의는 쓰지 않는다.
+/// 3. 설정의 여는 주소(`settings.bind:port`).
+///
+/// 어디서든 이 서버를 찾으면 그 서버가 키를 만들게 한다(세대 올리기 · 앞 세대 세션 끊기 · WebSocket 닫기가 그
+/// 서버 안에서 일어난다). 도는 서버가 있는데 루프백 경로로 바꿀 수 없으면 키를 만들지 않고
+/// [`CliError::NotOurServer`]다(안내: 서버를 멈추거나 `--port`를 맞게). 어디에도 없을 때만 직접 만들고, 그때
+/// 안내 글은 "도는 서버를 찾지 못해 직접 만들었습니다"로 시작한다. `rotate` 없이 이미 키가 있으면 어느 길이든
+/// [`CliError::AccessKeyExists`]. 발급 뒤 이 홈 저장소의 세대(읽기 전용으로 연다)가 서버가 답한 세대와 다르면
+/// 안내 글에 알린다.
+pub async fn access_key_with(
+    settings: &Settings,
+    request: &AccessKeyRequest,
+    service: &Service<'_>,
+) -> Result<ShownAccessKey, CliError> {
+    let _ = (settings, request, service);
+    todo!("10차 10a 0번: 서비스 정의의 주소로 도는 서버 찾기")
 }
 
 /// 도는 서버가 없을 때: 같은 저장소에 직접 만든다. (키, 세대).
