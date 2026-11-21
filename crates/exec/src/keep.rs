@@ -238,6 +238,7 @@ fn purpose_code(purpose: SellPurpose) -> &'static str {
         SellPurpose::StopLoss => "stop_loss",
         SellPurpose::TakeProfit => "take_profit",
         SellPurpose::Liquidation => "liquidation",
+        SellPurpose::TeamExit => todo!("7차: 팀장 팔기의 목적 글자"),
     }
 }
 

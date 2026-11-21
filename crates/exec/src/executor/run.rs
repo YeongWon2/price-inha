@@ -151,6 +151,9 @@ impl Executor {
         permit: CheckPermit,
     ) -> Result<OrderId, Error> {
         let now = self.clock.now();
+        if attempt.purpose == SellPurpose::TeamExit {
+            todo!("7차: 팀장 팔기 — 열린 파는 주문을 취소하지 않고 낸다");
+        }
         if matches!(
             attempt.purpose,
             SellPurpose::StopLoss | SellPurpose::Liquidation

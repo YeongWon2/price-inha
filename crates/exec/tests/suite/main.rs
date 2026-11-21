@@ -10,5 +10,6 @@ mod restart;
 mod resume;
 mod sell;
 mod submit;
+mod team_exit;
 mod tied;
 mod watch;
