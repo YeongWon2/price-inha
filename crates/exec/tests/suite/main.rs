@@ -5,6 +5,7 @@ mod common;
 mod fill;
 mod ledger;
 mod persist;
+mod reduced;
 mod restart;
 mod resume;
 mod sell;

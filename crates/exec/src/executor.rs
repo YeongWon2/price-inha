@@ -1,5 +1,6 @@
 //! 주문 실행기 (C10 · E12 · E13 · E16 · E25 · E29 · E30 · E33 · V6).
 
+mod reduced;
 mod run;
 mod watch;
 
@@ -20,6 +21,7 @@ use rust_decimal::Decimal;
 use crate::error::Error;
 use crate::track::{State, adopt, apply, block_unfilled, buy_key, millis, parse_key};
 use crate::{grant, keep};
+pub use reduced::ReducedSubmission;
 use run::{SellAttempt, classify, order_request, paper_kind};
 
 /// 파는 주문이 실패한 뒤 처음 다시 낼 때까지의 간격(E30). 실패할 때마다 두 배가 된다.

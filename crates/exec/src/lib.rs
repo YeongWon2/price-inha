@@ -14,6 +14,6 @@ mod track;
 
 pub use error::Error;
 pub use executor::{
-    Executor, Guard, Reconciled, SELL_RETRY_FIRST, SELL_RETRY_MAX, SellPurpose, SellRetry,
-    SellSubmission, Submission, TradeChange,
+    Executor, Guard, Reconciled, ReducedSubmission, SELL_RETRY_FIRST, SELL_RETRY_MAX, SellPurpose,
+    SellRetry, SellSubmission, Submission, TradeChange,
 };
