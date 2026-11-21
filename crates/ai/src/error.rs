@@ -50,3 +50,11 @@ pub enum AiError {
     #[error("AI 공급자 주소가 https가 아닙니다")]
     InsecureBaseUrl,
 }
+
+/// 임베딩 등록부의 오류(ai.md 10차 3). [`AiError`]에 갈래를 더하지 않으려고 따로 둔다.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RegistryError {
+    /// 같은 ID의 공급자가 이미 올라 있다. 앞의 것이 남는다.
+    #[error("임베딩 공급자 `{0}`가 이미 올라 있습니다")]
+    Duplicate(&'static str),
+}
