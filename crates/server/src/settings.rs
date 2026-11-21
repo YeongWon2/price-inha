@@ -208,13 +208,18 @@ impl Settings {
                     .map_err(|_| SettingsError::UnknownArgument)
             })
             .collect::<Result<Vec<String>, SettingsError>>()?;
+        Settings::from_process_env(&args)
+    }
+
+    /// (9차) 받은 인자(하위 명령 이름을 뺀 것)와 프로세스의 환경 변수 · 홈 폴더로 [`Settings::parse`]를 부른다.
+    pub fn from_process_env(args: &[String]) -> Result<Settings, SettingsError> {
         for name in ENV_NAMES {
             if std::env::var_os(name).is_some_and(|value| value.to_str().is_none()) {
                 return Err(SettingsError::InvalidValue { name });
             }
         }
         let env = |name: &str| std::env::var(name).ok();
-        Settings::parse(&args, &env, std::env::home_dir().as_deref())
+        Settings::parse(args, &env, std::env::home_dir().as_deref())
     }
 }
 

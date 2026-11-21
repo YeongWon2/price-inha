@@ -33,7 +33,14 @@ pub struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn run(&self, command: &CommandLine) -> std::io::Result<CommandOutput> {
-        let _ = command;
-        todo!()
+        let output = std::process::Command::new(&command.program)
+            .args(&command.args)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        Ok(CommandOutput {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
     }
 }
