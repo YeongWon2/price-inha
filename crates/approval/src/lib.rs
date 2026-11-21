@@ -7,6 +7,7 @@ mod approvals;
 mod due;
 mod error;
 mod execute;
+mod handling;
 mod inner;
 mod record;
 mod subject;
@@ -16,6 +17,7 @@ pub use approvals::{
     Notice, Requested, WaitTimes,
 };
 pub use error::{Error, RejectReason};
+pub use handling::DueHandling;
 pub use subject::{
     Fingerprint, OrderSubject, OrderType, Side, SignalKind, Subject, canonical_json, fingerprint,
 };
