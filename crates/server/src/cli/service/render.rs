@@ -1,6 +1,11 @@
 //! 서비스 정의 파일의 내용(plist · unit · 작업 XML)과 그 글자 다루기.
 
-use super::{CONFIG_FATAL_EXIT, LAUNCHD_LABEL, SERVER_ERROR_LOG, SERVER_LOG, Service};
+use super::{
+    CONFIG_FATAL_EXIT, LAUNCHD_LABEL, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, Service,
+};
+
+/// `run`의 기록 파일 인자(Windows 예약 작업 정의가 싣는다).
+const LOG_FILE_ARG: &str = "--log-file";
 
 impl Service<'_> {
     /// macOS 사용자 에이전트 정의.
@@ -96,7 +101,7 @@ WantedBy=default.target
     /// Windows 예약 작업 XML.
     pub(super) fn task_xml(&self) -> String {
         let arguments: Vec<String> = self
-            .program_args()
+            .windows_args()
             .iter()
             .map(|arg| windows_quote(arg))
             .collect();
@@ -142,6 +147,34 @@ WantedBy=default.target
             home = xml_escape(&self.home_text()),
         )
     }
+}
+
+impl Service<'_> {
+    /// Windows 예약 작업의 인자: `run` 인자에 기록 파일(`<home>\logs\server.log`)을 더한다. 예약 작업은
+    /// 표준 출력을 파일로 돌리지 못한다(9차 보강 3). 사용자가 `--log-file`을 이미 줬으면 그것을 따른다.
+    fn windows_args(&self) -> Vec<String> {
+        let mut args = self.program_args();
+        if !args.iter().any(|arg| arg == LOG_FILE_ARG) {
+            args.push(LOG_FILE_ARG.to_string());
+            args.push(windows_join(
+                &self.home_text(),
+                &[SERVER_LOGS_DIR, SERVER_LOG],
+            ));
+        }
+        args
+    }
+}
+
+/// Windows 경로를 `\`로 잇는다(정의는 다른 운영체제에서도 같은 글자로 만들어져야 한다).
+fn windows_join(base: &str, parts: &[&str]) -> String {
+    let mut path = base.to_string();
+    for part in parts {
+        if !path.ends_with(['\\', '/']) {
+            path.push('\\');
+        }
+        path.push_str(part);
+    }
+    path
 }
 
 pub(super) fn xml_escape(text: &str) -> String {
@@ -197,6 +230,15 @@ pub(super) fn windows_quote(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_경로는_역슬래시로_잇는다() {
+        assert_eq!(
+            windows_join(r"C:\Users\me\.price-inha", &["logs", "server.log"]),
+            r"C:\Users\me\.price-inha\logs\server.log"
+        );
+        assert_eq!(windows_join(r"C:\", &["logs"]), r"C:\logs");
+    }
 
     #[test]
     fn 따옴표는_필요할_때만() {

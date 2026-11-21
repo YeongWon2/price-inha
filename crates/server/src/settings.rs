@@ -198,8 +198,7 @@ impl Settings {
             demo: given.demo,
             user_home: user_home.map(Path::to_path_buf),
             cli_env: crate::cli_base_env(env),
-            // 뼈대: `--log-file`은 아직 읽지 않는다(9차 보강 3의 구현 몫).
-            log_file: None,
+            log_file: log_file(given.log_file.as_deref())?,
         })
     }
 
@@ -341,6 +340,7 @@ const ARG_REGISTER_WINDOW_MS: &str = "--register-window-ms";
 const ARG_SYMBOLS_ATTEMPTS: &str = "--symbols-attempts";
 const ARG_SYMBOLS_WINDOW_MS: &str = "--symbols-window-ms";
 const ARG_DEMO: &str = "--demo";
+const ARG_LOG_FILE: &str = "--log-file";
 
 /// 읽는 환경 변수 전부.
 const ENV_NAMES: [&str; 13] = [
@@ -376,6 +376,7 @@ struct Given {
     symbols_attempts: Option<String>,
     symbols_window_ms: Option<String>,
     demo: bool,
+    log_file: Option<String>,
 }
 
 impl Given {
@@ -401,6 +402,7 @@ impl Given {
                 ARG_REGISTER_WINDOW_MS => (&mut given.register_window_ms, ARG_REGISTER_WINDOW_MS),
                 ARG_SYMBOLS_ATTEMPTS => (&mut given.symbols_attempts, ARG_SYMBOLS_ATTEMPTS),
                 ARG_SYMBOLS_WINDOW_MS => (&mut given.symbols_window_ms, ARG_SYMBOLS_WINDOW_MS),
+                ARG_LOG_FILE => (&mut given.log_file, ARG_LOG_FILE),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };
@@ -442,6 +444,17 @@ pub(crate) fn symbol(code: &str) -> Option<Symbol> {
     Symbol::parse(code).ok()
 }
 
+/// `--log-file`의 값(인자로만 받는다). 빈 글자는 거부한다. 여기서는 파일도 폴더도 만들지 않는다.
+fn log_file(value: Option<&str>) -> Result<Option<PathBuf>, SettingsError> {
+    match value {
+        Some(path) if path.trim().is_empty() => {
+            Err(SettingsError::InvalidValue { name: ARG_LOG_FILE })
+        }
+        Some(path) => Ok(Some(PathBuf::from(path))),
+        None => Ok(None),
+    }
+}
+
 fn market(value: &str, name: &'static str) -> Result<Market, SettingsError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "kr" => Ok(Market::Kr),
@@ -460,6 +473,19 @@ mod tests {
 
     fn none(_name: &str) -> Option<String> {
         None
+    }
+
+    #[test]
+    fn log_file은_빈_값을_받지_않는다() {
+        assert_eq!(log_file(None), Ok(None));
+        assert_eq!(
+            log_file(Some("/var/log/pi.log")),
+            Ok(Some(PathBuf::from("/var/log/pi.log")))
+        );
+        assert_eq!(
+            log_file(Some("  ")),
+            Err(SettingsError::InvalidValue { name: ARG_LOG_FILE })
+        );
     }
 
     #[test]

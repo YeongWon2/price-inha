@@ -4,11 +4,16 @@
 //! 인자 없이 띄우거나 `run`이면 설정을 읽고, 띄우고, Ctrl+C를 기다렸다가 끈다(지금 동작 그대로).
 //! `service` · `doctor` · `access-key` · `restore`는 라이브러리의 같은 이름 함수를 부르고 끝난다.
 //! `--version`은 설정 · 보관 폴더를 읽기 전에 답한다. 조립은 `lib.rs` 쪽에 있다.
+//!
+//! 서버를 띄우지 않는 명령(`doctor` · `service …` · `restore` · `--version`)은 보관 폴더를 만들거나 고치지
+//! 않는다: 비밀 보관소를 여는 것(기록 가리기)은 `run`과 `access-key`뿐이다. `run --log-file <경로>`를 주면
+//! 기록을 표준 오류 대신 그 파일에 덧붙여 쓴다(가리기는 그대로 거친다).
 
+use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pi_secrets::SecretStore;
 use pi_store::UnixMillis;
@@ -18,12 +23,13 @@ use price_inha::{
     SettingsError, SystemRunner, TeamWiring, TradingWiring, VERSION, Wiring, access_key,
     announce_addr, doctor, restore,
 };
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 /// 설정 · 명령을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [run] [--home <폴더>] [--bind <IP>] [--port <수>] \
 [--symbols <a,b,c>] [--market <kr|us>] [--interval-ms <수>] \
 [--retry-initial-ms <수>] [--retry-max-ms <수>] [--calendar-retry-ms <수>] \
-[--register-attempts <수>] [--register-window-ms <수>] [--demo]
+[--register-attempts <수>] [--register-window-ms <수>] [--log-file <경로>] [--demo]
   price-inha service install [--start-now] [--dry-run] [설정 인자들]
   price-inha service uninstall [--dry-run] [--home <폴더>]
   price-inha service start|stop|restart|status [--home <폴더>]
@@ -53,22 +59,78 @@ fn show(text: &str) {
     let _ = std::io::stdout().flush();
 }
 
-/// 기록(tracing)을 표준 오류로 낸다. 보관 폴더의 비밀 보관소를 열 수 있으면 그 값들을 가린 뒤에만 낸다
-/// ([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
+/// 기록 파일을 덧붙여 쓰게 연다. 부모 폴더가 없으면 만든다. 유닉스에서는 새 파일을 0600으로 만든다.
+fn open_log_file(path: &Path) -> std::io::Result<File> {
+    if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        // 이미 있던 파일이 넓게 열려 있으면 좁힌다.
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
+/// 기록이 가는 곳: `--log-file`을 줬고 열 수 있으면 그 파일, 아니면 표준 오류.
+fn log_sink(log_file: Option<&Path>) -> BoxMakeWriter {
+    let Some(path) = log_file else {
+        return BoxMakeWriter::new(std::io::stderr);
+    };
+    match open_log_file(path) {
+        Ok(file) => BoxMakeWriter::new(Mutex::new(file)),
+        Err(error) => {
+            say(&format!(
+                "기록 파일을 열지 못해 표준 오류에 기록합니다: {}",
+                error.kind()
+            ));
+            BoxMakeWriter::new(std::io::stderr)
+        }
+    }
+}
+
+/// 서버를 띄우는 길(`run`, 직접 만드는 `access-key`)의 기록(tracing). 보관 폴더의 비밀 보관소를 열 수 있으면
+/// 그 값들을 가린 뒤에만 낸다([`RedactingWriter`], E38 · N8). 열 수 없으면 등록된 비밀도 없으므로 그대로 낸다.
+/// `create`가 거짓이면 보관 폴더가 이미 있을 때만 연다(없는 폴더에는 가릴 비밀도 없다. 만들지 않는다).
 ///
 /// 연 보관소는 앱에도 그대로 준다([`App::launch_with`]): 띄운 뒤 등록한 키도 가리게.
-fn init_tracing(settings: Option<&Settings>) -> Option<Arc<SecretStore>> {
+fn init_tracing(settings: Option<&Settings>, create: bool) -> Option<Arc<SecretStore>> {
     let secrets = settings
+        .filter(|s| create || s.home.is_dir())
         .and_then(|s| SecretStore::open(s.home.clone()).ok())
         .map(Arc::new);
-    let builder = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO);
+    let log_file = settings.and_then(|s| s.log_file.as_deref());
+    let sink = log_sink(log_file);
+    // 파일에는 색 글자(터미널 제어 글자)를 쓰지 않는다.
+    let builder = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(log_file.is_none());
     match &secrets {
         Some(secrets) => builder
-            .with_writer(RedactingWriter::new(Arc::clone(secrets), std::io::stderr))
+            .with_writer(RedactingWriter::new(Arc::clone(secrets), sink))
             .init(),
-        None => builder.with_writer(std::io::stderr).init(),
+        None => builder.with_writer(sink).init(),
     }
     secrets
+}
+
+/// 서버를 띄우지 않는 명령(`doctor` · `service …` · `restore`)의 기록: 가리기 없이 표준 오류로 낸다.
+/// 보관 폴더를 열지 않는다(`SecretStore::open`은 폴더를 만들고 권한을 고친다 — 9차 보강 2).
+/// 이 명령들은 비밀 값을 읽어 기록하지 않는다.
+fn init_plain_tracing() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 /// 프로그램 이름을 뺀 인자. 글자로 읽을 수 없는 인자는 말없이 버리지 않고 거부한다.
@@ -125,15 +187,26 @@ async fn dispatch(command: Command) -> ExitCode {
     match command {
         Command::Run { args } => serve(&args).await,
         Command::Service { action, args } => match settings_of(&args) {
-            Ok(settings) => service_command(action, &settings, &args),
+            Ok(settings) => {
+                init_plain_tracing();
+                service_command(action, &settings, &args)
+            }
             Err(code) => code,
         },
         Command::Doctor { json, args } => match settings_of(&args) {
-            Ok(settings) => doctor_command(json, &settings),
+            Ok(settings) => {
+                init_plain_tracing();
+                doctor_command(json, &settings)
+            }
             Err(code) => code,
         },
         Command::AccessKey { rotate, args } => match settings_of(&args) {
-            Ok(settings) => access_key_command(rotate, &settings).await,
+            Ok(settings) => {
+                // 직접 만드는 길은 보관 폴더를 스스로 만든다. 여기서는 이미 있는 폴더의 비밀만 가린다
+                // (그 포트가 다른 프로그램이면 아무것도 만들지 않고 끝나야 한다).
+                init_tracing(Some(&settings), false);
+                access_key_command(rotate, &settings).await
+            }
             Err(code) => code,
         },
         Command::Restore {
@@ -152,15 +225,9 @@ async fn dispatch(command: Command) -> ExitCode {
     }
 }
 
-/// 하위 명령의 설정 인자를 읽고 기록을 켠다. 읽지 못하면 종료 코드 2.
+/// 하위 명령의 설정 인자를 읽는다(기록은 명령마다 따로 켠다). 읽지 못하면 종료 코드 2.
 fn settings_of(args: &[String]) -> Result<Settings, ExitCode> {
-    match Settings::from_process_env(args) {
-        Ok(settings) => {
-            init_tracing(Some(&settings));
-            Ok(settings)
-        }
-        Err(error) => Err(settings_failed(&error)),
-    }
+    Settings::from_process_env(args).map_err(|error| settings_failed(&error))
 }
 
 /// 명령이 실패했을 때: 까닭(비밀 값 없음), 종료 코드 1.
@@ -172,7 +239,7 @@ fn failed(error: &CliError) -> ExitCode {
 /// 포그라운드로 띄운다(지금 동작).
 async fn serve(args: &[String]) -> ExitCode {
     let settings = Settings::from_process_env(args);
-    let secrets = init_tracing(settings.as_ref().ok());
+    let secrets = init_tracing(settings.as_ref().ok(), true);
     match run(settings, secrets).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Settings(error)) => settings_failed(&error),
@@ -299,7 +366,7 @@ async fn access_key_command(rotate: bool, settings: &Settings) -> ExitCode {
 }
 
 fn restore_command(backup: PathBuf, identity: PathBuf, into: PathBuf) -> ExitCode {
-    init_tracing(None);
+    init_plain_tracing();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
