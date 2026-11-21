@@ -2,7 +2,7 @@
 
 use pi_store::{RoleScore, TradeId, UnixMillis};
 
-use crate::ports::OrderDraft;
+use crate::ports::{OrderDraft, SellDraft};
 use crate::role::Role;
 
 /// 논의 상한(결정 14번, 원본 Hermes의 숫자).
@@ -105,7 +105,7 @@ impl WatchReason {
 pub enum Decision {
     /// 사기. 매매는 판단됨이고 주문 안이 있다(V4).
     Buy,
-    /// 팔기. 매매는 판단됨이다. 팔기 주문 안은 이 단계에서 만들지 않는다.
+    /// 팔기. 매매는 판단됨이고, 같은 종목을 가지고 있으면 `sells`에 파는 주문 안이 있다.
     Sell,
     /// 지켜보기. 매매는 논의중 그대로이고 주문 안이 없다.
     Watch(WatchReason),
@@ -122,4 +122,6 @@ pub struct DiscussionOutcome {
     pub consensus: Option<i32>,
     /// 매매 담당의 주문 안. 사기로 판단되고 주문 안이 만들어졌을 때만 있다.
     pub order: Option<OrderDraft>,
+    /// 매매 담당의 팔기 주문 안들(보유 매매마다 하나). 팔기로 판단되고 주문 안이 만들어졌을 때만 차 있다.
+    pub sells: Vec<SellDraft>,
 }

@@ -44,7 +44,7 @@ use serde_json::json;
 use crate::discussion::{DataItem, Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
 use crate::error::{Error, TurnFailure};
 use crate::floor::{Floor, is_pass, mentions};
-use crate::ports::{OrderDraft, Side};
+use crate::ports::{OrderDraft, SellDraft, Side};
 use crate::prompt;
 use crate::role::{Role, RoleConfig, TimeLimits};
 use crate::roomlog::{RoomLog, Writer};
@@ -199,6 +199,23 @@ impl Team {
         };
         self.ports.tools.submit_order_draft(&draft).await?;
         Ok(draft)
+    }
+
+    /// 팔기로 판단된 매매에 대해 매매 담당이 같은 종목 보유를 파는 주문 안을 만들어 넘긴다(V4, 9차).
+    ///
+    /// - 매매가 판단됨이 아니면 [`Error::TradeNotJudged`](E20), 저장소의 방향이 팔기가 아니면(사기 · 없음)
+    ///   [`Error::TradeNotSell`]. 둘 다 AI를 부르지 않는다.
+    /// - 팔 것: 저장소의 보유중 매매 가운데 종목 · 계좌 종류가 판단 매매와 같은 것(만든 순서).
+    ///   없으면 AI를 부르지 않고 빈 목록이다.
+    /// - 있으면 매매 담당 턴 한 번. 답은 `{"side": "sell", "note": 글, "quantity"?: 수, "price"?: 수}`.
+    ///   `side`가 `sell`이 아니거나 모양이 틀리면 매매 담당 응답 실패([`Error::RoleUnavailable`]).
+    /// - 보유 매매마다 [`SellDraft`] 하나(같은 설명 · 참고값)를 [`Tools::submit_sell_draft`]로 하나씩 넘기고,
+    ///   넘긴 것을 돌려준다. 넘기기가 실패하면 그 오류로 끝난다.
+    /// - 설명은 넘기기 전에 가린다(E38). 판단 매매의 상태는 옮기지 않는다.
+    ///
+    /// [`Tools::submit_sell_draft`]: crate::Tools::submit_sell_draft
+    pub async fn draft_sell(&self, trade: TradeId) -> Result<Vec<SellDraft>, Error> {
+        todo!()
     }
 
     /// 담당 한 명의 턴. 세션 제목은 매매마다 하나다.
@@ -368,6 +385,7 @@ impl Team {
             scores,
             consensus: Some(total),
             order,
+            sells: Vec::new(),
         })
     }
 
@@ -426,6 +444,7 @@ fn watched(
         scores,
         consensus,
         order: None,
+        sells: Vec::new(),
     })
 }
 

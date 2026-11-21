@@ -22,7 +22,7 @@ pub use discussion::{
     DataItem, Decision, DiscussionLimits, DiscussionOutcome, DiscussionRequest, WatchReason,
 };
 pub use error::{Error, ToolError, TurnFailure};
-pub use ports::{Clock, OrderDraft, Side, Tools};
+pub use ports::{Clock, OrderDraft, SellDraft, Side, Tools};
 pub use role::{
     DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOKENS, Role, RoleConfig, TimeLimits, TurnMode,
 };

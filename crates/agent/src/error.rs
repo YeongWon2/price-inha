@@ -79,6 +79,12 @@ pub enum Error {
         /// 매매 번호.
         trade: TradeId,
     },
+    /// 팔기로 판단되지 않은(사기 · 방향 없음) 매매로 팔기 주문 안을 내려 했다(V4, 9차).
+    #[error("팔기로 판단되지 않은 매매({trade:?})로는 팔기 주문 안을 내지 않습니다")]
+    TradeNotSell {
+        /// 매매 번호.
+        trade: TradeId,
+    },
     /// 주문 안을 도구 포트로 보내지 못했다.
     #[error("{0}")]
     Tool(#[from] ToolError),
