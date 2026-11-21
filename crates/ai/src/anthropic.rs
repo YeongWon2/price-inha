@@ -1,16 +1,16 @@
 //! Anthropic Messages API를 `reqwest`로 직접 부르는 공급자.
 
-use std::hash::{BuildHasher, RandomState};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use reqwest::header::{HeaderName, HeaderValue, RETRY_AFTER};
-use reqwest::{Method, RequestBuilder, Response};
+use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::{Method, RequestBuilder};
 
 use crate::credential::{Credential, CredentialSource};
 use crate::error::AiError;
-use crate::retry::{self, RETRY_MAX_DELAY, RetryBackoff};
+use crate::http::{self, Failure, Retrier};
+use crate::retry::{RETRY_MAX_DELAY, RetryBackoff};
 use crate::types::{AiProvider, CompletionRequest, CompletionResponse};
 use crate::{ANTHROPIC_DEFAULT_BASE_URL, ANTHROPIC_VERSION, DEFAULT_MAX_RETRIES, wire};
 
@@ -98,25 +98,10 @@ pub struct AnthropicProvider {
     client: Option<reqwest::Client>,
     /// 기본 주소가 `https`도 루프백도 아니다. 참이면 아무것도 보내지 않는다.
     insecure: bool,
-    /// 다시 시도 간격의 무작위. 잠금은 간격 하나를 뽑는 동안만 쥔다.
-    backoff: Mutex<RetryBackoff>,
+    /// 다시 시도(Ollama 공급자와 같은 함수, ai.md 10차 10).
+    retrier: Retrier,
     /// 나가는 글의 가리기 자리(ai.md 7차 1). 기본은 [`crate::NoRedaction`].
     redactor: Arc<dyn crate::Redactor>,
-}
-
-/// 보낸 요청 하나가 실패한 까닭과, 공급자가 기다리라고 한 시간.
-struct Failure {
-    error: AiError,
-    retry_after: Option<Duration>,
-}
-
-impl From<AiError> for Failure {
-    fn from(error: AiError) -> Self {
-        Self {
-            error,
-            retry_after: None,
-        }
-    }
 }
 
 impl AnthropicProvider {
@@ -165,15 +150,15 @@ impl AnthropicProvider {
             .connect_timeout(limits.connect_timeout)
             .build()
             .ok();
-        let seed = limits.jitter_seed.unwrap_or_else(random_seed);
+        let seed = limits.jitter_seed.unwrap_or_else(http::random_seed);
         let backoff = RetryBackoff::new(config.retry_base_delay, limits.max_retry_delay, seed);
         Self {
             insecure: !is_allowed_base_url(&config.base_url),
+            retrier: Retrier::new(config.max_retries, limits.retry_after_unit, backoff),
             config,
             limits,
             credentials,
             client,
-            backoff: Mutex::new(backoff),
             redactor: Arc::new(crate::NoRedaction),
         }
     }
@@ -219,34 +204,14 @@ impl AnthropicProvider {
         builder: RequestBuilder,
         credential: &Credential,
     ) -> Result<Vec<u8>, Failure> {
-        let response = builder.send().await.map_err(transport_error)?;
-        let status = response.status();
-        let now = SystemTime::now();
-        let header_after = response
-            .headers()
-            .get(RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| retry::parse_retry_after(value, now));
-        let body = read_capped(response, self.limits.max_response_bytes).await;
-        if status.is_success() {
-            return body.map_err(Failure::from);
-        }
-        // 오류 본문을 다 읽지 못해도 상태 코드로 구분한다.
-        let body = body.unwrap_or_default();
-        let retry_after = header_after.or_else(|| wire::body_retry_after(&body, now));
-        let error = wire::error_from_status(status.as_u16(), retry_after, &body, credential);
-        Err(Failure { error, retry_after })
-    }
-
-    /// `retry`번째(1부터) 다시 시도 전에 기다릴 시간. `Retry-After`가 있으면 그 값이 우선이다.
-    fn wait_before(&self, retry: u32, retry_after: Option<Duration>) -> Duration {
-        if let Some(after) = retry_after {
-            return retry::scale_wait(self.limits.retry_after_unit, after);
-        }
-        self.backoff
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .delay(retry)
+        http::send_once(builder, self.limits.max_response_bytes, |reply| {
+            let retry_after = reply
+                .header_after
+                .or_else(|| wire::body_retry_after(reply.body, reply.now));
+            let error = wire::error_from_status(reply.status, retry_after, reply.body, credential);
+            Failure { error, retry_after }
+        })
+        .await
     }
 }
 
@@ -265,39 +230,20 @@ impl AiProvider for AnthropicProvider {
         // 가린 요청을 한 번 만들어 다시 시도에도 같은 본문을 보낸다(ai.md 7차 1).
         let request = crate::redact::redact_request(self.redactor.as_ref(), request);
         let body = wire::MessagesBody::from_request(&request);
-        let mut retries = 0;
-        loop {
-            let builder = self
-                .request(Method::POST, "/v1/messages", &credential)?
-                .json(&body);
-            let failure = match self.send(builder, &credential).await {
-                Ok(bytes) => return wire::parse_completion(&bytes),
-                Err(failure) => failure,
-            };
-            if retries >= self.config.max_retries || !retry::is_retryable(&failure.error) {
-                return Err(failure.error);
-            }
-            retries += 1;
-            let wait = self.wait_before(retries, failure.retry_after);
-            tokio::time::sleep(wait).await;
-        }
+        // 자격 · 클라이언트 문제는 다시 보내도 같으니 다시 시도에 넣지 않고 먼저 돌려준다.
+        drop(self.request(Method::POST, "/v1/messages", &credential)?);
+        let (this, credential, body) = (self, &credential, &body);
+        let bytes = self
+            .retrier
+            .run(move || async move {
+                let builder = this
+                    .request(Method::POST, "/v1/messages", credential)?
+                    .json(body);
+                this.send(builder, credential).await
+            })
+            .await?;
+        wire::parse_completion(&bytes)
     }
-}
-
-/// 본문을 상한까지만 읽는다. 넘으면 끝까지 읽지 않고 [`AiError::InvalidResponse`].
-async fn read_capped(mut response: Response, limit: usize) -> Result<Vec<u8>, AiError> {
-    let limit_u64 = u64::try_from(limit).unwrap_or(u64::MAX);
-    if response.content_length().is_some_and(|len| len > limit_u64) {
-        return Err(AiError::InvalidResponse);
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
-        if body.len().saturating_add(chunk.len()) > limit {
-            return Err(AiError::InvalidResponse);
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
 }
 
 /// 평문으로 보내도 되는 주소인가: `https`이거나, `http`면 루프백만.
@@ -307,14 +253,9 @@ fn is_allowed_base_url(base_url: &str) -> bool {
     };
     match url.scheme() {
         "https" => url.host_str().is_some(),
-        "http" => matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost")),
+        "http" => http::is_loopback_host(&url),
         _ => false,
     }
-}
-
-/// 설정에 씨앗이 없을 때 쓰는 씨앗. 프로세스마다 다른 해시 열쇠와 지금 시각으로 만든다.
-fn random_seed() -> u64 {
-    RandomState::new().hash_one(SystemTime::now())
 }
 
 /// 자격의 인증 헤더. API 키는 `x-api-key`로 나간다.
@@ -332,15 +273,6 @@ fn auth_header(credential: &Credential) -> Result<(HeaderName, HeaderValue), AiE
     let mut value = HeaderValue::from_str(secret).map_err(|_| AiError::InvalidCredential)?;
     value.set_sensitive(true);
     Ok((API_KEY_HEADER, value))
-}
-
-/// 응답을 받지 못한 까닭을 구분한다. 오류에는 종류만 남긴다.
-fn transport_error(err: reqwest::Error) -> AiError {
-    if err.is_timeout() {
-        AiError::Timeout
-    } else {
-        AiError::Connection
-    }
 }
 
 #[cfg(test)]

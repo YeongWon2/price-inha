@@ -13,6 +13,7 @@ mod cli;
 mod credential;
 mod embedding;
 mod error;
+mod http;
 mod ollama;
 mod redact;
 mod retry;

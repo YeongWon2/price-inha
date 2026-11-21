@@ -81,23 +81,26 @@ pub struct EmbeddingRegistry {
 impl EmbeddingRegistry {
     /// 빈 등록부.
     pub fn new() -> Self {
-        todo!()
+        Self::default()
     }
 
     /// 공급자를 올린다. 같은 ID가 이미 있으면 [`RegistryError::Duplicate`]이고 앞의 것이 남는다.
     pub fn register(&mut self, provider: Arc<dyn EmbeddingProvider>) -> Result<(), RegistryError> {
-        let _ = (&self.providers, provider);
-        todo!()
+        let id = provider.id();
+        if self.providers.contains_key(id) {
+            return Err(RegistryError::Duplicate(id));
+        }
+        self.providers.insert(id, provider);
+        Ok(())
     }
 
     /// ID로 공급자를 찾는다. 모르는 ID면 `None`.
     pub fn get(&self, id: &str) -> Option<Arc<dyn EmbeddingProvider>> {
-        let _ = id;
-        todo!()
+        self.providers.get(id).cloned()
     }
 
     /// 올린 공급자 ID들(이름순).
     pub fn ids(&self) -> Vec<&'static str> {
-        todo!()
+        self.providers.keys().copied().collect()
     }
 }
