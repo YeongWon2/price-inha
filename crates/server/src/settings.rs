@@ -118,6 +118,9 @@ pub struct Settings {
     /// (6차) CLI 자식에게 줄 환경: 받은 환경에서 `crate::CLI_ENV_ALLOWLIST`의 이름만 그 순서로 고른 것.
     /// 서버의 다른 환경 변수(비밀이 있을 수 있는 것)는 들어가지 않는다.
     pub cli_env: Vec<(String, String)>,
+    /// (9차 보강 3) `--log-file <경로>`: 기록을 표준 오류 대신 이 파일에 덧붙여 쓴다(가리기는 그대로 거친다.
+    /// 폴더가 없으면 만든다). 주지 않으면 `None`(표준 오류). Windows 예약 작업 정의가 이 인자를 싣는다.
+    pub log_file: Option<PathBuf>,
 }
 
 impl Settings {
@@ -195,6 +198,8 @@ impl Settings {
             demo: given.demo,
             user_home: user_home.map(Path::to_path_buf),
             cli_env: crate::cli_base_env(env),
+            // 뼈대: `--log-file`은 아직 읽지 않는다(9차 보강 3의 구현 몫).
+            log_file: None,
         })
     }
 

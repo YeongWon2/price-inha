@@ -118,6 +118,16 @@ pub fn settings(home: &Path, bind: &str) -> Settings {
     Settings::parse(&args, &|_| None, None).unwrap()
 }
 
+/// 보관 폴더 `home`, 여는 포트 `port`(루프백)로 읽은 설정. 도는 서버의 포트를 가리킬 때 쓴다.
+pub fn settings_at(home: &Path, port: u16) -> Settings {
+    let port = port.to_string();
+    let args: Vec<String> = ["--home", home.to_str().unwrap(), "--port", &port]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+    Settings::parse(&args, &|_| None, None).unwrap()
+}
+
 /// 무엇이든 받는 시험용 확인자(바깥으로 나가지 않는다).
 pub struct AcceptAll;
 
