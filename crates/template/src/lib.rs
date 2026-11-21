@@ -17,6 +17,7 @@ mod json;
 mod params;
 mod presets;
 mod promotion;
+mod risk;
 mod state;
 
 pub use caps::{AbsoluteCaps, CappedField, Change, adjust};
@@ -28,4 +29,5 @@ pub use params::{
     TriggerKind, UnfilledCancel, Universe, preset,
 };
 pub use promotion::{Criterion, PromotionCriteria, PromotionStats, Verdict};
+pub use risk::{AdjustPlan, RiskField, increases_risk, plan_adjust, widened_fields};
 pub use state::{ALLOWED_TRANSITIONS, TemplateState, Transition, TransitionReason};
