@@ -121,8 +121,8 @@
   1. 시세가 있다(`NoQuote`). 모두 같은 종목이다(`MixedSymbols`).
   2. `now`에 장이 열려 있다(`calendar.session_at(now)`, `MarketClosed`). 달력이 `now`를 덮지 않으면 `Stale`(N6 2차 규칙과 같다).
   3. **늦지 않다**: 가장 늦게 받은 시세가 `is_stale(.., &policy.stale)`로 거짓(`Stale`).
-  4. **충분히 지켜봤다**: 받은 시각이 `now - still_after` 이전인 시세가 하나 있다(`NotObservedLongEnough`). 장이 막 열렸을 때는 이 때문에 잠깐 막힌다(모르면 멈춤).
-  5. **가격이 움직인다**: 받은 시각이 `(now - still_after, now]` 안인 시세 가운데, 바로 앞 시세와 가격이 다른 것이 하나 있다(`NotMoving`). VI(단일가 2분) · 거래정지 · LULD 정지(5분) 동안은 체결가가 멈춘다.
+  4. **충분히 지켜봤다**: 받은 시각이 `now - still_after` 이전인 시세가 하나 있고, 그 시세부터 가장 늦은 시세까지 이웃한 두 시세의 간격이 모두 `stale.max_age` 이하이며, 그 시세들이 모두 `now`와 같은 세션(`calendar.session_at`) 안이다(`NotObservedLongEnough`). 장이 막 열렸을 때 · 폴링이 끊겼다 이어졌을 때 · 다시 켠 뒤에는 이 때문에 잠깐 막힌다(모르면 멈춤). (7차 검토 되돌림으로 보강 — 지난 장이나 오래전 시세 하나로 '지켜봤다'가 되지 않게)
+  5. **가격이 움직인다**: 받은 시각이 **둘 다** `(now - still_after, now]` 안인 이웃한 두 시세 가운데 가격이 다른 쌍이 하나 있다(`NotMoving`). 창 밖 시세와의 차이는 움직임으로 치지 않는다(7차 검토 되돌림으로 보강). VI(단일가 2분) · 거래정지 · LULD 정지(5분) 동안은 체결가가 멈춘다.
   6. **가격제한에서 멀다**: 그 시장에 가격제한(`limit_band`)이 있으면, 기준가가 있어야 하고(`NoReferencePrice`) 마지막 가격의 등락률 `(가격 - 기준가) / 기준가`가 `+(band - margin)` 이상이면 `NearUpperLimit`, `-(band - margin)` 이하면 `NearLowerLimit`. 딱 경계 값이면 의심이다. 가격제한이 없는 시장(미국)은 이 검사를 건너뛴다(기준가가 없어도 된다).
 - `pub struct StatusPolicy { pub stale: StalePolicy, pub still_after: Duration, pub limit_band: Option<Decimal>, pub near_limit_margin: Decimal }` — 모두 설정값이다. `StatusPolicy::for_market(Market)`이 기본값을 준다:
   - `stale`: `StalePolicy::default()`(30초, N6과 같은 기준을 다시 쓴다).
@@ -130,6 +130,7 @@
   - `limit_band`: 국내 `Some(0.30)`(±30%), 미국 `None`(일일 상하한 없음).
   - `near_limit_margin`: **0.02**(2%p, 등락률 ±28% 이상이면 의심). 까닭: 상한가 · 하한가 근처는 잔량이 쌓여 체결이 안 되거나 크게 밀린다(`stock-investing-principles.md` 5장 3번). 실제 상 · 하한 가격은 호가 단위로 깎이므로 계산한 경계와 몇 호가 차이가 날 수 있어 그 여유를 둔다.
 - 돈 · 비율은 모두 `Decimal`이다(부동소수점 금지).
+- (7차 보강) 시험에 더할 것: `[(200초 전, 100), (5초 전, 101)]` → `NotMoving`과 `NotObservedLongEnough`; `[(어제 정규장 끝, 100), (오늘 장 시작 +10초, 110)]` → `NotObservedLongEnough`; 30초 간격으로 이어진 61초 관측 + 창 안 가격 변화 → `Normal`; 간격 31초가 한 번 끼면 `NotObservedLongEnough`.
 
 ### 5. 공급자 상태와 추정 합치기 (결정 5번)
 
