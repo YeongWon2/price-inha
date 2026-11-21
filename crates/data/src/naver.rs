@@ -23,7 +23,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::http::{is_allowed_scheme, with_segments};
-use crate::news::NewsSort;
+use crate::news::{MAX_SUMMARY_CHARS, MAX_TITLE_CHARS, NewsSort, truncate_chars};
 use crate::{
     Clock, DEFAULT_TIMEOUT, NewsError, NewsFetched, NewsItem, NewsKeys, NewsProvider,
     NewsProviderId, NewsRequest, clean_news_text,
@@ -41,9 +41,14 @@ const ID_HEADER: &str = "X-Naver-Client-Id";
 /// 클라이언트 시크릿 머리글.
 const SECRET_HEADER: &str = "X-Naver-Client-Secret";
 
-/// 키 칸 이름.
-const ID_FIELD: &str = "client_id";
-const SECRET_FIELD: &str = "client_secret";
+/// 키 칸 이름들(선언 순서: 클라이언트 ID, 클라이언트 시크릿). [`NAVER_NEWS_KEYS`]와 머리글이 함께 쓴다.
+const NAVER_NEWS_FIELDS: [&str; 2] = ["client_id", "client_secret"];
+
+/// 클라이언트 ID 칸.
+const ID_FIELD: &str = NAVER_NEWS_FIELDS[0];
+
+/// 클라이언트 시크릿 칸.
+const SECRET_FIELD: &str = NAVER_NEWS_FIELDS[1];
 
 /// 오류 본문에서 받아들이는 오류 코드의 길이 상한(`SE01` · `024` 같은 짧은 코드만).
 const MAX_ERROR_CODE_LEN: usize = 16;
@@ -56,7 +61,8 @@ pub const DEFAULT_NEWS_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 /// 네이버 뉴스 검색의 키 칸 선언: 공급자 `naver_news`, 칸 `client_id` · `client_secret`.
 /// (보관소 줄 이름은 secrets 8차 규칙으로 `PRICE_INHA_KEY__NAVER_NEWS__CLIENT_ID` · `..__CLIENT_SECRET`.)
-pub const NAVER_NEWS_KEYS: NewsKeys = NewsKeys::new("naver_news", &["client_id", "client_secret"]);
+/// 보관소 선언은 [`NewsKeys::provider_keys`]로 이 선언에서 만든다(이름 · 칸을 따로 적지 않는다).
+pub const NAVER_NEWS_KEYS: NewsKeys = NewsKeys::new("naver_news", &NAVER_NEWS_FIELDS);
 
 /// 네이버 뉴스 설정. 기본 주소는 인자로 받는다(테스트는 로컬 가짜 서버 주소를 준다).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +112,7 @@ impl NaverNewsConfig {
 ///   (공급자는 칸이 모두 있어야 요청한다, 아니면 [`NewsError::NoKey`]).
 /// - 읽지 못했으면(입출력 · 손상) [`NewsError::KeyUnreadable`].
 ///
-/// `SecretStore`(`read_provider`)에 잇는 구현은 secrets 8차의 `ProviderKeys`가 생긴 뒤 server/secrets 차수에서 한다.
+/// `pi_secrets::SecretStore`는 `read_provider`로 이것을 구현한다.
 pub trait NewsKeySource: Send + Sync {
     /// 그 선언의 칸 값들.
     fn read_news_keys(&self, keys: NewsKeys) -> Result<Option<Credentials>, NewsError>;
@@ -177,7 +183,7 @@ impl NewsProvider for NaverNews {
 
 /// 확인기: 이 키로 한 번 검색(`display=1`)한다.
 ///
-/// 200이면 `Ok`, 401 · 403이면 [`VerifyFailure::Rejected`], 그 밖(연결 실패 · 시간 초과 · 5xx · 404 · 3xx)과
+/// 200이면 `Ok`(200이 아닌 2xx는 닿지 않음), 401 · 403이면 [`VerifyFailure::Rejected`], 그 밖(연결 실패 · 시간 초과 · 5xx · 404 · 3xx)과
 /// 칸이 빠진 값은 [`VerifyFailure::Unreachable`](빠진 칸이면 요청하지 않는다). 리다이렉트는 따라가지 않는다.
 /// server가 secrets의 `verify_provider`를 이것으로 구현한다(server 차수).
 pub async fn verify_news_keys(
@@ -238,6 +244,7 @@ impl Endpoint {
     }
 
     /// 뉴스 검색을 한 번 보내고 200 본문을 글로 돌려준다. 다시 시도하지 않는다.
+    /// 200이 아닌 2xx(204 등)는 성공으로 보지 않고 [`NewsError::Format`]이다.
     async fn get(
         &self,
         query: &str,
@@ -272,6 +279,9 @@ impl Endpoint {
                 return Err(status_error(status, &[]));
             }
             bytes.extend_from_slice(&chunk);
+        }
+        if status.is_success() && status != StatusCode::OK {
+            return Err(format_error("응답 상태가 200이 아닙니다"));
         }
         if !status.is_success() {
             return Err(status_error(status, &bytes));
@@ -390,27 +400,56 @@ fn parse_item(item: &Value, query: &str, known_at: DateTime<Utc>) -> Result<News
     } else {
         original
     };
-    let link = web_link(chosen).ok_or_else(|| format_error("기사 링크가 http(s)가 아닙니다"))?;
+    let link = web_link(chosen)
+        .ok_or_else(|| format_error("기사 링크가 쓸 수 있는 http(s) 주소가 아닙니다"))?;
     let published_at = DateTime::parse_from_rfc2822(pub_date.trim())
         .map_err(|_| format_error("기사 시각(pubDate)을 읽을 수 없습니다"))?
         .with_timezone(&Utc);
     Ok(NewsItem {
         provider: PROVIDER,
         query: query.to_owned(),
-        title: clean_news_text(title),
-        summary: clean_news_text(description),
+        title: truncate_chars(clean_news_text(title), MAX_TITLE_CHARS),
+        summary: truncate_chars(clean_news_text(description), MAX_SUMMARY_CHARS),
         link,
         published_at,
         known_at,
     })
 }
 
-/// `http` · `https`의 절대 주소만 받는다.
+/// `http` · `https`의 절대 주소만 받고, 주소 해석기가 정규화한 글(`Url::as_str`)을 돌려준다.
+///
+/// 앞뒤 공백을 뺀 원문에 제어 문자 · 공백 · `"` `<` `>` `\\` `` ` ``가 있거나, 사용자 정보(`user@host`)가
+/// 있거나, 호스트가 없으면 `None`(기사 전체가 형식 오류).
 fn web_link(text: &str) -> Option<String> {
     let trimmed = text.trim();
+    if trimmed.chars().any(is_forbidden_link_char) || !has_authority(trimmed) {
+        return None;
+    }
     let url = Url::parse(trimmed).ok()?;
-    let web = matches!(url.scheme(), "http" | "https") && url.host_str().is_some();
-    web.then(|| trimmed.to_owned())
+    let web = matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some_and(|host| !host.is_empty())
+        && url.username().is_empty()
+        && url.password().is_none();
+    web.then(|| url.as_str().to_owned())
+}
+
+/// 원문이 `http://호스트` · `https://호스트` 꼴로 쓰였는가(`http:a` · `http:///a`처럼
+/// 해석기가 고쳐 읽는 꼴은 받지 않는다).
+fn has_authority(text: &str) -> bool {
+    let lower = text.get(..8).unwrap_or(text).to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &text[8..]
+    } else if lower.starts_with("http://") {
+        &text[7..]
+    } else {
+        return false;
+    };
+    !rest.is_empty() && !rest.starts_with('/')
+}
+
+/// 링크 원문에 있으면 거절하는 글자.
+fn is_forbidden_link_char(ch: char) -> bool {
+    ch.is_control() || ch.is_whitespace() || matches!(ch, '"' | '<' | '>' | '\\' | '`')
 }
 
 #[cfg(test)]
@@ -435,6 +474,79 @@ mod tests {
                 provider: PROVIDER,
                 code: "400".to_owned()
             }
+        );
+    }
+
+    #[test]
+    fn 링크는_정규화한_글을_돌려준다() {
+        assert_eq!(
+            web_link(" https://News.Example.com/a?b=1 "),
+            Some("https://news.example.com/a?b=1".to_owned())
+        );
+        assert_eq!(
+            web_link("https://news.example.com"),
+            Some("https://news.example.com/".to_owned())
+        );
+        assert_eq!(
+            web_link("https://news.example.com/기사"),
+            Some("https://news.example.com/%EA%B8%B0%EC%82%AC".to_owned())
+        );
+    }
+
+    #[test]
+    fn 위험한_글자나_사용자_정보가_있는_링크는_거절한다() {
+        for bad in [
+            "https://news.example.com/a\nb",
+            "https://news.example.com/a\tb",
+            "https://news.example.com/a\u{0}b",
+            "https://news.example.com/a\rb",
+            "https://news.example.com/a b",
+            "https://news.example.com/\"x",
+            "https://news.example.com/<x>",
+            "https://news.example.com\\evil.example.com",
+            "https://user@news.example.com/a",
+            "https://user:pw@news.example.com/a",
+            "https://:pw@news.example.com/a",
+            "http:///a",
+            "http:news.example.com/a",
+            "https:/news.example.com/a",
+            "https://",
+            "javascript:alert(1)",
+            "mailto:a@example.com",
+        ] {
+            assert_eq!(web_link(bad), None, "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 이백이_아닌_2xx는_성공이_아니다() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let config = NaverNewsConfig::new(server.uri());
+        let endpoint = Endpoint::new(&config).unwrap();
+        let headers = key_headers(
+            &Credentials::new()
+                .with(ID_FIELD, "fake-id-00000001")
+                .with(SECRET_FIELD, "fake-secret-0001"),
+        )
+        .unwrap();
+        let result = endpoint.get("주식", 1, NewsSort::Latest, headers).await;
+        assert!(
+            matches!(result, Err(NewsError::Format { .. })),
+            "{result:?}"
+        );
+        let creds = Credentials::new()
+            .with(ID_FIELD, "fake-id-00000001")
+            .with(SECRET_FIELD, "fake-secret-0001");
+        assert_eq!(
+            verify_news_keys(&config, &creds).await,
+            Err(VerifyFailure::Unreachable)
         );
     }
 

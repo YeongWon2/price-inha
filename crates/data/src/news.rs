@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use pi_secrets::ProviderKeys;
 
 use crate::NewsError;
 
@@ -45,8 +46,9 @@ impl fmt::Display for NewsProviderId {
 
 /// 공급자가 쓰는 키 칸의 선언(공급자 이름 + 칸 이름들).
 ///
-/// `pi_secrets::ProviderKeys`(secrets 8차)와 같은 모양의 이 모듈 쪽 선언이다. secrets와의 연결
-/// (보관소에서 읽기 · 화면 키 칸 목록)은 server/secrets 차수에서 잇는다.
+/// `pi_secrets::ProviderKeys`(secrets 8차)와 같은 모양의 이 모듈 쪽 선언이다.
+/// [`NewsKeys::provider_keys`]로 보관소 선언으로 바꾸고, 보관소에서 읽기는
+/// `impl NewsKeySource for SecretStore`(`read_provider`)가 한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NewsKeys {
     provider: &'static str,
@@ -67,6 +69,12 @@ impl NewsKeys {
     /// 칸 이름들(선언한 순서).
     pub fn fields(&self) -> &'static [&'static str] {
         self.fields
+    }
+
+    /// 같은 공급자 이름 · 칸 이름의 보관소 선언(`pi_secrets::ProviderKeys`).
+    /// 이름 규칙 검사는 보관소가 읽거나 등록할 때 한다.
+    pub fn provider_keys(&self) -> ProviderKeys {
+        ProviderKeys::new(self.provider, self.fields)
     }
 }
 
@@ -141,11 +149,11 @@ pub struct NewsItem {
     pub provider: NewsProviderId,
     /// 요청한 검색어.
     pub query: String,
-    /// 제목([`clean_news_text`]를 거친 글).
+    /// 제목([`clean_news_text`]를 거친 글, 300자에서 자른다).
     pub title: String,
-    /// 요약([`clean_news_text`]를 거친 글).
+    /// 요약([`clean_news_text`]를 거친 글, 2,000자에서 자른다).
     pub summary: String,
-    /// 기사 링크(`http` · `https`).
+    /// 기사 링크(`http` · `https`, 주소 해석기가 정규화한 글).
     pub link: String,
     /// 공급자가 준 기사 시각(UTC).
     pub published_at: DateTime<Utc>,
@@ -175,13 +183,37 @@ pub enum NewsFetched {
 /// 1. 태그(`<...>`)를 먼저 모두 지운다.
 /// 2. 그다음 엔티티를 푼다: `&quot;` `&amp;` `&lt;` `&gt;` `&#39;` `&apos;` `&nbsp;`, `&#숫자;` · `&#x16진;`.
 ///    모르는 엔티티는 그대로 둔다. 한 번만 푼다.
-/// 3. 공백을 하나로 모으고 앞뒤를 자른다.
+/// 3. 공백이 아닌 제어 문자와 양방향 덮어쓰기 문자(U+202A~U+202E, U+2066~U+2069)를 지운다
+///    (엔티티로 들어온 것도).
+/// 4. 공백을 하나로 모으고 앞뒤를 자른다.
 ///
 /// 순서 때문에 글로 쓴 `&lt;b&gt;`는 `<b>`로 남는다.
 pub fn clean_news_text(text: &str) -> String {
     let untagged = strip_tags(text);
     let decoded = decode_entities(&untagged);
-    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
+    let visible: String = decoded.chars().filter(|ch| !is_hidden_char(*ch)).collect();
+    visible.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 기사 제목 글자 수 상한. 넘으면 자른다.
+pub(crate) const MAX_TITLE_CHARS: usize = 300;
+
+/// 기사 요약 글자 수 상한. 넘으면 자른다.
+pub(crate) const MAX_SUMMARY_CHARS: usize = 2_000;
+
+/// 글을 `max_chars`자까지만 남긴다(끝 공백은 뺀다).
+pub(crate) fn truncate_chars(text: String, max_chars: usize) -> String {
+    match text.char_indices().nth(max_chars) {
+        Some((at, _)) => text[..at].trim_end().to_owned(),
+        None => text,
+    }
+}
+
+/// 지울 글자: 공백이 아닌 제어 문자, 양방향 덮어쓰기 문자.
+fn is_hidden_char(ch: char) -> bool {
+    (ch.is_control() && !ch.is_whitespace())
+        || ('\u{202A}'..='\u{202E}').contains(&ch)
+        || ('\u{2066}'..='\u{2069}').contains(&ch)
 }
 
 /// `<`부터 다음 `>`까지를 지운다. 닫히지 않은 `<`는 글로 남긴다.
@@ -325,6 +357,20 @@ impl NewsRegistry {
     }
 }
 
+/// 그 공급자의 키 칸 선언.
+pub(crate) fn keys_of(id: NewsProviderId) -> NewsKeys {
+    match id {
+        NewsProviderId::Naver => crate::NAVER_NEWS_KEYS,
+    }
+}
+
+/// 그 키 칸 선언을 쓰는 공급자. 아는 공급자 선언이 아니면 `None`.
+pub(crate) fn provider_of(keys: NewsKeys) -> Option<NewsProviderId> {
+    [NewsProviderId::Naver]
+        .into_iter()
+        .find(|id| keys_of(*id) == keys)
+}
+
 /// 가짜 뉴스 공급자: 정해 준 결과(정하지 않았으면 [`NewsFetched::Missing`])와 오류를 돌려주고
 /// 받은 요청을 기록한다. 공개 API다(판단 · 조립 쪽 테스트가 쓴다).
 pub struct FakeNewsProvider {
@@ -368,9 +414,7 @@ impl NewsProvider for FakeNewsProvider {
     }
 
     fn keys(&self) -> NewsKeys {
-        match self.id {
-            NewsProviderId::Naver => crate::NAVER_NEWS_KEYS,
-        }
+        keys_of(self.id)
     }
 
     async fn search(&self, request: &NewsRequest) -> Result<NewsFetched, NewsError> {
@@ -392,6 +436,43 @@ mod tests {
         );
         assert_eq!(clean_news_text("&amp"), "&amp");
         assert_eq!(clean_news_text("&#X41;"), "A");
+    }
+
+    #[test]
+    fn 제어_문자와_양방향_덮어쓰기_문자는_지운다() {
+        assert_eq!(clean_news_text("a\u{0}b\u{7f}c\u{9b}d"), "abcd");
+        assert_eq!(
+            clean_news_text("삼성\u{202E}전자\u{2066}x\u{2069}"),
+            "삼성전자x"
+        );
+        assert_eq!(clean_news_text("a&#x202E;b&#0;c&#8238;d"), "abcd");
+        assert_eq!(clean_news_text("a \u{0} b"), "a b");
+        assert_eq!(clean_news_text("&lt;b&gt;글"), "<b>글");
+    }
+
+    #[test]
+    fn 길이_상한을_넘으면_자른다() {
+        assert_eq!(truncate_chars("가나다라".to_owned(), 2), "가나");
+        assert_eq!(truncate_chars("가나".to_owned(), 2), "가나");
+        assert_eq!(truncate_chars("ab cd".to_owned(), 3), "ab");
+        let long = "가".repeat(MAX_TITLE_CHARS + 5);
+        assert_eq!(
+            truncate_chars(long, MAX_TITLE_CHARS).chars().count(),
+            MAX_TITLE_CHARS
+        );
+    }
+
+    #[test]
+    fn 키_칸_선언은_보관소_선언으로_바뀐다() {
+        let keys = crate::NAVER_NEWS_KEYS.provider_keys();
+        assert_eq!(keys.provider(), crate::NAVER_NEWS_KEYS.provider());
+        assert_eq!(keys.fields(), crate::NAVER_NEWS_KEYS.fields());
+        assert!(keys.check().is_ok());
+        assert_eq!(
+            provider_of(crate::NAVER_NEWS_KEYS),
+            Some(NewsProviderId::Naver)
+        );
+        assert_eq!(provider_of(NewsKeys::new("other", &["a"])), None);
     }
 
     #[test]
