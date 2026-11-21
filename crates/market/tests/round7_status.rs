@@ -101,8 +101,26 @@ fn kr_with(
     )
 }
 
-/// 정상인 국내 시세: 90초 전부터 지켜봤고, 30초 전에 가격이 바뀌었고, 5초 전에 받았다.
-const NORMAL: &[(i64, &str)] = &[(90, "100"), (30, "101"), (5, "101")];
+/// 정상인 국내 시세: 90초 전부터 이웃 간격 30초 이하로 이어 지켜봤고, 창(60초) 안에서
+/// 40초 전 → 15초 전 사이에 가격이 바뀌었고, 5초 전에 받았다.
+const NORMAL: &[(i64, &str)] = &[
+    (90, "100"),
+    (65, "100"),
+    (40, "100"),
+    (15, "101"),
+    (5, "101"),
+];
+
+/// NORMAL과 같은 시각들로, 창 안에서 `before`에서 `after`로 한 번 바뀐 시세.
+fn moved<'a>(before: &'a str, after: &'a str) -> [(i64, &'a str); 5] {
+    [
+        (90, before),
+        (65, before),
+        (40, before),
+        (15, after),
+        (5, after),
+    ]
+}
 
 fn normal() -> StatusEstimate {
     StatusEstimate {
@@ -129,7 +147,14 @@ fn 늦지_않고_움직이고_가격제한에서_멀면_정상이다() {
 // 검증: P12
 #[test]
 fn 육십초_안에_한_번이라도_바뀌면_정상이다() {
-    let points = [(90, "100"), (50, "100"), (20, "101"), (5, "101")];
+    let points = [
+        (90, "100"),
+        (70, "100"),
+        (50, "100"),
+        (25, "100"),
+        (10, "101"),
+        (5, "101"),
+    ];
     assert_eq!(kr(&points, Some("100")), normal());
 }
 
@@ -173,6 +198,8 @@ fn 다른_종목이_섞이면_모른다() {
 // 검증: P12
 #[test]
 fn 장이_닫혀_있으면_모른다() {
+    // 장이 닫힌 뒤에는 시세가 지금과 같은 세션 안일 수 없어(7차 보강 4번)
+    // NotObservedLongEnough도 함께 올 수 있다. 여기서는 MarketClosed가 담기는지만 본다.
     let now = at(KR_CLOSED);
     let got = estimate_status(
         &series("005930", now, NORMAL),
@@ -181,7 +208,11 @@ fn 장이_닫혀_있으면_모른다() {
         now,
         &StatusPolicy::for_market(Market::Kr),
     );
-    assert_eq!(got, unknown(&[SuspectReason::MarketClosed]));
+    assert_eq!(got.status, TradingStatus::Unknown);
+    assert!(
+        got.reasons.contains(&SuspectReason::MarketClosed),
+        "{got:?}"
+    );
 }
 
 // 검증: P12, N6
@@ -202,14 +233,14 @@ fn 달력이_지금을_덮지_않으면_늦은_것으로_보고_모른다() {
 // 검증: P12, N6
 #[test]
 fn 마지막_시세가_삼십초를_넘으면_늦어서_모른다() {
-    let points = [(90, "100"), (31, "101")];
+    let points = [(90, "100"), (65, "100"), (40, "100"), (31, "101")];
     assert_eq!(kr(&points, Some("100")), unknown(&[SuspectReason::Stale]));
 }
 
 // 검증: P12, N6
 #[test]
 fn 마지막_시세가_딱_삼십초면_아직_늦지_않다() {
-    let points = [(90, "100"), (30, "101")];
+    let points = [(90, "100"), (65, "100"), (40, "100"), (30, "101")];
     assert_eq!(kr(&points, Some("100")), normal());
 }
 
@@ -217,7 +248,7 @@ fn 마지막_시세가_딱_삼십초면_아직_늦지_않다() {
 #[test]
 fn 충분히_지켜보지_않았으면_모른다() {
     // 60초보다 앞에 받은 시세가 없다(장이 막 열렸거나 막 지켜보기 시작했다).
-    let points = [(50, "100"), (10, "101")];
+    let points = [(50, "100"), (30, "100"), (10, "101")];
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NotObservedLongEnough])
@@ -227,7 +258,13 @@ fn 충분히_지켜보지_않았으면_모른다() {
 // 검증: P12
 #[test]
 fn 육십초_동안_가격이_같으면_모른다() {
-    let points = [(90, "100"), (40, "100"), (5, "100")];
+    let points = [
+        (90, "100"),
+        (65, "100"),
+        (40, "100"),
+        (15, "100"),
+        (5, "100"),
+    ];
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NotMoving])
@@ -237,7 +274,14 @@ fn 육십초_동안_가격이_같으면_모른다() {
 // 검증: P12
 #[test]
 fn 육십초_전에만_바뀌고_그_뒤로_그대로면_모른다() {
-    let points = [(120, "99"), (90, "100"), (30, "100"), (5, "100")];
+    let points = [
+        (120, "99"),
+        (95, "100"),
+        (70, "100"),
+        (45, "100"),
+        (20, "100"),
+        (5, "100"),
+    ];
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NotMoving])
@@ -256,7 +300,7 @@ fn 국내_기준가가_없으면_모른다() {
 // 검증: P12
 #[test]
 fn 국내_등락률이_플러스_이십팔퍼센트면_상한가_근처다() {
-    let points = [(90, "127"), (5, "128")];
+    let points = moved("127", "128");
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NearUpperLimit])
@@ -266,7 +310,7 @@ fn 국내_등락률이_플러스_이십팔퍼센트면_상한가_근처다() {
 // 검증: P12
 #[test]
 fn 국내_등락률이_이십팔퍼센트를_넘으면_상한가_근처다() {
-    let points = [(90, "128"), (5, "130")];
+    let points = moved("128", "130");
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NearUpperLimit])
@@ -276,7 +320,7 @@ fn 국내_등락률이_이십팔퍼센트를_넘으면_상한가_근처다() {
 // 검증: P12
 #[test]
 fn 국내_등락률이_마이너스_이십팔퍼센트면_하한가_근처다() {
-    let points = [(90, "73"), (5, "72")];
+    let points = moved("73", "72");
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NearLowerLimit])
@@ -286,7 +330,7 @@ fn 국내_등락률이_마이너스_이십팔퍼센트면_하한가_근처다() 
 // 검증: P12
 #[test]
 fn 국내_등락률이_마이너스_이십팔퍼센트_아래면_하한가_근처다() {
-    let points = [(90, "72"), (5, "70")];
+    let points = moved("72", "70");
     assert_eq!(
         kr(&points, Some("100")),
         unknown(&[SuspectReason::NearLowerLimit])
@@ -296,9 +340,9 @@ fn 국내_등락률이_마이너스_이십팔퍼센트_아래면_하한가_근�
 // 검증: P12
 #[test]
 fn 국내_등락률이_이십칠점구구퍼센트면_정상이다() {
-    let up = [(90, "127"), (5, "127.99")];
+    let up = moved("127", "127.99");
     assert_eq!(kr(&up, Some("100")), normal());
-    let down = [(90, "73"), (5, "72.01")];
+    let down = moved("73", "72.01");
     assert_eq!(kr(&down, Some("100")), normal());
 }
 
@@ -306,7 +350,7 @@ fn 국내_등락률이_이십칠점구구퍼센트면_정상이다() {
 #[test]
 fn 미국은_기준가가_없어도_큰_등락도_정상이다() {
     let now = at(US_OPEN);
-    let recent = series("AAPL", now, &[(90, "100"), (5, "180")]);
+    let recent = series("AAPL", now, &moved("100", "180"));
     let policy = StatusPolicy::for_market(Market::Us);
     assert_eq!(
         estimate_status(&recent, None, &us_calendar(), now, &policy),
@@ -322,9 +366,15 @@ fn 미국은_기준가가_없어도_큰_등락도_정상이다() {
 // 검증: P12, N6
 #[test]
 fn 받은_시각으로_순서를_맞춘다() {
-    // 받은 시각 순: 90초 전 128 → 30초 전 127 → 5초 전 100. 마지막 가격은 100(등락 0%)이다.
+    // 받은 시각 순: 90 · 65초 전 128 → 40 · 15초 전 127 → 5초 전 100. 마지막 가격은 100(등락 0%)이다.
     // 넘긴 순서의 끝(90초 전 128)을 마지막으로 보면 늦음 · 상한가 근처로 잘못 본다.
-    let points = [(5, "100"), (30, "127"), (90, "128")];
+    let points = [
+        (5, "100"),
+        (65, "128"),
+        (15, "127"),
+        (90, "128"),
+        (40, "127"),
+    ];
     assert_eq!(kr(&points, Some("100")), normal());
 }
 
@@ -332,7 +382,7 @@ fn 받은_시각으로_순서를_맞춘다() {
 #[test]
 fn 까닭이_여럿이면_모두_enum_순서로_담는다() {
     // 마지막 시세가 40초 전(늦음), 60초 안에 가격이 그대로(멈춤), 기준가 없음.
-    let points = [(90, "100"), (40, "100")];
+    let points = [(90, "100"), (65, "100"), (40, "100")];
     assert_eq!(
         kr(&points, None),
         unknown(&[
@@ -341,6 +391,122 @@ fn 까닭이_여럿이면_모두_enum_순서로_담는다() {
             SuspectReason::NoReferencePrice,
         ])
     );
+}
+
+// ---------------------------------------------------------------- 추정: 7차 보강(지켜보기 · 움직임 창)
+
+// 검증: P12
+#[test]
+fn 오래전_시세_하나와_최근_시세_하나로는_지켜본_것도_움직인_것도_아니다() {
+    // 200초 전 → 5초 전 사이 간격(195초)이 30초를 넘고, 창(60초) 안 시세는 하나뿐이다.
+    let points = [(200, "100"), (5, "101")];
+    assert_eq!(
+        kr(&points, Some("100")),
+        unknown(&[
+            SuspectReason::NotObservedLongEnough,
+            SuspectReason::NotMoving,
+        ])
+    );
+}
+
+// 검증: P12
+#[test]
+fn 지난_장의_시세로는_지켜본_것이_아니다() {
+    // 어제 정규장 끝(06:29:50Z) 100 → 오늘 장 시작 +10초(00:00:10Z) 110, 지금은 +15초.
+    let now = at("2026-03-25T00:00:15Z");
+    let yesterday_end = (now - at("2026-03-24T06:29:50Z")).num_seconds();
+    let recent = series("005930", now, &[(yesterday_end, "100"), (5, "110")]);
+    let got = estimate_status(
+        &recent,
+        Some(d("100")),
+        &kr_calendar(),
+        now,
+        &StatusPolicy::for_market(Market::Kr),
+    );
+    assert_eq!(
+        got,
+        unknown(&[
+            SuspectReason::NotObservedLongEnough,
+            SuspectReason::NotMoving,
+        ])
+    );
+}
+
+// 검증: P12
+#[test]
+fn 간격이_촘촘해도_세션이_다르면_지켜본_것이_아니다() {
+    // 늦음 기준을 하루로 늘려 간격 조건은 통과시키고, 세션 조건만 남긴다.
+    let policy = StatusPolicy {
+        stale: StalePolicy {
+            max_age: Duration::from_secs(24 * 60 * 60),
+        },
+        ..StatusPolicy::for_market(Market::Kr)
+    };
+    let now = at("2026-03-25T00:00:40Z");
+    let yesterday_end = (now - at("2026-03-24T06:29:50Z")).num_seconds();
+    let recent = series(
+        "005930",
+        now,
+        &[(yesterday_end, "100"), (30, "100"), (10, "101")],
+    );
+    assert_eq!(
+        estimate_status(&recent, Some(d("100")), &kr_calendar(), now, &policy),
+        unknown(&[SuspectReason::NotObservedLongEnough])
+    );
+}
+
+// 검증: P12
+#[test]
+fn 삼십초_간격으로_육십일초_지켜보고_창_안에서_바뀌면_정상이다() {
+    let points = [(61, "100"), (31, "100"), (1, "101")];
+    assert_eq!(kr(&points, Some("100")), normal());
+}
+
+// 검증: P12
+#[test]
+fn 간격이_삼십일초인_틈이_하나_끼면_지켜본_것이_아니다() {
+    let points = [(62, "100"), (31, "100"), (1, "101")];
+    assert_eq!(
+        kr(&points, Some("100")),
+        unknown(&[SuspectReason::NotObservedLongEnough])
+    );
+}
+
+// 검증: P12
+#[test]
+fn 간격이_딱_삼십초면_이어진_것으로_본다() {
+    let points = [(95, "100"), (65, "100"), (35, "100"), (5, "101")];
+    assert_eq!(kr(&points, Some("100")), normal());
+}
+
+// 검증: P12
+#[test]
+fn 딱_육십초_전_시세는_창_밖이라_그와의_차이는_움직임이_아니다() {
+    // 60초 전 99 → 40초 전 100은 바뀌었지만 60초 전은 창 `(now-60s, now]` 밖이다.
+    let points = [
+        (90, "100"),
+        (60, "99"),
+        (40, "100"),
+        (20, "100"),
+        (5, "100"),
+    ];
+    assert_eq!(
+        kr(&points, Some("100")),
+        unknown(&[SuspectReason::NotMoving])
+    );
+}
+
+// 검증: P12
+#[test]
+fn 오십구초_전_시세는_창_안이라_그와의_차이는_움직임이다() {
+    let points = [
+        (89, "100"),
+        (59, "99"),
+        (40, "100"),
+        (20, "100"),
+        (5, "100"),
+    ];
+    assert_eq!(kr(&points, Some("100")), normal());
 }
 
 // ---------------------------------------------------------------- 기준값
@@ -385,6 +551,15 @@ fn 지켜보기_시간을_바꾸면_판단이_따라_바뀐다() {
 // 검증: P12, N6
 #[test]
 fn 늦음_기준을_바꾸면_판단이_따라_바뀐다() {
+    // 3초 간격으로 90초 전부터 6초 전까지 이어 받았고, 30초 전 → 27초 전에 가격이 바뀌었다.
+    let points: Vec<(i64, &str)> = (2..=30)
+        .map(|k| (k * 3, if k * 3 >= 30 { "100" } else { "101" }))
+        .collect();
+    assert_eq!(
+        kr(&points, Some("100")),
+        normal(),
+        "기본 기준(30초)이면 정상이다"
+    );
     let policy = StatusPolicy {
         stale: StalePolicy {
             max_age: Duration::from_secs(3),
@@ -392,7 +567,7 @@ fn 늦음_기준을_바꾸면_판단이_따라_바뀐다() {
         ..StatusPolicy::for_market(Market::Kr)
     };
     assert_eq!(
-        kr_with(NORMAL, Some("100"), &policy),
+        kr_with(&points, Some("100"), &policy),
         unknown(&[SuspectReason::Stale])
     );
 }
@@ -400,7 +575,7 @@ fn 늦음_기준을_바꾸면_판단이_따라_바뀐다() {
 // 검증: P12
 #[test]
 fn 가격제한_여유를_바꾸면_판단이_따라_바뀐다() {
-    let points = [(90, "127"), (5, "128")];
+    let points = moved("127", "128");
     let no_margin = StatusPolicy {
         near_limit_margin: d("0"),
         ..StatusPolicy::for_market(Market::Kr)
@@ -410,7 +585,7 @@ fn 가격제한_여유를_바꾸면_판단이_따라_바뀐다() {
         near_limit_margin: d("0.10"),
         ..StatusPolicy::for_market(Market::Kr)
     };
-    let mid = [(90, "119"), (5, "120")];
+    let mid = moved("119", "120");
     assert_eq!(
         kr_with(&mid, Some("100"), &wide),
         unknown(&[SuspectReason::NearUpperLimit])
