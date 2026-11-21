@@ -108,6 +108,9 @@ pub const DEFAULT_DATA_POLL: std::time::Duration = std::time::Duration::from_sec
 /// (10차 10b 8번) 네이버 뉴스 검색의 하루 요청 상한 기본값(네이버 공식 한도 25,000회).
 pub const DEFAULT_NEWS_DAILY_LIMIT: u32 = 25_000;
 
+/// (10차 10b 보강 1번) OpenDART 하루 요청 상한 기본값(개인 키 한도 약 20,000건의 절반 — 공식 문서로 다시 확인).
+pub const DEFAULT_DART_DAILY_LIMIT: u32 = 10_000;
+
 /// 투자 팀 조립의 바깥 값. [`crate::Launch::team`]에 준다.
 #[derive(Debug, Clone)]
 pub struct TeamWiring {
@@ -136,6 +139,10 @@ pub struct TeamWiring {
     /// (10차 10b 8번) 네이버 뉴스 검색의 하루 요청 상한. 주기와 종목 수로 이 수를 넘지 않게 한다.
     /// 기본 [`DEFAULT_NEWS_DAILY_LIMIT`].
     pub news_daily_limit: u32,
+    /// (10차 10b 보강 1번) DART 하루 요청 상한(주기 가져오기 · 논의의 자료 받기를 함께 센다).
+    /// 간격을 `하루 × 종목 수 ÷ 상한` 이상으로 두고 하루 수를 세어 저장소에 남긴다. 상한에 닿으면 그날은
+    /// "공시 없음(한도)"으로 두고 자료 이상으로 세지 않는다. 기본 [`DEFAULT_DART_DAILY_LIMIT`].
+    pub dart_daily_limit: u32,
 }
 
 /// 공식 조립이 아는 종목 → DART 고유번호(시가총액이 큰 국내 종목). 표에 없는 종목은 공시 · 재무를 받지
@@ -168,6 +175,7 @@ impl TeamWiring {
             news: NaverNewsConfig::official(),
             data_poll: DEFAULT_DATA_POLL,
             news_daily_limit: DEFAULT_NEWS_DAILY_LIMIT,
+            dart_daily_limit: DEFAULT_DART_DAILY_LIMIT,
         }
     }
 }

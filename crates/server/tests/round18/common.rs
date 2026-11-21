@@ -38,9 +38,9 @@ use pi_store::{
     TeamState, TradeId, TradeState, UnixMillis,
 };
 use price_inha::{
-    App, CalendarFn, Crew, DayPlan, DemoTurn, Launch, OrderRequest, Placed, Reach, Settings,
-    TEMPLATE_ADJUST_PATH, TEMPLATE_PATH, TeamWiring, Trading, TradingWiring, Upstreams, Wiring,
-    save_watchlist,
+    App, CalendarFn, Crew, DEFAULT_DART_DAILY_LIMIT, DayPlan, DemoTurn, Launch, OrderRequest,
+    Placed, Reach, Settings, TEMPLATE_ADJUST_PATH, TEMPLATE_PATH, TeamWiring, Trading,
+    TradingWiring, Upstreams, Wiring, save_watchlist,
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -182,15 +182,18 @@ fn business_day(date: NaiveDate, forward: bool) -> NaiveDate {
     }
 }
 
+/// 그 날의 국내 세션(정규장 09:00~15:30). 주말은 휴장(세션 없음)이다.
 fn kr_day(date: NaiveDate) -> TradingDay {
-    TradingDay {
-        date,
-        sessions: vec![Session {
+    let sessions = if matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+        Vec::new()
+    } else {
+        vec![Session {
             kind: SessionKind::Regular,
             start: kst(date, 9, 0),
             end: kst(date, 15, 30),
-        }],
-    }
+        }]
+    };
+    TradingDay { date, sessions }
 }
 
 fn kr_calendar(date: NaiveDate) -> MarketCalendar {
@@ -214,20 +217,26 @@ struct DataState {
     news: Mutex<Vec<Value>>,
     /// 네이버 뉴스 검색의 상태 번호(200 또는 401).
     news_status: AtomicU16,
+    /// FRED 미국 금리 관측값.
+    fred: Mutex<String>,
+    /// ECOS 한국은행 기준금리 값.
+    korea_rate: Mutex<String>,
+    /// DART 재무(매출액)의 이번 기 금액.
+    revenue: Mutex<String>,
 }
 
 fn ok(body: Value) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(body)
 }
 
-fn financials_body(corp: &str) -> Value {
+fn financials_body(corp: &str, revenue: &str) -> Value {
     json!({
         "status": "000", "message": "정상",
         "list": [{
             "rcept_no": "20260310000789", "reprt_code": "11011", "bsns_year": "2025",
             "corp_code": corp, "stock_code": "000000", "fs_div": "CFS", "fs_nm": "연결재무제표",
             "sj_div": "IS", "sj_nm": "손익계산서", "account_nm": "매출액", "thstrm_nm": "제 57 기",
-            "thstrm_dt": "2025.01.01 ~ 2025.12.31", "thstrm_amount": "300,870,903,000,000",
+            "thstrm_dt": "2025.01.01 ~ 2025.12.31", "thstrm_amount": revenue,
             "frmtrm_nm": "제 56 기", "frmtrm_dt": "2024.01.01 ~ 2024.12.31",
             "frmtrm_amount": "1,000", "ord": "21", "currency": "KRW"
         }]
@@ -278,9 +287,9 @@ fn data_reply(state: &DataState, request: &Request) -> ResponseTemplate {
                 "total_count": list.len(), "total_page": 1, "list": list
             }))
         }
-        "/api/fnlttSinglAcnt.json" => ok(financials_body(&corp)),
+        "/api/fnlttSinglAcnt.json" => ok(financials_body(&corp, &locked(&state.revenue))),
         FRED_PATH => ok(json!({
-            "observations": [{"date": "2026-11-12", "value": "4.10"}]
+            "observations": [{"date": "2026-11-12", "value": *locked(&state.fred)}]
         })),
         NEWS_PATH => {
             let status = state.news_status.load(Ordering::SeqCst);
@@ -301,7 +310,7 @@ fn data_reply(state: &DataState, request: &Request) -> ResponseTemplate {
             "한국은행 기준금리",
             "연%",
             "202610",
-            "2.25",
+            &locked(&state.korea_rate),
         )),
         _ if path.contains("/731Y001/") => ok(ecos_body(
             "731Y001",
@@ -329,6 +338,9 @@ impl DataServer {
             disclosures: Mutex::new(Vec::new()),
             news: Mutex::new(Vec::new()),
             news_status: AtomicU16::new(200),
+            fred: Mutex::new("4.10".to_string()),
+            korea_rate: Mutex::new("2.25".to_string()),
+            revenue: Mutex::new("300,870,903,000,000".to_string()),
         });
         let reply_state = Arc::clone(&state);
         Mock::given(method("GET"))
@@ -362,6 +374,21 @@ impl DataServer {
         self.state.news_status.store(401, Ordering::SeqCst);
     }
 
+    /// FRED 미국 금리 관측값을 바꾼다(처음 `4.10`).
+    pub fn set_fred(&self, value: &str) {
+        *locked(&self.state.fred) = value.to_string();
+    }
+
+    /// ECOS 한국은행 기준금리 값을 바꾼다(처음 `2.25`).
+    pub fn set_korea_rate(&self, value: &str) {
+        *locked(&self.state.korea_rate) = value.to_string();
+    }
+
+    /// DART 재무(매출액)의 이번 기 금액을 바꾼다(처음 `300,870,903,000,000`).
+    pub fn set_revenue(&self, amount: &str) {
+        *locked(&self.state.revenue) = amount.to_string();
+    }
+
     /// 모든 자료 요청이 500으로 실패하게 바꾼다(출처 장애).
     pub fn fail(&self) {
         self.state.failing.store(true, Ordering::SeqCst);
@@ -381,6 +408,15 @@ impl DataServer {
             .collect()
     }
 
+    /// 이 가짜 서버가 받은, 경로에 `part`가 든 요청들(ECOS처럼 경로에 키 · 기간이 실리는 것).
+    pub async fn requests_like(&self, part: &str) -> Vec<Request> {
+        let received = self.server.received_requests().await.unwrap_or_default();
+        received
+            .into_iter()
+            .filter(|request| request.url.path().contains(part))
+            .collect()
+    }
+
     /// 이 가짜 서버를 쓰는 팀 조립 값.
     fn team(&self, plan: &Plan) -> TeamWiring {
         let mut team = TeamWiring::official();
@@ -391,9 +427,15 @@ impl DataServer {
             (Symbol::new(WATCHED), CorpCode::parse(CORP_WATCHED).unwrap()),
             (Symbol::new(HYNIX), CorpCode::parse(CORP_HYNIX).unwrap()),
         ]);
+        // 그 밖의 지켜볼 종목에도 고유번호를 준다(가짜 서버는 그 번호의 공시가 없다고 답한다).
+        for symbol in &plan.symbols {
+            let code = CorpCode::parse(&format!("90{symbol}")).unwrap();
+            team.corp_codes.entry(Symbol::new(*symbol)).or_insert(code);
+        }
         team.news = NaverNewsConfig::new(uri).with_timeout(Duration::from_secs(3));
         team.data_poll = plan.poll;
         team.news_daily_limit = plan.news_limit;
+        team.dart_daily_limit = plan.dart_limit;
         team
     }
 }
@@ -475,8 +517,12 @@ async fn fake_quotes(clock: Arc<TestClock>, prices: Prices) -> MockServer {
     server
 }
 
+/// 뉴스 공시 시세 담당이 논의 턴이 아닌 턴(깨우기)에 할 답. 없으면 기본 답.
+type ScoutReply = Arc<Mutex<Option<String>>>;
+
 /// 요청 글로 턴을 골라 답한다(시연용 가짜 AI와 같은 규칙): 팀장은 언제나 사기로 판단한다.
-fn ai_reply(system: &str, last: &str) -> String {
+/// 뉴스 공시 시세 담당의 논의 턴이 아닌 턴은 `scout`이 정해져 있으면 그 글로 답한다.
+fn ai_reply(system: &str, last: &str, scout: Option<String>) -> String {
     let role = system
         .split("담당 id: ")
         .nth(1)
@@ -492,6 +538,9 @@ fn ai_reply(system: &str, last: &str) -> String {
         verdict("buy")
     } else if last.contains("[주문 안]") {
         json!({"side": "buy", "note": "시험 주문 안"}).to_string()
+    } else if let Some(reply) = scout.filter(|_| role == "scout" && !last.contains("라운드다"))
+    {
+        reply
     } else {
         match role {
             "scout" => "새 자료를 확인했다. @strategy @risk 의견을 부탁한다".to_string(),
@@ -503,10 +552,10 @@ fn ai_reply(system: &str, last: &str) -> String {
 }
 
 /// 가짜 AI 서버: 대화 요청(`POST /v1/messages`)에 [`ai_reply`]의 글 하나로 답한다.
-async fn fake_ai() -> MockServer {
+async fn fake_ai(scout: ScoutReply) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(|request: &Request| {
+        .respond_with(move |request: &Request| {
             let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
             let system = body["system"].as_str().unwrap_or_default();
             let last = body["messages"]
@@ -516,7 +565,7 @@ async fn fake_ai() -> MockServer {
                 .unwrap_or_default();
             ok(json!({
                 "id": "msg_test", "type": "message", "role": "assistant", "model": "test-model",
-                "content": [{"type": "text", "text": ai_reply(system, last)}],
+                "content": [{"type": "text", "text": ai_reply(system, last, locked(&scout).clone())}],
                 "stop_reason": "end_turn",
                 "usage": {"input_tokens": 1, "output_tokens": 1}
             }))
@@ -531,6 +580,7 @@ struct Live {
     quotes: MockServer,
     ai: MockServer,
     prices: Prices,
+    scout: ScoutReply,
 }
 
 // ───────────── 서버 띄우기 ─────────────
@@ -729,7 +779,7 @@ async fn prepare(home: &Path, plan: &Plan) {
     save_watchlist(home, &symbols).unwrap();
 }
 
-/// 띄울 모양: 시연인가 · 지켜볼 종목 · 어떤 키를 등록하나 · 자료 간격 · 네이버 하루 상한.
+/// 띄울 모양: 시연인가 · 지켜볼 종목 · 어떤 키를 등록하나 · 자료 간격 · 네이버 · DART 하루 상한.
 pub struct Plan {
     live: bool,
     symbols: Vec<&'static str>,
@@ -738,6 +788,7 @@ pub struct Plan {
     naver: bool,
     poll: Duration,
     news_limit: u32,
+    dart_limit: u32,
 }
 
 impl Plan {
@@ -751,6 +802,7 @@ impl Plan {
             naver: false,
             poll: Duration::from_secs(3600),
             news_limit: 25_000,
+            dart_limit: DEFAULT_DART_DAILY_LIMIT,
         }
     }
 
@@ -801,6 +853,11 @@ impl Plan {
         Plan { news_limit, ..self }
     }
 
+    /// DART 요청의 하루 상한.
+    pub fn dart_limit(self, dart_limit: u32) -> Plan {
+        Plan { dart_limit, ..self }
+    }
+
     /// 이 모양으로 그 시각에 띄운다.
     pub async fn start(self, at: DateTime<Utc>) -> Bench {
         let dir = tempfile::tempdir().unwrap();
@@ -810,10 +867,12 @@ impl Plan {
             let initial = HashMap::from([(WATCHED.to_string(), WATCHED_PRICE)]);
             let prices: Prices = Arc::new(Mutex::new(initial));
             let quotes = fake_quotes(Arc::clone(&clock), Arc::clone(&prices)).await;
+            let scout: ScoutReply = Arc::new(Mutex::new(None));
             Some(Live {
                 quotes,
-                ai: fake_ai().await,
+                ai: fake_ai(Arc::clone(&scout)).await,
                 prices,
+                scout,
             })
         } else {
             None
@@ -975,6 +1034,58 @@ impl Bench {
                 system.contains("담당 id: scout") && body.to_string().contains(needle)
             })
             .count()
+    }
+
+    /// 가짜 AI 서버가 받은 뉴스 공시 시세 담당(scout)의 요청 가운데 마지막 사용자 글에 `needle`이 (대소문자
+    /// 없이) 든 것들의 그 글.
+    pub async fn scout_inputs(&self, needle: &str) -> Vec<String> {
+        let needle = needle.to_lowercase();
+        let received = self.live().ai.received_requests().await;
+        received
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|request| serde_json::from_slice::<Value>(&request.body).ok())
+            .filter(|body| {
+                let system = body["system"].as_str().unwrap_or_default();
+                system.contains("담당 id: scout")
+            })
+            .filter_map(|body| {
+                let messages = body["messages"].as_array()?;
+                let last = messages.iter().rev().find(|m| m["role"] == json!("user"))?;
+                last["content"].as_str().map(str::to_string)
+            })
+            .filter(|input| input.to_lowercase().contains(&needle))
+            .collect()
+    }
+
+    /// 뉴스 공시 시세 담당이 논의 턴이 아닌 턴(깨우기)에 할 답을 정한다.
+    pub fn scout_says(&self, reply: &str) {
+        *locked(&self.live().scout) = Some(reply.to_string());
+    }
+
+    /// 가짜 AI 서버가 받은 요청에서 팀 논의(`[팀 논의] … · 종목 <코드>`)가 열린 종목들.
+    pub async fn discussed_symbols(&self) -> std::collections::BTreeSet<String> {
+        const MARK: &str = " · 종목 ";
+        let received = self.live().ai.received_requests().await;
+        let mut found = std::collections::BTreeSet::new();
+        for request in received.unwrap_or_default() {
+            let Ok(body) = serde_json::from_slice::<Value>(&request.body) else {
+                continue;
+            };
+            for message in body["messages"].as_array().cloned().unwrap_or_default() {
+                let text = message["content"].as_str().unwrap_or_default();
+                let Some(start) = text.find("[팀 논의]") else {
+                    continue;
+                };
+                let rest = &text[start..];
+                let Some(at) = rest.find(MARK) else {
+                    continue;
+                };
+                let code: String = rest[at + MARK.len()..].chars().take(6).collect();
+                found.insert(code);
+            }
+        }
+        found
     }
 
     pub fn addr(&self) -> SocketAddr {
