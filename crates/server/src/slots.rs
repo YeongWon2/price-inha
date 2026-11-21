@@ -28,6 +28,16 @@ pub const KEY_BACKUP_GITHUB_TOKEN: &str = "backup_github_token";
 /// 칸별 등록 여부를 읽는 경로(`GET`, 세션).
 pub const SETUP_SLOTS_PATH: &str = "/api/setup/slots";
 
+/// (10차 10b 10번) 공급자 선언(`pi_secrets::ProviderKeys`)에서 만든 키 칸 목록을 읽는 경로(`GET`, 세션).
+///
+/// 답: `{"providers": [{"provider": 공급자 이름, "fields": [칸 이름], "registered": bool}]}`. 값 · 값의 일부 ·
+/// 길이는 없다. 네이버 뉴스(`pi_data::NAVER_NEWS_KEYS`)가 들어 있고, 옛 `item` `data` 칸은 없다.
+/// 등록은 키 등록 경로(`/api/setup/keys` · `/api/remote/keys`)에 `item`으로 공급자 이름을 준다
+/// (`{"item": "naver_news", "fields": {"client_id": .., "client_secret": ..}}`). 확인은
+/// `KeyVerifier`의 `verify_provider`(네이버는 `pi_data::verify_news_keys`)이고, 실패하면 저장하지 않는다.
+/// (옛 [`SETUP_SLOTS_PATH`] · `GET /api/setup`의 모양은 앞 차수 시험이 못 박아 두어 그대로다.)
+pub const SETUP_PROVIDERS_PATH: &str = "/api/setup/providers";
+
 /// `item` 이름과 칸(이 순서로 상태를 싣는다).
 pub const KEY_SLOTS: [(&str, KeySlot); 4] = [
     (KEY_DART, KeySlot::Dart),

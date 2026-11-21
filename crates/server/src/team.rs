@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use pi_agent::{DiscussionOutcome, RoleConfig, Team};
 use pi_approval::Approvals;
-use pi_data::{CorpCode, DataAdapter, DataConfig, EcosCycle, EcosSeries};
+use pi_data::{CorpCode, DataAdapter, DataConfig, EcosCycle, EcosSeries, NaverNewsConfig};
 use pi_journal::{Journal, ReviewRecord};
 use pi_market::{Clock, Symbol};
 use pi_store::{ProposalId, Store, TradeId};
@@ -98,6 +98,13 @@ pub const DEFAULT_CONSENSUS_REQUIRED: i32 = 180;
 /// 담당이 쓰는 모델 이름의 기본값. 조정자 결정, docs/dev/modules/server.md 2차 보강.
 pub const DEFAULT_TEAM_MODEL: &str = "claude-sonnet-5-5";
 
+/// (10차 10b 8번) 자료(새 공시 · 새 뉴스 · 재무/거시 값)를 다시 보는 간격의 기본값(시계 기준).
+/// 네이버 하루 한도([`DEFAULT_NEWS_DAILY_LIMIT`])를 넘지 않게 실제 간격은 종목 수로 더 늘어날 수 있다.
+pub const DEFAULT_DATA_POLL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// (10차 10b 8번) 네이버 뉴스 검색의 하루 요청 상한 기본값(네이버 공식 한도 25,000회).
+pub const DEFAULT_NEWS_DAILY_LIMIT: u32 = 25_000;
+
 /// 투자 팀 조립의 바깥 값. [`crate::Launch::team`]에 준다.
 #[derive(Debug, Clone)]
 pub struct TeamWiring {
@@ -118,6 +125,14 @@ pub struct TeamWiring {
     pub schedule: ScheduleTimes,
     /// 담당 6명이 쓰는 모델 이름(고른 AI 연결에 그대로 넘긴다).
     pub model: String,
+    /// (10차 10b 9번) 네이버 뉴스 검색 설정(기본 주소 · 시간 한도). 테스트는 로컬 가짜 서버를 넣는다.
+    /// 키는 비밀 보관소의 `pi_data::NAVER_NEWS_KEYS` 칸이다(`NewsKeySource`).
+    pub news: NaverNewsConfig,
+    /// (10차 10b 8번) 자료를 다시 보는 간격(시계 기준). 기본 [`DEFAULT_DATA_POLL`].
+    pub data_poll: std::time::Duration,
+    /// (10차 10b 8번) 네이버 뉴스 검색의 하루 요청 상한. 주기와 종목 수로 이 수를 넘지 않게 한다.
+    /// 기본 [`DEFAULT_NEWS_DAILY_LIMIT`].
+    pub news_daily_limit: u32,
 }
 
 /// 공식 조립이 아는 종목 → DART 고유번호(시가총액이 큰 국내 종목). 표에 없는 종목은 공시 · 재무를 받지
@@ -147,6 +162,9 @@ impl TeamWiring {
             consensus_required: DEFAULT_CONSENSUS_REQUIRED,
             schedule: ScheduleTimes::default(),
             model: DEFAULT_TEAM_MODEL.to_string(),
+            news: NaverNewsConfig::official(),
+            data_poll: DEFAULT_DATA_POLL,
+            news_daily_limit: DEFAULT_NEWS_DAILY_LIMIT,
         }
     }
 }
