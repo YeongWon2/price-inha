@@ -184,3 +184,8 @@ C10 E12 E13 E16 E25 E29 E30 E33 V6 E22
 3. 저장소 매매 수량과의 대조는 "이하"로 둔다.
 4. 알림 기록(`Notice::Sent`)이 없으면 내지 않는다(P20). server가 `record_notice`를 빠뜨리면 줄인 주문이 안 나가는 것이 의도다.
 5. 재시작 틈(주문은 나갔는데 처리 기록 전에 꺼짐)은 server 10a에서 고친다: 다시 켠 뒤 `unhandled_due`가 준 요청의 매매가 이미 주문됨 · 보유중이면 막힘으로 닫지 않고 `Reduced`(그 매매의 수량)로 기록만 남긴다.
+
+### 6차 검토 참고 (다음 차수 후보)
+- 실행기는 "승인이 필요한 금액"을 스스로 막지 못한다(요청 크기 이하로만 묶는다). `CheckPermit`에 "승인 증표로 낸 표시인지"가 남지 않아, 조립하는 쪽이 `rules::approved`의 표시(요청 전량)를 `submit_reduced`에 넘기면 통과한다. paper · rules 차수에서 표시에 그 표를 남기고 `submit_reduced`가 거부하게 한다. 그때까지 server는 `submit_reduced`에 `reduce_within_limit`의 표시만 넘긴다(server 검토에서 확인).
+- `within_request`: 지정가가 0 이하면 거부(지금은 증권사가 거부해 매매가 막힘으로 간다).
+- 같은 매매에 `submit_reduced` 둘을 동시에 불러 주문이 하나뿐임을 보는 시험. 동시에 진 쪽은 `Error::Store(TransitionDenied)`다(지시서의 `NotAwaitingApproval`과 다름 — 주문은 나가지 않는다).
