@@ -7,7 +7,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-use crate::{Market, MarketAdapter, MarketCalendar, MarketError, Quote, Symbol, TradingDay};
+use crate::{
+    Market, MarketAdapter, MarketCalendar, MarketError, Quote, Symbol, TradingDay, TradingStatus,
+};
 
 /// 정해 준 값들.
 #[derive(Default)]
@@ -55,6 +57,12 @@ impl FakeAdapter {
         self.quote_calls.load(Ordering::SeqCst)
     }
 
+    /// 종목의 거래 상태를 정한다. 하나라도 정하면 `trading_statuses`가 `Some`(정한 종목만,
+    /// 넘긴 순서)을 준다. 하나도 정하지 않았으면 `None`이다.
+    pub fn set_status(&self, symbol: Symbol, status: TradingStatus) {
+        todo!()
+    }
+
     /// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도
     /// 값은 온전하다. 그래서 그대로 이어 쓴다.
     fn state(&self) -> MutexGuard<'_, State> {
@@ -79,6 +87,13 @@ impl MarketAdapter for FakeAdapter {
             .iter()
             .filter_map(|symbol| state.quotes.get(symbol).cloned())
             .collect())
+    }
+
+    async fn trading_statuses(
+        &self,
+        symbols: &[Symbol],
+    ) -> Result<Option<Vec<(Symbol, TradingStatus)>>, MarketError> {
+        todo!()
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {

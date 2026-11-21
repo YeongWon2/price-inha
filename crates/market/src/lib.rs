@@ -15,7 +15,9 @@ mod credentials;
 mod error;
 mod fake;
 mod model;
+mod provider;
 mod stale;
+mod status;
 mod toss;
 mod watch;
 
@@ -27,7 +29,12 @@ pub use fake::FakeAdapter;
 pub use model::{
     Currency, Market, MarketCalendar, Quote, Session, SessionKind, Symbol, TradingDay,
 };
+pub use provider::{AssetClass, MarketRegistry, ProviderId};
 pub use stale::{DEFAULT_STALE_AFTER, StalePolicy, is_stale};
+pub use status::{
+    StatusEstimate, StatusPolicy, StatusSource, SuspectReason, TradingStatus, estimate_status,
+    resolve_status,
+};
 pub use toss::{
     DEFAULT_BASE_URL, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_RATE_LIMIT_RETRIES, DEFAULT_TIMEOUT,
     DEFAULT_TOKEN_FAILURE_COOLDOWN, DEFAULT_TOKEN_REFRESH_MARGIN, MAX_SYMBOLS_PER_REQUEST,

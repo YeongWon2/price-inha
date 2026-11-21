@@ -3,7 +3,7 @@
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
 use rust_decimal::Decimal;
 
-use crate::MarketError;
+use crate::{AssetClass, MarketError};
 
 /// 시장. 나중에 코인이 더해질 수 있어 `non_exhaustive`다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -13,6 +13,13 @@ pub enum Market {
     Kr,
     /// 미국 주식 (토스증권 `market-calendar/US`).
     Us,
+}
+
+impl Market {
+    /// 이 시장의 자산 종류. `Kr` · `Us`는 [`AssetClass::Stock`].
+    pub fn asset_class(self) -> AssetClass {
+        todo!()
+    }
 }
 
 /// 종목 심볼. 예: `005930`, `AAPL`.
