@@ -193,6 +193,7 @@ D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에�
 8. **가리기 (E38 · V47)**: 로컬이어도 보내는 글마다 끼운 `Redactor`를 거친다(기록 · Ollama 로그에 비밀이 남지 않게). 길이 판단은 **가린 뒤** 글로 한다.
 9. **응답 읽기**: 2xx 본문의 `embeddings` 배열 길이가 보낸 개수와 같아야 하고, 모든 벡터 길이가 같아야 하며, `dimensions`가 `Some(n)`이면 길이가 `n`이어야 한다. 숫자가 아니거나 하나라도 어긋나면 `InvalidResponse`. `model`은 응답의 것(없으면 요청 모델), `usage.total_tokens`는 `prompt_eval_count`(없으면 0).
 10. **오류 · 다시 시도**: 연결 실패(Ollama가 꺼짐) → `Connection`(받는 쪽 knowledge에서 "쓸 수 없음"이 된다), 404 또는 본문 `error`가 "모델 없음" → `InvalidRequest`이고 다시 시도하지 않음(모델을 받아 두지 않았다 — 오류 문장에 `ollama pull <모델>` 안내), 400 → `InvalidRequest`, 500 이상 → `ProviderUnavailable`. 다시 시도는 Anthropic 공급자와 **같은 함수**(3차 1~4: 간격 · jitter, 시간 초과 · 연결 실패 · 5xx는 다시 시도, 잘못된 요청은 안 함). 응답 크기 상한(3차 6), 연결 제한(3차 4)도 같다. 첫 요청은 모델을 메모리에 올리느라 느릴 수 있으니 `timeout` 기본은 60초.
+10-1. (N1이 남긴 모호한 곳 — 조정자 결정) 나눠 보낼 때 `usage.total_tokens`는 조각의 합, `model`은 첫 조각의 것. `check`는 다시 시도하지 않는다(Anthropic `verify`와 같다). 429는 `RateLimited`로 다시 시도한다. 리다이렉트 응답(3xx)은 따라가지 않고 `InvalidResponse`. 루프백이 아닌 주소의 `InsecureBaseUrl` 문장은 "루프백 주소만 받는다"는 뜻이 드러나게 쓴다(https여도 거부).
 11. **`check(model)`**: `GET {base_url}/api/tags`로 받아 둔 모델 목록을 보고, `name`이 `<모델>` 또는 `<모델>:latest`인 것이 있으면 성공, 없으면 `InvalidRequest`("`ollama pull <모델>`"), 연결 실패면 `Connection`. 임베딩을 돌리지 않으니 싸다.
 
 ### 원본 동작 근거
@@ -224,7 +225,7 @@ D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에�
 
 ## 하지 않는 것
 
-OAuth 로그인 절차와 구독 토큰을 API에 보내는 길은 만들지 않는다(구독은 2차의 CLI 공급자로만 쓴다). 도구 호출, 스트리밍, 다른 AI 공급자는 나중 작업이다. 임베딩은 10차의 Voyage 하나만 만들고 다른 임베딩 공급자는 어댑터만 나중에 더한다.
+OAuth 로그인 절차와 구독 토큰을 API에 보내는 길은 만들지 않는다(구독은 2차의 CLI 공급자로만 쓴다). 도구 호출, 스트리밍, 다른 AI 공급자는 나중 작업이다. 임베딩은 10차의 Ollama(로컬) 하나만 만들고 다른 임베딩 공급자(Voyage 등)는 어댑터만 나중에 더한다.
 
 ## 테스트 주의
 

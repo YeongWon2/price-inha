@@ -70,7 +70,9 @@ D10 M7 V22 V23
   1. 포트가 없으면 `Unavailable`. 저장소를 바꾸지 않고 바깥 요청 0건(V23). 남은 설정도 그대로.
   2. `current.model` · `current.dims`가 붙은 포트의 `model()` · `Some(dims())`와 다르면 `Error::Embedder`이고 아무것도 바꾸지 않는다.
   3. `embed_missing(batch)`를 한 번 부른다(포트 호출 많아야 1번 — 지금 약속 그대로). 임베딩은 모델별로 남으므로(`chunks_missing_embedding(model, …)`), 공급자 · 모델이 바뀌면 새 모델 기준으로 모든 조각이 "빠짐"이 되어 차례로 다시 만들어진다. 글이 바뀐 기록(`index()`가 옛 임베딩을 지움)도 같은 길로 다시 만들어진다(M7 "기록이 바뀌면 다시 만든다").
-  4. 이번에 둔 것이 있으면 `InProgress { embedded }`. 빠진 조각이 하나도 없으면 그때 **처음으로** `record_settings(current)`를 하고 `Done`(그때의 `plan_reindex(current, true, false)` 결과를 함께 준다).
+  4. 이번에 둔 것이 있으면 `InProgress { embedded }`. 빠진 조각이 하나도 없으면 그때 **처음으로** `record_settings(current)`를 하고 `Done`(그때의 `plan_reindex(current, true, false)` 결과를 함께 준다 — **설정을 남기기 전에** 구한 값이다. 남긴 뒤 값은 늘 `Keep`이라 뜻이 없다).
+  4-1. (4차 검토 되돌림으로 보강) **`batch`가 0이면** 아무것도 하지 않고 `InProgress { embedded: 0 }`을 준다. 포트를 부르지 않고 설정도 남기지 않는다("빠진 것이 없다"와 "이번에 하나도 안 만들었다"를 섞지 않는다).
+  4-2. (4차 검토 되돌림으로 보강) **모델 이름은 같고 차원만 다른 경우**: 남아 있는 설정의 모델이 `current.model`과 같고 차원이 다르면(`plan_reindex`가 `Rebuild(DimsChanged)`) 저장소가 "그 모델의 임베딩이 없는 조각"만 고를 수 있어(차원은 보지 않는다) 옛 차원 벡터를 다시 만들 길이 없다. 이때는 `Done`을 내지 않고 설정도 남기지 않으며 `Error::Embedder`(글: 차원을 바꾸려면 모델 이름을 바꾸거나 색인을 다시 올려야 한다)로 끝낸다. 포트 호출 0건. 차원까지 보는 저장소 조회는 store 다음 차수(벡터 조회 API와 함께)에서 더하고, 그때 이 줄을 "다시 만든다"로 바꾼다.
   5. 포트가 실패하면 `Err`이고 남은 설정은 그대로다. 그래서 도중에 꺼지거나 실패해도 다음 부름이 이어서 하고, 남은 설정은 "다 만들어진 색인"만 가리킨다(원본의 "옆에 새 색인을 만들어 한 번에 바꿔치기"를 줄인 것, 4.3 "줄여서").
   6. 조각 설정 · 색인 방식 · 범위가 바뀐 까닭(`ChunkSettingsChanged` · `TokenizerChanged` · `ScopeChanged`)은 이 함수가 글을 다시 나누지 않는다(이 모듈은 원래 글을 갖고 있지 않다). 그 경우 server가 기록을 `index()`로 다시 올린 뒤 이 함수를 부른다 — server 차수.
 - 공급자가 죽었을 때 벡터 색인을 키워드 전용으로 덮어쓰지 않는 규칙(`plan_reindex`의 `SkipProviderUnavailable`)은 그대로다.
