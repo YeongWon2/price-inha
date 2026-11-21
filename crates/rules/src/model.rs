@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use pi_market::{Currency, Market, MarketCalendar, Quote, StalePolicy, Symbol};
+use pi_market::{Currency, Market, MarketCalendar, Quote, StalePolicy, Symbol, TradingStatus};
 use pi_paper::{ApprovedOrder, MarketRules, OrderType, Side};
 use pi_template::RiskParams;
 use rust_decimal::Decimal;
@@ -80,8 +80,13 @@ pub enum Purpose {
     StopLoss,
     /// 익절로 판다.
     TakeProfit,
-    /// 청산한다. 어떤 멈춤에서도 받는다(E34 · P3).
+    /// 청산한다. 어떤 멈춤에서도 받는다(E34 · P3). 템플릿의 손절 방식에 든 장 마감 청산 ·
+    /// 최대 보유 기간(시간 손절)으로 걸어 둔 것이라 "걸어 둔 손절"로 읽는다(결정 2026-11-21 12번).
     Liquidation,
+    /// 팀장이 팔기로 판단한 매도(4차). 방향은 팔기다. 전체 정지(E24 · F4 7b2) 중에는 익절처럼
+    /// 막히고, 다른 상태에서는 청산과 같은 점검을 받는다(근거 · 가진 수량 · 열린 익절에 중복으로
+    /// 막히지 않음 · 승인 없음).
+    TeamExit,
 }
 
 impl Purpose {
@@ -254,6 +259,20 @@ pub struct SymbolStatus {
     pub vi: Option<bool>,
     /// 거래정지인가.
     pub halted: Option<bool>,
+}
+
+impl SymbolStatus {
+    /// market이 준 거래 상태(공급자 값 또는 시세 추정, `pi_market::resolve_status`)를 점검의
+    /// 표시로 바꾼다(결정 2026-11-21 5번).
+    ///
+    /// - `Normal` → `{ vi: Some(false), halted: Some(false) }`(통과).
+    /// - `Vi` → `{ vi: Some(true), halted: None }`.
+    /// - `Halted` → `{ vi: None, halted: Some(true) }`.
+    /// - `Unknown`과 앞으로 더해질 모르는 변형 → `{ vi: None, halted: None }`(모르면 막는다).
+    pub fn from_trading_status(status: TradingStatus) -> SymbolStatus {
+        let _ = status;
+        todo!()
+    }
 }
 
 /// 자료와 연결의 상태(P11 · N6). 하나라도 나쁘면 새 주문(사기)을 막는다. 손절 · 청산은 받는다.

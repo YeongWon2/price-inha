@@ -125,6 +125,8 @@ pub enum Violation {
     MarketBuyOverAutoLimit,
     /// P13: 비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다.
     NoPositiveEdge,
+    /// P12 · E22: 답 없는 사기를 금액 한도 안으로 줄였더니 한 주도 살 수 없다(4차).
+    NothingWithinLimit,
 }
 
 impl Violation {
@@ -161,6 +163,7 @@ impl Violation {
             | Violation::ApiLimitReached
             | Violation::MarketBuyOverAutoLimit => Principle::P12,
             Violation::NoPositiveEdge => Principle::P13,
+            Violation::NothingWithinLimit => todo!(),
         }
     }
 
@@ -203,6 +206,7 @@ impl Violation {
                 "시장가 사기가 자동 주문 금액 한도를 넘는다(승인이 필요한 사기는 지정가만)"
             }
             Violation::NoPositiveEdge => "비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다",
+            Violation::NothingWithinLimit => todo!(),
         };
         text.to_string()
     }
@@ -234,7 +238,8 @@ impl BlockKind {
 pub enum Reason {
     /// E20: 판단됨이 아닌 매매의 주문 안이다.
     NotJudged(TradeStage),
-    /// E31: 운용 중이 아닐 때의 사는 주문이다.
+    /// E31 · E24: 운용 중이 아닐 때의 사는 주문, 또는 전체 정지 중의 걸어 둔 손절 · 청산이
+    /// 아닌 파는 주문(익절 · 팀장 판단 매도)이다(4차, 결정 2026-11-21 12번).
     TeamNotOperating(TeamStatus),
     /// E10 · P9: 빠진 근거 칸들([`RationaleField::ALL`] 순서). 손절값이 빠지면 P2도 어긴 것이다.
     MissingRationale(Vec<RationaleField>),

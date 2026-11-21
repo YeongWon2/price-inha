@@ -10,8 +10,10 @@
 //!   승인 소비 뒤 [`approved`]로 다시 점검을 거쳐야 점검 통과가 된다.
 //! - 손실과 멈춤(T13)은 [`day_loss_pct`] · [`drawdown_pct`] · [`evaluate_stops`]가 센다.
 //!   전이를 실제로 하는 것은 store다.
+//! - 이상 감지 멈춤에 들어가고 스스로 푸는 것(P11 · N6)은 [`evaluate_health`]가 정한다.
 //! - 시각은 언제나 인자로 받는다. 돈은 [`rust_decimal::Decimal`]로만 센다.
 
+mod anomaly;
 mod approval;
 mod check;
 pub mod error;
@@ -22,7 +24,11 @@ mod principles;
 mod screen;
 mod sizing;
 
-pub use approval::{ApprovalGrant, approved};
+pub use anomaly::{
+    DEFAULT_RECOVERY_HOLD, HealthTransition, HealthWatch, RecoveryPolicy, evaluate_health,
+    is_abnormal,
+};
+pub use approval::{ApprovalGrant, approved, reduce_within_limit};
 pub use check::{check, issue, issue_for_trade};
 pub use error::Error;
 pub use loss::{StopContext, StopTransition, day_loss_pct, drawdown_pct, evaluate_stops};

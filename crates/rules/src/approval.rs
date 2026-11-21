@@ -65,3 +65,25 @@ pub fn approved(
     }
     Ok(Passed::new(done.order, done.amount).with_approval(grant.clone()))
 }
+
+/// 답 없는 사기를 지금의 금액 한도 안으로 줄여 다시 점검한다(FN2 3b3 · E22, 4차).
+///
+/// approval의 `DueAction::ReduceWithinLimit`를 받은 server가 부른다. 답이 없어 승인이 없으므로
+/// 승인 증표를 받지 않는다.
+///
+/// - `draft`를 지금의 `ctx`로 [`crate::check`]와 같은 순서로 다시 점검한다(판단 · 팀 상태 · 근거 ·
+///   원칙 · 주문 직전 점검). 막히면 그 막힘 그대로 낸다(시장가 사기는
+///   [`crate::Violation::MarketBuyOverAutoLimit`] 그대로).
+/// - 다시 셈한 주문의 종목 · 방향 · 호가 유형이 `pending.order()`와 다르거나 사는 주문이 아니면
+///   [`crate::Reason::ApprovalMismatch`].
+/// - 수량 = `min(다시 셈한 수량, pending의 수량, floor(평가액 × 자동 주문 금액 한도% ÷ 지정가))`.
+///   지정가는 다시 셈한 값이다. 0이면 [`crate::Violation::NothingWithinLimit`].
+/// - 줄인 금액은 한도 이하라 승인 없이 [`Passed`]이고 [`Passed::approval`]은 `None`이다.
+pub fn reduce_within_limit(
+    pending: PendingApproval,
+    draft: &OrderDraft,
+    ctx: &CheckContext<'_>,
+) -> Result<Passed, Blocked> {
+    let _ = (pending, draft, ctx);
+    todo!()
+}
