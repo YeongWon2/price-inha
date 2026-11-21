@@ -132,12 +132,17 @@ impl SecretStore {
             }
         }
         // 8차: 공급자 키 줄은 어떤 공급자가 선언했는지 몰라도 모두 가린다(모르면 가린다).
-        if let Some(text) = fsio::read_private(&dir.join(ENV_FILE), ENV_FILE)? {
-            for (name, value) in envfile::read_prefixed(&text, KEY_LINE_PREFIX) {
-                if value.chars().count() >= MIN_SECRET_CHARS {
-                    targets.set_current_line(name, &value);
+        // 깨진 파일이면 줄을 올리지 못하지만, 그때는 어떤 읽기도 값을 내주지 않는다.
+        match fsio::read_private(&dir.join(ENV_FILE), ENV_FILE) {
+            Ok(Some(text)) => {
+                for (name, value) in envfile::read_prefixed(&text, KEY_LINE_PREFIX) {
+                    if value.chars().count() >= MIN_SECRET_CHARS {
+                        targets.set_current_line(name, &value);
+                    }
                 }
             }
+            Ok(None) | Err(SecretsError::Corrupt { .. }) => {}
+            Err(other) => return Err(other),
         }
         Ok(Self {
             dir,
@@ -389,5 +394,14 @@ mod tests {
         }
         let out = store.redact("옛 시험용-자료-값-0008 새 시험용-자료-값-0009");
         assert_eq!(out, format!("옛 {0} 새 {0}", crate::REDACTED));
+    }
+
+    #[test]
+    fn utf8이_아닌_키_파일이_있어도_열린다() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut bytes = b"MY_OTHER=keep\n".to_vec();
+        bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        fs::write(tmp.path().join(ENV_FILE), bytes).unwrap();
+        assert!(SecretStore::open(tmp.path()).is_ok());
     }
 }
