@@ -67,4 +67,19 @@ impl Condition {
         };
         symbol_ok && from_ok && to_ok && pnl_ok
     }
+
+    /// 실수 유형 조건에 맞는가. 조건이 없거나(공백을 뗀 값이 빔) 카탈로그의 실수 가운데
+    /// 공백을 뗀 글자가 똑같은 것이 있으면 참이다.
+    pub(crate) fn matches_mistake(&self, catalog: &dyn TradeCatalog, record_ref: &str) -> bool {
+        let Some(wanted) = self.mistake.as_deref().map(str::trim) else {
+            return true;
+        };
+        if wanted.is_empty() {
+            return true;
+        }
+        catalog
+            .mistakes(record_ref)
+            .iter()
+            .any(|m| m.trim() == wanted)
+    }
 }

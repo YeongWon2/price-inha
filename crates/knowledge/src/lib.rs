@@ -75,7 +75,24 @@ impl RecordText {
         note: &str,
         at: UnixMillis,
     ) -> Option<RecordText> {
-        todo!()
+        let kept: Vec<&str> = mistakes
+            .iter()
+            .map(|m| m.trim())
+            .filter(|m| !m.is_empty())
+            .collect();
+        if kept.is_empty() {
+            return None;
+        }
+        Some(RecordText {
+            kind: KnowledgeKind::Mistake,
+            source: KnowledgeSource::Team,
+            record_ref: trade_ref.to_string(),
+            text: format!(
+                "실수 · 매매 {trade_ref} · 종목 {symbol}\n실수: {}\n{note}",
+                kept.join(", ")
+            ),
+            at,
+        })
     }
 
     /// 담당이 쓴 시장 메모. 종류 `MarketNote`, 글은 그대로. 등급은 `Mine` · `Team`만 받고
@@ -86,7 +103,18 @@ impl RecordText {
         text: &str,
         at: UnixMillis,
     ) -> Result<RecordText, Error> {
-        todo!()
+        if source == KnowledgeSource::External {
+            return Err(Error::InvalidRecord(
+                "바깥 자료는 시장 메모가 아니라 바깥 자료 길로 올린다".to_string(),
+            ));
+        }
+        Ok(RecordText {
+            kind: KnowledgeKind::MarketNote,
+            source,
+            record_ref: note_ref.to_string(),
+            text: text.to_string(),
+            at,
+        })
     }
 
     /// 뉴스 · 공시 요약(바깥 자료). 종류 `MarketNote`, 등급 `External`, 글은 `{title}\n{summary}\n{link}`,
@@ -98,7 +126,13 @@ impl RecordText {
         link: &str,
         published_at: UnixMillis,
     ) -> RecordText {
-        todo!()
+        RecordText {
+            kind: KnowledgeKind::MarketNote,
+            source: KnowledgeSource::External,
+            record_ref: item_ref.to_string(),
+            text: format!("{title}\n{summary}\n{link}"),
+            at: published_at,
+        }
     }
 }
 
@@ -247,7 +281,7 @@ impl Knowledge {
         let mut trades: Vec<TradeRecord> = catalog
             .trades()
             .into_iter()
-            .filter(|t| condition.matches(t))
+            .filter(|t| condition.matches(t) && condition.matches_mistake(catalog, &t.record_ref))
             .collect();
         trades.sort_by(|a, b| {
             b.closed_at
@@ -325,7 +359,27 @@ impl Knowledge {
         current: &IndexSettings,
         batch: usize,
     ) -> Result<ReembedProgress, Error> {
-        todo!()
+        let Some(embedder) = &self.embedder else {
+            return Ok(ReembedProgress::Unavailable);
+        };
+        if current.model != embedder.model() || current.dims != Some(embedder.dims()) {
+            return Err(Error::Embedder(
+                "현재 색인 설정의 모델이나 차원이 붙은 임베딩 공급자와 다르다".to_string(),
+            ));
+        }
+        let report = self.run_embed_missing(batch).await?;
+        if report.embedded > 0 {
+            return Ok(ReembedProgress::InProgress {
+                embedded: report.embedded,
+            });
+        }
+        // 다 만들어졌다. 남기기 전의 계획(무엇이 바뀌어 다시 만들었나)을 함께 준다.
+        let plan = self.plan_reindex(current, true, false)?;
+        self.record_settings(current)?;
+        Ok(ReembedProgress::Done {
+            embedded: report.embedded,
+            plan,
+        })
     }
 
     /// 다시 색인할지 정한다. 규칙: 남은 설정이 없으면 `Rebuild(FirstTime)`; 남은 설정에 벡터가 있는데
