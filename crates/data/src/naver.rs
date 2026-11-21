@@ -402,7 +402,8 @@ fn parse_items(body: &str, query: &str, known_at: DateTime<Utc>) -> Result<Parse
 
 /// 기사 하나를 읽는다. 칸이 없거나 시각을 못 읽으면 형식 오류, 링크 값이 이상하면 `Ok(None)`(버림).
 ///
-/// 링크 검사는 시각 검사보다 먼저다. `originallink`가 비었거나 이상하면 `link`를 쓰고,
+/// 시각을 먼저 읽는다: 링크가 이상해도 시각을 못 읽으면 응답 전체가 형식 오류다.
+/// 그 뒤 링크를 본다. `originallink`가 비었거나 이상하면 `link`를 쓰고,
 /// 둘 다 쓸 수 없으면(둘 다 빈 글인 것도) 버린다.
 fn parse_item(
     item: &Value,
@@ -419,12 +420,12 @@ fn parse_item(
     let original = text("originallink")?;
     let naver = text("link")?;
     let pub_date = text("pubDate")?;
-    let Some(link) = web_link(original).or_else(|| web_link(naver)) else {
-        return Ok(None);
-    };
     let published_at = DateTime::parse_from_rfc2822(pub_date.trim())
         .map_err(|_| format_error("기사 시각(pubDate)을 읽을 수 없습니다"))?
         .with_timezone(&Utc);
+    let Some(link) = web_link(original).or_else(|| web_link(naver)) else {
+        return Ok(None);
+    };
     Ok(Some(NewsItem {
         provider: PROVIDER,
         query: query.to_owned(),
@@ -578,13 +579,13 @@ mod tests {
     }
 
     #[test]
-    fn 링크가_이상한_기사는_시각보다_먼저_버리고_미래_기사는_세지_않는다() {
+    fn 링크가_이상한_기사는_버려_세고_미래_기사는_세지_않는다() {
         let known_at = DateTime::parse_from_rfc3339("2026-11-21T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let body = serde_json::json!({ "items": [
             article("https://a.example.com/1", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
-            article("bad link", "", "시각 아님"),
+            article("bad link", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
             article("", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
             article("https://a.example.com/2", "", "Sun, 22 Nov 2026 08:00:00 +0900"),
         ]})
@@ -593,6 +594,24 @@ mod tests {
         assert_eq!(parsed.dropped, 2);
         let links: Vec<&str> = parsed.items.iter().map(|n| n.link.as_str()).collect();
         assert_eq!(links, ["https://a.example.com/1"]);
+    }
+
+    #[test]
+    fn 링크도_시각도_이상한_기사는_응답_전체_형식_오류다() {
+        let known_at = DateTime::parse_from_rfc3339("2026-11-21T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let body = serde_json::json!({ "items": [
+            article("https://a.example.com/1", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
+            article("bad link", "", "시각 아님"),
+        ]})
+        .to_string();
+        let result = parse_items(&body, "q", known_at);
+        assert!(
+            matches!(result, Err(NewsError::Format { .. })),
+            "{:?}",
+            result.map(|p| p.dropped)
+        );
     }
 
     #[test]
