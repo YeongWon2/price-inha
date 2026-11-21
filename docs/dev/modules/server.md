@@ -209,3 +209,42 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 
 ### 하지 않는 것 (이번 차수)
 - Tailscale · 방화벽 설정(사용자가 고른다, D2). 자동 업데이트(결정 "알리기만" 추천이 아직 미정). 설치 스크립트(다음 차수 후보). `doctor --fix`.
+
+## 10차 작업 (2026-11-21 발표 자료 대조 — 모듈 잇기)
+
+9차(홈서버) 뒤에 한다. 모듈 차수(market 7 · data 4 · secrets 8 · rules 4 · template 9 · agent 9 · trigger 6 · approval 4 · knowledge 4 · ai 10)가 만든 것을 실행 파일에 잇는다. 로직을 다시 만들지 않고 잇기만 한다. 근거는 `docs/dev/decisions.md` 2026-11-21 절 1~15번과 각 모듈 지시서의 "server 차수에서 잇는다" 줄이다. 크기가 커서 **10a · 10b · 10c 세 걸음**으로 나눠 red → green을 따로 한다(새 테스트는 걸음마다 새 최상위 폴더).
+
+### 원본 동작 근거
+각 걸음이 잇는 모듈 지시서의 근거를 따른다. 조립 자체는 원본에 없음 — 스펙 F2 · F4 · F6 · FN2 · F9와 결정 번호.
+
+### 10a 돈을 지키는 쪽 (먼저)
+1. **VI 추정 잇기** (결정 5 · 11 · 14): 시세마다 종목별 최근 시세 버퍼(끝이 있는 크기)를 두고 `pi_market::estimate_status` → `resolve_status` → `pi_rules::SymbolStatus::from_trading_status`를 점검 입력에 넣는다. 지금 `team/tools.rs`가 늘 '모름'을 넣는 자리를 바꾼다. `StatusPolicy`는 **`StatusPolicy::for_market(calendar.market)`로만** 만든다(시장 · 정책 불일치 금지). 기준가는 지난 정규장 마지막 시세를 저장해 쓰고, 없으면 그대로 막힌다(결정 11). 여러 경로의 시세를 한 버퍼에 섞지 않는다.
+2. **이상 감지** (결정 8 · 13): 시세를 받은 **뒤에** `pi_rules::evaluate_health`를 주기적으로 부른다(장 시작 순간 낡은 시세로 매일 멈추지 않게). 지금 `trading/order.rs`가 `api_error` · `data_anomaly`를 늘 `false`로 넘기는 것을 실제 신호(시세 공급자 오류, 자료 어댑터의 연속 실패)로 바꾼다. `healthy_since`는 비정상이 한 번이라도 생기면 지운다. `Recovered`면 이상 감지 멈춤 → 쉬는 중으로 옮긴 뒤 그날 계획을 적용한다. `hold` 설정은 최솟값(1초)을 둔다.
+3. **전체 정지 중 매도** (결정 12): rules 4차가 막는다. server의 손절 감시가 붙이는 목적(`StopLoss` · `Liquidation`)은 server 코드만 만들 수 있고, **AI 입력에서 온 주문 안은 언제나 `TeamExit`(팔기) · 사기 목적**이 되게 한다(라벨 위조 금지 시험).
+4. **팀장 팔기** (agent 9차): `CrewTools::submit_sell_draft`를 구현해 `Purpose::TeamExit` 매도로 점검 · 실행에 잇는다. 같은 보유(`holding`)에 열린 매도가 있으면 다시 내지 않는다. 보유 수량을 넘는 매도는 나가지 않는다(exec/paper가 거절하는지 시험으로 확인). "팔기 판단 + 보유 있음 → 논의 Ok, 매도 주문이 점검으로 간다" 시험.
+5. **답 없음** (approval 4차 · rules 4차): 주기적으로 `expire_due` → `unhandled_due`를 보고, 사기는 `reduce_within_limit`로 줄여 다시 점검해 내고, 팔기는 팀 판단(손절 신호면 그대로 실행)으로 넘긴 뒤 `record_due_handling`으로 한 번만 남긴다. 신호 유효 시간이 지난 것은 **`Dropped`만** 기록한다(늦은 매수 · 매도 금지, `DoNotBuy`의 late_drop 포함 시험).
+6. **템플릿 값 바꾸기** (결정 9, template 9차): `templates.rs`의 조정 경로가 `plan_adjust`를 쓴다. `ApplyNow`는 바로, `NeedsApproval`은 복기 개선안과 같은 길(승인 → 냉각 → 다음 거래일)로. journal에 사용자 변경을 개선안으로 넣는 API가 없으면 멈추고 journal 차수를 먼저 연다.
+7. **승격** (결정 6): 장 마감 뒤 `promotion::evaluate`로 기준을 재고, 통과하면 승격대기 + 승인 요청, 승인되면 `promote_live`. 실전 주문은 계속 E25로 막힌다(V29 · V30 · E36 시험).
+
+### 10b 깨우기 · 자료
+8. **트리거** (trigger 6차): `TriggerConfig`의 시세 조건을 `watch_conditions`(지켜보는 종목 · 기준가, 기본 3%)로 채우고 종목이 바뀌면 `replace_conditions`. 자료를 주기적으로 가져와 새 뉴스 · 새 공시 · 재무/거시 값 바뀜을 `push_data`로 넘긴다. 다시 켠 뒤의 중복은 자료를 가져오는 쪽이 마지막으로 본 것을 저장소에 기억해 거른다. 네이버 하루 한도(25,000회)를 넘지 않게 주기와 종목 수로 상한을 둔다.
+9. **뉴스 · FRED** (data 4차): `NewsRegistry`에 네이버를 등록하고, 키는 `SecretStore`의 `NewsKeySource`로. 논의 자료에 뉴스(제목 · 요약 · 링크 · 시각)와 출처를 싣고 판단 기록에 남긴다(V35). FRED `UsRate`를 자료 요청에 더한다(`team/facts.rs`).
+10. **키 칸** (secrets 8차): 설정 화면 · `/keys` · `doctor`의 칸 목록을 공급자 선언(`ProviderKeys`)에서 만든다. `KeyVerifier::verify_provider`를 네이버(`verify_news_keys`)에 잇는다. 옛 `item` `data` 칸은 화면에서 뺀다(8차 검토 참고).
+11. **공급자 등록부** (market 7차): 시세는 `MarketRegistry`를 거친다(토스 하나 등록). 
+
+### 10c 기억 · 화면
+12. **검색 도구** (knowledge 4차): `knowledge_search` 도구에 날짜(from · to)와 실수 유형 조건을 내보낸다. 복기 때 실수 기록(`RecordText::mistakes`), 시장 메모, 뉴스 · 공시 요약(`external`, 자동 회상 제외)을 색인한다. `TradeCatalog::mistakes`를 저장소로 구현한다.
+13. **뜻 검색** (ai 10차, 결정 15): 설정의 "뜻 검색 켜기"(기본 꺼짐, Ollama 주소는 루프백만 · 모델 기본 `bge-m3`)가 켜지면 `OllamaEmbeddingProvider`를 `EmbeddingRegistry`에 등록하고, 감싸는 타입으로 `pi_knowledge::Embedder`를 구현해 `Knowledge::with_embedder`에 건다. `reembed_step`을 한가할 때 한 걸음씩 돌린다(간격 · 취소). `doctor`에 Ollama 항목. `hybrid_search`는 store · knowledge 다음 차수 뒤에 잇는다.
+14. **사무실 승인 카드** (FN2 "폰과 사무실로"): 사무실 화면에 승인 카드(내용 · 지문 앞 6자리 · 승인/거절, 폰과 같은 경로 · 같은 지문 대조). **Vite 이전(결정 1)과 겹치므로 화면은 Vite 차수에서 만들고, 여기서는 경로와 이벤트만 확인한다.**
+15. **메모리 (N1)**: 시연 모드로 띄워 논의 · 시세 · 트리거를 돌린 뒤 프로세스 RSS가 500MB 아래인지 재는 시험(운영체제별로 재는 법이 다르면 유닉스만, 나머지는 "미확인"으로 보고).
+
+### 걸음마다 테스트 주의
+가짜 시세 · 가짜 AI · 가짜 자료 서버만. 실제 토스 · 네이버 · Ollama · GitHub 주소 금지. 앞 차수 잠긴 테스트(특히 `round9/loss.rs:160-168`, `setup/mod.rs`의 `/api/setup` 칸)를 깨지 않는다.
+
+### 넘어온 다듬기 후보 (모듈 다음 차수, server 밖)
+- market: `status.rs`의 `Decimal` 뺄셈을 `checked_sub`로(넘치면 죽는 길), 같은 시각 다른 가격 쌍은 움직임에서 빼기, 공급자 ID · 키 칸 선언을 어댑터 쪽으로 옮길지(지금은 enum 3곳 고침).
+- template · journal: ATR 손절의 봉 단위 넓히기를 위험을 키우는 변경에 넣기, 두 `increases_risk`를 하나로.
+- rules: 금액 한도가 수수료 포함인지(E21) 확인, `reduce_within_limit` 속성 테스트.
+- secrets: `store.rs:118` 주석("다시 등록하면 고쳐진다")은 UTF-8 깨짐에는 맞지 않음.
+- approval: `unhandled_due`가 닫힌 요청을 매번 모두 읽음(몇 달 뒤 비용), `Blocked.reason` 길이 상한.
+- store → knowledge: 모델별 조각 벡터 조회 API, 그 뒤 `hybrid_search`. 벡터 점수 식은 원본(OpenClaw) 조사를 더 한 뒤.
