@@ -78,7 +78,7 @@ pub trait Tools: Send + Sync {
     /// 팔기 주문 안을 넘긴다(9차). 넘겨받은 쪽이 rules의 `Purpose::TeamExit`로 점검한다.
     ///
     /// 기본 구현은 받지 않는다: `Err(ToolError("팔기 주문 안을 받지 않습니다"))`.
-    async fn submit_sell_draft(&self, draft: &SellDraft) -> Result<(), ToolError> {
-        todo!()
+    async fn submit_sell_draft(&self, _draft: &SellDraft) -> Result<(), ToolError> {
+        Err(ToolError("팔기 주문 안을 받지 않습니다".to_string()))
     }
 }

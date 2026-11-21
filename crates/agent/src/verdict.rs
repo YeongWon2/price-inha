@@ -90,9 +90,19 @@ pub(crate) struct DraftReply {
 /// 매매 담당의 주문 안 답을 읽는다: 방향이 `buy`인 객체만 된다.
 /// 수량 · 가격은 0보다 큰 숫자일 때만 참고값으로 담고, 아니면 버린다(P7).
 pub(crate) fn parse_draft(text: &str) -> Option<DraftReply> {
+    parse_draft_as(text, "buy")
+}
+
+/// 매매 담당의 팔기 주문 안 답을 읽는다: 방향이 `sell`인 객체만 된다(9차). 나머지는 [`parse_draft`]와 같다.
+pub(crate) fn parse_sell_draft(text: &str) -> Option<DraftReply> {
+    parse_draft_as(text, "sell")
+}
+
+/// 방향이 `expected`인 주문 안 답 객체를 읽는다.
+fn parse_draft_as(text: &str, expected: &str) -> Option<DraftReply> {
     let object = find_object_with(text, "side")?;
     let side = object.get("side")?.as_str()?.trim().to_ascii_lowercase();
-    if side != "buy" {
+    if side != expected {
         return None;
     }
     let note = match object.get("note") {
@@ -177,5 +187,15 @@ mod tests {
         assert!(parse_draft("{\"side\": \"buy\", \"note\": 3}").is_none());
         let empty = parse_draft("{\"side\": \"buy\"}").unwrap();
         assert_eq!(empty.note, "");
+    }
+
+    #[test]
+    fn 사기_답과_팔기_답은_서로_받지_않는다() {
+        let sell = "{\"side\": \"Sell\", \"note\": \" 정리 \", \"quantity\": 2}";
+        assert!(parse_draft(sell).is_none());
+        let reply = parse_sell_draft(sell).unwrap();
+        assert_eq!(reply.note, "정리");
+        assert_eq!(reply.ai_quantity, Some(Decimal::from(2)));
+        assert!(parse_sell_draft("{\"side\": \"buy\", \"note\": \"x\"}").is_none());
     }
 }

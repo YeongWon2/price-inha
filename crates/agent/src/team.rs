@@ -32,6 +32,9 @@
 //!    - 모양이 틀리면 팀장 응답 실패로 지켜보기.
 //!    - 판단은 방 로그 `message.member`(쓴 쪽 팀장)로 남고 내용에 `"decision": "buy"|"sell"|"watch"`가 있다.
 //! 7. 사기면 [`Team::draft_order`]와 같은 길로 매매 담당이 주문 안을 만든다(V4).
+//!    팔기면 [`Team::draft_sell`]과 같은 길로 같은 종목 · 계좌 종류의 보유 매매마다 파는 주문 안을 만든다(9차).
+//!    팔 보유가 없으면 매매 담당을 부르지 않고 방 로그에 `room.activity`
+//!    (`{"status": "nothing_held", "trade": <번호>}`)를 남긴다.
 //!
 //! 지켜보기로 끝나면 매매는 논의중 그대로이고(판단을 저장하지 않는다) 주문 안을 만들지 않는다.
 //! 그때 방 로그에 `room.activity`(쓴 쪽 `Gateway`, 내용 `{"status": "watch", "reason_code": <코드>}`)를
@@ -44,12 +47,14 @@ use serde_json::json;
 use crate::discussion::{DataItem, Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
 use crate::error::{Error, TurnFailure};
 use crate::floor::{Floor, is_pass, mentions};
-use crate::ports::{OrderDraft, SellDraft, Side};
+use crate::ports::{OrderDraft, Side};
 use crate::prompt;
 use crate::role::{Role, RoleConfig, TimeLimits};
 use crate::roomlog::{RoomLog, Writer};
 use crate::score::{consensus, exceeds_threshold, parse_score};
 use crate::turn::{Ports, TurnOutcome, TurnRunner};
+
+mod sell;
 use crate::verdict::{Verdict, is_complete, parse_draft, parse_verdict};
 
 /// 투자 팀. 담당 6명의 설정과 실행기를 가진다.
@@ -199,23 +204,6 @@ impl Team {
         };
         self.ports.tools.submit_order_draft(&draft).await?;
         Ok(draft)
-    }
-
-    /// 팔기로 판단된 매매에 대해 매매 담당이 같은 종목 보유를 파는 주문 안을 만들어 넘긴다(V4, 9차).
-    ///
-    /// - 매매가 판단됨이 아니면 [`Error::TradeNotJudged`](E20), 저장소의 방향이 팔기가 아니면(사기 · 없음)
-    ///   [`Error::TradeNotSell`]. 둘 다 AI를 부르지 않는다.
-    /// - 팔 것: 저장소의 보유중 매매 가운데 종목 · 계좌 종류가 판단 매매와 같은 것(만든 순서).
-    ///   없으면 AI를 부르지 않고 빈 목록이다.
-    /// - 있으면 매매 담당 턴 한 번. 답은 `{"side": "sell", "note": 글, "quantity"?: 수, "price"?: 수}`.
-    ///   `side`가 `sell`이 아니거나 모양이 틀리면 매매 담당 응답 실패([`Error::RoleUnavailable`]).
-    /// - 보유 매매마다 [`SellDraft`] 하나(같은 설명 · 참고값)를 [`Tools::submit_sell_draft`]로 하나씩 넘기고,
-    ///   넘긴 것을 돌려준다. 넘기기가 실패하면 그 오류로 끝난다.
-    /// - 설명은 넘기기 전에 가린다(E38). 판단 매매의 상태는 옮기지 않는다.
-    ///
-    /// [`Tools::submit_sell_draft`]: crate::Tools::submit_sell_draft
-    pub async fn draft_sell(&self, trade: TradeId) -> Result<Vec<SellDraft>, Error> {
-        todo!()
     }
 
     /// 담당 한 명의 턴. 세션 제목은 매매마다 하나다.
@@ -376,16 +364,24 @@ impl Team {
         self.ports
             .store
             .judge_trade_with_side(session.request.trade, judgment, stored_side)?;
-        let (decision, order) = match side {
-            Side::Sell => (Decision::Sell, None),
-            Side::Buy => (Decision::Buy, self.order_after_judgment(session).await?),
+        let (decision, order, sells) = match side {
+            Side::Sell => (
+                Decision::Sell,
+                None,
+                self.sells_after_judgment(session).await?,
+            ),
+            Side::Buy => (
+                Decision::Buy,
+                self.order_after_judgment(session).await?,
+                Vec::new(),
+            ),
         };
         Ok(DiscussionOutcome {
             decision,
             scores,
             consensus: Some(total),
             order,
-            sells: Vec::new(),
+            sells,
         })
     }
 

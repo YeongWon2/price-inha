@@ -1,6 +1,6 @@
 //! 담당에게 보내는 글: 시스템 글 세 층(공통 · 담당 SOUL · 팀 규칙)과 턴마다의 입력 글.
 
-use pi_store::{RoleScore, Trade};
+use pi_store::{Amount, RoleScore, Trade, TradeId};
 
 use crate::discussion::DiscussionRequest;
 use crate::role::{Role, RoleConfig};
@@ -125,6 +125,34 @@ pub(crate) fn order_turn(trade: &Trade) -> String {
          답은 JSON 객체 하나다: {{\"side\": \"buy\", \"note\": \"<설명>\"}}",
         id = trade.id.0,
         symbol = trade.symbol,
+    )
+}
+
+/// 매매 담당의 팔기 주문 안 턴의 입력 글(9차): 판단의 근거 · 팔 보유 매매 번호들 · 금액 단위 안내.
+pub(crate) fn sell_turn(judged: &Trade, holdings: &[TradeId]) -> String {
+    let text = |value: &Option<String>| value.clone().unwrap_or_default();
+    let amount = |value: Option<Amount>| value.map(|a| a.0.to_string()).unwrap_or_default();
+    let rationale = &judged.rationale;
+    let ids: Vec<String> = holdings.iter().map(|id| id.0.to_string()).collect();
+    format!(
+        "[팔기 주문 안] 팔기로 판단된 매매 {id} · 종목 {symbol}. 같은 종목 보유 매매 {held}를 파는 주문 안을 만든다.\n\
+         [판단 근거]\n\
+         - 가설: {hypothesis}\n\
+         - 계기: {trigger}\n\
+         - entry: {entry} · stop: {stop} · target: {target} · expected_value: {expected}\n\
+         금액은 통화의 최소 단위 정수다: 국내 종목은 원, 미국 종목은 센트.\n\
+         수량과 가격은 규칙 엔진이 정한다. 적으면 참고값으로만 쓴다.\n\
+         답은 JSON 객체 하나다: {{\"side\": \"sell\", \"note\": \"<설명>\", \
+         \"quantity\": <수, 생략 가능>, \"price\": <수, 생략 가능>}}",
+        id = judged.id.0,
+        symbol = judged.symbol,
+        held = ids.join(", "),
+        hypothesis = text(&rationale.hypothesis),
+        trigger = text(&rationale.trigger),
+        entry = amount(rationale.entry),
+        stop = amount(rationale.stop),
+        target = amount(rationale.target),
+        expected = amount(rationale.expected_value),
     )
 }
 
