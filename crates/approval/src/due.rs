@@ -2,10 +2,11 @@
 
 use pi_store::{ApprovalStatus, StoreError, UnixMillis};
 
-use crate::approvals::{ApprovalNumber, Approvals, DueAction, DueOutcome, Notice};
+use crate::approvals::{ApprovalNumber, Approvals, DueOutcome};
 use crate::error::Error;
+use crate::handling::due_action;
 use crate::record;
-use crate::subject::{Side, Subject};
+use crate::subject::Subject;
 
 impl Approvals {
     /// 기한이 된 기다림 요청을 닫고 처리 방침을 돌려준다(E22).
@@ -33,15 +34,7 @@ impl Approvals {
                 Err(StoreError::TransitionDenied { .. }) => continue,
                 Err(err) => return Err(err.into()),
             };
-            let action = if done.status == ApprovalStatus::Expired {
-                DueAction::Dropped
-            } else if order.side == Side::Sell {
-                DueAction::TeamDecides
-            } else if self.notice_of(&found.number)? == Some(Notice::Sent) {
-                DueAction::ReduceWithinLimit
-            } else {
-                DueAction::DoNotBuy
-            };
+            let action = due_action(done.status, order, self.notice_of(&found.number)?);
             out.push(DueOutcome {
                 number: found.number.clone(),
                 subject: found.subject.clone(),

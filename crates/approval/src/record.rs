@@ -15,6 +15,7 @@ use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use crate::approvals::{ApprovalNumber, Notice};
+use crate::handling::DueHandling;
 use crate::subject::{
     Fingerprint, OrderSubject, OrderType, Side, SignalKind, Subject, account_code, order_type_code,
     side_code, signal_kind_code,
@@ -26,6 +27,7 @@ pub(crate) const NEVER: UnixMillis = UnixMillis(i64::MAX);
 const EV_REPEAT: &str = "approval.repeat";
 const EV_NOTICE: &str = "approval.notice";
 const EV_VOIDED: &str = "approval.voided";
+const EV_HANDLED: &str = "approval.due_handling";
 const EVENT_PAGE: usize = 500;
 
 /// 저장소 한 줄을 풀어 낸 승인 요청.
@@ -40,6 +42,7 @@ pub(crate) struct Record {
     pub(crate) consumed: bool,
     pub(crate) wait_until: Option<UnixMillis>,
     pub(crate) expires_at: Option<UnixMillis>,
+    pub(crate) resolved_at: Option<UnixMillis>,
 }
 
 impl Record {
@@ -84,6 +87,7 @@ pub(crate) fn decode(row: &ApprovalRequest) -> Option<Record> {
         consumed: row.consumed_at.is_some(),
         wait_until: s.get("wait_until")?.as_i64().map(UnixMillis),
         expires_at: s.get("expires_at")?.as_i64().map(UnixMillis),
+        resolved_at: row.resolved_at,
     })
 }
 
@@ -166,6 +170,7 @@ pub(crate) struct Memo {
     repeat: HashMap<String, u32>,
     notice: HashMap<String, Notice>,
     voided: HashSet<String>,
+    handled: HashMap<String, DueHandling>,
 }
 
 impl Memo {
@@ -205,6 +210,12 @@ impl Memo {
             EV_VOIDED => {
                 self.voided.insert(number);
             }
+            EV_HANDLED => {
+                // 한 번만 남는다: 처음 기록이 그대로다.
+                if let Some(handling) = handling_from(payload) {
+                    self.handled.entry(number).or_insert(handling);
+                }
+            }
             _ => {}
         }
     }
@@ -219,6 +230,10 @@ impl Memo {
 
     pub(crate) fn is_voided(&self, number: &ApprovalNumber) -> bool {
         self.voided.contains(number.as_str())
+    }
+
+    pub(crate) fn handling(&self, number: &ApprovalNumber) -> Option<DueHandling> {
+        self.handled.get(number.as_str()).cloned()
     }
 
     /// 번호로 저장소 줄을 찾는다. 모르는 번호면 표를 다시 읽는다.
@@ -279,6 +294,54 @@ pub(crate) fn log_voided(
     store.append_at(EV_VOIDED, &payload, at).map(|_| ())
 }
 
+/// 답 없음 · 만료 처리 기록을 쌓는다(E22). 글은 부르는 쪽이 가린 것이다(E38).
+pub(crate) fn log_handling(
+    store: &Store,
+    number: &ApprovalNumber,
+    handling: &DueHandling,
+    at: UnixMillis,
+) -> Result<(), StoreError> {
+    let payload = handling_payload(number, handling);
+    store.append_at(EV_HANDLED, &payload, at).map(|_| ())
+}
+
+fn handling_payload(number: &ApprovalNumber, handling: &DueHandling) -> Value {
+    let mut payload = json!({"number": number.as_str(), "handling": handling_code(handling)});
+    match handling {
+        DueHandling::Reduced { quantity } => payload["quantity"] = json!(quantity),
+        DueHandling::Blocked { reason } => payload["reason"] = json!(reason),
+        _ => {}
+    }
+    payload
+}
+
+fn handling_code(handling: &DueHandling) -> &'static str {
+    match handling {
+        DueHandling::Reduced { .. } => "reduced",
+        DueHandling::NotBought => "not_bought",
+        DueHandling::TeamSold => "team_sold",
+        DueHandling::TeamKept => "team_kept",
+        DueHandling::Blocked { .. } => "blocked",
+        DueHandling::Dropped => "dropped",
+    }
+}
+
+fn handling_from(payload: &Value) -> Option<DueHandling> {
+    Some(match payload.get("handling")?.as_str()? {
+        "reduced" => DueHandling::Reduced {
+            quantity: payload.get("quantity")?.as_u64()?,
+        },
+        "not_bought" => DueHandling::NotBought,
+        "team_sold" => DueHandling::TeamSold,
+        "team_kept" => DueHandling::TeamKept,
+        "blocked" => DueHandling::Blocked {
+            reason: payload.get("reason")?.as_str()?.to_string(),
+        },
+        "dropped" => DueHandling::Dropped,
+        _ => return None,
+    })
+}
+
 /// 이 크레이트가 만든 모든 승인 요청(결과별, 번호 순).
 pub(crate) fn all_records(store: &Store) -> Result<Vec<Record>, StoreError> {
     let mut out = Vec::new();
@@ -330,5 +393,23 @@ mod tests {
         assert_eq!(back.number, number);
         assert_eq!(back.wait_until, Some(UnixMillis(5)));
         assert_eq!(back.expires_at, None);
+    }
+
+    #[test]
+    fn handling_payload_round_trips() {
+        for h in [
+            DueHandling::Reduced { quantity: 7 },
+            DueHandling::NotBought,
+            DueHandling::TeamSold,
+            DueHandling::TeamKept,
+            DueHandling::Blocked {
+                reason: "막힘".to_string(),
+            },
+            DueHandling::Dropped,
+        ] {
+            let payload = handling_payload(&ApprovalNumber::new("n"), &h);
+            assert_eq!(handling_from(&payload), Some(h));
+        }
+        assert_eq!(handling_from(&json!({"handling": "other"})), None);
     }
 }
