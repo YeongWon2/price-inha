@@ -20,6 +20,14 @@ pub struct TradeRecord {
 pub trait TradeCatalog {
     /// 모든 매매의 요약. 순서는 정해지지 않았다.
     fn trades(&self) -> Vec<TradeRecord>;
+
+    /// 그 매매(`record_ref`)의 실수 유형들(journal 실수의 기계 글자 — `chased_entry` · `late_stop` ·
+    /// `oversized_position` · `no_rationale` · `panic_exit` — 자유 글은 그 글). 기본은 빈 목록이다
+    /// (실수를 모르는 카탈로그에 실수 조건을 주면 아무 매매도 맞지 않는다).
+    fn mistakes(&self, record_ref: &str) -> Vec<String> {
+        let _ = record_ref;
+        Vec::new()
+    }
 }
 
 /// 조건. 정한 것만 거른다(모두 `None`이면 모든 매매). 양끝은 모두 **포함**한다.
@@ -37,6 +45,10 @@ pub struct Condition {
     pub max_pnl: Option<Decimal>,
     /// 가장 많이 줄 개수. `None`이면 설정의 기본 개수.
     pub max: Option<usize>,
+    /// 이 실수 유형이 있는 매매만. [`TradeCatalog::mistakes`] 가운데 앞뒤 공백을 뗀 글자가
+    /// 이 값(앞뒤 공백을 뗀 것)과 똑같은 것이 하나라도 있어야 맞는다(대소문자 그대로, 부분 일치 아님).
+    /// 실수 목록이 비면 맞지 않는다. 공백을 뗀 값이 비면 조건이 없는 것으로 본다.
+    pub mistake: Option<String>,
 }
 
 impl Condition {

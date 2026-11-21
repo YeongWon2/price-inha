@@ -50,3 +50,22 @@ pub enum ReindexPlan {
     /// 공급자가 죽어 있어 벡터가 있는 색인을 키워드 전용으로 덮어쓰지 않는다. 그대로 둔다.
     SkipProviderUnavailable,
 }
+
+/// 임베딩 다시 만들기 한 걸음의 결과([`crate::Knowledge::reembed_step`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReembedProgress {
+    /// 임베딩 포트가 없다. 아무것도 바꾸지 않았고 바깥 요청도 없다(V23).
+    Unavailable,
+    /// 이번에 임베딩을 둔 조각이 있다. 아직 끝나지 않았다(남은 설정은 그대로다).
+    InProgress {
+        /// 이번에 둔 조각 수.
+        embedded: usize,
+    },
+    /// 빠진 조각이 없다. 이때 처음으로 현재 설정을 남겼다.
+    Done {
+        /// 이번에 둔 조각 수.
+        embedded: usize,
+        /// 그때의 `plan_reindex(current, true, false)` 결과.
+        plan: ReindexPlan,
+    },
+}

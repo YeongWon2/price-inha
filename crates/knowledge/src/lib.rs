@@ -18,7 +18,7 @@ pub use condition::{Condition, TradeCatalog, TradeRecord};
 pub use embed::{EmbedReport, Embedder, SemanticStatus, SharedEmbedder};
 pub use error::{EmbedError, Error};
 pub use output::{SNIPPET_CHARS, SearchMode, SearchOutput, ToolHit};
-pub use reindex::{IndexSettings, ReindexPlan, ReindexReason};
+pub use reindex::{IndexSettings, ReembedProgress, ReindexPlan, ReindexReason};
 
 use pi_store::{ChunkId, KnowledgeKind, KnowledgeSource, NewKnowledgeRecord, Store, UnixMillis};
 
@@ -62,6 +62,44 @@ pub struct RecordText {
     pub text: String,
     /// 올린 시각.
     pub at: UnixMillis,
+}
+
+impl RecordText {
+    /// 복기에서 나온 실수 기록. 종류 `Mistake`, 등급 `Team`, 기록 키 = 매매 키.
+    /// 글은 `실수 · 매매 {trade_ref} · 종목 {symbol}\n실수: {a, b}\n{note}`.
+    /// 앞뒤 공백을 뗀 실수가 하나도 없으면 `None`(실수 없는 복기는 실수 기록을 만들지 않는다).
+    pub fn mistakes(
+        trade_ref: &str,
+        symbol: &str,
+        mistakes: &[String],
+        note: &str,
+        at: UnixMillis,
+    ) -> Option<RecordText> {
+        todo!()
+    }
+
+    /// 담당이 쓴 시장 메모. 종류 `MarketNote`, 글은 그대로. 등급은 `Mine` · `Team`만 받고
+    /// `External`이면 [`Error::InvalidRecord`](바깥 자료는 [`RecordText::external`]로만 들어온다).
+    pub fn market_note(
+        note_ref: &str,
+        source: KnowledgeSource,
+        text: &str,
+        at: UnixMillis,
+    ) -> Result<RecordText, Error> {
+        todo!()
+    }
+
+    /// 뉴스 · 공시 요약(바깥 자료). 종류 `MarketNote`, 등급 `External`, 글은 `{title}\n{summary}\n{link}`,
+    /// 시각은 공개 시각. 자동 회상에는 나오지 않는다(M7).
+    pub fn external(
+        item_ref: &str,
+        title: &str,
+        summary: &str,
+        link: &str,
+        published_at: UnixMillis,
+    ) -> RecordText {
+        todo!()
+    }
 }
 
 /// 키워드 검색 요청.
@@ -272,6 +310,22 @@ impl Knowledge {
     /// 포트가 실패했거나 개수 · 차원이 약속과 다르면 [`Error::Embedder`]이고 아무것도 두지 않는다.
     pub async fn embed_missing(&self, max: usize) -> Result<EmbedReport, Error> {
         self.run_embed_missing(max).await
+    }
+
+    /// 임베딩 다시 만들기의 한 걸음. 끝까지 도는 일 · 쉬는 간격 · 취소는 부르는 쪽이 한다.
+    ///
+    /// 1. 포트가 없으면 [`ReembedProgress::Unavailable`]: 저장소 · 남은 설정을 바꾸지 않고 바깥 요청 0건(V23).
+    /// 2. `current.model` · `current.dims`가 포트의 `model()` · `Some(dims())`와 다르면 [`Error::Embedder`]이고 아무것도 바꾸지 않는다.
+    /// 3. [`Knowledge::embed_missing`]`(batch)`를 한 번 부른다(포트 호출 많아야 1번). 모델이 바뀌면 모든 조각이
+    ///    새 모델 기준으로 "빠짐"이라 차례로 다시 만들어지고, 글이 바뀐 기록도 같은 길로 다시 만들어진다(M7).
+    /// 4. 이번에 둔 것이 있으면 `InProgress`. 빠진 조각이 없으면 그때 처음으로 `record_settings(current)`를 하고 `Done`.
+    /// 5. 포트가 실패하면 `Err`이고 남은 설정은 그대로다(다음 부름이 이어서 한다).
+    pub async fn reembed_step(
+        &self,
+        current: &IndexSettings,
+        batch: usize,
+    ) -> Result<ReembedProgress, Error> {
+        todo!()
     }
 
     /// 다시 색인할지 정한다. 규칙: 남은 설정이 없으면 `Rebuild(FirstTime)`; 남은 설정에 벡터가 있는데
