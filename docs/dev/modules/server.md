@@ -278,7 +278,7 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
    - 개선안 답과 하루 마감의 승격 판정이 겹치면 개선안이 "반영됨"인데 값은 그대로가 될 수 있다(500) — 둘이 같은 차례 잠금을 쓴다. 답하기와 맞춰 보기가 겹쳐 실전중이 됐는데 답이 500인 것도 같은 잠금으로.
    - 다음 걸음 이후: `promotion_requests` · `unhandled_due`가 닫힌 요청을 매번 모두 읽는 비용, journal 차수(사용자 템플릿 변경을 개선안으로 — 10a 6번 원안), 승격 통계(장중 낙폭 · 표본 밖 성과).
 8. **트리거** (trigger 6차): `TriggerConfig`의 시세 조건을 `watch_conditions`(지켜보는 종목 · 기준가, 기본 3%)로 채우고 종목이 바뀌면 `replace_conditions`. 자료를 주기적으로 가져와 새 뉴스 · 새 공시 · 재무/거시 값 바뀜을 `push_data`로 넘긴다. 다시 켠 뒤의 중복은 자료를 가져오는 쪽이 마지막으로 본 것을 저장소에 기억해 거른다. 네이버 하루 한도(25,000회)를 넘지 않게 주기와 종목 수로 상한을 둔다.
-9. **뉴스 · FRED** (data 4차): `NewsRegistry`에 네이버를 등록하고, 키는 `SecretStore`의 `NewsKeySource`로. 논의 자료에 뉴스(제목 · 요약 · 링크 · 시각)와 출처를 싣고 판단 기록에 남긴다(V35). FRED `UsRate`를 자료 요청에 더한다(`team/facts.rs`).
+9. **뉴스 · FRED** (data 4차 · 5차 — `NewsFetched::Partial { items, dropped }`는 남은 기사를 쓰고 버린 수를 판단 기록 · 방 로그에 남긴다, 남은 것이 없으면 "뉴스 없음", 결정 16): `NewsRegistry`에 네이버를 등록하고, 키는 `SecretStore`의 `NewsKeySource`로. 논의 자료에 뉴스(제목 · 요약 · 링크 · 시각)와 출처를 싣고 판단 기록에 남긴다(V35). FRED `UsRate`를 자료 요청에 더한다(`team/facts.rs`).
 10. **키 칸** (secrets 8차): 설정 화면 · `/keys` · `doctor`의 칸 목록을 공급자 선언(`ProviderKeys`)에서 만든다. `KeyVerifier::verify_provider`를 네이버(`verify_news_keys`)에 잇는다. 옛 `item` `data` 칸은 화면에서 뺀다(8차 검토 참고).
 11. **공급자 등록부** (market 7차): 시세는 `MarketRegistry`를 거친다(토스 하나 등록). 
 
