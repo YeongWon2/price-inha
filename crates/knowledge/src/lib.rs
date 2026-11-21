@@ -352,6 +352,8 @@ impl Knowledge {
     /// 2. `current.model` · `current.dims`가 포트의 `model()` · `Some(dims())`와 다르면 [`Error::Embedder`]이고 아무것도 바꾸지 않는다.
     /// 3. [`Knowledge::embed_missing`]`(batch)`를 한 번 부른다(포트 호출 많아야 1번). 모델이 바뀌면 모든 조각이
     ///    새 모델 기준으로 "빠짐"이라 차례로 다시 만들어지고, 글이 바뀐 기록도 같은 길로 다시 만들어진다(M7).
+    ///    남은 설정의 모델이 `current.model`과 같고 차원만 다르면 포트를 부르지 않고 [`Error::Embedder`]다(설정 그대로).
+    ///    `batch`가 0이면 포트를 부르지 않고 설정도 남기지 않으며 `InProgress { embedded: 0 }`이다.
     /// 4. 이번에 둔 것이 있으면 `InProgress`. 빠진 조각이 없으면 그때 처음으로 `record_settings(current)`를 하고 `Done`.
     /// 5. 포트가 실패하면 `Err`이고 남은 설정은 그대로다(다음 부름이 이어서 한다).
     pub async fn reembed_step(
@@ -366,6 +368,21 @@ impl Knowledge {
             return Err(Error::Embedder(
                 "현재 색인 설정의 모델이나 차원이 붙은 임베딩 공급자와 다르다".to_string(),
             ));
+        }
+        // 4-2: 모델 이름은 같고 차원만 다르면 저장소가 옛 차원 벡터를 "빠짐"으로 고르지 못한다(모델만 본다).
+        // 다 됐다고 하지 않고, 설정도 남기지 않고, 포트도 부르지 않는다.
+        if let Some(stored) = self.stored_settings()?
+            && stored.model == current.model
+            && stored.dims != current.dims
+        {
+            return Err(Error::Embedder(
+                "모델 이름은 같은데 차원이 다르다. 차원을 바꾸려면 모델 이름을 바꾸거나 색인을 다시 올려야 한다"
+                    .to_string(),
+            ));
+        }
+        // 4-1: 이번에 하나도 만들지 않는 것은 "빠진 것이 없다"가 아니다.
+        if batch == 0 {
+            return Ok(ReembedProgress::InProgress { embedded: 0 });
         }
         let report = self.run_embed_missing(batch).await?;
         if report.embedded > 0 {
