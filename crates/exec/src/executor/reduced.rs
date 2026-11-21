@@ -5,10 +5,13 @@
 
 use pi_approval::ApprovalNumber;
 use pi_paper::{AccountKind, CheckPermit, OrderId, UnfilledTimeout};
-use pi_store::TradeId;
+use pi_store::{TradeId, TradeState};
+use rust_decimal::Decimal;
 
 use super::Executor;
+use super::run::fits_buy;
 use crate::error::Error;
+use crate::grant;
 
 /// 답 없음으로 닫힌 사는 요청을 줄여서 내는 주문 하나(E22 · FN2 3b3).
 #[derive(Debug)]
@@ -53,7 +56,29 @@ impl Executor {
     /// 옮기고 받지 않음 · 응답 없음은 [`Error::AnomalyStop`](E13), 그 밖은 [`Error::Rejected`].
     /// 승인 기록은 읽기만 한다(처리 기록은 부르는 쪽이 남긴다).
     pub async fn submit_reduced(&self, submission: ReducedSubmission) -> Result<OrderId, Error> {
-        _ = submission;
-        todo!()
+        let now = self.clock.now();
+        if !self.ready() {
+            return Err(Error::NotReady);
+        }
+        let id = submission.trade_id;
+        let trade = self.store.get_trade(id)?;
+        let approved = submission.permit.approved().clone();
+        self.check_buy_accounts(submission.template_account, &trade, &approved)?;
+        if !fits_buy(&submission.permit, &trade) {
+            return Err(Error::PermitMismatch);
+        }
+        if trade.state != TradeState::AwaitingApproval {
+            return Err(Error::NotAwaitingApproval(trade.state));
+        }
+        grant::check_unanswered(&self.approvals, &submission.unanswered, &trade, &approved)?;
+        // 저장소에 매매 수량이 있으면 줄인 수량이 그것 이하여야 한다(매매 수량은 고쳐 쓰지 않는다).
+        if let Some(quantity) = self.store.trade_quantity(id)?
+            && approved.quantity > Decimal::from(quantity)
+        {
+            return Err(Error::PermitMismatch);
+        }
+        // 승인이 없으므로 큰 금액 확인 표시는 붙이지 않는다.
+        self.place_buy(id, submission.permit, submission.timeout, false, now)
+            .await
     }
 }

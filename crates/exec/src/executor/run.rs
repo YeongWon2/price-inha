@@ -9,13 +9,13 @@ use pi_paper::{
     AccountKind, ApprovedOrder, Broker, BrokerError, CheckPermit, OrderEvent, OrderGroup, OrderId,
     OrderRequest, Side, UnfilledTimeout,
 };
-use pi_store::{AccountKind as StoreAccount, TradeId};
+use pi_store::{AccountKind as StoreAccount, Trade, TradeId, TradeState};
 use tokio::sync::mpsc::error::TryRecvError;
 
 use super::{Executor, SELL_RETRY_FIRST, SELL_RETRY_MAX, SellPurpose, SellRetry, TradeChange};
 use crate::error::Error;
 use crate::keep;
-use crate::track::{State, apply, millis};
+use crate::track::{State, apply, block_unfilled, buy_key, millis};
 
 /// 파는 주문 한 번 내기.
 pub(super) struct SellAttempt {
@@ -95,6 +95,51 @@ impl Executor {
             Ok(())
         } else {
             Err(Error::AccountKindMismatch { broker, found })
+        }
+    }
+
+    /// 사는 길의 계좌 종류(E25): 템플릿 · 매매 · 표시가 모두 증권사와 같아야 한다.
+    pub(super) fn check_buy_accounts(
+        &self,
+        template: AccountKind,
+        trade: &Trade,
+        order: &ApprovedOrder,
+    ) -> Result<(), Error> {
+        self.check_account(template)?;
+        self.check_account(paper_kind(trade.account))?;
+        self.check_account(order.account_kind)
+    }
+
+    /// 사는 주문을 낸다: 매매를 주문됨으로 **저장**한 뒤에만 `place_order`를 부른다. 저장이
+    /// 거부되면 [`Error::Store`]이고 주문을 내지 않는다.
+    ///
+    /// 증권사가 받지 않으면 매매를 막힘(미체결 취소, 이유 남김)으로 옮기고: 받지 않음 · 응답 없음은
+    /// [`Error::AnomalyStop`](E13), 그 밖은 [`Error::Rejected`].
+    pub(super) async fn place_buy(
+        &self,
+        id: TradeId,
+        permit: CheckPermit,
+        timeout: UnfilledTimeout,
+        confirm_high_value: bool,
+        now: DateTime<Utc>,
+    ) -> Result<OrderId, Error> {
+        self.store
+            .transition_trade(id, TradeState::Ordered, millis(now))?;
+        let order = permit.approved().clone();
+        let request = order_request(&order, buy_key(id), timeout, confirm_high_value, permit);
+        match self.broker.place_order(request, now).await {
+            Ok(ack) => {
+                // 주문은 나갔다. 스냅샷 저장만 실패하면 매매는 주문됨 그대로이고, 마지막 저장값이
+                // 바뀌지 않았으니 다음 저장에서 맞춘다(오류로 끝내지 않는다).
+                self.persist().ok();
+                Ok(ack.order_id)
+            }
+            Err(e) => {
+                let detail = format!("미체결 취소: 증권사가 주문을 받지 않음({e})");
+                block_unfilled(&self.store, id, detail, millis(now), &mut Vec::new())?;
+                self.persist().ok();
+                Err(classify(e))
+            }
         }
     }
 
@@ -208,6 +253,17 @@ pub(super) fn classify(error: BrokerError) -> Error {
         BrokerError::Unavailable | BrokerError::NoResponse => Error::AnomalyStop(error),
         other => Error::Rejected(other),
     }
+}
+
+/// 표시가 이 매매에 묶여 있는가(E33). 묶이지 않은 표시도 받지 않는다.
+pub(super) fn fits_trade(permit: &CheckPermit, trade: TradeId) -> bool {
+    permit.trade() == Some(trade.0)
+}
+
+/// 사는 표시가 이 매매의 것인가(E33): 종목이 같고, 방향이 사기이고, 이 매매에 묶여 있다.
+pub(super) fn fits_buy(permit: &CheckPermit, trade: &Trade) -> bool {
+    let order = permit.approved();
+    order.symbol.as_str() == trade.symbol && order.side == Side::Buy && fits_trade(permit, trade.id)
 }
 
 /// 저장소의 계좌 종류를 증권사의 것으로.

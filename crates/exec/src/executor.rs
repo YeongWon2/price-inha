@@ -22,7 +22,7 @@ use crate::error::Error;
 use crate::track::{State, adopt, apply, block_unfilled, buy_key, millis, parse_key};
 use crate::{grant, keep};
 pub use reduced::ReducedSubmission;
-use run::{SellAttempt, classify, order_request, paper_kind};
+use run::{SellAttempt, classify, fits_buy, fits_trade, paper_kind};
 
 /// 파는 주문이 실패한 뒤 처음 다시 낼 때까지의 간격(E30). 실패할 때마다 두 배가 된다.
 pub const SELL_RETRY_FIRST: Duration = Duration::from_secs(1);
@@ -143,11 +143,6 @@ pub struct Executor {
     approvals: Approvals,
     /// 안쪽 상태(준비됨 · 보유 장부 · 다시 낼 파는 주문 · 구독 · 마지막 스냅샷).
     state: Mutex<State>,
-}
-
-/// 표시가 이 매매에 묶여 있는가(E33). 묶이지 않은 표시도 받지 않는다.
-fn fits_trade(permit: &CheckPermit, trade: TradeId) -> bool {
-    permit.trade() == Some(trade.0)
 }
 
 impl std::fmt::Debug for Executor {
@@ -303,13 +298,8 @@ impl Executor {
         let id = submission.trade_id;
         let trade = self.store.get_trade(id)?;
         let approved = submission.permit.approved().clone();
-        self.check_account(submission.template_account)?;
-        self.check_account(paper_kind(trade.account))?;
-        self.check_account(approved.account_kind)?;
-        if approved.symbol.as_str() != trade.symbol
-            || approved.side != Side::Buy
-            || !fits_trade(&submission.permit, id)
-        {
+        self.check_buy_accounts(submission.template_account, &trade, &approved)?;
+        if !fits_buy(&submission.permit, &trade) {
             return Err(Error::PermitMismatch);
         }
         // 저장소에 매매 수량이 있으면 표시의 수량이 그것과 같아야 한다(승인 내용은 아래에서 표시와 대조).
@@ -325,31 +315,9 @@ impl Executor {
             }
             None => {}
         }
-        self.store
-            .transition_trade(id, TradeState::Ordered, millis(now))?;
         let confirm = submission.approval.is_some();
-        let request = order_request(
-            &approved,
-            buy_key(id),
-            submission.timeout,
-            confirm,
-            submission.permit,
-        );
-        let placed = self.broker.place_order(request, now).await;
-        match placed {
-            Ok(ack) => {
-                // 주문은 나갔다. 스냅샷 저장만 실패하면 매매는 주문됨 그대로이고, 마지막 저장값이
-                // 바뀌지 않았으니 다음 저장에서 맞춘다(오류로 끝내지 않는다).
-                self.persist().ok();
-                Ok(ack.order_id)
-            }
-            Err(e) => {
-                let detail = format!("미체결 취소: 증권사가 주문을 받지 않음({e})");
-                block_unfilled(&self.store, id, detail, millis(now), &mut Vec::new())?;
-                self.persist().ok();
-                Err(classify(e))
-            }
-        }
+        self.place_buy(id, submission.permit, submission.timeout, confirm, now)
+            .await
     }
 
     /// 파는 주문을 낸다. 손절 · 청산은 먼저 같은 종목의 열린 파는 주문을 취소한다.
