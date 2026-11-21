@@ -39,7 +39,7 @@
 
 ## 필수 번호
 
-D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46
+D2 D11 C2 C15 E3 M6 V6 V31 V32 N6 N8 E38 C3 C16 E4 V46 V51 D1
 
 ## 트리거를 조립할 때 (trigger 3차 검토의 참고)
 
@@ -151,3 +151,61 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 
 ### 8차 검토 참고
 - 옛 `item` `data`(`KeyKind::Data`, 확인할 곳 없음)는 그대로 둔다. 새 칸과 겹치므로 다음 차수에 화면에서 뺄지 정한다(물음).
+
+## 9차 작업 (홈서버 · 미니 PC · VPN — 2026-11-21 결정 10번)
+
+사용자 말: "홈서버나 미니 PC VPN같은 환경에서 가능하게끔 되어야해 … 오픈클로나 헤르메스처럼". 화면 없는 컴퓨터에서 SSH로 설치 · 설정하고, 서비스로 늘 돌고, VPN(Tailscale 등, D2대로 사용자가 고름) 너머 기기에서 접속 키로 들어오게 한다. D2(기본은 `127.0.0.1`, 밖은 접속 키)는 바꾸지 않는다.
+
+### 원본 동작 근거
+- 서비스: `docs/research/install-and-cli.md` 2.4(Hermes) · 3.4(OpenClaw). 진단: 2.6 · 3.6. 처음 설정 · 일회용 토큰: 2.3 · 3.3. 제거: 2.5 · 3.5. 파일 배치: 2.7 · 3.7.
+- 접속: `docs/research/remote-access-security.md` 4.1(서버는 루프백, 바깥은 Serve 같은 프록시가 연다), D2.
+
+### 명령 (하위 명령. 인자 없이 띄우는 지금 동작은 그대로)
+| 명령 | 하는 일 |
+|---|---|
+| `price-inha run [지금 인자들]` | 지금과 같다(포그라운드). 인자 없는 `price-inha`도 그대로 run |
+| `price-inha service install [--start-now] [--dry-run]` | 사용자 서비스 정의를 쓰고 등록한다. 정의는 `run --home <절대 경로> [지금 준 --bind · --port 등]`을 띄운다 |
+| `price-inha service uninstall [--dry-run]` | 멈추고 정의를 지운다. 보관 폴더는 남긴다(Hermes "Keep data") |
+| `price-inha service start \| stop \| restart \| status` | 서비스 관리자를 통해서. `status`는 등록 여부 · 도는지 · 정의가 가리키는 홈 |
+| `price-inha doctor [--json]` | 아래 진단. 문제가 남으면 종료 코드 1 |
+| `price-inha access-key [--rotate]` | 접속 키를 만들어 **터미널에 한 번만** 보여 준다(화면의 `/api/access/key`와 같은 저장소 · 같은 규칙, 결정 8번). 바깥 주소가 있으면 `https://<원격 이름>/` 안내를 함께. 화면 없는 컴퓨터의 처음 설정은 SSH로 이것을 부르고, 다른 기기 브라우저에서 키로 들어와 설정 화면(원격 키 등록 `/api/remote/keys`)을 쓴다 |
+| `price-inha restore <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>` | `restore_backup`을 부른다. 빈 폴더가 아니면 거부. 끝나면 "팀은 멈춤, 기다리던 승인은 만료(V51 · M5)"와 다음에 띄울 명령을 보여 준다. 비밀키 파일 내용은 어디에도 남기지 않는다 |
+| `price-inha --version` | 설정 · 기록을 읽기 전에 답한다(Hermes 2.2) |
+
+### 서비스 정의 (원본 표 그대로, 이름만 우리 것)
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| 정의 | `~/Library/LaunchAgents/kr.priceinha.server.plist` 사용자 LaunchAgent | `~/.config/systemd/user/price-inha.service` 사용자 unit | 예약 작업 `PriceInha` (`schtasks /Create /XML`, 최소 권한) |
+| 자동 시작 | `RunAtLoad=true` | `WantedBy=default.target` + `loginctl enable-linger` 시도(실패하면 수동 명령 안내) | 로그온 트리거(30초 지연) |
+| 되살리기 | `KeepAlive={SuccessfulExit:false}`, `ThrottleInterval=30` | `Restart=on-failure`, `RestartSec=5`. 설정 치명 오류 종료 코드(지금 2)는 `RestartPreventExitStatus=2` | 실패 시 1분 간격 재시도 |
+| 멈춤 | `launchctl bootout`(정의를 내린다. KeepAlive가 되살리지 않게) | `systemctl --user stop` | `schtasks /End` |
+| 기록 | `<home>/logs/server.log` · `server.error.log` | journal | `<home>/logs/` |
+- 작업 폴더는 보관 폴더(사라질 수 있는 체크아웃을 피함). 환경에는 `PATH`만 명시, 비밀 값은 정의에 넣지 않는다(키는 보관 폴더에서 읽는다).
+- 다른 홈을 가리키는 기존 정의는 덮어쓰지 않고 거부한다(Hermes 2.4). 같은 홈이면 새로 쓴다(업데이트 뒤 낡은 경로를 피함).
+- 바깥 명령(`launchctl` · `systemctl` · `loginctl` · `schtasks`)은 `CommandRunner` trait 뒤에서 부른다. 테스트는 가짜 실행기로 부른 명령 줄과 쓴 정의 파일만 본다(**실제 서비스 관리자를 부르지 않는다**). 정의를 쓰는 폴더도 인자로 받는다(테스트는 임시 폴더).
+- 운영체제 판별은 `cfg!(target_os)` 기본값 + 테스트용 인자.
+
+### 진단 (`doctor`)
+순서대로 보고, 항목마다 `✓ / ✗ 무엇 · 고치기` 한 줄(Hermes 2.6처럼 사람이 할 것을 번호로). 자동으로 고치지 않는다(이번에는 `--fix` 없음).
+1. 보관 폴더가 있고 0700, 비밀 파일 0600(유닉스).
+2. SQLite가 열리고 `PRAGMA integrity_check`가 ok, 스키마 버전이 이 실행 파일이 아는 버전.
+3. 키 칸마다 등록 여부(이름만, 값 · 길이 · 앞뒤 글자 금지).
+4. 여는 주소 · 포트를 쓸 수 있는가(이미 도는 서버가 있으면 그 사실만).
+5. 루프백이 아닌 주소에 열리는데 접속 키가 없는가 → ✗.
+6. 서비스 등록 여부와 정의가 가리키는 홈이 이 홈인가, Linux면 linger.
+7. 백업 설정이 켜졌으면 마지막 백업 시각.
+- 진단은 실제 증권사 · AI · GitHub를 부르지 않는다(바깥 연결 확인은 하지 않음 — 이번 범위 밖).
+
+### 테스트로 확인할 것
+- `run` 없이 띄운 지금 동작과 `run`이 같다(앞 차수 시험을 깨지 않는다).
+- 운영체제 셋마다 `service install --dry-run`이 쓰는 정의의 칸(위 표)과 부르는 명령 순서. 다른 홈 정의가 있으면 거부. `uninstall`은 멈춤 → 정의 삭제, 보관 폴더는 남음.
+- `doctor`: 권한이 넓으면 ✗와 고치기, 깨진 DB면 ✗, 키 값이 출력에 0번(N8), 문제 있으면 종료 코드 1.
+- `access-key`: 한 번만 보여 주고 저장은 해시(화면 경로와 같은 저장소), 두 번째는 `--rotate` 없이는 거부, 출력 밖(기록)에 키 글자 0번.
+- `restore`: 빈 폴더가 아니면 거부, 되살린 폴더로 띄우면 팀 멈춤 · 승인 만료(V51), 비밀키 파일 글자가 기록에 0번.
+- `--version`이 보관 폴더 없이도 답한다.
+
+### main.rs 주석
+- "백업 저장소는 아직 고를 화면이 없어 잇지 않는다"는 지금 코드(설정 화면 `backup-settings.json`)와 다르다. 맞게 고친다.
+
+### 하지 않는 것 (이번 차수)
+- Tailscale · 방화벽 설정(사용자가 고른다, D2). 자동 업데이트(결정 "알리기만" 추천이 아직 미정). 설치 스크립트(다음 차수 후보). `doctor --fix`.
