@@ -144,6 +144,7 @@ impl Executor {
     }
 
     /// 파는 주문을 낸다. 손절 · 청산은 먼저 같은 종목의 열린 파는 주문을 취소한다.
+    /// 익절 · 팀장 팔기는 취소하지 않고 낸다.
     /// 받지 않음 · 응답 없음이면 다시 내기를 기다리는 것으로 남긴다(E30).
     pub(super) async fn send_sell(
         &self,
@@ -151,9 +152,7 @@ impl Executor {
         permit: CheckPermit,
     ) -> Result<OrderId, Error> {
         let now = self.clock.now();
-        if attempt.purpose == SellPurpose::TeamExit {
-            todo!("7차: 팀장 팔기 — 열린 파는 주문을 취소하지 않고 낸다");
-        }
+        // 팀장 팔기 · 익절은 다른 열린 파는 주문을 그대로 둔다(7차: 같은 종목 보유를 모두 판다).
         if matches!(
             attempt.purpose,
             SellPurpose::StopLoss | SellPurpose::Liquidation

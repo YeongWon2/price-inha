@@ -238,7 +238,7 @@ fn purpose_code(purpose: SellPurpose) -> &'static str {
         SellPurpose::StopLoss => "stop_loss",
         SellPurpose::TakeProfit => "take_profit",
         SellPurpose::Liquidation => "liquidation",
-        SellPurpose::TeamExit => todo!("7차: 팀장 팔기의 목적 글자"),
+        SellPurpose::TeamExit => "team_exit",
     }
 }
 
@@ -247,6 +247,7 @@ fn purpose_from(code: &str) -> Option<SellPurpose> {
         "stop_loss" => Some(SellPurpose::StopLoss),
         "take_profit" => Some(SellPurpose::TakeProfit),
         "liquidation" => Some(SellPurpose::Liquidation),
+        "team_exit" => Some(SellPurpose::TeamExit),
         _ => None,
     }
 }
@@ -261,6 +262,7 @@ mod tests {
             SellPurpose::StopLoss,
             SellPurpose::TakeProfit,
             SellPurpose::Liquidation,
+            SellPurpose::TeamExit,
         ] {
             assert_eq!(purpose_from(purpose_code(purpose)), Some(purpose));
         }
