@@ -43,7 +43,6 @@ pub struct Env {
     /// 임시 폴더를 테스트 끝까지 살려 둔다(떨어지면 지워진다).
     pub _dir: TempDir,
     pub path: PathBuf,
-    pub store: Store,
     pub clock: Arc<FakeClock>,
     pub approvals: Approvals,
 }
@@ -53,11 +52,10 @@ pub fn env() -> Env {
     let path = dir.path().join("pi.sqlite");
     let store = Store::open(&path).unwrap();
     let clock = FakeClock::at(T0);
-    let approvals = Approvals::new(store.clone(), clock.clone(), WaitTimes::default());
+    let approvals = Approvals::new(store, clock.clone(), WaitTimes::default());
     Env {
         _dir: dir,
         path,
-        store,
         clock,
         approvals,
     }
