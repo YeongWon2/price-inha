@@ -170,8 +170,11 @@ impl DataState {
         };
         let batch = &mut self.batches[index];
         batch.last_at = now;
+        let market = batch.key.0;
         insert_sorted(&mut batch.events, pending);
-        self.dropped += cap(&mut batch.events, limit);
+        let over = cap(&mut batch.events, limit);
+        warn_dropped(over, &[market], "한 묶음의 사건이 한 깨우기 상한을 넘었다");
+        self.dropped += over;
     }
 
     fn drop_oldest_batch(&mut self) {
@@ -183,10 +186,8 @@ impl DataState {
             .map(|(index, _)| index);
         if let Some(index) = oldest {
             let batch = self.batches.remove(index);
-            tracing::warn!(
-                dropped = batch.events.len(),
-                "자료 묶음이 너무 많아 가장 오래된 묶음을 버린다"
-            );
+            let reason = "열어 둔 묶음 수가 상한을 넘어 가장 오래된 묶음을 버린다";
+            warn_dropped(batch.events.len(), &[batch.key.0], reason);
             self.dropped += batch.events.len();
         }
     }
@@ -209,15 +210,12 @@ impl DataState {
 
     /// 전체 정지: 모인 사건을 모두 버리고 센다.
     pub(crate) fn drop_all(&mut self) {
+        let markets = self.markets();
         let batched: usize = self.batches.drain(..).map(|batch| batch.events.len()).sum();
         let held: usize = self.held.drain(..).map(|(_, events)| events.len()).sum();
         let dropped = batched + held;
-        if dropped > 0 {
-            tracing::warn!(
-                dropped,
-                "전체 정지 중이라 모인 자료 사건을 깨우지 않고 버린다"
-            );
-        }
+        let reason = "전체 정지 중이라 모인 사건을 깨우지 않고 버린다";
+        warn_dropped(dropped, &markets, reason);
         self.dropped += dropped;
     }
 
@@ -259,6 +257,14 @@ impl DataState {
         self.batches = waiting;
         out.sort_by_key(|(pending, _)| pending.order());
         let over = out.len().saturating_sub(config.batch_limit);
+        let mut markets: Vec<Market> = Vec::new();
+        for (pending, _) in out.iter().take(over) {
+            if !markets.contains(&pending.change.market) {
+                markets.push(pending.change.market);
+            }
+        }
+        let reason = "한 tick에 보낼 사건의 합이 한 깨우기 상한을 넘었다";
+        warn_dropped(over, &markets, reason);
         self.dropped += over;
         out.into_iter()
             .skip(over)
@@ -307,7 +313,9 @@ impl DataState {
             for pending in events {
                 insert_sorted(held, pending);
             }
-            self.dropped += cap(held, limit);
+            let over = cap(held, limit);
+            warn_dropped(over, &[market], "장 밖 보관이 상한을 넘었다");
+            self.dropped += over;
         }
     }
 
@@ -397,6 +405,13 @@ fn cap(events: &mut Vec<Pending>, limit: usize) -> usize {
     let over = events.len().saturating_sub(limit);
     events.drain(..over);
     over
+}
+
+/// 버린 자료 사건을 기록에 보인다: 수 · 시장 · 까닭만(글 · 제목은 싣지 않는다). 가장 오래된 것부터 버린다.
+pub(crate) fn warn_dropped(dropped: usize, markets: &[Market], reason: &'static str) {
+    if dropped > 0 {
+        tracing::warn!(dropped, ?markets, reason, "자료 사건을 버렸다");
+    }
 }
 
 /// `at` 뒤 `span`. 넘치면 없다(끝나지 않는다).

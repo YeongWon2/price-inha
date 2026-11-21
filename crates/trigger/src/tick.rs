@@ -33,7 +33,7 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
         lock(&trigger.data).drop_all();
         let delay = stopped_delay(trigger, now).await;
         let mut stopped = report(TickOutcome::Stopped, clock_jumped, delay);
-        stopped.data_dropped = lock(&trigger.data).take_dropped();
+        stopped.data_dropped = trigger.take_data_dropped();
         return Ok(stopped);
     }
     let calendars = load_calendars(trigger, now).await?;
@@ -77,7 +77,7 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
         wakes,
         alerts: trigger.inflight.take_alerts(),
         clock_jumped,
-        data_dropped: lock(&trigger.data).take_dropped(),
+        data_dropped: trigger.take_data_dropped(),
         next_delay,
     })
 }

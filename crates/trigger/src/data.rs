@@ -123,6 +123,12 @@ impl Trigger {
         lock(&self.data).push(change, now, &self.config.data)
     }
 
+    /// 지난 보고 뒤로 버린 자료 사건 수를 가져간다(한 번만 센다): 상한 · 전체 정지로 버린 것과
+    /// 실패한 깨우기에 실렸던 것.
+    pub(crate) fn take_data_dropped(&self) -> usize {
+        lock(&self.data).take_dropped() + self.inflight.take_data_dropped()
+    }
+
     /// 시세 조건 목록을 실행 중에 바꾼다. [`Trigger::new`]와 같은 확인을 하고, 실패하면 지금 목록 그대로다.
     /// 같은 id · 같은 조건은 다시 걸기 상태를 그대로 두고, 같은 id인데 조건이 바뀌었으면 `Armed`로 다시 건다.
     /// 빠진 조건은 더 보지 않는다.

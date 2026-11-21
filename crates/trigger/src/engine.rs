@@ -350,7 +350,13 @@ impl Trigger {
                 return Ok(());
             }
             let delay = match self.tick().await {
-                Ok(report) => report.next_delay,
+                Ok(report) => {
+                    if report.data_dropped > 0 {
+                        let dropped = report.data_dropped;
+                        tracing::warn!(dropped, "이번 tick 보고에 버린 자료 사건이 있다");
+                    }
+                    report.next_delay
+                }
                 Err(error) => {
                     tracing::warn!(%error, "tick이 실패했다. 잠시 뒤 다시 본다");
                     ERROR_BACKOFF[0]

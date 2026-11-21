@@ -45,6 +45,8 @@ pub(crate) struct InFlight {
     finished: Mutex<Vec<Finished>>,
     alerts: Mutex<Vec<Alert>>,
     errors: Mutex<Vec<StoreError>>,
+    /// 실패한 깨우기에 실렸던 자료 사건 수 가운데 아직 보고하지 않은 것(6차 보강 3번).
+    data_dropped: AtomicUsize,
     /// 띄운 깨우기가 하나 끝날 때마다 알린다(`settle`이 취소돼도 잃는 것이 없게 이것으로 기다린다).
     idle: tokio::sync::Notify,
 }
@@ -108,6 +110,29 @@ impl InFlight {
         self.idle.notify_waiters();
     }
 
+    /// 실패한 깨우기에 실렸던 자료 사건을 버린 것으로 센다. 자료 사건에는 영수증이 없어 다시 보내지 않으므로
+    /// 여기서 세지 않으면 흔적 없이 사라진다. 글 · 제목은 기록하지 않는다(수 · 시장 · 까닭만).
+    fn drop_data(&self, wake: &Wake) {
+        let mut markets = Vec::new();
+        let mut dropped = 0;
+        for event in &wake.events {
+            if let TriggerEvent::Data { change, .. } = event {
+                dropped += 1;
+                if !markets.contains(&change.market) {
+                    markets.push(change.market);
+                }
+            }
+        }
+        let reason = "깨운 실행이 실패했다(자료 사건은 다시 보내지 않는다)";
+        crate::batch::warn_dropped(dropped, &markets, reason);
+        self.data_dropped.fetch_add(dropped, Ordering::SeqCst);
+    }
+
+    /// 실패한 깨우기로 버린 자료 사건 수를 가져간다(한 번만 센다).
+    pub(crate) fn take_data_dropped(&self) -> usize {
+        self.data_dropped.swap(0, Ordering::SeqCst)
+    }
+
     /// 아직 내지 않은 알림 요구를 가져간다(한 번만 낸다).
     pub(crate) fn take_alerts(&self) -> Vec<Alert> {
         mem::take(&mut *lock(&self.alerts))
@@ -154,6 +179,9 @@ pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
     let task = Arc::clone(&inflight);
     let handle = tokio::spawn(async move {
         let ok = wake_guarded(&ports, &wake).await;
+        if !ok {
+            task.drop_data(&wake);
+        }
         let jobs: Vec<JobId> = members
             .iter()
             .map(|firing| firing.key.job.clone())
