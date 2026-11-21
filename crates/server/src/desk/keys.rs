@@ -5,7 +5,7 @@ use pi_secrets::{KeySlot, SecretsError, SlotStatus};
 use super::{Desk, VERIFY_TIMEOUT, allow, refusal};
 use crate::SetupRefusal;
 use crate::setup::KeyRequest;
-use crate::slots::{KeyBody, SlotRequest};
+use crate::slots::{KeyBody, ProviderRequest, SlotRequest, provider_declarations, registered_of};
 
 /// 확인 시간 상한을 둔 등록 결과를 까닭으로 옮긴다.
 fn settle<T>(
@@ -32,7 +32,35 @@ impl Desk {
         match request {
             KeyBody::Kind(request) => self.register_kind(request).await,
             KeyBody::Slot(request) => self.register_slot(request).await,
+            KeyBody::Provider(request) => self.register_provider(request).await,
         }
+    }
+
+    /// (10b 10번) 공급자 선언의 키(네이버 뉴스 등). 선택 항목이라 시세 흐름을 깨우지 않는다.
+    async fn register_provider(&self, request: ProviderRequest) -> Result<(), SetupRefusal> {
+        let provider = request.keys.provider();
+        let registering =
+            self.secrets
+                .register_provider(request.keys, request.values, &self.verifier);
+        let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
+        match outcome {
+            Ok(()) => tracing::info!(provider, "공급자 키를 등록했습니다"),
+            Err(why) => tracing::warn!(provider, %why, "공급자 키를 등록하지 못했습니다"),
+        }
+        outcome
+    }
+
+    /// (10b 10번) 공급자 선언마다 등록 여부(선언 순서). 키 파일을 읽지 못하면 등록되지 않은 것으로 본다.
+    pub(crate) fn provider_status(&self) -> Vec<(pi_secrets::ProviderKeys, bool)> {
+        let declared = provider_declarations();
+        let status = self.secrets.provider_status(&declared).unwrap_or_else(|error| {
+            tracing::warn!(%error, "키 파일을 읽지 못해 공급자 칸을 등록되지 않은 것으로 봅니다");
+            Vec::new()
+        });
+        declared
+            .into_iter()
+            .map(|keys| (keys, registered_of(&status, keys)))
+            .collect()
     }
 
     async fn register_kind(&self, request: KeyRequest) -> Result<(), SetupRefusal> {

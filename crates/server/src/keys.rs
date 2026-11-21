@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use pi_ai::AnthropicConfig;
 use pi_data::DataConfig;
 use pi_market::TossConfig;
-use pi_secrets::{Credentials, KeyKind, KeySlot, SecretStore, Verifier, VerifyFailure};
+use pi_secrets::{
+    Credentials, KeyKind, KeySlot, ProviderKeys, SecretStore, Verifier, VerifyFailure,
+};
 
 use crate::retry::{LOG_EVERY, LogGate};
 
@@ -190,6 +192,7 @@ impl pi_ai::CredentialSource for NoKeys {
 /// | [`KeyKind::Data`] | 확인할 곳이 아직 없다 | 언제나 실패(저장하지 않는다) |
 /// | (8차) `KeySlot::{Dart, Ecos, Fred}` | `pi_data::verify_slot`([`KeyVerifier::with_data`]의 주소) | 주소가 없으면 `Unreachable` |
 /// | (8차) `KeySlot::BackupGithubToken` | `pi_backup::verify_token`([`KeyVerifier::with_github`]의 주소) | 주소가 없으면 `Unreachable` |
+/// | (10b) 네이버 뉴스(`pi_data::NAVER_NEWS_KEYS`) | `pi_data::verify_news_keys`([`KeyVerifier::with_news`]의 주소) | 주소가 없거나 모르는 공급자면 `Unreachable` |
 ///
 /// 그 밖의 실패(한도 초과 · 장애 등)도 `Ok`가 아니다(확인하지 못한 키는 저장하지 않는다, E4).
 pub struct KeyVerifier {
@@ -198,6 +201,8 @@ pub struct KeyVerifier {
     data: Option<DataConfig>,
     /// (8차) GitHub API 주소. 없으면 토큰은 확인하지 않는다.
     github_api_base: Option<String>,
+    /// (10b 10번) 네이버 뉴스 주소. 없으면 네이버 키는 확인하지 않는다(저장하지 않는다).
+    news: Option<pi_data::NaverNewsConfig>,
 }
 
 impl KeyVerifier {
@@ -207,7 +212,14 @@ impl KeyVerifier {
             upstreams,
             data: None,
             github_api_base: None,
+            news: None,
         }
+    }
+
+    /// (10b 10번) 네이버 뉴스 키를 이 주소로 확인한다(검색 한 번, `pi_data::verify_news_keys`).
+    pub fn with_news(mut self, news: pi_data::NaverNewsConfig) -> Self {
+        self.news = Some(news);
+        self
     }
 
     /// (8차) 자료 칸(DART · ECOS · FRED)을 이 주소로 확인한다(앱의 자료 설정과 같은 주소).
@@ -281,6 +293,20 @@ impl Verifier for KeyVerifier {
         }
         let data = self.data.as_ref().ok_or(VerifyFailure::Unreachable)?;
         pi_data::verify_slot(data, slot, values).await
+    }
+
+    /// (10b 10번) 공급자 선언의 키: 네이버 뉴스는 검색 한 번으로 확인한다(401 · 403이면 `Rejected`).
+    /// 모르는 공급자 · 주소가 없으면 `Unreachable`(저장하지 않는다).
+    async fn verify_provider(
+        &self,
+        keys: ProviderKeys,
+        values: &Credentials,
+    ) -> Result<(), VerifyFailure> {
+        if keys != pi_data::NAVER_NEWS_KEYS.provider_keys() {
+            return Err(VerifyFailure::Unreachable);
+        }
+        let news = self.news.as_ref().ok_or(VerifyFailure::Unreachable)?;
+        pi_data::verify_news_keys(news, values).await
     }
 }
 

@@ -16,10 +16,14 @@ pub(crate) type ApprovalHook = Box<dyn Fn(ApprovalNumber, String) + Send + Sync>
 /// 하루 마감을 남긴 뒤 부른다(시장 날짜). 오래 붙잡지 않는다.
 pub(crate) type CloseHook = Box<dyn Fn(NaiveDate) + Send + Sync>;
 
+/// (10b 0번 라) 자료 이상으로 이상 감지 멈춤이 됐을 때 부른다(묶기는 주문 길이 한다). 오래 붙잡지 않는다.
+pub(crate) type DataHaltHook = Box<dyn Fn() + Send + Sync>;
+
 /// 주문 길이 알리는 자리.
 pub(crate) struct Hooks {
     pub(crate) approval: ApprovalHook,
     pub(crate) closed: CloseHook,
+    pub(crate) data_halt: DataHaltHook,
 }
 
 /// 승인 결과의 글자.
@@ -71,6 +75,12 @@ impl Trading {
         }
     }
 
+    pub(super) fn announce_data_halt(&self) {
+        if let Some(hooks) = self.hooks.get() {
+            (hooks.data_halt)();
+        }
+    }
+
     /// 승인 요청 하나(없으면 `None`).
     pub(crate) fn approval_view(&self, number: &str) -> Result<Option<ApprovalView>, TradingError> {
         self.approvals
@@ -84,6 +94,18 @@ impl Trading {
         if let Err(error) = self.approvals.record_notice(number, notice) {
             tracing::warn!(%error, "승인 요청 알림 결과를 남기지 못했습니다");
         }
+    }
+
+    /// (10차 10b 0번 나) 보유 종목들(손절 감시 자리가 있는 매매의 종목, 겹치지 않게 매매 번호 순서).
+    /// 시세 흐름이 지켜보는 목록에 없어도 함께 받는다(보유의 손절 감시가 시세 없이 죽지 않게).
+    pub(crate) fn held_symbols(&self) -> Vec<pi_market::Symbol> {
+        let mut symbols: Vec<pi_market::Symbol> = Vec::new();
+        for guard in self.executor.guards() {
+            if !symbols.contains(&guard.symbol) {
+                symbols.push(guard.symbol);
+            }
+        }
+        symbols
     }
 
     /// (10차 10a 4번) 그 보유 매매에 걸려 있는(또는 다시 내기를 기다리는) 파는 주문이 있는가.

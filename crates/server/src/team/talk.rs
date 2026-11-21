@@ -3,7 +3,9 @@
 use pi_agent::{DiscussionLimits, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
 use pi_market::Symbol;
-use pi_store::{AccountKind, NewTrade, StoredFact, TradeId, UnixMillis};
+use pi_store::{
+    AccountKind, NewRoomEvent, NewTrade, RoomActorKind, StoredFact, TradeId, UnixMillis,
+};
 
 use super::facts::{self, Gathered};
 use super::{Crew, Discussed, TRADE_ROOM_PREFIX};
@@ -11,6 +13,11 @@ use crate::TeamError;
 
 /// 논의에 나오는 담당(명단 순서). 매매 담당은 판단 뒤 주문 안 턴에만 나온다.
 pub(super) const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, Role::Leader];
+
+/// 그 매매의 논의 방 이름.
+fn request_room(trade: TradeId) -> String {
+    format!("{TRADE_ROOM_PREFIX}{}", trade.0)
+}
 
 impl Crew {
     fn now_millis(&self) -> UnixMillis {
@@ -33,7 +40,7 @@ impl Crew {
     }
 
     /// 그 종목의 공시 가운데 저장소에 아직 없는 것(접수번호 기준)의 계기 글.
-    async fn new_disclosure(&self, symbol: &str) -> Result<Option<String>, TeamError> {
+    pub(super) async fn new_disclosure(&self, symbol: &str) -> Result<Option<String>, TeamError> {
         let now = self.clock.now();
         let today = self.trading.date_of(now);
         let Some(request) = facts::disclosures(&self.wiring, symbol, today) else {
@@ -86,7 +93,15 @@ impl Crew {
             (today, now),
         )
         .await?;
-        self.trading.note_data(!gathered.all_failed);
+        let mut gathered = gathered;
+        let news = self.news.gather(symbol, now).await?;
+        if let Some(news) = &news {
+            gathered.items.push(news.item.clone());
+            gathered.facts.extend(news.facts.iter().copied());
+            gathered.asked += 1;
+            gathered.failed += u32::from(news.failed);
+        }
+        self.trading.note_data(!gathered.all_failed());
         let price = self
             .trading
             .last_quote(symbol)
@@ -95,7 +110,7 @@ impl Crew {
         let mut data = gathered.items.clone();
         data.extend(self.recall(symbol, topic, trade.id).await);
         let request = DiscussionRequest {
-            room: format!("{TRADE_ROOM_PREFIX}{}", trade.id.0),
+            room: request_room(trade.id),
             trade: trade.id,
             topic: format!("{topic} · 종목 {symbol}{price}"),
             members: MEMBERS.to_vec(),
@@ -107,6 +122,9 @@ impl Crew {
         self.at_table(true).await;
         let result = self.team.discuss(request).await;
         self.at_table(false).await;
+        if let Some(news) = news.filter(|news| news.dropped > 0) {
+            self.log_dropped(&request_room(trade.id), news.dropped);
+        }
         self.attach(trade.id, &gathered)?;
         let outcome = result.map_err(|error| TeamError::Agent(error.to_string()))?;
         Ok(Discussed {
@@ -114,6 +132,25 @@ impl Crew {
             outcome,
             placed: self.tools.take(trade.id),
         })
+    }
+
+    /// (10b 9번) 링크가 이상해 버린 뉴스 기사 수를 그 매매의 방 로그에 남긴다(결정 2026-11-21 16번).
+    fn log_dropped(&self, room: &str, dropped: usize) {
+        let event = NewRoomEvent {
+            room: room.to_string(),
+            event_id: format!("news-dropped-{room}"),
+            kind: "room.activity".to_string(),
+            actor_kind: RoomActorKind::Gateway,
+            actor_id: "server".to_string(),
+            payload: serde_json::json!({
+                "news_dropped": dropped,
+                "text": format!("링크가 이상한 뉴스 기사 {dropped}건을 버렸습니다"),
+            }),
+            at: self.now_millis(),
+        };
+        if let Err(error) = self.store.append_room_event(event) {
+            tracing::warn!(%error, "버린 뉴스 기사 수를 방 로그에 남기지 못했다");
+        }
     }
 
     /// 판단된 매매에 받은 자료를 붙인다(판단 시각보다 늦게 안 것은 뺀다, V36).

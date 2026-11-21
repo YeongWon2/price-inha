@@ -23,6 +23,7 @@ mod link;
 mod marks;
 mod order;
 mod promote;
+mod retry;
 mod stop;
 mod templates;
 mod watch;
@@ -49,8 +50,9 @@ use watch::Watch;
 
 pub(crate) use answer::reject_word;
 pub(crate) use base::{TradingParts, default_wiring};
+pub(crate) use chosen::CHOOSE_TEMPLATE_NOTICE;
 pub(crate) use http::routes;
-pub(crate) use link::{ApprovalHook, CloseHook, Hooks, approval_status_word};
+pub(crate) use link::{ApprovalHook, CloseHook, DataHaltHook, Hooks, approval_status_word};
 pub(crate) use templates::change_of;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →

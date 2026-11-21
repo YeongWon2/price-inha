@@ -122,6 +122,13 @@ impl Crew {
         let roles = roles(&wiring.model);
         let team = Team::new(ports, roles.clone(), TimeLimits::MARKET)
             .map_err(|error| TeamError::Agent(error.to_string()))?;
+        let news = Arc::new(super::news::NewsDesk::open(
+            wiring.news.clone(),
+            wiring.news_daily_limit,
+            Arc::clone(&secrets),
+            store.clone(),
+            Arc::clone(&shared) as Arc<dyn pi_data::Clock>,
+        ));
         let keys: Arc<dyn KeySource> = secrets;
         let data_clock = Arc::clone(&shared) as Arc<dyn pi_data::Clock>;
         let client = DataClient::new(wiring.data.clone(), keys, data_clock)
@@ -140,6 +147,7 @@ impl Crew {
             wiring,
             demo,
             redactor,
+            news,
             approvals,
             day_turn: tokio::sync::Mutex::new(()),
             review_turn: tokio::sync::Mutex::new(()),

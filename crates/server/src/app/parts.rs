@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use pi_gate::{Gate, GateConfig, GateServer};
-use pi_market::{Clock, CredentialSource, MarketAdapter, Symbol, TossClient};
+use pi_market::{Clock, CredentialSource, MarketAdapter, ProviderId, Symbol, TossClient};
 use pi_secrets::SecretStore;
 use pi_store::{Store, UnixMillis};
 use tokio::sync::watch;
@@ -15,7 +15,7 @@ use crate::access_http::{self, AccessSlot};
 use crate::ai_link::Leftovers;
 use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
-use crate::feed::{Feed, Pace, Source, StaleHook};
+use crate::feed::{Feed, Pace, Registered, Source, StaleHook};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::{
     AiChoice, AppError, BrokerKeys, Crew, KeyVerifier, SecretsRedactor, Settings, Trading,
@@ -111,7 +111,9 @@ pub(super) fn key_verifier(
 ) -> KeyVerifier {
     let mut verifier = KeyVerifier::new(wiring.upstreams.clone());
     if let Some(team) = team {
-        verifier = verifier.with_data(team.data.clone());
+        verifier = verifier
+            .with_data(team.data.clone())
+            .with_news(team.news.clone());
     }
     if let Some(reach) = reach {
         let api_base = reach.backup.as_ref().map_or_else(
@@ -195,7 +197,7 @@ pub(super) async fn check_cli_briefly(desk: &Arc<Desk>) -> Option<JoinHandle<()>
     }
 }
 
-/// 시세 흐름을 뒤에서 돌린다: `--demo`면 가짜 어댑터, 아니면 토스 어댑터. 받은 시세는 주문 길로도 간다.
+/// 시세 흐름을 뒤에서 돌린다: `--demo`면 가짜 어댑터, 아니면 공급자 등록부(토스 하나). 받은 시세는 주문 길로도 간다.
 pub(super) fn spawn_feed(
     settings: &Settings,
     wiring: Wiring,
@@ -212,7 +214,9 @@ pub(super) fn spawn_feed(
     } else {
         let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));
         let client = TossClient::new(wiring.upstreams.toss, keys, Arc::clone(&wiring.clock));
-        let adapter: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
+        let toss: Arc<dyn MarketAdapter> = Arc::new(client.adapter(settings.market));
+        // (10b 11번) 시세는 공급자 등록부를 거친다(지금은 토스 하나).
+        let adapter: Arc<dyn MarketAdapter> = Arc::new(Registered::single(ProviderId::Toss, toss));
         Source::Broker(adapter)
     };
     let pace = Pace {

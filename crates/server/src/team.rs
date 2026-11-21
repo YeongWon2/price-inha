@@ -23,7 +23,10 @@ mod facts;
 mod guard;
 mod http;
 mod link;
+mod news;
+mod poll;
 mod review;
+mod scout;
 mod talk;
 mod tools;
 mod wake;
@@ -214,6 +217,8 @@ pub struct Crew {
     wiring: TeamWiring,
     demo: Option<Arc<DemoAi>>,
     redactor: Arc<SecretsRedactor>,
+    /// (10b 9번) 뉴스 공급자 등록부와 네이버 하루 상한.
+    news: Arc<news::NewsDesk>,
     approvals: Approvals,
     journal: Journal,
     /// 하루 판단 · 복기 · 공시 보기를 한 줄로 세운다(트리거와 부르는 쪽이 겹쳐도 한 번씩).

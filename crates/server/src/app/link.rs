@@ -90,6 +90,21 @@ fn approval_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading
     })
 }
 
+/// (10b 0번 라) 자료 이상 멈춤 알림(N5 · V11). 같은 까닭을 묶는 것은 주문 길이 한다(한 시간에 한 번).
+fn data_halt_hook(linked: &Arc<Linked>) -> crate::trading::DataHaltHook {
+    let linked = Arc::clone(linked);
+    Box::new(move || {
+        let body = "자료(공시 · 금리 · 환율 등)를 이어서 받지 못해 이상 감지 멈춤이 됐습니다. \
+자료가 다시 들어오면 스스로 다시 시작합니다(같은 까닭의 알림은 한 시간에 한 번 보냅니다)";
+        linked.notice_later(
+            NoticeKind::Anomaly,
+            "자료 이상".to_string(),
+            body.to_string(),
+            None,
+        );
+    })
+}
+
 /// 하루 마감 뒤: 백업(있으면) → 하루 정리 알림(V48 · V12 · E15).
 fn close_hook(
     linked: &Arc<Linked>,
@@ -145,6 +160,7 @@ pub(super) fn attach(
     trading.hook(Hooks {
         approval: approval_hook(linked, Arc::downgrade(trading)),
         closed: close_hook(linked, Arc::downgrade(trading), crew.map(Arc::downgrade)),
+        data_halt: data_halt_hook(linked),
     });
 }
 

@@ -47,6 +47,8 @@ const API_ERROR_AFTER: Duration = Duration::from_secs(30);
 const DATA_FAILURES_FOR_ANOMALY: u32 = 3;
 /// 마지막 자료 받기 실패 뒤 이만큼 지나면 다음 논의 때까지 정상으로 본다(논의가 없어도 자료 이상이 풀린다).
 const DATA_ANOMALY_KEEP: Duration = Duration::from_secs(600);
+/// 자료 이상 멈춤 알림을 다시 보내기까지의 가장 짧은 시간(멈춤 ↔ 풀림이 번갈아 생겨도 묶는다).
+const DATA_NOTICE_EVERY: Duration = Duration::from_secs(3600);
 /// 비정상을 이만큼 이어서 봐야 멈춘다(시계가 건너뛴 순간의 한 번은 다음 시세에서 다시 본다).
 const ABNORMAL_ROUNDS_TO_HALT: u32 = 2;
 
@@ -76,6 +78,8 @@ pub(super) struct Watch {
     data_failures: u32,
     /// 마지막으로 자료 받기에 실패한 시각.
     data_failed_at: Option<DateTime<Utc>>,
+    /// (10b 0번 라) 자료 이상 멈춤을 마지막으로 알린 시각(같은 까닭은 [`DATA_NOTICE_EVERY`]에 한 번).
+    data_noticed_at: Option<DateTime<Utc>>,
 }
 
 impl Watch {
@@ -316,9 +320,9 @@ impl Trading {
         let Some(calendar) = self.calendar(now) else {
             return Ok(());
         };
-        // 시세 흐름이 지금 받고 있는 종목만 본다. 흐름이 받지 않는 보유 종목은 시세가 올 길이 없어, 넣으면 다음
-        // 거래일 장 시작마다 낡은 시세로 멈춘다(잠긴 round9의 밤을 넘긴 보유). 보유 종목은 시세 흐름이 함께
-        // 받게 된 뒤에(10b) 여기에 든다.
+        // 시세 흐름이 지금 받고 있는 종목을 본다. (10b) 시연이 아니면 흐름이 보유 종목도 함께 받으므로 보유
+        // 종목의 시세가 끊겨도 여기서 알아챈다. 흐름이 받지 않는 종목(시연의 보유)은 시세가 올 길이 없어 넣지
+        // 않는다(넣으면 다음 거래일 장 시작마다 낡은 시세로 멈춘다).
         let symbols: Vec<Symbol> = watching.to_vec();
         let quotes: Vec<(Symbol, Option<Quote>)> = symbols
             .into_iter()
@@ -358,11 +362,31 @@ impl Trading {
                 let cause = TeamCause::AnomalyDetected;
                 let detail = "시세가 늦거나 자료 · 연결에 이상이 있음";
                 self.change_team(TeamState::AnomalyHalt, cause, false, detail)?;
+                if probe.health.data_anomaly {
+                    self.data_halted(now);
+                }
             }
             Some(HealthTransition::Recovered) => self.recovered()?,
             Some(HealthTransition::AnomalyHalt) | None => {}
         }
         Ok(())
+    }
+
+    /// (10b 0번 라) 자료 이상으로 멈췄다: 알린다. 같은 까닭은 [`DATA_NOTICE_EVERY`]에 한 번만 보낸다.
+    fn data_halted(&self, now: DateTime<Utc>) {
+        {
+            let mut watch = lock(&self.watch);
+            let recent = watch.data_noticed_at.is_some_and(|at| {
+                now.signed_duration_since(at)
+                    .to_std()
+                    .map_or(true, |since| since < DATA_NOTICE_EVERY)
+            });
+            if recent {
+                return;
+            }
+            watch.data_noticed_at = Some(now);
+        }
+        self.announce_data_halt();
     }
 
     /// 이상이 풀렸다: 이상 감지 멈춤 → 쉬는 중으로 옮긴 뒤 그날 계획(매매면 운용 중)을 적용한다.

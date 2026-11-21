@@ -17,6 +17,11 @@ use super::Trading;
 use super::base::millis;
 use crate::TradingError;
 
+/// (10차 10b 0번 다) 매수가 막힌 까닭 안내: 쓰는 템플릿이 멈춤이거나 없다. 다시 시작 응답 · 팀 상태 화면 ·
+/// `doctor`가 같은 글을 쓴다.
+pub(crate) const CHOOSE_TEMPLATE_NOTICE: &str =
+    "쓰는 템플릿이 없거나 멈춰 있어 사는 주문이 나가지 않습니다. 새 템플릿을 고르세요";
+
 /// 상태를 가리지 않고 모두 읽는다.
 const STATES: [TemplateState; 4] = [
     TemplateState::Simulating,
@@ -62,6 +67,21 @@ impl Trading {
             return Ok(None);
         }
         Ok(params_of(&template))
+    }
+
+    /// (10b 0번 다) 쓰는 템플릿이 멈춤이거나 없으면 그 안내([`CHOOSE_TEMPLATE_NOTICE`]). 읽지 못하면 없음.
+    pub(super) fn template_notice(&self) -> Option<&'static str> {
+        match self.template_in_use() {
+            Ok(None) => Some(CHOOSE_TEMPLATE_NOTICE),
+            Ok(Some(template)) if template.state == TemplateState::Stopped => {
+                Some(CHOOSE_TEMPLATE_NOTICE)
+            }
+            Ok(Some(_)) => None,
+            Err(error) => {
+                tracing::warn!(%error, "쓰는 템플릿을 읽지 못했습니다");
+                None
+            }
+        }
     }
 
     /// 쓰는 템플릿의 값이 잠겨 있는가(모의중이 아니다: 승격대기 · 실전중 · 멈춤). 템플릿이 없으면 거짓.

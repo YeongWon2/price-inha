@@ -1,7 +1,9 @@
 //! 깨우기 엔진 잇기(T11): 장 시작에 하루 운용 판단 · 새 공시 보기, 마감 뒤에 하루 복기.
 //!
 //! - 작업 상태 · 영수증은 저장소에 둔다([`StoreTriggers`], 다시 켜도 같은 회차를 두 번 돌리지 않는다, E16).
-//! - 달력은 주문 길과 같은 것을 쓴다([`CalendarMarket`]). 시세 조건은 두지 않는다(시세는 시세 흐름이 받는다).
+//! - 달력은 주문 길과 같은 것을 쓴다([`CalendarMarket`]). (10b 8번) 시세 조건의 시세는 시세 흐름이 받아 주문 길에
+//!   넘긴 마지막 시세다(바깥에 따로 묻지 않는다). 조건 목록 · 자료 사건은 [`super::poll::Poller`]가 넣는다.
+//! - 뉴스 공시 시세 담당을 깨운 시세 조건 · 자료 변화는 종목마다 한 번 논의한다([`Crew::on_scout`]).
 //! - `Trigger::run`만 돌린다. `Trigger::settle`은 `select!` 안에 두지 않는다(`run`이 되풀이마다
 //!   `drain_finished`로 끝난 결과를 가져간다).
 
@@ -25,6 +27,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::Crew;
+use super::poll::Poller;
 use crate::{DayPlan, Trading};
 
 fn millis(at: DateTime<Utc>) -> UnixMillis {
@@ -186,7 +189,7 @@ impl TriggerStore for StoreTriggers {
     }
 }
 
-/// 주문 길의 달력을 내주는 시장 어댑터(시세는 받지 않는다).
+/// 주문 길의 달력과 마지막 시세를 내주는 시장 어댑터(바깥에 묻지 않는다).
 struct CalendarMarket(Arc<Trading>);
 
 #[async_trait]
@@ -195,8 +198,11 @@ impl MarketAdapter for CalendarMarket {
         self.0.market()
     }
 
-    async fn quotes(&self, _symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
-        Ok(Vec::new())
+    async fn quotes(&self, symbols: &[Symbol]) -> Result<Vec<Quote>, MarketError> {
+        Ok(symbols
+            .iter()
+            .filter_map(|symbol| self.0.last_quote(symbol.as_str()))
+            .collect())
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
@@ -241,6 +247,15 @@ impl CrewWaker {
 #[async_trait]
 impl Waker for CrewWaker {
     async fn wake(&self, wake: Wake) -> Result<(), WakeError> {
+        if let Target::Member(member) = &wake.target
+            && member == super::poll::SCOUT
+        {
+            return self
+                .0
+                .on_scout(&wake.events)
+                .await
+                .map_err(|error| WakeError(error.to_string()));
+        }
         for event in &wake.events {
             let kind = match event {
                 TriggerEvent::Schedule { kind, .. } | TriggerEvent::CatchUp { kind, .. } => *kind,
@@ -294,14 +309,20 @@ pub(crate) async fn spawn_trigger(
         stop: Arc::new(FullStop(crew.store.clone())),
     };
     let failed = |e: pi_trigger::Error| crate::TeamError::Trigger(e.to_string());
-    let trigger = Trigger::new(config, ports).map_err(failed)?;
+    let trigger = Arc::new(Trigger::new(config, ports).map_err(failed)?);
     trigger.start().await.map_err(failed)?;
     if let Err(error) = trigger.tick().await {
         tracing::warn!(%error, "깨우기 엔진의 첫 tick이 실패했다");
     }
+    // (10b 8번) 시세 조건 · 자료 변화를 엔진에 넣는 고리. 엔진과 함께 멈춘다.
+    let poller = Poller::new(Arc::clone(crew), Arc::clone(&trigger));
+    let polling = stop.clone();
     Ok(tokio::spawn(async move {
-        if let Err(error) = trigger.run(stop).await {
-            tracing::warn!(%error, "깨우기 엔진이 멈췄다");
-        }
+        let engine = async {
+            if let Err(error) = trigger.run(stop).await {
+                tracing::warn!(%error, "깨우기 엔진이 멈췄다");
+            }
+        };
+        tokio::join!(engine, poller.run(polling));
     }))
 }

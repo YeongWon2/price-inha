@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use pi_secrets::{KeyKind, KeySlot, SecretStore};
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 
 use crate::ai_link::{AiMethod, load_ai_choice};
@@ -301,11 +302,15 @@ fn check_database(home: &Path) -> (Check, Option<bool>) {
         .ok()
         .map(|found| found.is_some());
     let known = i64::from(pi_store::SCHEMA_VERSION);
+    // (10차 10b 0번 다) 쓰는 템플릿이 멈춤이거나 없으면 매수가 막힌 까닭을 같은 ✓ 줄에 덧붙인다(문제로 세지 않는다).
+    let notice = template_notice(&conn)
+        .map(|notice| format!(" · {notice}"))
+        .unwrap_or_default();
     let check = match version {
-        Ok(v) if v == known => good(item, format!("저장소 정상(스키마 {v})")),
+        Ok(v) if v == known => good(item, format!("저장소 정상(스키마 {v}){notice}")),
         Ok(v) if (0..known).contains(&v) => good(
             item,
-            format!("저장소 정상(스키마 {v}, 띄울 때 {known}로 올립니다)"),
+            format!("저장소 정상(스키마 {v}, 띄울 때 {known}로 올립니다){notice}"),
         ),
         Ok(v) => bad(
             item,
@@ -315,6 +320,22 @@ fn check_database(home: &Path) -> (Check, Option<bool>) {
         Err(_) => bad(item, "저장소 스키마 버전을 읽지 못했습니다", restore_fix),
     };
     (check, has_key)
+}
+
+/// 쓰는 템플릿(가장 나중에 고른 것)이 없거나 멈춤이면 그 안내. 템플릿 표를 읽지 못하면(옛 스키마 등) 없음.
+fn template_notice(conn: &rusqlite::Connection) -> Option<&'static str> {
+    let state: Result<Option<String>, _> = conn
+        .query_row(
+            "SELECT state FROM templates ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional();
+    match state {
+        Ok(None) => Some(crate::trading::CHOOSE_TEMPLATE_NOTICE),
+        Ok(Some(state)) if state == "stopped" => Some(crate::trading::CHOOSE_TEMPLATE_NOTICE),
+        _ => None,
+    }
 }
 
 fn kind_name(kind: KeyKind) -> &'static str {
@@ -332,6 +353,13 @@ fn slot_name(slot: KeySlot) -> &'static str {
         KeySlot::Fred => "FRED 키",
         KeySlot::BackupGithubToken => "백업 GitHub 토큰",
         _ => "그 밖의 키",
+    }
+}
+
+fn provider_name(provider: &str) -> &str {
+    match provider {
+        "naver_news" => "네이버 뉴스",
+        other => other,
     }
 }
 
@@ -378,6 +406,21 @@ fn check_keys(home: &Path, home_ok: bool) -> Check {
             "없음"
         };
         parts.push(format!("{} {state}", slot_name(status.slot)));
+    }
+    // (10b 10번) 공급자 선언의 키 칸(네이버 뉴스 등, 선택). 이름과 등록 여부만.
+    let declared = crate::slots::provider_declarations();
+    if let Ok(providers) = secrets.provider_status(&declared) {
+        for status in &providers {
+            let state = if status.registered {
+                "있음"
+            } else {
+                "없음"
+            };
+            parts.push(format!(
+                "{} 키(선택) {state}",
+                provider_name(status.provider)
+            ));
+        }
     }
     if cli {
         parts.push("AI는 Claude Code CLI 사용".to_string());

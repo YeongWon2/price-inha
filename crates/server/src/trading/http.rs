@@ -58,7 +58,14 @@ async fn team(State(trading): State<Arc<Trading>>) -> Response {
 
 async fn restart(State(trading): State<Arc<Trading>>) -> Response {
     match trading.restart() {
-        Ok(Restart::Done(state)) => reply(StatusCode::OK, json!({ "state": team_word(state) })),
+        Ok(Restart::Done(state)) => {
+            // 다시 시작해도 쓰는 템플릿이 멈춤이거나 없으면 사는 주문은 나가지 않는다: 까닭을 함께 알린다.
+            let mut body = json!({ "state": team_word(state) });
+            if let Some(notice) = trading.template_notice() {
+                body["notice"] = json!(notice);
+            }
+            reply(StatusCode::OK, body)
+        }
         Ok(Restart::KeysRequired) => reply(
             StatusCode::CONFLICT,
             json!({

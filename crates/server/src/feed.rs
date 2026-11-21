@@ -8,7 +8,9 @@
 
 mod fetch;
 mod late;
+mod registry;
 mod step;
+mod symbols;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,6 +33,7 @@ use late::Board;
 use step::{Rested, Step, failure_state, millis};
 
 pub(crate) use late::market_date;
+pub(crate) use registry::Registered;
 pub(crate) use step::{Pace, Source, StaleHook};
 
 /// 필수 설정이 그대로인지 다시 보는 간격(키 파일만 읽는다. 바깥으로 나가지 않는다).
@@ -269,42 +272,6 @@ impl Feed {
                 self.rest(left, Some(until), demo).await
             }
             _ => Rested::Done,
-        }
-    }
-
-    /// 지켜보는 종목이 바뀌었으면 받아들인다. 빠진 종목의 것은 버리고, 거절 기억은 처음부터다.
-    /// (7차 3번) 시연인데 지켜볼 종목이 없으면 시연 종목 하나를 쓴다(저장하지 않는다).
-    fn adopt_symbols(&mut self) {
-        let mut symbols = self.desk.symbols();
-        if symbols.is_empty() && self.desk.demo() {
-            symbols.push(crate::demo::demo_symbol(self.market));
-        }
-        if symbols != self.symbols {
-            self.symbols = symbols;
-            self.board.keep_only(&self.symbols);
-            self.remember_rejected(Vec::new());
-        }
-    }
-
-    /// 이번에 무엇을 물을지 정한다.
-    fn plan(&mut self) -> Plan {
-        // 거절된 종목도 가끔은 다시 물어본다(새로 생긴 종목 · 잘못 가려낸 종목).
-        // 다시 물어본 결과가 올 때까지 이 표시는 남는다(받기가 실패하면 다음에 또 다시 묻는다).
-        self.recheck_rejected |= self
-            .rejected_since
-            .is_some_and(|since| since.elapsed() >= REJECTED_RECHECK);
-        let skip = if self.recheck_rejected {
-            Vec::new()
-        } else {
-            self.rejected.clone()
-        };
-        let today = late::market_date(self.market, self.clock.now());
-        let waiting = self.calendar_retry_at.is_some_and(|at| Instant::now() < at);
-        let calendar = (!self.board.has_calendar_for(today) && !waiting).then_some(today);
-        Plan {
-            symbols: self.symbols.clone(),
-            skip,
-            calendar,
         }
     }
 

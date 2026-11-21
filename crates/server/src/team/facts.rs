@@ -1,6 +1,6 @@
 //! 자료 잇기(T10): 종목 하나의 판단 자료를 받아 저장하고 논의 자료(`pi_agent::DataItem`)로 옮긴다.
 //!
-//! 받는 것: 공시 · 재무(DART, 고유번호가 있는 종목만), 국내 금리 · 환율(ECOS). 받은 자료는 저장소에 쌓고
+//! 받는 것: 공시 · 재무(DART, 고유번호가 있는 종목만), 국내 금리 · 환율(ECOS), (10b) 미국 금리(FRED, 키가 있을 때). 받은 자료는 저장소에 쌓고
 //! (`Store::save_facts`), 판단된 뒤에 매매에 붙인다. 비었거나(`Missing`) 받지 못한 자료는 내용이 없는
 //! 자료 항목이 된다(실행기가 지켜보기로 둔다, E32).
 
@@ -20,10 +20,23 @@ pub(super) struct Gathered {
     pub(super) items: Vec<DataItem>,
     /// 저장한 자료 번호와 알게 된 시각(판단 뒤 매매에 붙인다).
     pub(super) facts: Vec<(FactId, UnixMillis)>,
-    /// (10차 10a 2번 · 보강 3번) 키가 있는 출처에 물은 자료가 하나도 답하지 않았나(모두 오류). 자료 이상
-    /// 신호로 쓴다. 키가 없어 묻지 못한 것(`DataError::NoKey`)은 세지 않고, 물은 것이 하나도 없으면 거짓이다.
-    pub(super) all_failed: bool,
+    /// (10차 10a 2번 · 보강 3번) 키가 있는 출처에 물은 자료 수와 그 가운데 받지 못한 수. 모두 받지 못했으면
+    /// 자료 이상 신호다. 키가 없어 묻지 못한 것(`DataError::NoKey`)은 세지 않는다.
+    pub(super) asked: u32,
+    pub(super) failed: u32,
 }
+
+impl Gathered {
+    /// 물은 자료가 하나도 답하지 않았나(모두 오류). 물은 것이 하나도 없으면 거짓이다.
+    pub(super) fn all_failed(&self) -> bool {
+        self.asked > 0 && self.failed == self.asked
+    }
+}
+
+/// (10차 10b 9번) 미국 금리로 묻는 FRED 계열(미국 10년 국채 금리).
+const US_RATE_SERIES: &str = "DGS10";
+/// 미국 금리를 묻는 기간(오늘을 포함해 이만큼 앞부터).
+const US_RATE_DAYS: i64 = 10;
 
 /// 저장하는 자료 종류 이름.
 pub(super) fn kind_name(kind: FactKind) -> &'static str {
@@ -104,6 +117,11 @@ fn requests(
         financials.ok_or(FactKind::Financials),
         Ok(FactRequest::KoreaRate(dated(&wiring.korea_rate, today))),
         Ok(FactRequest::KoreaFx(dated(&wiring.korea_fx, today))),
+        Ok(FactRequest::UsRate {
+            series_id: US_RATE_SERIES.to_string(),
+            from: today - Days::days(US_RATE_DAYS),
+            to: today,
+        }),
     ]
 }
 
@@ -156,17 +174,23 @@ pub(super) async fn gather(
     let mut gathered = Gathered {
         items: Vec::new(),
         facts: Vec::new(),
-        all_failed: false,
+        asked: 0,
+        failed: 0,
     };
-    let (mut asked, mut failed) = (0_u32, 0_u32);
     for request in requests(wiring, symbol, today) {
         let (kind, fetched) = match request {
             Ok(request) => {
                 let fetched = adapter.fetch(&request).await;
+                let no_key = matches!(fetched, Err(DataError::NoKey { .. }));
+                // (10b 9번) FRED 키는 새로 더한 선택 키다: 키가 없으면 자료에 넣지 않는다(받지 못한 자료로 세어
+                // 논의를 지켜보기로 바꾸지 않는다).
+                if no_key && request.kind() == FactKind::UsRate {
+                    continue;
+                }
                 // 자료 키는 선택이다: 키가 없어 바깥에 묻지 못한 것은 물은 것도 실패한 것도 아니다.
-                if !matches!(fetched, Err(DataError::NoKey { .. })) {
-                    asked += 1;
-                    failed += u32::from(fetched.is_err());
+                if !no_key {
+                    gathered.asked += 1;
+                    gathered.failed += u32::from(fetched.is_err());
                 }
                 (request.kind(), fetched)
             }
@@ -194,6 +218,5 @@ pub(super) async fn gather(
             }),
         }
     }
-    gathered.all_failed = asked > 0 && failed == asked;
     Ok(gathered)
 }

@@ -81,6 +81,8 @@ impl Trading {
         if let Err(error) = self.settle_due().await {
             tracing::warn!(%error, "답 없는 승인 요청을 처리하지 못했습니다");
         }
+        // 실패한 파는 주문(손절 · 팀장 팔기 등)을 때가 되면 다시 낸다(E30).
+        self.retry_sells().await;
     }
 
     async fn try_tick(&self) -> Result<(), TradingError> {
@@ -287,6 +289,7 @@ impl Trading {
             }
             _ => (Value::Null, Value::Null),
         };
-        Ok(json!({ "state": team_word(state), "plan": plan, "reason": reason }))
+        let notice = self.template_notice();
+        Ok(json!({ "state": team_word(state), "plan": plan, "reason": reason, "notice": notice }))
     }
 }

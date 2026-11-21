@@ -9,7 +9,7 @@
 //! 값 · 값의 일부 · 길이는 없다. 자료 키 · 토큰은 선택 항목이라 시작 조건(`ready`)에 들지 않는다.
 //! (`GET /api/setup`의 모양은 앞 차수 시험이 칸을 못 박아 두어 따로 둔다.)
 
-use pi_secrets::{Credentials, KeySlot, SlotStatus};
+use pi_secrets::{Credentials, KeySlot, ProviderKeys, ProviderStatus, SlotStatus};
 use serde_json::{Value, json};
 use zeroize::Zeroize;
 
@@ -46,6 +46,18 @@ pub const KEY_SLOTS: [(&str, KeySlot); 4] = [
     (KEY_BACKUP_GITHUB_TOKEN, KeySlot::BackupGithubToken),
 ];
 
+/// (10b 10번) 새 칸 목록에 싣는 공급자 선언들(선언을 가진 모듈의 상수에서 읽는다). 옛 `item` `data` 칸은 없다.
+/// 새 공급자는 여기에 선언 한 줄을 더한다.
+pub(crate) fn provider_declarations() -> Vec<ProviderKeys> {
+    vec![pi_data::NAVER_NEWS_KEYS.provider_keys()]
+}
+
+fn provider_named(item: &str) -> Option<ProviderKeys> {
+    provider_declarations()
+        .into_iter()
+        .find(|keys| keys.provider() == item)
+}
+
 fn slot_named(item: &str) -> Option<KeySlot> {
     KEY_SLOTS
         .iter()
@@ -66,10 +78,17 @@ pub(crate) struct SlotRequest {
     pub(crate) values: Credentials,
 }
 
-/// 키 등록 본문: 앞 차수의 키 종류이거나 바깥 키 칸.
+/// (10b 10번) 공급자 키 등록 요청. `Debug`를 만들지 않는다(값이 기록으로 나가지 않게).
+pub(crate) struct ProviderRequest {
+    pub(crate) keys: ProviderKeys,
+    pub(crate) values: Credentials,
+}
+
+/// 키 등록 본문: 앞 차수의 키 종류이거나 바깥 키 칸이거나 (10b) 공급자 선언의 키.
 pub(crate) enum KeyBody {
     Kind(KeyRequest),
     Slot(SlotRequest),
+    Provider(ProviderRequest),
 }
 
 impl KeyBody {
@@ -89,10 +108,32 @@ impl KeyBody {
             let values = read_fields(kind.fields(), fields)?;
             return Ok(KeyBody::Kind(KeyRequest { kind, values }));
         }
+        if let Some(keys) = provider_named(item) {
+            let values = read_fields(keys.fields(), fields)?;
+            return Ok(KeyBody::Provider(ProviderRequest { keys, values }));
+        }
         let slot = slot_named(item).ok_or(SetupRefusal::InvalidInput)?;
         let values = read_fields(slot.fields(), fields)?;
         Ok(KeyBody::Slot(SlotRequest { slot, values }))
     }
+}
+
+/// (10b 10번) 새 칸 목록의 응답 본문: 공급자 이름 · 칸 이름 · 등록 여부뿐이다(값 · 값의 일부 · 길이 없음).
+pub(crate) fn providers_json(status: &[(ProviderKeys, bool)]) -> Value {
+    let providers: Vec<Value> = status
+        .iter()
+        .map(|(keys, registered)| {
+            json!({ "provider": keys.provider(), "fields": keys.fields(), "registered": registered })
+        })
+        .collect();
+    json!({ "providers": providers })
+}
+
+/// 공급자 상태 한 줄에서 등록 여부.
+pub(crate) fn registered_of(status: &[ProviderStatus], keys: ProviderKeys) -> bool {
+    status
+        .iter()
+        .any(|s| s.provider == keys.provider() && s.registered)
 }
 
 /// 칸 상태의 응답 본문. 이름과 등록 여부뿐이다.
