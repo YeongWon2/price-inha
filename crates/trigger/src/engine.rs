@@ -15,9 +15,9 @@ use tokio::sync::watch;
 use crate::inflight::InFlight;
 use crate::watch::QuoteWatch;
 use crate::{
-    Alert, CLOCK_JUMP_TOLERANCE, Clock, ConditionKind, ERROR_BACKOFF, Error, JobId, Monotonic,
-    Receipt, ReceiptKey, ReceiptStatus, ScheduleKind, ScheduleTimes, StopSignal, Target,
-    TriggerStore, Wake, Waker,
+    Alert, CLOCK_JUMP_TOLERANCE, Clock, ConditionKind, DataKind, DataTriggerConfig, ERROR_BACKOFF,
+    Error, JobId, Monotonic, Receipt, ReceiptKey, ReceiptStatus, ScheduleKind, ScheduleTimes,
+    StopSignal, Target, TriggerStore, Wake, Waker,
 };
 
 /// 시세를 받는 간격의 기본값(10초). 시세 조건이 있고 장이 열려 있을 때 쓴다.
@@ -68,11 +68,15 @@ pub struct TriggerConfig {
     pub quote_interval: Duration,
     /// 늦은 시세(이상)로 깨울 대상.
     pub stale_target: Target,
+    /// 자료 변화(뉴스 · 공시 · 재무 · 거시)로 깨우기(6차).
+    pub data: DataTriggerConfig,
 }
 
 impl TriggerConfig {
     /// 작업들과 기본값: 일정 간격 [`ScheduleTimes::default`], 다시 걸기 0.5%,
     /// 늦은 시세 30초, 시세 간격 [`DEFAULT_QUOTE_INTERVAL`], 이상은 [`Target::Team`].
+    /// 자료 변화: 네 종류 모두 받음, 대상 `Target::Member("scout")`, 중복 1시간, 조용한 시간 30초,
+    /// 최대 기다림 300초, 출처마다 60초에 30개, 한 깨우기 상한 20.
     pub fn new(schedules: Vec<ScheduleJob>, conditions: Vec<ConditionJob>) -> Self {
         Self {
             schedules,
@@ -82,6 +86,21 @@ impl TriggerConfig {
             stale: StalePolicy::default(),
             quote_interval: DEFAULT_QUOTE_INTERVAL,
             stale_target: Target::Team,
+            data: DataTriggerConfig {
+                enabled: vec![
+                    DataKind::News,
+                    DataKind::Disclosure,
+                    DataKind::Financials,
+                    DataKind::Macro,
+                ],
+                target: Target::Member("scout".to_string()),
+                dedupe_for: Duration::from_secs(60 * 60),
+                quiet: Duration::from_secs(30),
+                max_wait: Duration::from_secs(300),
+                per_source_window: Duration::from_secs(60),
+                per_source_limit: 30,
+                batch_limit: 20,
+            },
         }
     }
 }
@@ -127,6 +146,8 @@ pub struct TickReport {
     /// 지난 tick 뒤로 벽시계 경과와 단조 시계 경과가 [`crate::CLOCK_JUMP_TOLERANCE`]보다 크게
     /// 달랐나(시계가 뒤로 감 · 절전에서 깸 · 시계 맞춤). 첫 tick은 거짓.
     pub clock_jumped: bool,
+    /// 이번 tick에 상한 · 전체 정지로 버린 자료 사건 수(6차).
+    pub data_dropped: usize,
     /// 다음 tick까지 기다릴 시간: 다음 회차까지 · 시세 간격(시세 조건이 있고 장이 열렸을 때) ·
     /// [`crate::MAX_TIMER`] 가운데 가장 짧은 것. 0 이하이면 [`crate::MIN_REFIRE_GAP`].
     pub next_delay: Duration,

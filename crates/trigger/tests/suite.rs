@@ -22,6 +22,10 @@
 //!
 //! 4차(3차 검토의 참고):
 //! - `round4`: 4차 1~3 바깥 작업 안의 패닉 · 취소된 `settle` · 일반 발사의 `pending_slot` 지우기
+//!
+//! 6차(2026-11-21 발표 자료 대조):
+//! - `round6`: 자료 변화 사건으로 깨우기(중복 · 속도 제한 · 묶어 보내기 · 장 밖 보관 · 전체 정지) ·
+//!   지켜보는 종목의 시세 조건 목록(`watch_conditions` · `replace_conditions`)
 
 mod support;
 
@@ -35,6 +39,7 @@ mod restart;
 mod revive;
 mod round3;
 mod round4;
+mod round6;
 mod schedule;
 mod store;
 mod timer;

@@ -69,6 +69,7 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
         wakes,
         alerts: trigger.inflight.take_alerts(),
         clock_jumped,
+        data_dropped: 0,
         next_delay,
     })
 }
@@ -135,6 +136,7 @@ fn report(outcome: TickOutcome, clock_jumped: bool, next_delay: Duration) -> Tic
         wakes: Vec::new(),
         alerts: Vec::new(),
         clock_jumped,
+        data_dropped: 0,
         next_delay,
     }
 }
@@ -409,6 +411,7 @@ fn reason_of(events: &[TriggerEvent]) -> WakeReason {
         TriggerEvent::CatchUp { .. } => (1, WakeReason::CatchUp),
         TriggerEvent::Schedule { .. } => (2, WakeReason::Schedule),
         TriggerEvent::Price { .. } => (3, WakeReason::Price),
+        TriggerEvent::Data { .. } => (4, WakeReason::Data),
     };
     events
         .iter()

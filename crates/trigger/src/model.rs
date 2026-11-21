@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use pi_market::{Market, Symbol};
 use rust_decimal::Decimal;
 
-use crate::{ConditionKind, Direction};
+use crate::{ConditionKind, DataChange, Direction};
 
 /// 작업 id. 영수증 키 `(작업, 예정 시각)`의 앞쪽이다.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -103,9 +103,17 @@ pub enum TriggerEvent {
         /// 마지막으로 받은 시각. 한 번도 못 받았으면 없다.
         last_received: Option<DateTime<Utc>>,
     },
+    /// 자료 변화(뉴스 · 공시 · 재무 · 거시, 6차).
+    Data {
+        /// 받은 사건.
+        change: DataChange,
+        /// 장 밖이라 보관했다가 장이 열린 뒤 넘기는 것인가.
+        held: bool,
+    },
 }
 
-/// 깨우는 이유. 한 깨우기에 여러 사건이 묶이면 `Anomaly` > `CatchUp` > `Schedule` > `Price` 순으로 앞의 것.
+/// 깨우는 이유. 한 깨우기에 여러 사건이 묶이면 `Anomaly` > `CatchUp` > `Schedule` > `Price` > `Data`
+/// 순으로 앞의 것.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WakeReason {
     /// 이상(늦은 시세 등).
@@ -116,6 +124,8 @@ pub enum WakeReason {
     Schedule,
     /// 시세 조건.
     Price,
+    /// 자료 변화(6차).
+    Data,
 }
 
 /// [`crate::Waker`]에 넘기는 깨우기 하나. 대상 하나에 한 번의 tick에서 생긴 사건을 묶는다.
