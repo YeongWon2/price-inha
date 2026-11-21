@@ -421,3 +421,102 @@ async fn done_carries_the_plan_from_before_the_settings_were_recorded() {
     );
     assert_eq!(kb.stored_settings().expect("설정"), Some(sb));
 }
+
+/// 남은 설정에서 모델 칸의 키. `record_settings`가 칸을 따로따로 쓰는 것을 흉내 낼 때 쓴다.
+const MODEL_KEY: &str = "settings.model";
+/// 남은 설정에서 차원 칸의 키. 값이 빈 글자면 벡터가 없다는 뜻이다.
+const DIMS_KEY: &str = "settings.dims";
+
+/// 키워드 전용 설정(모델 빈 글자 · 차원 없음)을 남기고, 설정은 건드리지 않은 채 model-a(차원 3)로
+/// 모든 조각의 임베딩을 만든 시험대. `Done` 직전에 설정 남기기만 남은 상태다.
+async fn keyword_settings_with_all_chunks_embedded() -> (Fixture, Arc<ModelEmbedder>, Knowledge) {
+    let f = three_records();
+    let keyword_only = settings("", None);
+    f.knowledge.record_settings(&keyword_only).expect("설정");
+    let a = ModelEmbedder::new("model-a");
+    let ka = knowledge_with(&f.store, &a);
+    let report = ka.embed_missing(10).await.expect("임베딩");
+    assert_eq!(report.embedded, 3);
+    assert_eq!(ka.stored_settings().expect("설정"), Some(keyword_only));
+    (f, a, ka)
+}
+
+// 검증: D10 V23
+#[tokio::test]
+async fn settings_torn_after_the_dims_cell_heal_on_the_next_step() {
+    let (f, a, ka) = keyword_settings_with_all_chunks_embedded().await;
+    // 새 순서(모델 칸이 맨 마지막)에서 끊긴 모습: 차원 칸만 새것이고 모델 칸은 옛것(빈 글자)이다.
+    f.store.set_knowledge_meta(DIMS_KEY, "3").expect("차원 칸");
+    let torn = settings("", Some(3));
+    assert_eq!(ka.stored_settings().expect("설정"), Some(torn.clone()));
+
+    let sa = settings("model-a", Some(3));
+    let total = run_to_done(&ka, &a, &sa, 10, Some(torn)).await;
+    assert_eq!(total, 0, "이미 다 만든 조각을 또 만들었다");
+    assert_eq!(ka.stored_settings().expect("설정"), Some(sa.clone()));
+    for id in all_chunks(&f) {
+        assert_eq!(model_of(&f, id).as_deref(), Some("model-a"));
+    }
+
+    // 다시 열어도 온전한 설정이 남아 있고, 더 할 일이 없다.
+    let f = f.reopen();
+    let again = knowledge_with(&f.store, &a);
+    assert_eq!(again.stored_settings().expect("설정"), Some(sa.clone()));
+    assert_eq!(
+        again.reembed_step(&sa, 10).await.expect("한 걸음"),
+        ReembedProgress::Done {
+            embedded: 0,
+            plan: ReindexPlan::Keep
+        }
+    );
+}
+
+// 검증: D10 V23
+#[tokio::test]
+async fn a_model_and_dims_switch_torn_after_the_dims_cell_reembeds_everything() {
+    let f = three_records();
+    let a = ModelEmbedder::new("model-a");
+    let ka = knowledge_with(&f.store, &a);
+    let sa = settings("model-a", Some(3));
+    run_to_done(&ka, &a, &sa, 10, None).await;
+
+    // A,3 → B,4 로 남기다 끊긴 모습: 차원 칸만 4이고 모델 칸은 아직 A다.
+    f.store.set_knowledge_meta(DIMS_KEY, "4").expect("차원 칸");
+    let torn = settings("model-a", Some(4));
+    assert_eq!(ka.stored_settings().expect("설정"), Some(torn.clone()));
+
+    let b = ModelEmbedder::with_dims("model-b", 4);
+    let kb = knowledge_with(&f.store, &b);
+    let sb = settings("model-b", Some(4));
+    let total = run_to_done(&kb, &b, &sb, 2, Some(torn)).await;
+    assert_eq!(total, 3);
+    assert_eq!(kb.stored_settings().expect("설정"), Some(sb));
+    for id in all_chunks(&f) {
+        let e = f.store.chunk_embedding(id).expect("읽기").expect("임베딩");
+        assert_eq!(e.model, "model-b");
+        assert_eq!(e.dims, 4);
+    }
+}
+
+// 검증: D10 V23
+#[tokio::test]
+async fn settings_torn_after_the_model_cell_with_no_dims_still_reach_done() {
+    let (f, a, ka) = keyword_settings_with_all_chunks_embedded().await;
+    // 옛 순서(모델 칸이 차원보다 먼저)에서 끊겨 이미 남아 있을 수 있는 모습: 모델 칸만 새것이고
+    // 차원 칸은 아직 비어 있다. 옛 차원 벡터가 있을 수 없으니 막지 않고 이어서 끝낸다.
+    f.store
+        .set_knowledge_meta(MODEL_KEY, "model-a")
+        .expect("모델 칸");
+    let torn = settings("model-a", None);
+    assert_eq!(ka.stored_settings().expect("설정"), Some(torn.clone()));
+
+    let sa = settings("model-a", Some(3));
+    let total = run_to_done(&ka, &a, &sa, 10, Some(torn)).await;
+    assert_eq!(total, 0, "이미 다 만든 조각을 또 만들었다");
+    assert_eq!(ka.stored_settings().expect("설정"), Some(sa));
+    for id in all_chunks(&f) {
+        let e = f.store.chunk_embedding(id).expect("읽기").expect("임베딩");
+        assert_eq!(e.model, "model-a");
+        assert_eq!(e.dims, 3);
+    }
+}
