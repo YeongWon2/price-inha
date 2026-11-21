@@ -154,8 +154,10 @@ impl Trading {
         if let Some(reason) = self.rest_reason(now) {
             return Err(format!("쉬는 날: {reason}"));
         }
+        // 다시 점검은 그 자리의 상태 추정 · 기준가로 한다(보관해 둔 '정상'으로 아무도 승인하지 않은 주문을 내지 않는다).
+        let request = self.refreshed(request, now);
         let params = self
-            .params()
+            .params_for(request.draft.purpose)
             .map_err(text)?
             .ok_or_else(|| "고른 템플릿이 없습니다".to_string())?;
         let inputs = self

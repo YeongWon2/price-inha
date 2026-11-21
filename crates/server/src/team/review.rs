@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use pi_agent::Role;
 use pi_approval::{Answer, ApprovalNumber, Ask, Decision, Subject};
 use pi_journal::{Improvement, Mistake};
-use pi_store::{Proposal, ProposalId, ProposalState, Trade, UnixMillis};
+use pi_store::{ApprovalStatus, Proposal, ProposalId, ProposalState, Trade, UnixMillis};
 use pi_template::Change;
 use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
@@ -98,6 +98,9 @@ pub(super) struct Answered {
     pub(super) result: &'static str,
     pub(super) reason: Option<&'static str>,
 }
+
+/// 개선안 답의 거절 이유: 쓰는 템플릿의 값이 잠겨 있다(승격대기 · 실전중, V21).
+const PROPOSAL_TEMPLATE_LOCKED: &str = "template_locked";
 
 fn answered(result: &'static str, reason: Option<&'static str>) -> Answered {
     Answered { result, reason }
@@ -247,6 +250,13 @@ impl Crew {
                 .answer(&number, fingerprint, Decision::Reject)
                 .map_err(approval_error)?;
             return Ok(self.reject(id));
+        }
+        // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 닫거나 소비하기 전에 거절한다(V21 · E28):
+        // 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다. 잠김이 풀린 뒤 같은 번호로 다시 답할 수 있다.
+        let waiting = self.approvals.get(&number).map_err(approval_error)?;
+        let waiting = waiting.is_some_and(|view| view.status == ApprovalStatus::Pending);
+        if waiting && self.trading.template_locked()? {
+            return Ok(answered("rejected", Some(PROPOSAL_TEMPLATE_LOCKED)));
         }
         let answer = self
             .approvals

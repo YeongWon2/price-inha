@@ -72,6 +72,8 @@ pub const PROPOSALS_PATH: &str = "/api/proposals";
 ///   위험을 키우면 `"cooling"`: 템플릿은 그대로이고 다음 거래일 시작에 반영한다(E28).
 /// - 승인 번호가 없거나 맞지 않으면 `"rejected"`, 이유 [`crate::ANSWER_NOT_FOUND`] 등(E35). 개선안 · 템플릿은 그대로다.
 /// - 거절이면 `"rejected"`, 이유 `"user_rejected"`. 개선안은 거절됨이고 템플릿은 그대로다.
+/// - (10a 보강) 승인인데 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 소비하기 전에 거절한다:
+///   `"rejected"`, 이유 `"template_locked"`. 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다(V21 · E28).
 pub const PROPOSAL_ANSWER_PATH: &str = "/api/proposals/answer";
 
 /// 저장되는 이벤트 종류: 팀장의 하루 운용 판단 논의(V5, 1차에서 넘긴 몫).

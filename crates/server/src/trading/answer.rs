@@ -1,7 +1,7 @@
 //! 승인 답하기(C7 · E7 · E8 · T14): 승인 증표는 승인 모듈이 소비에 성공한 뒤에만 여기서 만든다.
 //!
 //! 순서: `pi_approval::Approvals::answer` → (승인이면) `consume`(한 번만) → 쉬는 날 검사(E19) → 증표 →
-//! `pi_rules::approved`(지금의 시세 · 장부로 다시 점검, 내용이 다르면 막힘) → 실행.
+//! `pi_rules::approved`(지금의 시세 · 장부 · 상태 추정으로 다시 점검, 내용이 다르면 막힘) → 실행.
 //! 소비가 규칙 확인보다 먼저다.
 
 use pi_approval::{Answer, ApprovalNumber, Decision, RejectReason, Subject, fingerprint};
@@ -117,12 +117,13 @@ impl Trading {
             return Ok(rejected(ANSWER_REST_DAY));
         }
         let grant = ApprovalGrant::new(number.as_str(), fingerprint(&waiting.subject).as_str());
-        let Some(params) = self.params()? else {
+        let Some(params) = self.params_for(waiting.request.draft.purpose)? else {
             self.block_rejected(waiting.trade, "고른 템플릿이 없습니다")?;
             return Ok(rejected("blocked"));
         };
         let now = self.clock.now();
-        let request = &waiting.request;
+        // 보관해 둔 상태 추정 · 기준가는 낡았을 수 있다: 그 자리에서 새로 구한다(10a 보강 1번).
+        let request = &self.refreshed(waiting.request, now);
         let inputs = match self.inputs(request, now).await? {
             Ok(inputs) => inputs,
             Err(blocked) => {

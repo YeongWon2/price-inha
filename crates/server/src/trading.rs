@@ -15,6 +15,7 @@
 
 mod answer;
 mod base;
+mod chosen;
 mod day;
 mod due;
 mod http;

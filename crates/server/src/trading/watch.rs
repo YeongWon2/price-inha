@@ -26,7 +26,7 @@ use serde_json::{Map, Value, json};
 
 use super::base::{lock, millis};
 use super::day::status;
-use super::{DayPlan, Trading};
+use super::{DayPlan, OrderRequest, Trading};
 use crate::TradingError;
 
 /// 저장되는 이벤트 종류: 그 날 정규장의 종목별 마지막 시세(다음 거래일의 기준가). 화면에는 보내지 않는다.
@@ -45,6 +45,8 @@ const MIN_RECOVERY_HOLD: Duration = Duration::from_secs(1);
 const API_ERROR_AFTER: Duration = Duration::from_secs(30);
 /// 자료 받기가 이만큼 이어서 모두 실패하면 자료 이상으로 본다.
 const DATA_FAILURES_FOR_ANOMALY: u32 = 3;
+/// 마지막 자료 받기 실패 뒤 이만큼 지나면 다음 논의 때까지 정상으로 본다(논의가 없어도 자료 이상이 풀린다).
+const DATA_ANOMALY_KEEP: Duration = Duration::from_secs(600);
 /// 비정상을 이만큼 이어서 봐야 멈춘다(시계가 건너뛴 순간의 한 번은 다음 시세에서 다시 본다).
 const ABNORMAL_ROUNDS_TO_HALT: u32 = 2;
 
@@ -70,8 +72,10 @@ pub(super) struct Watch {
     abnormal_rounds: u32,
     /// 시세 공급자가 실패하기 시작한 시각(받으면 지운다).
     feed_failing_since: Option<DateTime<Utc>>,
-    /// 이어진 자료 받기 실패 수.
+    /// 이어진 자료 받기 실패 수(키가 있는 출처에 물어 모두 실패한 논의의 수).
     data_failures: u32,
+    /// 마지막으로 자료 받기에 실패한 시각.
+    data_failed_at: Option<DateTime<Utc>>,
 }
 
 impl Watch {
@@ -158,6 +162,28 @@ impl Watch {
             .map(|close| close.price)
     }
 
+    /// 자료 받기 한 번의 결과를 센다: 받았으면 처음부터, 실패했으면 하나 더하고 그 시각을 적는다.
+    fn note_data(&mut self, ok: bool, now: DateTime<Utc>) {
+        if ok {
+            self.data_failures = 0;
+            self.data_failed_at = None;
+        } else {
+            self.data_failures = self.data_failures.saturating_add(1);
+            self.data_failed_at = Some(now);
+        }
+    }
+
+    /// 자료 이상인가: 연속 실패가 기준을 넘었고 마지막 실패가 아직 오래되지 않았다. 마지막 실패 뒤
+    /// [`DATA_ANOMALY_KEEP`]이 지나면 다음 논의(다음 자료 받기) 때까지 정상으로 본다.
+    fn data_anomaly(&self, now: DateTime<Utc>) -> bool {
+        let fresh = self.data_failed_at.is_some_and(|at| {
+            now.signed_duration_since(at)
+                .to_std()
+                .is_ok_and(|since| since < DATA_ANOMALY_KEEP)
+        });
+        fresh && self.data_failures >= DATA_FAILURES_FOR_ANOMALY
+    }
+
     /// 그 날 정규장의 마지막 시세들(저장할 내용). 하나도 없으면 없음.
     fn closes_on(&self, date: NaiveDate) -> Option<Value> {
         let prices: Map<String, Value> = self
@@ -238,18 +264,29 @@ impl Trading {
         Health {
             account_in_sync: self.executor.ready(),
             api_error,
-            data_anomaly: watch.data_failures >= DATA_FAILURES_FOR_ANOMALY,
+            data_anomaly: watch.data_anomaly(now),
         }
     }
 
-    /// 자료 받기 한 번의 결과를 받는다(받을 것이 모두 실패했으면 `ok`가 거짓).
+    /// 자료 받기 한 번의 결과를 받는다. `ok`가 거짓인 것은 키가 있는 출처에 물었는데 모두 실패했을 때뿐이다
+    /// (키가 없어 묻지 못한 것은 실패가 아니고, 물은 것이 하나도 없으면 정상이다 — 10a 보강 3번).
     pub(crate) fn note_data(&self, ok: bool) {
-        let mut watch = lock(&self.watch);
-        watch.data_failures = if ok {
-            0
-        } else {
-            watch.data_failures.saturating_add(1)
-        };
+        let now = self.clock.now();
+        lock(&self.watch).note_data(ok, now);
+    }
+
+    /// 다시 점검할 주문 안의 상태 추정 · 기준가를 그 자리에서 새로 구한다(승인 답 · 답 없음, 10a 보강 1번).
+    /// 시연 모드(VI · 거래정지가 없다고 안다)와 파는 주문(상태를 모른다고 막지 않는다)은 받은 그대로다.
+    pub(super) fn refreshed(&self, mut request: OrderRequest, now: DateTime<Utc>) -> OrderRequest {
+        if self.desk.demo() || !request.draft.purpose.is_buy() {
+            return request;
+        }
+        let symbol = request.draft.symbol.as_str().to_string();
+        request.status = self.estimated_status(&symbol, now);
+        if let Some(reference) = self.reference_price(&symbol, now) {
+            request.reference_price = reference;
+        }
+        request
     }
 
     /// 비정상이 생겼다(주문 실행기의 이상 감지 멈춤 등): 정상 시간을 처음부터 다시 센다.
@@ -421,6 +458,29 @@ mod tests {
         let back = Watch::restore(saved.as_ref());
         assert_eq!(back.reference("A", &calendar(18)), Some(Decimal::from(100)));
         assert_eq!(Watch::default().closes_on(date), None);
+    }
+
+    #[test]
+    fn 자료_이상은_연속_실패_세_번부터이고_마지막_실패_뒤_시간이_지나면_풀린다() {
+        let mut watch = Watch::default();
+        let start = at(17, 1, 0, 0);
+        watch.note_data(false, start);
+        watch.note_data(false, start);
+        assert!(!watch.data_anomaly(start), "두 번까지는 아니다");
+        watch.note_data(false, start);
+        assert!(watch.data_anomaly(start));
+        let keep = chrono::Duration::from_std(DATA_ANOMALY_KEEP).unwrap_or_default();
+        assert!(watch.data_anomaly(start + keep - chrono::Duration::seconds(1)));
+        // 논의가 없어도 풀린다.
+        assert!(!watch.data_anomaly(start + keep));
+        // 다음 논의에서 또 실패하면 다시 자료 이상이다.
+        watch.note_data(false, start + keep);
+        assert!(watch.data_anomaly(start + keep));
+        // 한 번 받으면 처음부터 센다.
+        watch.note_data(true, start + keep);
+        assert!(!watch.data_anomaly(start + keep));
+        watch.note_data(false, start + keep);
+        assert!(!watch.data_anomaly(start + keep));
     }
 
     #[test]

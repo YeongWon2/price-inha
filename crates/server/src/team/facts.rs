@@ -7,8 +7,8 @@
 use chrono::{DateTime, Datelike, Duration as Days, NaiveDate, Utc};
 use pi_agent::DataItem;
 use pi_data::{
-    DataAdapter, EcosCycle, EcosSeries, Fact, FactKind, FactRequest, FactValue, Fetched, FsDiv,
-    ReportCode,
+    DataAdapter, DataError, EcosCycle, EcosSeries, Fact, FactKind, FactRequest, FactValue, Fetched,
+    FsDiv, ReportCode,
 };
 use pi_store::{FactId, NewFact, Store, StoreError, UnixMillis};
 
@@ -20,7 +20,8 @@ pub(super) struct Gathered {
     pub(super) items: Vec<DataItem>,
     /// 저장한 자료 번호와 알게 된 시각(판단 뒤 매매에 붙인다).
     pub(super) facts: Vec<(FactId, UnixMillis)>,
-    /// (10차 10a 2번) 물어본 자료가 하나도 답하지 않았나(모두 오류). 자료 이상 신호로 쓴다.
+    /// (10차 10a 2번 · 보강 3번) 키가 있는 출처에 물은 자료가 하나도 답하지 않았나(모두 오류). 자료 이상
+    /// 신호로 쓴다. 키가 없어 묻지 못한 것(`DataError::NoKey`)은 세지 않고, 물은 것이 하나도 없으면 거짓이다.
     pub(super) all_failed: bool,
 }
 
@@ -162,8 +163,11 @@ pub(super) async fn gather(
         let (kind, fetched) = match request {
             Ok(request) => {
                 let fetched = adapter.fetch(&request).await;
-                asked += 1;
-                failed += u32::from(fetched.is_err());
+                // 자료 키는 선택이다: 키가 없어 바깥에 묻지 못한 것은 물은 것도 실패한 것도 아니다.
+                if !matches!(fetched, Err(DataError::NoKey { .. })) {
+                    asked += 1;
+                    failed += u32::from(fetched.is_err());
+                }
                 (request.kind(), fetched)
             }
             Err(kind) => (kind, Ok(Fetched::Missing(kind))),

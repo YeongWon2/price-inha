@@ -138,26 +138,3 @@ impl Trading {
         }))
     }
 }
-
-impl Trading {
-    /// (W5 2차) 지금 쓰는 템플릿(가장 나중에 고른 모의중 템플릿)의 값을 `params`로 바꾼 새 판을 남긴다
-    /// (승인된 규칙 개선안 반영, V21). 고른 템플릿이 없으면 [`crate::TradingError::NoTemplate`].
-    pub(crate) fn apply_params(
-        &self,
-        params: pi_template::RiskParams,
-    ) -> Result<(), crate::TradingError> {
-        let chosen = self
-            .store
-            .templates_in_state(TemplateState::Simulating)?
-            .into_iter()
-            .max_by_key(|template| template.id)
-            .ok_or(crate::TradingError::NoTemplate)?;
-        let current = Template::from_json(&chosen.value.to_string())
-            .map_err(|_| crate::TradingError::NoTemplate)?;
-        let next = Template { params, ..current };
-        let value = template_value(&next).map_err(|_| crate::TradingError::NoTemplate)?;
-        self.store
-            .revise_template(chosen.id, &value, millis(self.clock.now()))?;
-        Ok(())
-    }
-}

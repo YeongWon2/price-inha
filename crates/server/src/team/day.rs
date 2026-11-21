@@ -113,10 +113,22 @@ impl Crew {
         if now < start {
             return Ok(());
         }
-        for proposal in self.store.proposals_in_state(ProposalState::Cooling)? {
-            if proposal.updated_at >= millis(start) {
-                continue;
-            }
+        let cooled: Vec<_> = self
+            .store
+            .proposals_in_state(ProposalState::Cooling)?
+            .into_iter()
+            .filter(|proposal| proposal.updated_at < millis(start))
+            .collect();
+        // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 반영을 건너뛰고 냉각중으로 둔다(V21). 하루 판단은
+        // 그대로 간다. 잠김이 풀린 뒤의 거래일 시작에 반영한다.
+        if !cooled.is_empty() && self.trading.template_locked()? {
+            tracing::info!(
+                waiting = cooled.len(),
+                "쓰는 템플릿이 잠겨 있어 냉각이 끝난 개선안을 반영하지 않았습니다"
+            );
+            return Ok(());
+        }
+        for proposal in cooled {
             let Some(current) = self.trading.params()? else {
                 return Ok(());
             };

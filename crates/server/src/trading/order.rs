@@ -116,6 +116,8 @@ fn sell_purpose(purpose: Purpose) -> SellPurpose {
     match purpose {
         Purpose::StopLoss => SellPurpose::StopLoss,
         Purpose::TakeProfit => SellPurpose::TakeProfit,
+        // 팀장 팔기는 같은 종목의 다른 열린 파는 주문을 취소하지 않는다(보유가 여럿이면 매도가 모두 남는다, exec 7차).
+        Purpose::TeamExit => SellPurpose::TeamExit,
         _ => SellPurpose::Liquidation,
     }
 }
@@ -124,10 +126,11 @@ impl Trading {
     /// [`Trading::place`]의 몸통.
     pub(super) async fn place_order(&self, request: OrderRequest) -> Result<Placed, TradingError> {
         self.require_setup()?;
-        let params = self.params()?.ok_or(TradingError::NoTemplate)?;
+        let purpose = request.draft.purpose;
+        // 파는 주문은 마지막으로 쓰던 템플릿의 값으로(멈춤이어도), 사는 주문은 쓸 수 있는 템플릿만(`chosen`).
+        let params = self.params_for(purpose)?.ok_or(TradingError::NoTemplate)?;
         let trade = self.trade(request.trade_id)?;
         let now = self.clock.now();
-        let purpose = request.draft.purpose;
         if purpose == Purpose::StopLoss
             && let Some(id) = self.stop_sent(trade.id).await
         {

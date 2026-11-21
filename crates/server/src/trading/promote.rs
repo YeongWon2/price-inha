@@ -8,12 +8,14 @@
 //!   못 미치면 모의중 그대로다(E26). 잰 결과는 [`KIND_PROMOTION_CHECK`]로 남는다.
 //! - 승인되면 `pi_approval::Approvals::promote_live`가 승인을 소비하며 실전중으로 올린다(E36). 거절이면
 //!   모의중으로 돌린다. 실전 주문은 만들지 않는다: 실전중 템플릿의 사는 주문은 주문 실행기가 막는다(E25).
+//! - (10a 보강 5번) 승격대기에 갇히지 않게 켤 때 · 하루 마감 때 · 다시 시작할 때 맞춰 본다
+//!   ([`Trading::reconcile_promotions`]). 전체 정지 중의 승인 답은 승인을 닫기 전에 거절한다.
 
 use std::collections::BTreeSet;
 
 use chrono::NaiveDate;
-use pi_approval::{Answer, ApprovalNumber, Ask, Decision, RejectReason, Subject};
-use pi_store::{StoreError, TemplateId, TemplateState};
+use pi_approval::{Answer, ApprovalNumber, ApprovalView, Ask, Decision, RejectReason, Subject};
+use pi_store::{ApprovalStatus, StoreError, TeamState, TemplateId, TemplateState};
 use pi_template::{PromotionStats, Verdict};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -38,25 +40,6 @@ fn date_of_payload(payload: &Value) -> Option<NaiveDate> {
 }
 
 impl Trading {
-    /// 지금 쓰는 템플릿: 가장 나중에 고른 것(모의중 · 승격대기 · 실전중). 멈춘 것은 쓰지 않는다.
-    pub(super) fn template_in_use(&self) -> Result<Option<pi_store::Template>, TradingError> {
-        let mut found = Vec::new();
-        for state in [
-            TemplateState::Simulating,
-            TemplateState::PromotionPending,
-            TemplateState::Live,
-        ] {
-            found.extend(self.store.templates_in_state(state)?);
-        }
-        Ok(found.into_iter().max_by_key(|template| template.id))
-    }
-
-    /// 지금 쓰는 템플릿이 실전중인가. 실전 주문은 만들지 않으므로 그 템플릿의 사는 주문은 나가지 않는다(E25).
-    pub(super) fn live_in_use(&self) -> Result<bool, TradingError> {
-        let template = self.template_in_use()?;
-        Ok(template.is_some_and(|template| template.state == TemplateState::Live))
-    }
-
     /// 장 마감 뒤 승격 기준을 잰다. 실패는 기록만 하고 다음 마감에 다시 본다.
     pub(super) async fn consider_promotion(&self, date: NaiveDate) {
         if let Err(error) = self.try_promotion(date).await {
@@ -199,6 +182,88 @@ impl Trading {
         }
     }
 
+    /// (10a 보강 5번) 승격대기 템플릿을 맞춰 본다: 켤 때 · 하루 마감 때 · 전체 정지에서 다시 시작할 때 부른다.
+    /// 실패는 기록만 하고 다음 번에 다시 본다.
+    ///
+    /// - 승인됨인데 소비되지 않은 실전 승격 승인이 있으면 `promote_live`를 다시 부른다(승인 저장 직후 꺼졌거나
+    ///   전체 정지 중에 승인된 것). 전체 정지 중이면 기다린다.
+    /// - 쓸 수 있는 승인 요청(기다림, 또는 승인됨 · 미소비)이 하나도 없으면 모의중으로 되돌린다(기준 통과 기록도
+    ///   지워진다. 다음 마감에 다시 잰다).
+    pub(super) fn reconcile_promotions(&self) {
+        if let Err(error) = self.try_reconcile() {
+            tracing::warn!(%error, "승격대기 템플릿을 맞춰 보지 못했습니다");
+        }
+    }
+
+    fn try_reconcile(&self) -> Result<(), TradingError> {
+        let pending = self
+            .store
+            .templates_in_state(TemplateState::PromotionPending)?;
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let stopped = self.store.team_state()? == TeamState::FullStop;
+        let requests = self.promotion_requests()?;
+        for template in pending {
+            let mine = requests.iter().filter(|view| {
+                matches!(view.subject, Subject::LivePromotion { template: id, .. } if id == template.id)
+            });
+            let mut usable = false;
+            for view in mine {
+                if view.status == ApprovalStatus::Pending || stopped {
+                    usable = true;
+                    continue;
+                }
+                match self.approvals.promote_live(&view.number, template.id) {
+                    Ok(_) => {
+                        tracing::info!(
+                            template = template.id.0,
+                            "받아 둔 승인으로 실전중으로 올렸습니다"
+                        );
+                        usable = true;
+                        break;
+                    }
+                    // 그 사이 전체 정지가 됐다: 다시 시작한 뒤에 다시 본다.
+                    Err(pi_approval::Error::Denied(RejectReason::FullStop)) => usable = true,
+                    // 쓸 수 없는 승인이다(내용이 바뀜 · 이미 씀 등).
+                    Err(pi_approval::Error::Denied(_)) => {}
+                    Err(error) => return Err(exec_text(error)),
+                }
+            }
+            if !usable {
+                tracing::info!(
+                    template = template.id.0,
+                    "쓸 수 있는 승인 요청이 없어 승격대기를 모의중으로 되돌립니다"
+                );
+                self.back_to_simulating(template.id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 쓸 수 있는 실전 승격 승인 요청들: 기다림, 또는 승인됨인데 소비되지 않은 것.
+    fn promotion_requests(&self) -> Result<Vec<ApprovalView>, TradingError> {
+        let mut found = Vec::new();
+        for status in [ApprovalStatus::Pending, ApprovalStatus::Approved] {
+            for row in self.store.approvals_in_status(status)? {
+                let Some(number) = row.summary["number"].as_str() else {
+                    continue;
+                };
+                let view = self.approvals.get(&ApprovalNumber::new(number));
+                let Some(view) = view.map_err(exec_text)? else {
+                    continue;
+                };
+                // 무효가 된 승인은 거절로 보인다(`ApprovalView::status`): 여기서 걸러진다.
+                let open = view.status == ApprovalStatus::Pending
+                    || (view.status == ApprovalStatus::Approved && !view.consumed);
+                if open && matches!(view.subject, Subject::LivePromotion { .. }) {
+                    found.push(view);
+                }
+            }
+        }
+        Ok(found)
+    }
+
     /// 그 승인 번호가 실전 승격을 묻는 것이면 그 템플릿.
     pub(super) fn promotion_of(
         &self,
@@ -220,6 +285,11 @@ impl Trading {
         shown: &str,
         decision: Decision,
     ) -> Result<Answered, TradingError> {
+        // 전체 정지 중의 승인은 승인을 닫기 전에 거절한다: 승인 번호는 그대로 기다리고, 다시 시작한 뒤 같은
+        // 번호로 답할 수 있다. 이 확인과 답 사이에 멈춘 것은 맞춰 보기([`Trading::reconcile_promotions`])가 잇는다.
+        if decision == Decision::Approve && self.store.team_state()? == TeamState::FullStop {
+            return Ok(rejected(reject_word(RejectReason::FullStop)));
+        }
         let answered = self.approvals.answer(number, shown, decision);
         match answered.map_err(exec_text)? {
             Answer::Approved => match self.approvals.promote_live(number, template) {

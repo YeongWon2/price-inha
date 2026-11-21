@@ -140,6 +140,8 @@ impl Trading {
             }
         }
         self.announce_close(date);
+        // 승격대기에 갇힌 템플릿을 먼저 맞춰 본 뒤(되돌린 것은 이 마감에서 다시 잰다) 기준을 잰다.
+        self.reconcile_promotions();
         self.consider_promotion(date).await;
         Ok(())
     }
@@ -248,16 +250,20 @@ impl Trading {
 
     /// 다시 시작(C8): 전체 정지 · 이상 감지 멈춤이고 필수 키가 모두 있으면 쉬는 중으로.
     pub(super) fn restart(&self) -> Result<Restart, TradingError> {
-        let _turn = lock(&self.team_turn);
-        let current = self.store.team_state()?;
-        if !matches!(current, TeamState::FullStop | TeamState::AnomalyHalt) {
-            return Ok(Restart::NotStopped);
-        }
-        if !self.desk.keys_ready() {
-            return Ok(Restart::KeysRequired);
-        }
-        let cause = TeamCause::OwnerRestart;
-        let state = self.change_team(TeamState::Resting, cause, true, "내가 다시 시작")?;
+        let state = {
+            let _turn = lock(&self.team_turn);
+            let current = self.store.team_state()?;
+            if !matches!(current, TeamState::FullStop | TeamState::AnomalyHalt) {
+                return Ok(Restart::NotStopped);
+            }
+            if !self.desk.keys_ready() {
+                return Ok(Restart::KeysRequired);
+            }
+            let cause = TeamCause::OwnerRestart;
+            self.change_team(TeamState::Resting, cause, true, "내가 다시 시작")?
+        };
+        // 전체 정지 중에 받아 둔 실전 승격 승인이 있으면 이제 올린다(10a 보강 5번).
+        self.reconcile_promotions();
         Ok(Restart::Done(state))
     }
 

@@ -1,5 +1,5 @@
 //! 주문 길의 바탕: 여는 일, 달력, 시세 기억, 통화별 장부(평가액 · 그날 시작 · 최고), 팀 상태 바꾸기,
-//! 지금 쓰는 템플릿, 하루 기록 읽기.
+//! 하루 기록 읽기. 쓰는 템플릿은 `chosen`이 고른다.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -16,7 +16,6 @@ use pi_paper::{
 };
 use pi_rules::{Book, Position, RulesConfig};
 use pi_store::{Store, StoreError, TeamCause, TeamChange, TeamState, UnixMillis};
-use pi_template::RiskParams;
 use rust_decimal::Decimal;
 use serde_json::Value;
 
@@ -263,6 +262,8 @@ impl Trading {
         });
         let now = trading.clock.now();
         trading.books(now).await?;
+        // 꺼지기 직전에 승격대기로 남은 템플릿을 맞춰 본다(10a 보강 5번).
+        trading.reconcile_promotions();
         Ok(trading)
     }
 
@@ -442,17 +443,6 @@ impl Trading {
         } else {
             Err(TradingError::SetupRequired)
         }
-    }
-
-    /// 지금 쓰는 템플릿 값: 가장 나중에 고른 템플릿(모의중 · 승격대기 · 실전중 — 승격을 기다리는 동안에도
-    /// 손절 · 청산은 그 값으로 나간다). 없거나 읽을 수 없으면 없음.
-    pub(crate) fn params(&self) -> Result<Option<RiskParams>, TradingError> {
-        let chosen = self.template_in_use()?;
-        Ok(chosen.and_then(|template| {
-            pi_template::Template::from_json(&template.value.to_string())
-                .ok()
-                .map(|parsed| parsed.params)
-        }))
     }
 }
 
