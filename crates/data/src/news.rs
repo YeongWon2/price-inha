@@ -172,8 +172,18 @@ impl NewsItem {
 /// 뉴스 검색 결과.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NewsFetched {
-    /// 받은 기사들. 비어 있지 않다.
+    /// 받은 기사들. 비어 있지 않다. 버린 기사가 없을 때다.
     Items(Vec<NewsItem>),
+    /// 링크 값이 이상한 기사(제어 문자 · 공백 · `"<>\`` ` `` · 사용자 정보 · 비정상 꼴 · http(s) 아님 ·
+    /// 호스트 없음)를 그것만 버리고 남은 기사들과 버린 수(`dropped >= 1`).
+    /// 남은 것이 없어도 `Missing`이 아니라 `items`가 빈 이 갈래다(버린 사실을 숨기지 않는다).
+    /// 받는 쪽은 빈 `items`를 "뉴스 없음"으로 다루되 버린 수를 판단 기록에 남긴다(결정 2026-11-21 16번, V35 · E32).
+    Partial {
+        /// 남은 기사들(비어 있을 수 있다).
+        items: Vec<NewsItem>,
+        /// 링크가 이상해 버린 기사 수.
+        dropped: usize,
+    },
     /// 결과가 없다. 오류가 아니다(E32).
     Missing,
 }

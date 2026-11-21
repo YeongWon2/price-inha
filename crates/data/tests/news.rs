@@ -1,4 +1,5 @@
 //! data 4차: 뉴스 공급자(네이버 뉴스 검색) · 등록부 · 뉴스 값.
+//! data 5차: 링크가 이상한 기사는 그것만 버리고 버린 수를 싣는다(결정 2026-11-21 16번).
 //! 잠긴 옛 테스트(`tests/suite/`)는 고치지 않고 이 파일에 쓴다.
 //! 로컬 가짜 서버(wiremock)만 쓴다. 키는 진짜처럼 보이지 않는 글자다.
 
@@ -183,6 +184,17 @@ fn items_of(fetched: NewsFetched) -> Vec<NewsItem> {
     match fetched {
         NewsFetched::Items(items) => items,
         NewsFetched::Missing => Vec::new(),
+        other @ NewsFetched::Partial { .. } => panic!("버린 기사가 없어야 한다: {other:?}"),
+    }
+}
+
+/// `Partial`의 남은 기사 링크들과 버린 수. 다른 갈래면 실패.
+fn partial_of(result: Result<NewsFetched, NewsError>) -> (Vec<String>, usize) {
+    match result {
+        Ok(NewsFetched::Partial { items, dropped }) => {
+            (items.into_iter().map(|news| news.link).collect(), dropped)
+        }
+        other => panic!("Partial이어야 한다: {other:?}"),
     }
 }
 
@@ -586,14 +598,15 @@ async fn 시각이나_칸이_깨진_응답은_전체가_형식_오류다() {
     ));
 }
 
-// 검증: E14
+// 5차(결정 16번)에서 뜻이 바뀐 4차 테스트: 기사 하나짜리 응답의 링크가 http(s)가 아니면
+// 응답 전체 `Format`이 아니라 그 기사만 버린 `Partial { [], 1 }`이다.
+// 검증: E14 E32 V35
 #[tokio::test]
-async fn http_https가_아닌_링크는_형식_오류다() {
+async fn http_https가_아닌_링크의_기사는_그것만_버린다() {
     let cases = [
         ("javascript:alert(1)", ""),
         ("ftp://news.example.com/a", ""),
         ("", "data:text/html,x"),
-        ("", ""),
         ("/relative/path", ""),
     ];
     for (originallink, link) in cases {
@@ -613,7 +626,180 @@ async fn http_https가_아닌_링크는_형식_오류다() {
 
         let result = provider.search(&NewsRequest::latest("주식", 10)).await;
 
-        assert!(is_format(&result), "{originallink:?} {link:?} → {result:?}");
+        assert_eq!(
+            partial_of(result),
+            (Vec::new(), 1),
+            "{originallink:?} {link:?}"
+        );
+    }
+}
+
+// ───────────────────────── 5차: 이상한 기사는 그것만 버린다 ─────────────────────────
+
+const GOOD_DATE: &str = "Sat, 21 Nov 2026 08:00:00 +0900";
+
+fn good_item(n: u32) -> Value {
+    item(
+        &format!("좋은 기사 {n}"),
+        "요약",
+        &format!("https://news.example.com/good-{n}"),
+        &format!("https://n.news.example.com/good-{n}"),
+        GOOD_DATE,
+    )
+}
+
+fn good_link(n: u32) -> String {
+    format!("https://news.example.com/good-{n}")
+}
+
+/// 두 링크가 모두 이상한 기사.
+fn bad_item(originallink: &str, link: &str) -> Value {
+    item("이상한 기사", "요약", originallink, link, GOOD_DATE)
+}
+
+async fn search_items(items: Vec<Value>) -> Result<NewsFetched, NewsError> {
+    let server = MockServer::start().await;
+    mount_ok(&server, items).await;
+    naver(&server, TestNewsKeys::both())
+        .search(&NewsRequest::latest("주식", 10))
+        .await
+}
+
+// 검증: E14 E32 V35
+#[tokio::test]
+async fn 좋은_기사_둘과_링크에_줄바꿈이_든_기사_하나면_그것만_버리고_버린_수를_싣는다() {
+    let result = search_items(vec![
+        good_item(1),
+        bad_item(
+            "https://news.example.com/bad\nx",
+            "https://n.news.example.com/bad\nx",
+        ),
+        good_item(2),
+    ])
+    .await;
+
+    match result {
+        Ok(NewsFetched::Partial { items, dropped }) => {
+            assert_eq!(dropped, 1);
+            let titles: Vec<&str> = items.iter().map(|news| news.title.as_str()).collect();
+            assert_eq!(titles, ["좋은 기사 1", "좋은 기사 2"]);
+            let links: Vec<&str> = items.iter().map(|news| news.link.as_str()).collect();
+            assert_eq!(links, [good_link(1), good_link(2)]);
+            assert!(items.iter().all(|news| news.known_at == ts(NOW)));
+        }
+        other => panic!("Partial이어야 한다: {other:?}"),
+    }
+}
+
+/// 4차 링크 규칙에 걸리는 링크 값들(제어 문자 · 공백 · `"<>\`` ` `` · 사용자 정보 · 비정상 꼴 ·
+/// http(s) 아님 · 호스트 없음).
+const BAD_LINKS: [&str; 14] = [
+    "https://news.example.com/a\u{7}b",
+    "https://news.example.com/a\tb",
+    "https://news.example.com/a b",
+    "https://news.example.com/a\"b",
+    "https://news.example.com/<b>",
+    "https://news.example.com/a\\b",
+    "https://news.example.com/a`b",
+    "https://user:pw@news.example.com/a",
+    "https://user@news.example.com/a",
+    "http:news.example.com/a",
+    "http:///news.example.com/a",
+    "ftp://news.example.com/a",
+    "javascript:alert(1)",
+    "https://",
+];
+
+// 검증: E14 E32 V35
+#[tokio::test]
+async fn 링크_규칙에_걸린_기사는_어느_규칙이든_그것만_버린다() {
+    for bad in BAD_LINKS {
+        let result = search_items(vec![good_item(1), bad_item(bad, bad)]).await;
+
+        assert_eq!(partial_of(result), (vec![good_link(1)], 1), "{bad:?}");
+    }
+}
+
+// 검증: E14 V35
+#[tokio::test]
+async fn originallink만_이상하고_link가_멀쩡하면_버리지_않고_link를_쓴다() {
+    for bad in BAD_LINKS {
+        let result = search_items(vec![
+            good_item(1),
+            item(
+                "링크로 살린 기사",
+                "요약",
+                bad,
+                "https://n.news.example.com/rescued",
+                GOOD_DATE,
+            ),
+        ])
+        .await;
+
+        match result {
+            Ok(NewsFetched::Items(items)) => {
+                let links: Vec<&str> = items.iter().map(|news| news.link.as_str()).collect();
+                assert_eq!(
+                    links,
+                    [good_link(1).as_str(), "https://n.news.example.com/rescued"],
+                    "{bad:?}"
+                );
+            }
+            other => panic!("{bad:?}: 버린 것이 없는 Items여야 한다: {other:?}"),
+        }
+    }
+}
+
+// 검증: E32 V35
+#[tokio::test]
+async fn 모든_기사의_링크가_이상하면_없음이_아니라_버린_수만_있는_부분_결과다() {
+    let result = search_items(vec![
+        bad_item("https://news.example.com/a\nb", ""),
+        bad_item(
+            "https://user@news.example.com/a",
+            "ftp://n.news.example.com/a",
+        ),
+        bad_item("", "javascript:alert(1)"),
+    ])
+    .await;
+
+    assert_eq!(partial_of(result), (Vec::new(), 3));
+}
+
+// 검증: E32 V35
+#[tokio::test]
+async fn 이상한_기사가_없으면_부분_결과가_아니라_기사들이다() {
+    let result = search_items(vec![good_item(1), good_item(2)]).await;
+
+    match result {
+        Ok(NewsFetched::Items(items)) => {
+            let links: Vec<String> = items.into_iter().map(|news| news.link).collect();
+            assert_eq!(links, [good_link(1), good_link(2)]);
+        }
+        other => panic!("Items여야 한다: {other:?}"),
+    }
+}
+
+// 검증: E14
+#[tokio::test]
+async fn 칸이_빠지거나_시각이_깨진_기사가_섞이면_이상한_링크가_있어도_전체가_형식_오류다() {
+    let bad_link = bad_item("https://news.example.com/a\nb", "");
+    let mut no_title = good_item(2);
+    no_title.as_object_mut().unwrap().remove("title");
+    let mut no_summary = good_item(2);
+    no_summary.as_object_mut().unwrap().remove("description");
+    let mut no_links = good_item(2);
+    no_links.as_object_mut().unwrap().remove("originallink");
+    no_links.as_object_mut().unwrap().remove("link");
+    let mut no_date = good_item(2);
+    no_date.as_object_mut().unwrap().remove("pubDate");
+    let mut bad_date = good_item(2);
+    bad_date["pubDate"] = json!("2026-11-21 08:00");
+
+    for broken in [no_title, no_summary, no_links, no_date, bad_date] {
+        let result = search_items(vec![good_item(1), bad_link.clone(), broken.clone()]).await;
+
+        assert!(is_format(&result), "{broken} → {result:?}");
     }
 }
 
