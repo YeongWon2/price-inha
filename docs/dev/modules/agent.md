@@ -27,6 +27,58 @@
 5. 필요한 자료가 비면 판단을 지켜보기로 남긴다(E32). 판단됨이 아닌 매매로 주문 안을 내지 않는다(E20).
 6. AI로 보내는 글은 `Redactor` 포트를 거친다(E38).
 
+## 9차 작업 (2026-11-21 발표 자료 대조)
+
+근거: `spec.md` F2 8b("보유 종목 팔기 흐름으로 넘어간다") · F4 시작("팀장이 팔기로 정하거나") · F4 기본 흐름 1 · 2("매매 담당이 파는 주문 안을 만든다"), `dev.md` V4 · E20 · E32, `principles.md` P7 · P9, `docs/dev/decisions.md` 2026-11-16 agent 1차 모호한 곳 2번("판단됨은 곧 사기 · 팔기로 이어지게 해 E20을 지킨다").
+지금은 팀장이 팔기로 정하면 판단만 남고 주문 안이 생기지 않는다(`src/team.rs:363`의 `Side::Sell => (Decision::Sell, None)`, `draft_order`는 팔기를 `TradeNotBuy`로 거부). 이 차수는 팔기 판단 뒤 매매 담당이 **보유 종목을 파는 주문 안**을 만든다. 사기 길(`draft_order` · `OrderDraft` · `submit_order_draft`)의 모양과 동작은 바꾸지 않는다.
+
+### (a) 공개 API 바뀜
+- 새 타입 `pub struct SellDraft { pub judged: TradeId, pub holding: TradeId, pub symbol: String, pub note: String, pub ai_quantity: Option<Decimal>, pub ai_price: Option<Decimal> }`. `judged`는 팔기로 판단된 논의 매매, `holding`은 팔 보유 매매(보유중). 수량 · 가격은 참고값뿐이다(P7, rules가 정한다).
+- `Tools`에 기본 구현이 있는 메서드를 더한다: `async fn submit_sell_draft(&self, draft: &SellDraft) -> Result<(), ToolError>`. 기본은 `Err(ToolError("팔기 주문 안을 받지 않습니다"))`(잠긴 테스트의 `FakeTools`가 그대로 컴파일되게).
+- `pub async fn Team::draft_sell(&self, trade: TradeId) -> Result<Vec<SellDraft>, Error>`.
+- `Error`(`non_exhaustive`)에 `TradeNotSell { trade }`를 더한다.
+- `DiscussionOutcome`에 `pub sells: Vec<SellDraft>`를 더한다(팔기로 판단되고 주문 안이 만들어졌을 때만 차 있다. `order`는 지금처럼 사기에만).
+- `Decision::Sell`의 문서를 "팔기. 매매는 판단됨이고, 같은 종목을 가지고 있으면 `sells`에 파는 주문 안이 있다"로 고친다.
+
+### (b) 동작 규칙 · 경계
+1. `draft_sell(trade)`:
+   - 매매가 판단됨이 아니면 `TradeNotJudged`(E20), 저장소의 방향(`trade_side`)이 팔기가 아니면(사기 · 없음) `TradeNotSell`. 둘 다 AI를 부르지 않는다.
+   - 팔 것 찾기: 저장소 `trades_in_state(TradeState::Holding)` 가운데 종목 · 계좌 종류가 판단 매매와 같은 것(만든 순서). 하나도 없으면 AI를 부르지 않고 `Ok(빈 목록)`이고, 방 로그에 `room.activity`(`{"status": "nothing_held", "trade": <번호>}`)를 하나 남긴다(F4 사전 조건 "팔 종목을 보유하고 있다").
+   - 있으면 매매 담당 턴 한 번(입력은 판단의 근거 · 보유 매매 번호들 · 금액 단위 안내, 5차와 같은 단위). 답은 `{"side": "sell", "note": 글, "quantity"?: 수, "price"?: 수}` 객체 하나. `side`가 `sell`이 아니거나 모양이 틀리면 매매 담당 응답 실패(`RoleUnavailable`, `InvalidStructuredReply`).
+   - 보유 매매마다 `SellDraft` 하나(같은 `note` · 참고값). 참고 수량은 0 · 음수 · 숫자 아님이면 `None`(사기 길과 같다). 하나씩 `submit_sell_draft`로 넘기고, 넘긴 것만 돌려준다. 넘기기가 실패하면 그 오류로 끝난다(앞에서 넘긴 것은 이미 넘어갔다).
+   - 글은 저장 · 넘기기 전에 `Redactor`를 거친다(E38, 3차와 같다).
+2. `discuss`: 팀장이 팔기로 정하면(근거가 찼을 때만, 2차 P9 그대로) 판단을 남긴 뒤 `draft_sell`과 같은 길로 간다. 매매 담당이 답하지 못하면 사기와 같이 방 로그에 실패를 남기고 `sells`는 빈 목록(논의 결과는 팔기 그대로).
+3. `draft_order`(사기)는 그대로 팔기 매매를 `TradeNotBuy`로 거부한다.
+4. 팔 때의 목적: server가 `SellDraft`를 rules의 `Purpose::TeamExit`(rules 4차 1번)로 바꿔 점검에 넣는다. 전체 정지에서는 rules가 막는다(F4 7b2). 손절값에 닿은 손절(F4 1a "논의 없이")은 지금처럼 exec가 하고 이 길을 거치지 않는다.
+5. 판단된 논의 매매(`judged`)의 상태를 옮기지 않는다(판단됨 그대로, 매매 기록으로 남음). 보유 매매의 상태 · 주문은 포트 너머(server · exec)다.
+
+### (c) 원본 동작 근거
+- 원본에 없음(매매 판단은 우리 고유, 결정 15번) — 스펙 F2 8b · F4 시작 · F4 기본 흐름 2.
+- 한 턴의 고리 · 도구 결과 · 구조화된 답의 실패 처리는 1차 근거 그대로: `docs/research/agent-runtime-deep.md` 1장, 도구 호출은 글 안의 JSON 행동 형식(결정 2026-11-16 12번, 의도해서 다름).
+
+### (d) 테스트로 확인할 것 (검증 주석: V4 E20 P7 P9 E38)
+- 같은 종목 보유 매매 둘이 있는 팔기 판단 → 매매 담당 1번 호출, `sells` 둘(각 `holding`), `submit_sell_draft` 두 번, `order`는 `None`.
+- 보유 없음 → 매매 담당 0번, `sells` 빈 목록, 방 로그에 `nothing_held`.
+- 다른 종목 · 다른 계좌 종류의 보유는 고르지 않는다.
+- 매매 담당이 `{"side": "buy"}`나 깨진 JSON을 주면 응답 실패, `sells` 빈 목록, 판단은 팔기 그대로.
+- 참고 수량 · 가격은 버리지 않고 참고값으로(0 · 음수는 `None`).
+- 사기 판단 매매로 `draft_sell` → `TradeNotSell`, 논의중 매매 → `TradeNotJudged`, 둘 다 AI 0번.
+- 다시 띄운 팀도 저장소의 방향으로 같은 결과.
+- 넘긴 `note`에 표시 글자가 가려져 있다.
+- 새 테스트는 `submit_sell_draft`를 기록하는 가짜 도구를 새 파일에 둔다(잠긴 `tests/suite/common.rs`의 `FakeTools`는 그대로 두고 기본 구현을 쓴다).
+
+### (e) 잠긴 옛 테스트와 부딪히는 곳
+없음(설계가 피한다). 확인한 곳:
+- `tests/suite/second.rs:31-52`: 팔기 판단 뒤 `out.order == None`, `draft_order`가 `TradeNotBuy`, 매매 담당 호출 0번. 이 테스트의 매매는 같은 종목 보유가 없어 새 규칙에서도 매매 담당을 부르지 않는다(보유 없음 → AI 0번).
+- `tests/suite/side.rs:28-90`: 방향 저장 · `TradeNotBuy`를 확인한다. 그대로 맞다.
+- `tests/suite/order.rs:28` · `:52`: `OrderDraft`를 구조체 문장으로 만든다. `OrderDraft`에 칸을 더하지 않으므로 깨지지 않는다.
+- `tests/suite/common.rs:181-205`: `Tools` 구현. 새 메서드에 기본 구현이 있어 깨지지 않는다.
+만약 "보유가 없어도 매매 담당에게 묻는다"로 정하면 `second.rs:50`(`calls(Role::Trader) == 0`)이 반대가 되어 **reopen 필요**.
+
+### 물을 것
+- 같은 종목 보유가 여럿일 때 모두 파는 주문 안을 만들지(추천: 보유 매매마다 하나), 매매 담당이 고르게 할지.
+- 팔기 판단된 논의 매매를 판단됨으로 남길지(추천), 다른 상태로 닫을지(store 상태표를 바꾸는 일이라 스펙 결정).
+
 ## 하지 않는 것
 
 주문 내기 · 점검 · 승인(포트 너머), 비밀 읽기, 스트리밍(결정 13번), 컨텍스트 압축(조사가 얇아 2차).

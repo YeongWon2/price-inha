@@ -46,6 +46,70 @@
 2. `settle()`은 핸들을 꺼내 쥐지 않고 끝난 수가 0이 되기를 기다린다(알림 기반). future가 취소돼도 깨우기를 잃지 않고 다음 `settle`이 끝까지 기다린다.
 3. 깨우기가 끝나 영수증을 닫을 때 그 회차의 `pending_slot`을 지운다(성공 · 실패 모두). 영수증 정리 기능은 아직 없지만, 생겨도 옛 회차를 되살리지 않는다.
 
+## 6차 작업 (2026-11-21 발표 자료 대조)
+
+근거: `spec.md` F2 시작("뉴스나 공시가 뜨거나 시세가 조건에 닿거나 정해진 시간이 되거나 재무나 거시 자료가 바뀐다") · F2 기본 흐름 1, `dev.md` A5("시세 조건과 뉴스와 공시와 재무와 거시 변화와 정해진 시간을 감시해 팀을 깨운다"), `docs/dev/decisions.md` 2026-11-21 2 · 3번(공급자 확장 · 네이버 뉴스), 2026-11-16 17 · 20 · 21번.
+지금은 일정 · 시세 조건 · 늦은 시세만 깨우고, server는 시세 조건 목록을 비워 넘긴다. 이 차수는 (1) 자료 변화 사건을 받아 깨우는 모델과 중복 억제 · 상한, (2) 지켜보는 종목으로 시세 조건 목록을 만드는 도우미와 실행 중에 바꾸는 길을 더한다. 자료를 가져오고 "새것"을 가리는 것은 pi-data, 잇는 것은 server다(이 크레이트는 `pi-market`만 쓴다 — 아키텍처 표 그대로).
+
+### (a) 공개 API 바뀜
+1. 자료 변화 사건 (새 파일 `src/data.rs`)
+   - `#[non_exhaustive] pub enum DataKind { News, Disclosure, Financials, Macro }`.
+   - `pub struct DataChange { pub kind: DataKind, pub source: String, pub id: String, pub revision: Option<String>, pub market: Market, pub symbol: Option<Symbol>, pub title: String, pub published_at: DateTime<Utc>, pub learned_at: DateTime<Utc> }`. `source`는 공급자 ID(예: `naver` · `dart` · `ecos` · `fred`), `id`는 출처 안의 번호(뉴스 링크 · 공시 접수번호 · 재무는 `종목/보고 기간` · 거시는 `계열 id/관측 시점`), `revision`은 값이 바뀐 것을 가르는 지문(재무 · 거시의 값 지문, 뉴스 · 공시는 `None`). `title`은 가린 짧은 글(200자에서 자른다). `learned_at`은 받은 시각(P10).
+   - `pub struct DataTriggerConfig { pub enabled: Vec<DataKind>, pub target: Target, pub dedupe_for: Duration, pub quiet: Duration, pub max_wait: Duration, pub per_source_window: Duration, pub per_source_limit: u32, pub batch_limit: usize }`. `TriggerConfig`에 `pub data: DataTriggerConfig` 칸을 더하고 `TriggerConfig::new`가 기본값을 채운다.
+   - `pub enum DataPush { Queued, Duplicate, Disabled, RateLimited }`.
+   - `pub fn Trigger::push_data(&self, change: DataChange) -> DataPush` (기다리지 않는다, 저장소를 쓰지 않는다).
+   - `TriggerEvent::Data { change: DataChange, held: bool }`, `WakeReason::Data`. 이유의 앞뒤는 `Anomaly > CatchUp > Schedule > Price > Data`.
+   - `TickReport`에 `data_dropped: usize`(상한 · 전체 정지로 버린 수)를 더한다.
+2. 시세 조건 목록
+   - `pub fn watch_conditions(market: Market, watched: &[(Symbol, Decimal)], percent: Decimal, target: Target) -> Vec<ConditionJob>`: 종목마다 `ConditionKind::Change { reference: 기준가, percent }` 하나, id `price:<시장>:<종목>:change`. 기준가가 0 이하인 종목은 빼고 돌려주지 않는다.
+   - `pub const DEFAULT_WATCH_CHANGE_PERCENT`(아래 기본값).
+   - `pub async fn Trigger::replace_conditions(&self, conditions: Vec<ConditionJob>) -> Result<(), Error>`.
+
+### (b) 동작 규칙 · 경계
+1. `push_data`
+   - `enabled`에 없는 종류는 `Disabled`(넣지 않음). server가 템플릿의 구독 트리거(`pi_template::TriggerKind` 뉴스 · 공시)와 설정으로 채운다. 재무 · 거시는 템플릿 칸에 없어 기본으로 켠다.
+   - 중복 막기: 키 `(source, id, revision)`. `dedupe_for`(기본 1시간) 안에 같은 키가 왔으면 `Duplicate`. 표는 메모리에만 두고, 표의 크기는 4096개(가장 오래된 것부터 지운다). 다시 켠 뒤의 중복은 가져오는 쪽이 이미 본 것을 기억해 걸러 넘긴다(이 크레이트는 저장소에 쓰지 않는다 — 하지 않는 것 그대로).
+   - 속도 제한: 출처마다 `per_source_window`(기본 60초)에 `per_source_limit`(기본 30)개. 넘으면 `RateLimited`(넣지 않음, 중복 표에도 넣지 않아 뒤에 다시 받을 수 있다).
+2. 묶어 보내기
+   - 묶음 키는 `(market, symbol)`(종목이 없는 거시 · 시장 뉴스는 `(market, 없음)`). 묶음의 마지막 사건 뒤 `quiet`(기본 30초)가 지나거나, 첫 사건 뒤 `max_wait`(기본 300초)가 지나면 다음 tick에서 깨운다. 계속 와도 `max_wait`가 발사를 굶기지 않는다.
+   - 한 깨우기에 묶음의 사건을 **모두**(이른 순) 싣되 `batch_limit`(기본 20)을 넘으면 오래된 것부터 버리고 `data_dropped`로 센다. 원본은 마지막 하나만 보낸다 — 의도해서 다름(아래 원본 근거).
+   - 대상은 `target`(기본 `Target::Member("scout")` — F2 1 "뉴스 공시 시세 담당이 계기를 알아차린다").
+3. 장 시간 · 멈춤
+   - 그 사건의 시장이 정규장 밖이면 깨우지 않고 보관했다가, 그 시장 장이 열린 뒤 첫 tick에 `held: true`로 한 번에 넘긴다(보관 상한도 `batch_limit`, 넘치면 오래된 것부터 버림). 장 밖은 따라잡지 않고 다음 장 시작 하나로 합치는 20번 결정과 같은 생각이다.
+   - tick의 전체 정지 확인(1차 tick 순서)에 걸리면 모인 자료 사건은 깨우지 않고 버린다(`data_dropped`). 전체 정지는 새 매매를 모두 멈춘다(F4 7b2).
+   - 자료 깨우기도 일정 · 시세처럼 띄워 두고 잠금을 바로 놓는다(2차 2번). 자료 사건에는 영수증을 열지 않는다(회차가 없는 사건이다). 같은 대상의 깨우기가 실행 중이면 보내지 않고 묶음에 남겨 다음 tick에 다시 본다.
+4. 시세 조건
+   - `watch_conditions`의 기본 변동률은 3%(추정 · 미확정, 설정값). 기준가는 server가 그 종목의 지난 정규장 마지막 시세로 넘긴다(market 7차 4번의 기준가와 같은 값).
+   - `replace_conditions`: `new()`와 같은 확인(id 겹침 · 시장 어댑터 없음 · 조건 값). 실패하면 지금 목록 그대로. 같은 id · 같은 조건이면 다시 걸기 상태(`ConditionMemory`)를 그대로 두고, 같은 id인데 조건이 바뀌었으면(기준가가 바뀐 다음 날 등) `Armed`로 다시 건다. 빠진 조건은 더 보지 않는다. 바꾸는 동안 tick과 겹치지 않게 같은 잠금 순서를 따른다.
+
+### (c) 원본 동작 근거
+- 중복 키 · 메모리 표 1시간 · 속도 제한(경로마다 60초에 30번) · 묶어 보내기(조용한 시간 30초, 첫 사건에서 300초면 보냄): `docs/research/triggers-approval-memory-deep.md` 2.1 동작 원리 3-5(속도 제한) · 3-11(중복 막기) · 4(묶어 보내기) (Hermes webhook). 같은 문서 "가격인하에 옮길 때 — Hermes 쪽" 표의 webhook 줄("묶어 보내기와 중복 키 규칙만 내부 트리거에 쓴다(같은 종목의 공시가 연달아 올 때)").
+- 대상마다 대기 상한 20 · 키 중복: 같은 문서 2.2 동작 원리 3(OpenClaw 시스템 이벤트 대기열), 이 크레이트의 `queue.rs`.
+- 의도해서 다름: 원본의 묶음은 마지막 이벤트 하나만 보낸다. 우리는 묶음의 사건을 모두(상한 20) 싣는다 — 같은 종목의 공시가 연달아 오면 앞의 공시도 판단 자료이기 때문이다. 바깥 HTTP 입구(webhook)는 만들지 않는다(하지 않는 것 그대로).
+- 원본에 없음: 장 밖 보관(결정 20번과 같은 생각), 전체 정지 중 버림, 시세 조건의 기준가 변동률 목록(결정 21번의 다시 걸기를 그대로 쓴다).
+
+### (d) 테스트로 확인할 것 (가짜 시계 · 가짜 달력 · 기록하는 가짜 깨우기. 검증 주석: E18 N6, 그리고 새로 E14를 적는다 — 필수 번호 줄에 더하는 것은 N1 커밋과 함께 조정자가 한다)
+- 같은 키 두 번 → 두 번째 `Duplicate`, 깨우기 하나. `revision`만 다르면 둘 다 들어간다. `dedupe_for`가 지나면 같은 키도 다시 들어간다.
+- 출처 하나에 60초 안 31번째는 `RateLimited`, 61초 뒤에는 다시 받는다. 다른 출처는 따로 센다.
+- `enabled`에 없는 종류는 `Disabled`.
+- 조용한 시간 29초에는 안 깨우고 30초에 깨운다. 10초마다 계속 와도 300초에 깨운다. 한 깨우기에 사건이 이른 순으로, 21개면 가장 오래된 1개를 버리고 `data_dropped = 1`.
+- 장 밖에 온 공시는 장 시작 뒤 첫 tick에 `held: true`로 한 번. 전체 정지 중이면 버리고 센다.
+- 한 tick에 시세 조건과 자료 사건이 같은 대상이면 깨우기 하나에 묶이고 이유는 `Price`.
+- `watch_conditions`: 종목마다 하나, id 모양, 기준가 0 이하는 빠짐. `replace_conditions`: 겹친 id는 거부하고 지금 목록 유지, 같은 조건은 `Fired` 상태 유지(다시 알리지 않음), 기준가가 바뀐 조건은 `Armed`.
+- 자료 깨우기가 오래 걸리는 동안에도 늦은 시세 감시가 돈다(2차 2번과 같게).
+
+### (e) 잠긴 옛 테스트와 부딪히는 곳
+없음(설계가 피한다). 확인한 곳:
+- `TriggerEvent` · `WakeReason`에 변형을 더한다. 잠긴 테스트의 `match`는 모두 `_`/`other` 갈래가 있다(`tests/engine/mod.rs:245-248`, `tests/inflight/mod.rs:60-65` · `:131-134`). server의 `crates/server/src/team/wake.rs:245-248`도 `_ => continue`.
+- `TriggerConfig`는 잠긴 테스트에서 `TriggerConfig::new`로만 만든다(`tests/support/mod.rs:508`). 새 칸은 `new`가 채우므로 깨지지 않는다.
+- `TriggerStore` · `Waker` trait에는 메서드를 더하지 않는다(`tests/round4/mod.rs:53`, `tests/support/mod.rs:259` · `:385`, `tests/round3/mod.rs:87`의 구현이 그대로 컴파일된다).
+- 이유 앞뒤에서 `Data`를 맨 뒤에 두어 지금 네 이유의 순서를 확인하는 테스트와 맞는다.
+
+### 물을 것
+- 자료 깨우기 대상을 뉴스 공시 시세 담당(`scout`)으로 둘지(추천), 팀(팀장)으로 둘지.
+- 지켜보는 종목의 시세 조건 기본 변동률 3%(추정)로 둘지, 다른 조건(넘음 · 내려감)도 기본으로 걸지.
+- 묶음에 사건을 모두 실을지(추천, 원본과 다름), 원본처럼 마지막 하나만 보낼지.
+
 ## 하지 않는 것
 
 판단, 저장소 직접 쓰기, 바깥 HTTP 입구(webhook).

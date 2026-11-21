@@ -68,6 +68,93 @@
 `pi-secrets`로 그 trait을 구현하는 일과 증권사 키 확인기를 `pi-secrets`의 확인기 trait에 잇는 일은 조립 단계(`price-inha`)에서 한다.
 이 모듈에서는 "이 자격으로 닿는지 확인하는 함수 `verify`"까지만 만든다. 위 본문에서 "`pi-secrets`에서 읽는다"는 말은 이 trait을 거친다는 뜻이다.
 
+## 7차 작업 (2026-11-21 발표 자료 대조 — 공급자 확장)
+
+근거: `docs/dev/decisions.md` 2026-11-21 2번(공급자 확장 구조) · 5번(VI · 거래정지 추정), `dev.md` D5 · N6, `principles.md` P12.
+아래를 **테스트로 먼저 쓰고** 구현한다. **공개 API는 더하기만 한다.** 이번 구현의 시세 공급자는 토스 하나다.
+
+### 원본 동작 근거
+
+- 공급자 등록부: Hermes의 `ProviderProfile`(공급자가 이름과 자기 키 이름 `env_vars`를 선언)과 공급자 정의의 last-writer-wins — `docs/research/hermes-agent.md` 4.1. 같은 공급자 ID를 다시 등록하면 앞의 것을 바꾼다는 규칙이 여기서 온다. 시세 공급자 자체는 원본에 없다(위 원본 동작 근거 절).
+- 거래 상태 추정: 원본에 없음 — 사용자 결정 2026-11-21 5번. 시장 규칙의 숫자는 `docs/research/stock-investing-principles.md` 5장(국내 가격제한 ±30%, 정적 VI는 2분 단일가, 미국은 일일 상하한이 없고 LULD로 5분 정지)을 따른다.
+
+### 잠긴 옛 테스트와 부딪히는 곳 (설계가 이것을 피한다)
+
+- `Quote`는 여러 크레이트의 잠긴 테스트가 구조체 글자로 만든다(`market/tests/local.rs` · `round3.rs`, `paper/tests/*`, `exec/tests/suite/common.rs`, `rules/tests/suite/common.rs`, `trigger/tests/*`, `server/tests/*`). **`Quote`에 칸을 더하지 않고 `#[non_exhaustive]`도 달지 않는다.** 거래 상태는 따로 돌려준다.
+- `MarketAdapter`는 다른 크레이트도 구현한다(`trigger/tests/round3`, `server/src/demo.rs` · `team/wake.rs` · `feed/fetch.rs`). **새 메서드는 모두 기본 구현을 가진다.** 있는 메서드의 모양은 그대로다.
+- `FakeAdapter::new(Market)`, `TossClient::adapter(Market)`, `is_stale`, `StalePolicy`는 그대로다.
+- `Market`에 `Crypto`를 이번에 더하지 않는다. `server`의 `_ =>` 갈래 여럿(`demo.rs`, `team/tools.rs`, `feed/late.rs`, `trading/base.rs`)이 모르는 시장을 국내로 다룬다. 코인 공급자를 붙이는 차수에 server와 함께 더한다(사용자 확인 필요 — 보고에 적음).
+
+### 1. 공급자 ID · 자산 종류 (결정 2번)
+
+- `#[non_exhaustive] pub enum ProviderId { Toss }`. `as_str()`는 `"toss"`, `ProviderId::parse(&str) -> Option<ProviderId>`(소문자 그대로만 받는다, 모르는 글자는 `None`), `Display`는 `as_str()`와 같다.
+- `ProviderId::credential_fields(self) -> &'static [&'static str]`: 공급자가 자기 키 칸을 선언한다. 토스는 `["client_id", "client_secret"]`. 이 크레이트는 `pi-secrets`에 기대지 않으므로(위 "pi-secrets와 잇는 법") 칸 이름만 선언하고, 보관소 칸과 잇는 일은 server 차수에서 잇는다(이번에는 옛 `KeyKind::Broker`를 그대로 쓴다).
+- `#[non_exhaustive] pub enum AssetClass { Stock, Crypto }`. `Market::asset_class(self) -> AssetClass`: `Kr` · `Us`는 `Stock`. `Crypto`는 값으로만 두고 이번에는 어느 시장도 돌려주지 않는다.
+- 주문 공급자 등록부는 이 크레이트에 만들지 않는다(주문 API 없음, 아래 하지 않는 것).
+
+### 2. 시세 공급자 등록부 (결정 2번)
+
+`pub struct MarketRegistry`. 공급자를 `(ProviderId, 시장)`으로 쥔다. 시장은 `adapter.market()`으로 정한다.
+
+- `new()`, `register(&mut self, provider: ProviderId, adapter: Arc<dyn MarketAdapter>)`: 같은 `(공급자, 시장)`을 다시 등록하면 앞의 것을 바꾼다(Hermes last-writer-wins). 등록 순서는 기억한다.
+- `set_default(&mut self, market, provider)`: 그 시장의 기본 공급자. `route(&mut self, market, symbol, provider)`: 그 종목만 다른 공급자로 보낸다.
+- `select(&self, market, &Symbol) -> Result<(ProviderId, Arc<dyn MarketAdapter>), MarketError>`. 고르는 순서: 종목 경로 → 시장 기본 → 그 시장에 처음 등록된 공급자. 하나도 없거나, 경로 · 기본이 **등록되지 않은 공급자**를 가리키면 `MarketError::NoProvider { market }`(새 변형, `MarketError`는 이미 `non_exhaustive`). 다른 공급자로 몰래 넘어가지 않는다.
+- `quotes(&self, market, &[Symbol]) -> Result<Vec<Quote>, MarketError>`: 종목마다 공급자를 고르고 공급자별로 한 번씩 부른다. 결과는 **호출한 쪽이 넘긴 종목 순서**(5차 1번과 같다), 같은 종목은 한 번. 공급자 하나라도 실패하면 전체가 그 오류다(모르면 멈춤). 공급자가 하나도 없으면 요청을 보내지 않고 `NoProvider`.
+- `providers(&self) -> Vec<(ProviderId, Market)>`: 등록 순서.
+- 토스: server가 `TossClient`의 `adapter(Market::Kr)` · `adapter(Market::Us)`를 `ProviderId::Toss`로 등록한다(server 차수에서 잇는다).
+
+### 3. 거래 상태 값과 공급자가 주는 상태 (결정 5번)
+
+- `#[non_exhaustive] pub enum TradingStatus { Normal, Vi, Halted, Unknown }`. `is_tradable(self) -> bool`은 `Normal`만 참이다(모르면 막는다, 결정 2026-11-16 19번).
+- `#[non_exhaustive] pub enum StatusSource { Provider, Estimated }`.
+- `MarketAdapter`에 기본 구현이 있는 메서드를 더한다: `async fn trading_statuses(&self, symbols: &[Symbol]) -> Result<Option<Vec<(Symbol, TradingStatus)>>, MarketError>`. 기본은 `Ok(None)`("이 공급자는 상태를 주지 않는다"), 요청을 보내지 않는다. 토스는 공식 명세의 현재가 응답에 상태 칸이 없으므로(`toss-api-notes.md`) 기본 그대로 `None`이다.
+- `FakeAdapter::set_status(&self, Symbol, TradingStatus)`: 하나라도 정하면 `trading_statuses`가 `Some`(정한 종목만, 넘긴 순서)을 준다. 정하지 않았으면 `None`.
+
+### 4. 시세로 거래 상태 추정 (결정 5번, 순수 함수)
+
+`estimate_status(recent: &[Quote], reference_price: Option<Decimal>, calendar: &MarketCalendar, now: DateTime<Utc>, policy: &StatusPolicy) -> StatusEstimate`
+
+- `recent`는 한 종목의 최근 시세들이다. 순서는 함수가 받은 시각으로 맞춘다. `reference_price`는 가격제한의 기준가(국내는 전일 정규장 종가)다. 토스는 기준가를 주지 않으므로 server가 지난 정규장의 마지막 시세로 넘긴다(server 차수에서 잇는다).
+- `pub struct StatusEstimate { pub status: TradingStatus, pub reasons: Vec<SuspectReason> }`. `status`는 `Normal` 아니면 `Unknown`뿐이다(추정으로는 VI와 거래정지를 가르지 못한다). `reasons`가 비었을 때만 `Normal`이다.
+- `#[non_exhaustive] pub enum SuspectReason { NoQuote, MixedSymbols, MarketClosed, Stale, NotObservedLongEnough, NotMoving, NoReferencePrice, NearUpperLimit, NearLowerLimit }`. 해당하는 것을 모두 담는다(하나에서 멈추지 않는다). 순서는 이 enum 순서다.
+- 규칙 — 아래가 모두 참이면 `Normal`, 아니면 `Unknown`과 까닭:
+  1. 시세가 있다(`NoQuote`). 모두 같은 종목이다(`MixedSymbols`).
+  2. `now`에 장이 열려 있다(`calendar.session_at(now)`, `MarketClosed`). 달력이 `now`를 덮지 않으면 `Stale`(N6 2차 규칙과 같다).
+  3. **늦지 않다**: 가장 늦게 받은 시세가 `is_stale(.., &policy.stale)`로 거짓(`Stale`).
+  4. **충분히 지켜봤다**: 받은 시각이 `now - still_after` 이전인 시세가 하나 있다(`NotObservedLongEnough`). 장이 막 열렸을 때는 이 때문에 잠깐 막힌다(모르면 멈춤).
+  5. **가격이 움직인다**: 받은 시각이 `(now - still_after, now]` 안인 시세 가운데, 바로 앞 시세와 가격이 다른 것이 하나 있다(`NotMoving`). VI(단일가 2분) · 거래정지 · LULD 정지(5분) 동안은 체결가가 멈춘다.
+  6. **가격제한에서 멀다**: 그 시장에 가격제한(`limit_band`)이 있으면, 기준가가 있어야 하고(`NoReferencePrice`) 마지막 가격의 등락률 `(가격 - 기준가) / 기준가`가 `+(band - margin)` 이상이면 `NearUpperLimit`, `-(band - margin)` 이하면 `NearLowerLimit`. 딱 경계 값이면 의심이다. 가격제한이 없는 시장(미국)은 이 검사를 건너뛴다(기준가가 없어도 된다).
+- `pub struct StatusPolicy { pub stale: StalePolicy, pub still_after: Duration, pub limit_band: Option<Decimal>, pub near_limit_margin: Decimal }` — 모두 설정값이다. `StatusPolicy::for_market(Market)`이 기본값을 준다:
+  - `stale`: `StalePolicy::default()`(30초, N6과 같은 기준을 다시 쓴다).
+  - `still_after`: **60초**. 까닭: 정적 VI는 2분 단일가라 60초면 VI의 뒤 절반 이상을 막는다. 더 짧게 하면 거래가 드문 종목이 정상인데도 자주 막힌다. 막혀도 지켜보기일 뿐이라 짧은 쪽보다 이 값이 낫다.
+  - `limit_band`: 국내 `Some(0.30)`(±30%), 미국 `None`(일일 상하한 없음).
+  - `near_limit_margin`: **0.02**(2%p, 등락률 ±28% 이상이면 의심). 까닭: 상한가 · 하한가 근처는 잔량이 쌓여 체결이 안 되거나 크게 밀린다(`stock-investing-principles.md` 5장 3번). 실제 상 · 하한 가격은 호가 단위로 깎이므로 계산한 경계와 몇 호가 차이가 날 수 있어 그 여유를 둔다.
+- 돈 · 비율은 모두 `Decimal`이다(부동소수점 금지).
+
+### 5. 공급자 상태와 추정 합치기 (결정 5번)
+
+`resolve_status(provided: Option<TradingStatus>, estimate: &StatusEstimate) -> (TradingStatus, StatusSource)`
+
+- 공급자가 상태를 주면(`Some`) 그것을 먼저 쓴다: `(그 값, Provider)`. 공급자가 `Unknown`을 주면 추정으로 `Normal`을 만들지 않고 `Unknown`이다(모르면 멈춤).
+- `None`이면 `(estimate.status, Estimated)`.
+- 늦은 시세(N6) 판단은 이것과 따로 그대로 한다(공급자가 `Normal`이라 해도 `is_stale`은 따로 막는다).
+- 주문 직전 점검(P12)에서 이 값을 쓰는 일은 rules · server 차수에서 잇는다.
+
+### 테스트로 확인할 것 (가짜 서버 · 가짜 어댑터만, 시각은 테스트가 정한다)
+
+1. `ProviderId::Toss`의 `as_str` · `parse` · `Display` · `credential_fields`, 모르는 글자 · 대문자는 `None`.
+2. `Market::asset_class`가 `Kr` · `Us`에서 `Stock`.
+3. 등록부: 시장 기본 고르기, 종목 경로가 기본보다 앞섬, 같은 `(공급자, 시장)` 다시 등록은 바꿈, 공급자 없는 시장 · 등록되지 않은 공급자를 가리키는 경로는 `NoProvider`이고 어느 어댑터도 불리지 않음.
+4. 등록부 `quotes`: 가짜 어댑터 둘에 종목을 나눠 보내고 결과가 요청 순서 · 같은 종목 한 번, 한 공급자의 실패가 전체 오류.
+5. `trading_statuses` 기본은 `None`이고 요청이 없다(테스트 안에서 이 메서드를 구현하지 않은 어댑터로 확인). 토스 어댑터도 `None`이고 로컬 가짜 서버에 요청이 0번. `FakeAdapter::set_status`가 `Some`을 준다.
+6. 추정 — 정상 하나와 까닭마다 하나씩: 시세 없음, 다른 종목 섞임, 장 닫힘, 달력 밖, 늦음(30초 넘음 · 딱 30초는 아님), 덜 지켜봄, 60초 동안 같은 가격, 60초 안에 한 번 바뀜(정상), 국내 +28% · -28%(경계 포함) · +27.99%(정상), 국내 기준가 없음, 미국 기준가 없고 큰 등락도 정상, 순서가 섞인 입력, 까닭 여럿이 함께 담김.
+7. `StatusPolicy::for_market`의 기본값(30초 · 60초 · 0.30 · 0.02 · 미국 `None`)과, 값을 바꾸면 판단이 따라 바뀜.
+8. `resolve_status`: 공급자 `Vi` · `Halted` · `Normal`이 추정보다 앞섬, 공급자 `Unknown`은 `Unknown`, `None`이면 추정.
+9. `TradingStatus::is_tradable`은 `Normal`만 참.
+10. 옛 공개 API가 그대로 컴파일됨: `Quote` 구조체 글자, `FakeAdapter::new`, 새 메서드를 구현하지 않은 `MarketAdapter` 구현.
+
+이 차수의 하지 않는 것: 코인 공급자(업비트), 코인의 24시간 달력 · 소수 수량 · 규칙 차이, `Market::Crypto`, 다른 증권사 어댑터, 기준가 저장(server), 웹소켓.
+
 ## 하지 않는 것
 
 **주문 · 계좌 · 보유 API를 만들지 않는다.** 토스증권에는 모의투자가 없어 주문 API는 실제 돈을 움직인다. 웹소켓 실시간도 이번에는 하지 않는다.
@@ -78,4 +165,4 @@
 
 ## 필수 번호
 
-D5 N6 V31 V32
+D5 N6 V31 V32 P12

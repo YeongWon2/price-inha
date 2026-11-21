@@ -82,6 +82,64 @@
 2. 회귀 시험: 여러 스레드가 함께 처음 켜도 VAPID를 한 번만 만든다. 깨진 VAPID 줄은 `Corrupt`이고 덮어쓰지 않는다.
 3. `contains_registered`는 첫 글자가 나오는 자리에서만 맞춰 보고, `%` 없는 값은 갈래 없이 따라간다(40MB 두 번 훑기가 디버그 빌드에서 약 42초 → 약 3초). 76자 줄바꿈 Base64(MIME)는 대상 밖이다. 백업기는 압축 전에 검사한다.
 
+## 8차 작업 (2026-11-21 발표 자료 대조 — 공급자 확장)
+
+근거: `docs/dev/decisions.md` 2026-11-21 2번(공급자는 이름과 자기 키 칸을 선언) · 3번(네이버 뉴스 키 칸 둘) · 4번(Voyage 임베딩 키), `dev.md` D9 · C3 · E4 · E38 · N8.
+아래를 **테스트로 먼저 쓰고** 구현한다. **공개 API는 더하기만 한다.**
+
+### 원본 동작 근거
+
+- 공급자가 자기 키 이름을 선언하는 구조: Hermes `ProviderProfile`의 `name` · `env_vars`, 같은 이름은 last-writer-wins — `docs/research/hermes-agent.md` 4.1.
+- 보관 방식(`.env` 줄, 0600, 원자 쓰기)은 위 원본 동작 근거 절(Hermes 3.8 · 4.2 · 7.5)을 그대로 따른다. 등록 전 확인 · 가리기는 위에 적은 "의도해서 다른 것" 그대로다.
+
+### 고른 방식: 공급자 선언 칸 (고정 목록 늘리기가 아니다)
+
+고정 목록(`KeySlot`에 변형 더하기)은 잠긴 테스트와 맞지 않는다:
+
+- 잠긴 `tests/round6.rs`가 `KeySlot::ALL`을 돌며 **첫 칸 하나만 채운 값**(`slot_values`)으로 등록이 성공하거나(`다시_연_보관소도_칸_값을_읽고_가린다`, `칸을_등록해도_키_파일은_0600이고_…`) 확인 실패로 끝나기(`확인에_실패하면_어느_칸도_…`)를 기대한다. 칸이 둘인 네이버 칸을 `ALL`에 넣으면 칸 검사에서 먼저 걸려 이 테스트들이 깨진다.
+- 같은 파일이 `slot_status()`가 `KeySlot::ALL` 그대로임을, `KeySlot::DATA_SOURCES`가 DART · ECOS · FRED 셋임을 확인한다. `ALL`에서 빼고 따로 두면 상태 보기에서 새 칸이 보이지 않는다.
+- `KeyKind`는 `non_exhaustive`가 아니어서 변형을 더하면 다른 크레이트의 `match`가 깨지고, 잠긴 `round3.rs`가 `KeyKind::ALL`을 돈다.
+
+그래서 결정 2번대로 **공급자가 칸을 선언하는 길을 새로 더하고**, 옛 `KeyKind` · `KeySlot` · `ALL` · `DATA_SOURCES` · `status` · `slot_status` · `register` · `register_slot`은 한 글자도 바꾸지 않는다. 옛 칸(증권사 · AI · DART · ECOS · FRED · 백업)을 새 길로 옮기는 일은 줄 이름이 바뀌어 옮기기가 필요하므로 이번에 하지 않는다.
+
+### 1. 공급자 키 선언 `ProviderKeys`
+
+- `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] pub struct ProviderKeys`(칸은 비공개). `pub const fn new(provider: &'static str, fields: &'static [&'static str]) -> Self`(상수로 선언할 수 있게 검사하지 않는다), `provider()`, `fields()`, `check(&self) -> Result<(), SecretsError>`.
+- 이름 규칙(`check`, 그리고 등록 · 읽기 때 언제나 먼저 본다): 공급자 이름과 칸 이름은 소문자 영문 · 숫자 · 밑줄 하나, 영문으로 시작, 밑줄로 끝나지 않고 밑줄 둘이 붙지 않음, 1~32자. 칸은 1~8개, 겹치지 않음. 어기면 새 변형 `SecretsError::InvalidProviderKeys`(값을 싣지 않는다. `SecretsError`는 이미 `non_exhaustive`라 변형을 더해도 다른 크레이트가 깨지지 않는다).
+- 줄 이름: `PRICE_INHA_KEY__{공급자}__{칸}`(대문자, 구분은 밑줄 둘). `env_name(&self, field) -> Option<String>`. 이름 규칙이 밑줄 둘을 막으므로 두 공급자의 줄 이름이 겹치지 않고, 옛 줄(`PRICE_INHA_BROKER_…` 등)과도 겹치지 않는다.
+- 이번에 쓰는 선언(선언은 그 공급자를 가진 모듈이 한다 — 결정 2번):
+  - 네이버 뉴스: 공급자 `naver_news`, 칸 `client_id` · `client_secret` → `PRICE_INHA_KEY__NAVER_NEWS__CLIENT_ID`, `PRICE_INHA_KEY__NAVER_NEWS__CLIENT_SECRET`. 상수 `NAVER_NEWS_KEYS`는 data 4차가 둔다.
+  - Voyage 임베딩: 공급자 `voyage`, 칸 `api_key` → `PRICE_INHA_KEY__VOYAGE__API_KEY`. 상수를 둘 곳(임베딩 클라이언트 위치)은 server 차수에서 잇는다.
+  - 이 모듈의 테스트는 위 두 선언을 테스트 안에서 `ProviderKeys::new`로 만들어 쓴다.
+
+### 2. 등록 · 읽기 · 상태
+
+- `register_provider<V: Verifier + ?Sized>(&self, keys: ProviderKeys, values: Credentials, verifier: &V) -> Result<ProviderRegistered, SecretsError>`: `register_slot`과 같은 순서다 — 이름 규칙 → 칸 검사(빠진 칸 · 모르는 칸 · 8자 미만 · 못 쓰는 글자) → **확인기를 부르기 전에** 가리기 대상에 넣기(2차 1번) → 확인 → `.env` 원자 쓰기(0600). 확인 · 저장에 실패하면 저장하지 않고 값은 계속 가린다. `ProviderRegistered { provider: &'static str }`에는 값이 없다. 다시 등록하면 그 공급자의 줄만 바꾼다(다른 줄 · 설명 · 모르는 줄은 글자 그대로).
+- `Verifier`에 기본 구현이 있는 메서드를 더한다: `fn verify_provider(&self, keys: ProviderKeys, values: &Credentials) -> impl Future<Output = Result<(), VerifyFailure>> + Send` — `verify_slot`과 같은 모양, 기본은 언제나 `VerifyFailure::Unreachable`(확인할 줄 모르는 확인기로는 저장되지 않는다). 이미 있는 확인기 구현은 그대로 컴파일된다.
+- `read_provider(&self, keys) -> Result<Option<Credentials>, SecretsError>`: 칸이 모두 있고 모두 8자 이상이어야 `Some`. 하나라도 없거나 짧으면 `None`(2차 2번과 같다). 그 공급자의 줄이 깨졌으면 `Corrupt`(다른 공급자 · 옛 칸 읽기에는 지장 없다).
+- `provider_status(&self, &[ProviderKeys]) -> Result<Vec<ProviderStatus>, SecretsError>`: 넘긴 순서로 `ProviderStatus { provider, registered }`. 값 · 값의 일부 · 길이를 알려 주지 않는다. 옛 `status()` · `slot_status()`에는 새 칸이 나오지 않는다(잠긴 테스트).
+
+### 3. 가리기 (E38 · N8)
+
+- 등록 · 확인 중인 새 칸 값은 `redact`와 `contains_registered`의 대상이다(그대로 · URL 인코딩 · Base64, 7차의 규칙 그대로).
+- **보관소를 열 때 `.env`의 `PRICE_INHA_KEY__`로 시작하는 줄은 모두 가리기 대상이다** — 어떤 공급자가 선언했는지 몰라도 가린다(모르면 가린다). 8자 미만 값은 대상이 아니다(가릴 수 없음, 등록된 것으로도 보지 않음).
+- 같은 `(공급자, 칸)`을 여러 번 다시 등록해도 가리기 대상은 칸마다 지금 값과 앞의 값 `REDACT_PREVIOUS_KEPT`개만 쥔다(2차 4번).
+- 오류 문장 · `Debug` 출력에 값이 없다.
+
+### 테스트로 확인할 것 (임시 폴더와 가짜 확인기만, 시험 값은 `시험용-…` 모양)
+
+1. `ProviderKeys::check`: `naver_news` · `voyage` 통과, 대문자 · 밑줄 둘 · 빈 이름 · 33자 · 숫자로 시작 · 칸 0개 · 칸 9개 · 겹친 칸은 `InvalidProviderKeys`이고 확인기를 부르지 않음.
+2. 줄 이름이 정확히 `PRICE_INHA_KEY__NAVER_NEWS__CLIENT_ID` · `…__CLIENT_SECRET` · `PRICE_INHA_KEY__VOYAGE__API_KEY`.
+3. 네이버(칸 둘) · Voyage(칸 하나) 등록 성공, 확인기가 선언과 값을 받음, 결과 · 상태에 값 없음.
+4. 빠진 칸 · 모르는 칸 · 짧은 값 · 줄바꿈 값 → 오류, 확인기 안 부름, 저장 안 됨.
+5. 확인 실패(거부 · 닿지 않음)와 `verify_provider`를 구현하지 않은 확인기 → 저장 안 됨, 값은 계속 가려짐 · `contains_registered` 참.
+6. 다시 연 보관소: `read_provider`가 값을 줌, `register_provider`를 부르지 않고 연 보관소의 `redact`가 새 줄 값을(URL 인코딩 · Base64 포함) 가림. 선언을 모르는 `PRICE_INHA_KEY__OTHER__TOKEN` 줄 값도 가림.
+7. 칸 하나만 적힌 줄 · 짧은 값 줄 → `None`, 깨진 줄 → 그 공급자만 `Corrupt`.
+8. 옛 칸과 섞임: 옛 `register` · `register_slot`이 새 줄을 지우지 않고, `register_provider`가 옛 줄 · `OTHER_NAME=keep` 같은 줄을 지우지 않음. 옛 `status()` · `slot_status()` 결과가 그대로.
+9. 권한: 폴더 0700, `.env` 0600, 임시 파일이 남지 않음, 값은 `BACKUP_EXCLUDED_FILES`의 파일에만 있음(`#[cfg(unix)]`).
+10. 같은 칸을 여러 번 다시 등록해도 가리기 대상이 끝없이 늘지 않음.
+11. `provider_status`의 순서와 등록 여부.
+
 ## 하지 않는 것
 
 OS 키체인, DB 저장, 백업에 넣기, 화면 만들기. 실제 증권사 · AI에 닿는 확인기는 이 모듈에 없다(확인기 trait만 있고, 테스트는 가짜 확인기를 쓴다).
