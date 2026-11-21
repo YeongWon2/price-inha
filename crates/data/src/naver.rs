@@ -159,7 +159,9 @@ impl NewsProvider for NaverNews {
         NAVER_NEWS_KEYS
     }
 
-    /// 검색한다. 받은 시각(시계)보다 뒤의 기사는 버린다(V36). 남은 것이 없으면 [`NewsFetched::Missing`].
+    /// 검색한다. 받은 시각(시계)보다 뒤의 기사는 버린다(V36, 버린 수에 넣지 않는다).
+    /// 링크 값이 이상한 기사는 그것만 버리고 세어, 하나라도 버렸으면 [`NewsFetched::Partial`]
+    /// (남은 것이 없어도). 버린 것이 없고 남은 것이 없으면 [`NewsFetched::Missing`].
     async fn search(&self, request: &NewsRequest) -> Result<NewsFetched, NewsError> {
         let query = request.checked_query(PROVIDER)?;
         let credentials = self
@@ -172,12 +174,14 @@ impl NewsProvider for NaverNews {
             .get(query, request.max_items, request.sort, headers)
             .await?;
         let known_at = self.clock.now();
-        let items = parse_items(&body, query, known_at)?;
-        if items.is_empty() {
-            Ok(NewsFetched::Missing)
+        let Parsed { items, dropped } = parse_items(&body, query, known_at)?;
+        Ok(if dropped > 0 {
+            NewsFetched::Partial { items, dropped }
+        } else if items.is_empty() {
+            NewsFetched::Missing
         } else {
-            Ok(NewsFetched::Items(items))
-        }
+            NewsFetched::Items(items)
+        })
     }
 }
 
@@ -361,13 +365,20 @@ fn format_error(detail: &str) -> NewsError {
     }
 }
 
-/// 응답 본문을 기사들로 읽는다. 한 기사라도 칸이 없거나 깨졌으면 응답 전체가 형식 오류다.
-/// `known_at`보다 뒤의 기사는 버린다(V36).
-fn parse_items(
-    body: &str,
-    query: &str,
-    known_at: DateTime<Utc>,
-) -> Result<Vec<NewsItem>, NewsError> {
+/// 읽은 응답: 남은 기사들과 링크가 이상해 버린 수.
+#[derive(Debug, PartialEq)]
+struct Parsed {
+    items: Vec<NewsItem>,
+    dropped: usize,
+}
+
+/// 응답 본문을 기사들로 읽는다.
+///
+/// - 응답 모양이 깨졌으면(JSON 아님, `items` 목록 없음, 기사의 필수 칸 없음, 시각을 못 읽음)
+///   응답 전체가 형식 오류다. 버릴 기사가 앞에 있어도 뒤의 기사까지 모두 본다.
+/// - 링크 값이 이상한 기사는 그것만 버리고 센다(결정 2026-11-21 16번).
+/// - `known_at`보다 뒤의 기사는 버리되 세지 않는다(V36).
+fn parse_items(body: &str, query: &str, known_at: DateTime<Utc>) -> Result<Parsed, NewsError> {
     let value: Value =
         serde_json::from_str(body).map_err(|_| format_error("응답이 JSON이 아닙니다"))?;
     let items = value
@@ -375,16 +386,29 @@ fn parse_items(
         .and_then(Value::as_array)
         .ok_or_else(|| format_error("items 목록이 없습니다"))?;
     let mut out = Vec::with_capacity(items.len());
+    let mut dropped = 0;
     for item in items {
-        let news = parse_item(item, query, known_at)?;
-        if news.published_at <= known_at {
-            out.push(news);
+        match parse_item(item, query, known_at)? {
+            Some(news) if news.published_at <= known_at => out.push(news),
+            Some(_) => {}
+            None => dropped += 1,
         }
     }
-    Ok(out)
+    Ok(Parsed {
+        items: out,
+        dropped,
+    })
 }
 
-fn parse_item(item: &Value, query: &str, known_at: DateTime<Utc>) -> Result<NewsItem, NewsError> {
+/// 기사 하나를 읽는다. 칸이 없거나 시각을 못 읽으면 형식 오류, 링크 값이 이상하면 `Ok(None)`(버림).
+///
+/// 링크 검사는 시각 검사보다 먼저다. `originallink`가 비었거나 이상하면 `link`를 쓰고,
+/// 둘 다 쓸 수 없으면(둘 다 빈 글인 것도) 버린다.
+fn parse_item(
+    item: &Value,
+    query: &str,
+    known_at: DateTime<Utc>,
+) -> Result<Option<NewsItem>, NewsError> {
     let text = |name: &str| {
         item.get(name)
             .and_then(Value::as_str)
@@ -395,17 +419,13 @@ fn parse_item(item: &Value, query: &str, known_at: DateTime<Utc>) -> Result<News
     let original = text("originallink")?;
     let naver = text("link")?;
     let pub_date = text("pubDate")?;
-    let chosen = if original.trim().is_empty() {
-        naver
-    } else {
-        original
+    let Some(link) = web_link(original).or_else(|| web_link(naver)) else {
+        return Ok(None);
     };
-    let link = web_link(chosen)
-        .ok_or_else(|| format_error("기사 링크가 쓸 수 있는 http(s) 주소가 아닙니다"))?;
     let published_at = DateTime::parse_from_rfc2822(pub_date.trim())
         .map_err(|_| format_error("기사 시각(pubDate)을 읽을 수 없습니다"))?
         .with_timezone(&Utc);
-    Ok(NewsItem {
+    Ok(Some(NewsItem {
         provider: PROVIDER,
         query: query.to_owned(),
         title: truncate_chars(clean_news_text(title), MAX_TITLE_CHARS),
@@ -413,13 +433,13 @@ fn parse_item(item: &Value, query: &str, known_at: DateTime<Utc>) -> Result<News
         link,
         published_at,
         known_at,
-    })
+    }))
 }
 
 /// `http` · `https`의 절대 주소만 받고, 주소 해석기가 정규화한 글(`Url::as_str`)을 돌려준다.
 ///
 /// 앞뒤 공백을 뺀 원문에 제어 문자 · 공백 · `"` `<` `>` `\\` `` ` ``가 있거나, 사용자 정보(`user@host`)가
-/// 있거나, 호스트가 없으면 `None`(기사 전체가 형식 오류).
+/// 있거나, 호스트가 없으면 `None`(그 기사만 버린다).
 fn web_link(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if trimmed.chars().any(is_forbidden_link_char) || !has_authority(trimmed) {
@@ -548,6 +568,31 @@ mod tests {
             verify_news_keys(&config, &creds).await,
             Err(VerifyFailure::Unreachable)
         );
+    }
+
+    fn article(original: &str, link: &str, date: &str) -> Value {
+        serde_json::json!({
+            "title": "t", "description": "d",
+            "originallink": original, "link": link, "pubDate": date,
+        })
+    }
+
+    #[test]
+    fn 링크가_이상한_기사는_시각보다_먼저_버리고_미래_기사는_세지_않는다() {
+        let known_at = DateTime::parse_from_rfc3339("2026-11-21T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let body = serde_json::json!({ "items": [
+            article("https://a.example.com/1", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
+            article("bad link", "", "시각 아님"),
+            article("", "", "Sat, 21 Nov 2026 08:00:00 +0900"),
+            article("https://a.example.com/2", "", "Sun, 22 Nov 2026 08:00:00 +0900"),
+        ]})
+        .to_string();
+        let parsed = parse_items(&body, "q", known_at).unwrap();
+        assert_eq!(parsed.dropped, 2);
+        let links: Vec<&str> = parsed.items.iter().map(|n| n.link.as_str()).collect();
+        assert_eq!(links, ["https://a.example.com/1"]);
     }
 
     #[test]
