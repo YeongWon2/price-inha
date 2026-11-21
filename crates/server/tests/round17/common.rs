@@ -280,6 +280,15 @@ impl DataServer {
         DataServer { server }
     }
 
+    /// 모든 자료 요청이 500으로 실패하게 바꾼다(출처 장애).
+    async fn fail(&self) {
+        self.server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&self.server)
+            .await;
+    }
+
     /// 이 가짜 서버를 쓰는 팀 조립 값.
     fn team(&self) -> TeamWiring {
         let mut team = TeamWiring::official();
@@ -585,10 +594,12 @@ impl Verifier for AcceptAll {
     }
 }
 
-/// 보관 폴더에 자료 키와 필수 키(증권사 · AI)를 등록한다. 값은 진짜 키처럼 보이지 않는다.
-async fn register_keys(home: &Path) {
+/// 보관 폴더에 필수 키(증권사 · AI)를 등록한다. `data_keys`면 자료 키(DART · ECOS)도 등록한다(자료 키는
+/// 선택이다). 값은 진짜 키처럼 보이지 않는다.
+async fn register_keys(home: &Path, data_keys: bool) {
     let secrets = SecretStore::open(home).unwrap();
-    for (slot, value) in [(KeySlot::Dart, DART_KEY), (KeySlot::Ecos, ECOS_KEY)] {
+    let data = [(KeySlot::Dart, DART_KEY), (KeySlot::Ecos, ECOS_KEY)];
+    for (slot, value) in data.into_iter().filter(|_| data_keys) {
         let values = Credentials::new().with(slot.fields()[0], value);
         secrets
             .register_slot(slot, values, &AcceptAll)
@@ -618,10 +629,10 @@ struct Live {
 
 /// 떠 있는 서버 하나와 그 보관 폴더 · 시계 · 가짜 서버들.
 pub struct Bench {
-    _dir: TempDir,
+    dir: TempDir,
     clock: Arc<TestClock>,
     pub app: App,
-    _data: DataServer,
+    data: DataServer,
     push: Option<PushServer>,
     live: Option<Live>,
 }
@@ -642,10 +653,42 @@ impl Bench {
         Bench::launch(at, false, true).await
     }
 
+    /// 시연이 아닌 모드로 띄우고 웹 푸시 가짜 서버를 잇는다(승인 요청 알림이 "갔다"로 남는다).
+    pub async fn live_with_push(at: DateTime<Utc>) -> Bench {
+        Bench::launch(at, true, true).await
+    }
+
+    /// 시연이 아닌 모드로, 자료 키(DART · ECOS)를 등록하지 않고 띄운다(자료 키는 선택이다).
+    pub async fn live_without_data_keys(at: DateTime<Utc>) -> Bench {
+        let dir = tempfile::tempdir().unwrap();
+        register_keys(dir.path(), false).await;
+        Bench::boot(dir, DataServer::start().await, at, false, true).await
+    }
+
+    /// 끄고, 같은 보관 폴더로 그 시각에 다시 띄운다(시연 모드, 웹 푸시 없음).
+    pub async fn reopen(self, at: DateTime<Utc>) -> Bench {
+        let Bench { dir, data, app, .. } = self;
+        tokio::time::timeout(STEP, app.shutdown())
+            .await
+            .expect("시간 안에 꺼져야 한다")
+            .expect("끄기가 성공해야 한다");
+        Bench::boot(dir, data, at, false, false).await
+    }
+
     async fn launch(at: DateTime<Utc>, push: bool, live: bool) -> Bench {
         let dir = tempfile::tempdir().unwrap();
-        register_keys(dir.path()).await;
-        let data = DataServer::start().await;
+        register_keys(dir.path(), true).await;
+        Bench::boot(dir, DataServer::start().await, at, push, live).await
+    }
+
+    /// 그 보관 폴더 · 자료 가짜 서버로 띄운다.
+    async fn boot(
+        dir: TempDir,
+        data: DataServer,
+        at: DateTime<Utc>,
+        push: bool,
+        live: bool,
+    ) -> Bench {
         let push = if push {
             Some(PushServer::start().await)
         } else {
@@ -682,10 +725,10 @@ impl Bench {
             .expect("서버가 시간 안에 떠야 한다")
             .expect("서버가 떠야 한다");
         Bench {
-            _dir: dir,
+            dir,
             clock,
             app,
-            _data: data,
+            data,
             push,
             live,
         }
@@ -721,6 +764,11 @@ impl Bench {
     pub fn fail_quotes(&self) {
         let live = self.live.as_ref().expect("시연이 아닌 모드다");
         live.failing.store(true, Ordering::SeqCst);
+    }
+
+    /// 자료 가짜 서버를 장애로 바꾼다(키가 있는 출처에 물어도 모두 실패한다).
+    pub async fn fail_data(&self) {
+        self.data.fail().await;
     }
 
     /// 웹 푸시 가짜 서버가 받은 알림 수.
@@ -1006,6 +1054,24 @@ pub async fn post(addr: SocketAddr, path: &str, body: &Value) -> Reply {
         .header("Origin", origin_of(addr))
         .header("Content-Type", "application/json")
         .body(body.to_string());
+    let reply = tokio::time::timeout(STEP, request.send())
+        .await
+        .expect("응답이 시간 안에 와야 한다")
+        .expect("요청이 닿아야 한다");
+    let status = reply.status().as_u16();
+    let bytes = reply.bytes().await.expect("본문을 읽어야 한다");
+    Reply {
+        status,
+        body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    }
+}
+
+/// 세션을 받아 같은 출처에서 읽는다.
+pub async fn get(addr: SocketAddr, path: &str) -> Reply {
+    let cookie = login(addr).await;
+    let request = reqwest::Client::new()
+        .get(format!("{}{path}", origin_of(addr)))
+        .header("Cookie", cookie);
     let reply = tokio::time::timeout(STEP, request.send())
         .await
         .expect("응답이 시간 안에 와야 한다")

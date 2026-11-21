@@ -8,6 +8,8 @@
 //! - `status`: 1번(VI 추정 잇기). `health`: 2번(이상 감지 멈춤과 스스로 풀기).
 //! - `exits`: 3번(전체 정지 중 매도) · 4번(팀장 팔기). `due`: 5번(답 없음). `promote`: 7번(승격).
 //! - 6번(템플릿 값 바꾸기의 승인 길)은 journal에 사용자 변경을 개선안으로 넣는 공개 API가 없어 쓰지 않았다.
+//! - 10a 보강(검토 되돌림) 여섯: `rework_orders`(1 다시 점검의 상태 추정 · 2 팀장 팔기 · 3 자료 키 없음),
+//!   `rework_templates`(4 멈춘 템플릿의 손절 · 5 승격대기 고착 · 6 잠긴 템플릿과 개선안).
 
 mod carry;
 mod common;
@@ -15,4 +17,6 @@ mod due;
 mod exits;
 mod health;
 mod promote;
+mod rework_orders;
+mod rework_templates;
 mod status;
