@@ -91,54 +91,127 @@ pub(crate) fn lines_of(store: &Store, chunk: &KnowledgeChunk) -> Result<(u32, u3
     Ok((1, count))
 }
 
-const SETTINGS_KEYS: [&str; 7] = [
-    "settings.provider",
-    "settings.model",
-    "settings.dims",
-    "settings.chunk_tokens",
-    "settings.chunk_overlap",
-    "settings.tokenizer",
-    "settings.scope_hash",
+const KEY_PROVIDER: &str = "settings.provider";
+const KEY_MODEL: &str = "settings.model";
+const KEY_DIMS: &str = "settings.dims";
+const KEY_CHUNK_TOKENS: &str = "settings.chunk_tokens";
+const KEY_CHUNK_OVERLAP: &str = "settings.chunk_overlap";
+const KEY_TOKENIZER: &str = "settings.tokenizer";
+const KEY_SCOPE_HASH: &str = "settings.scope_hash";
+
+/// 설정 칸을 쓰는 순서. **모델 칸이 맨 마지막이다**(지시서 4차 3번 4-3).
+///
+/// 칸은 하나씩 따로 쓰여서(칸마다 트랜잭션이 다르다) 도중에 끊기면 앞의 칸만 새것인 찢어진 설정이 남는다.
+/// 모델 칸을 마지막에 쓰면 찢어진 설정의 모델은 언제나 옛것(또는 없음)이라, `reembed_step`의 4-2
+/// ("모델은 같은데 차원이 다르다" 오류)에 걸리지 않고 다음 부름이 이어서 `Done`과 함께 온전히 다시 남긴다.
+/// 모델 칸이 먼저 쓰이면 "모델은 새것, 차원은 옛것"이 남아 4-2에 영영 막힌다.
+const SETTINGS_WRITE_ORDER: [&str; 7] = [
+    KEY_PROVIDER,
+    KEY_DIMS,
+    KEY_CHUNK_TOKENS,
+    KEY_CHUNK_OVERLAP,
+    KEY_TOKENIZER,
+    KEY_SCOPE_HASH,
+    KEY_MODEL,
 ];
 
+/// 그 칸에 쓸 글자. 차원이 없으면(키워드 전용) 빈 글자다.
+fn settings_value(key: &str, s: &IndexSettings) -> String {
+    match key {
+        KEY_PROVIDER => s.provider.clone(),
+        KEY_MODEL => s.model.clone(),
+        KEY_DIMS => s.dims.map(|d| d.to_string()).unwrap_or_default(),
+        KEY_CHUNK_TOKENS => s.chunk_tokens.to_string(),
+        KEY_CHUNK_OVERLAP => s.chunk_overlap.to_string(),
+        KEY_TOKENIZER => s.tokenizer.clone(),
+        _ => s.scope_hash.clone(),
+    }
+}
+
 pub(crate) fn save_settings(store: &Store, s: &IndexSettings) -> Result<(), Error> {
-    let dims = s.dims.map(|d| d.to_string()).unwrap_or_default();
-    let values = [
-        s.provider.clone(),
-        s.model.clone(),
-        dims,
-        s.chunk_tokens.to_string(),
-        s.chunk_overlap.to_string(),
-        s.tokenizer.clone(),
-        s.scope_hash.clone(),
-    ];
-    for (key, value) in SETTINGS_KEYS.iter().zip(values.iter()) {
-        store.set_knowledge_meta(key, value)?;
+    for key in SETTINGS_WRITE_ORDER {
+        store.set_knowledge_meta(key, &settings_value(key, s))?;
     }
     Ok(())
 }
 
 pub(crate) fn load_settings(store: &Store) -> Result<Option<IndexSettings>, Error> {
-    let mut values: Vec<String> = Vec::with_capacity(SETTINGS_KEYS.len());
-    for key in SETTINGS_KEYS {
-        match store.knowledge_meta(key)? {
-            Some(v) => values.push(v),
-            None => return Ok(None),
-        }
-    }
+    // 칸이 하나라도 없으면 남은 설정이 없는 것이다(처음 남기다 끊긴 것도 여기에 든다).
+    let read = |key: &str| store.knowledge_meta(key);
+    let (
+        Some(provider),
+        Some(model),
+        Some(dims),
+        Some(chunk_tokens),
+        Some(chunk_overlap),
+        Some(tokenizer),
+        Some(scope_hash),
+    ) = (
+        read(KEY_PROVIDER)?,
+        read(KEY_MODEL)?,
+        read(KEY_DIMS)?,
+        read(KEY_CHUNK_TOKENS)?,
+        read(KEY_CHUNK_OVERLAP)?,
+        read(KEY_TOKENIZER)?,
+        read(KEY_SCOPE_HASH)?,
+    )
+    else {
+        return Ok(None);
+    };
     let broken = |what: &str| Error::InvalidRecord(format!("남은 색인 설정이 깨졌다: {what}"));
-    let dims = if values[2].is_empty() {
+    let dims = if dims.is_empty() {
         None
     } else {
-        Some(values[2].parse().map_err(|_| broken("dims"))?)
+        Some(dims.parse().map_err(|_| broken("dims"))?)
     };
     Ok(Some(IndexSettings {
-        provider: values[0].clone(),
-        model: values[1].clone(),
+        provider,
+        model,
         dims,
-        chunk_tokens: values[3].parse().map_err(|_| broken("chunk_tokens"))?,
-        chunk_overlap: values[4].parse().map_err(|_| broken("chunk_overlap"))?,
-        tokenizer: values[5].clone(),
-        scope_hash: values[6].clone(),
+        chunk_tokens: chunk_tokens.parse().map_err(|_| broken("chunk_tokens"))?,
+        chunk_overlap: chunk_overlap.parse().map_err(|_| broken("chunk_overlap"))?,
+        tokenizer,
+        scope_hash,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_model_cell_is_written_last() {
+        assert_eq!(SETTINGS_WRITE_ORDER.last(), Some(&KEY_MODEL));
+        let dims = SETTINGS_WRITE_ORDER.iter().position(|k| *k == KEY_DIMS);
+        let model = SETTINGS_WRITE_ORDER.iter().position(|k| *k == KEY_MODEL);
+        assert!(dims < model);
+    }
+
+    #[test]
+    fn every_cell_is_written_exactly_once() {
+        let mut keys = SETTINGS_WRITE_ORDER.to_vec();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), 7);
+    }
+
+    #[test]
+    fn each_cell_gets_its_own_value() {
+        let s = IndexSettings {
+            provider: "p".to_string(),
+            model: "m".to_string(),
+            dims: Some(8),
+            chunk_tokens: 400,
+            chunk_overlap: 80,
+            tokenizer: "trigram".to_string(),
+            scope_hash: "h".to_string(),
+        };
+        let written: Vec<String> = SETTINGS_WRITE_ORDER
+            .iter()
+            .map(|k| settings_value(k, &s))
+            .collect();
+        assert_eq!(written, ["p", "8", "400", "80", "trigram", "h", "m"]);
+        let keyword_only = IndexSettings { dims: None, ..s };
+        assert_eq!(settings_value(KEY_DIMS, &keyword_only), "");
+    }
 }

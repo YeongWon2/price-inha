@@ -5,7 +5,7 @@
 pub struct IndexSettings {
     /// 임베딩 공급자 이름(없으면 `"none"`).
     pub provider: String,
-    /// 모델 이름.
+    /// 모델 이름. 키워드 전용이면 빈 글자(`""`).
     pub model: String,
     /// 벡터 차원. 키워드 전용이면 `None`.
     pub dims: Option<u32>,
