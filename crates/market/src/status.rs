@@ -153,7 +153,7 @@ pub fn estimate_status(
         reasons.push(SuspectReason::Stale);
     }
 
-    observation_reasons(&sorted, now, policy.still_after, &mut reasons);
+    observation_reasons(&sorted, calendar, now, policy, &mut reasons);
     if let Some(band) = policy.limit_band {
         limit_reasons(
             latest,
@@ -177,31 +177,63 @@ pub fn estimate_status(
 /// 시각을 빼다 넘치면(있을 수 없는 시각) 지켜보지 않은 것으로 본다.
 fn observation_reasons(
     sorted: &[&Quote],
+    calendar: &MarketCalendar,
     now: DateTime<Utc>,
-    still_after: Duration,
+    policy: &StatusPolicy,
     reasons: &mut Vec<SuspectReason>,
 ) {
-    let window_start = chrono::Duration::from_std(still_after)
+    let window_start = chrono::Duration::from_std(policy.still_after)
         .ok()
         .and_then(|still| now.checked_sub_signed(still));
-    let observed = window_start.is_some_and(|start| {
-        sorted
-            .first()
-            .is_some_and(|quote| quote.received_at <= start)
-    });
+    let observed = window_start
+        .is_some_and(|start| observed_long_enough(sorted, calendar, now, start, policy));
     if !observed {
         reasons.push(SuspectReason::NotObservedLongEnough);
     }
-    // `(now - still_after, now]` 안의 시세 가운데 바로 앞 시세와 가격이 다른 것이 있는가.
-    let moving = window_start.is_some_and(|start| {
-        sorted.windows(2).any(|pair| {
-            let (before, after) = (pair[0], pair[1]);
-            after.received_at > start && after.received_at <= now && after.price != before.price
-        })
-    });
+    let moving = window_start.is_some_and(|start| moving_in_window(sorted, now, start));
     if !moving {
         reasons.push(SuspectReason::NotMoving);
     }
+}
+
+/// (4번) `start` 이전에 받은 시세(그 가운데 가장 늦은 것)부터 가장 늦은 시세까지 이웃 간격이
+/// 모두 `stale.max_age` 이하이고, 그 시세들이 모두 `now`와 같은 세션 안인가.
+/// 더 이른 시세에서 시작하는 사슬은 이 사슬을 품으므로 가장 늦은 시작점만 보면 된다.
+fn observed_long_enough(
+    sorted: &[&Quote],
+    calendar: &MarketCalendar,
+    now: DateTime<Utc>,
+    start: DateTime<Utc>,
+    policy: &StatusPolicy,
+) -> bool {
+    let Some(anchor) = sorted.iter().rposition(|quote| quote.received_at <= start) else {
+        return false;
+    };
+    // 지금 장이 닫혀 있으면 같은 세션일 수 없다(모르면 멈춤).
+    let Some(session) = calendar.session_at(now) else {
+        return false;
+    };
+    let Ok(max_gap) = chrono::Duration::from_std(policy.stale.max_age) else {
+        return false;
+    };
+    let chain = &sorted[anchor..];
+    let in_session = chain
+        .iter()
+        .all(|quote| calendar.session_at(quote.received_at).as_ref() == Some(&session));
+    let no_gap = chain
+        .windows(2)
+        .all(|pair| pair[1].received_at - pair[0].received_at <= max_gap);
+    in_session && no_gap
+}
+
+/// (5번) 받은 시각이 둘 다 `(start, now]` 안인 이웃한 두 시세 가운데 가격이 다른 쌍이 있는가.
+/// 창 밖 시세와의 차이는 움직임으로 치지 않는다.
+fn moving_in_window(sorted: &[&Quote], now: DateTime<Utc>, start: DateTime<Utc>) -> bool {
+    let in_window = |quote: &Quote| quote.received_at > start && quote.received_at <= now;
+    sorted.windows(2).any(|pair| {
+        let (before, after) = (pair[0], pair[1]);
+        in_window(before) && in_window(after) && after.price != before.price
+    })
 }
 
 /// 6. 가격제한에서 멀다. 가격제한(`band`)이 있는 시장에서만 부른다.
@@ -283,7 +315,8 @@ mod tests {
     fn 기준가가_0이면_기준가가_없는_것으로_본다() {
         let now: DateTime<Utc> = "2026-03-25T02:00:00Z".parse().unwrap();
         let recent = [
-            quote(100, now - chrono::Duration::seconds(90)),
+            quote(100, now - chrono::Duration::seconds(60)),
+            quote(100, now - chrono::Duration::seconds(30)),
             quote(101, now - chrono::Duration::seconds(5)),
         ];
         let got = estimate_status(
