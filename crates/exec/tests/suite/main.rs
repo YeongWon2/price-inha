@@ -3,6 +3,7 @@
 mod bind;
 mod common;
 mod fill;
+mod guard;
 mod ledger;
 mod persist;
 mod reduced;

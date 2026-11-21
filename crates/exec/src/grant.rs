@@ -217,6 +217,25 @@ mod tests {
         ));
     }
 
+    // 8차 3: 지정가가 0 이하이면 요청 안이 아니다.
+    #[test]
+    fn zero_price_is_not_within() {
+        let subject = asked(10, Decimal::from(70_000));
+        assert!(!within_request(
+            &subject,
+            &order(Decimal::from(4), Some(Decimal::ZERO))
+        ));
+    }
+
+    #[test]
+    fn negative_price_is_not_within() {
+        let subject = asked(10, Decimal::from(70_000));
+        assert!(!within_request(
+            &subject,
+            &order(Decimal::from(4), Some(Decimal::from(-1)))
+        ));
+    }
+
     #[test]
     fn negative_quantity_is_not_within() {
         let subject = asked(10, Decimal::from(70_000));
