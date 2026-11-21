@@ -123,6 +123,17 @@ async fn 실패한_팀장_팔기가_다시_내기를_기다리면_때가_되어_
 
 // ───────────── (나) 시세 흐름이 보유 종목도 받는다 ─────────────
 
+/// 시계를 1초씩 움직이며 `done`이 될 때까지 기다린다(모의계좌는 주문 뒤에 받은 시세로만 체결하므로, 시세 흐름이
+/// 가짜 시세 서버에서 주문 뒤 시각의 시세를 받아 오게).
+async fn tick_until(bench: &Bench, what: &str, done: impl Fn(&Bench) -> bool) {
+    let deadline = Instant::now() + STEP;
+    while !done(bench) {
+        assert!(Instant::now() < deadline, "시간 안에 되지 않았다: {what}");
+        bench.set(plus(bench.now(), 1));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 // 검증: F4 E34 N6 C10
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 지켜보는_목록에_없는_보유_종목도_시세_흐름이_받아_손절이_나간다() {
@@ -135,9 +146,10 @@ async fn 지켜보는_목록에_없는_보유_종목도_시세_흐름이_받아_
 
     // 테스트는 더 넣지 않는다: 시세 흐름이 가짜 시세 서버에서 그 종목의 손절값 아래 시세를 받아야 한다.
     bench.set_price(HYNIX, STOP - 1_000);
-    wait_for(
+    tick_until(
+        &bench,
         "시세 흐름이 받은 시세로 손절이 나가 팔림",
-        || bench.trade_state(held) == TradeState::Sold,
+        |bench| bench.trade_state(held) == TradeState::Sold,
     )
     .await;
     let asked = bench.asked_symbols().await;
@@ -208,9 +220,10 @@ async fn 보유_종목을_지켜보는_목록에서_빼도_시세를_계속_받�
     }
 
     bench.set_price(HYNIX, STOP - 1_000);
-    wait_for(
+    tick_until(
+        &bench,
         "목록에서 빼려 한 보유 종목의 손절이 나가 팔림",
-        || bench.trade_state(held) == TradeState::Sold,
+        |bench| bench.trade_state(held) == TradeState::Sold,
     )
     .await;
     bench.close().await;
