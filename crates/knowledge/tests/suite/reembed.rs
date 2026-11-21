@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use pi_knowledge::{
     CHUNK_OVERLAP, CHUNK_TOKENS, EmbedError, Embedder, Error, IndexSettings, Knowledge,
-    ReembedProgress,
+    ReembedProgress, ReindexPlan, ReindexReason,
 };
 use pi_store::{ChunkId, KnowledgeKind, Store};
 
@@ -15,6 +15,7 @@ use crate::common::{Fixture, test_config};
 /// 모델 이름을 고를 수 있고, 실패를 켰다 껐다 할 수 있는 가짜 임베딩. 부른 횟수와 받은 글을 남긴다.
 struct ModelEmbedder {
     model: &'static str,
+    dims: u32,
     calls: AtomicUsize,
     failing: AtomicBool,
     seen: Mutex<Vec<String>>,
@@ -22,8 +23,12 @@ struct ModelEmbedder {
 
 impl ModelEmbedder {
     fn new(model: &'static str) -> Arc<ModelEmbedder> {
+        ModelEmbedder::with_dims(model, 3)
+    }
+    fn with_dims(model: &'static str, dims: u32) -> Arc<ModelEmbedder> {
         Arc::new(ModelEmbedder {
             model,
+            dims,
             calls: AtomicUsize::new(0),
             failing: AtomicBool::new(false),
             seen: Mutex::new(Vec::new()),
@@ -46,7 +51,7 @@ impl Embedder for ModelEmbedder {
         self.model
     }
     fn dims(&self) -> u32 {
-        3
+        self.dims
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -57,7 +62,10 @@ impl Embedder for ModelEmbedder {
             .lock()
             .expect("잠금")
             .extend(texts.iter().cloned());
-        Ok(texts.iter().map(|_| vec![0.25, 0.5, 1.0]).collect())
+        Ok(texts
+            .iter()
+            .map(|_| (1..=self.dims).map(|i| 0.25 * i as f32).collect())
+            .collect())
     }
 }
 
@@ -134,6 +142,18 @@ async fn run_to_done(
                 return total + embedded;
             }
             ReembedProgress::Unavailable => panic!("포트가 있는데 쓸 수 없다고 한다"),
+        }
+    }
+    panic!("스무 걸음 안에 끝나지 않았다");
+}
+
+/// `Done`이 나올 때까지 한 걸음씩 불러 그 `Done`에 실린 계획을 돌려준다.
+async fn plan_when_done(k: &Knowledge, current: &IndexSettings, batch: usize) -> ReindexPlan {
+    for _ in 0..20 {
+        if let ReembedProgress::Done { plan, .. } =
+            k.reembed_step(current, batch).await.expect("한 걸음")
+        {
+            return plan;
         }
     }
     panic!("스무 걸음 안에 끝나지 않았다");
@@ -305,4 +325,99 @@ async fn done_with_nothing_missing_makes_no_port_call() {
         "{step:?}"
     );
     assert_eq!(a.calls(), calls);
+}
+
+// 검증: D10 V23
+#[tokio::test]
+async fn a_zero_batch_is_in_progress_with_nothing_done_and_never_records_settings() {
+    let f = three_records();
+    let a = ModelEmbedder::new("model-a");
+    let ka = knowledge_with(&f.store, &a);
+    let sa = settings("model-a", Some(3));
+    run_to_done(&ka, &a, &sa, 10, None).await;
+
+    let b = ModelEmbedder::new("model-b");
+    let kb = knowledge_with(&f.store, &b);
+    let sb = settings("model-b", Some(3));
+    for _ in 0..2 {
+        let step = kb.reembed_step(&sb, 0).await.expect("한 걸음");
+        assert_eq!(step, ReembedProgress::InProgress { embedded: 0 });
+    }
+    assert_eq!(b.calls(), 0, "batch 0인데 포트를 불렀다");
+    assert_eq!(kb.stored_settings().expect("설정"), Some(sa.clone()));
+    for id in all_chunks(&f) {
+        assert_eq!(model_of(&f, id).as_deref(), Some("model-a"));
+    }
+    assert_eq!(
+        f.store
+            .chunks_missing_embedding("model-b", 10)
+            .expect("목록")
+            .len(),
+        3
+    );
+
+    let total = run_to_done(&kb, &b, &sb, 2, Some(sa)).await;
+    assert_eq!(total, 3);
+    assert_eq!(kb.stored_settings().expect("설정"), Some(sb));
+    for id in all_chunks(&f) {
+        assert_eq!(model_of(&f, id).as_deref(), Some("model-b"));
+    }
+}
+
+// 검증: D10 V23
+#[tokio::test]
+async fn same_model_with_other_dims_is_an_embedder_error_and_keeps_the_old_settings() {
+    let f = three_records();
+    let a3 = ModelEmbedder::new("model-a");
+    let k3 = knowledge_with(&f.store, &a3);
+    let s3 = settings("model-a", Some(3));
+    run_to_done(&k3, &a3, &s3, 10, None).await;
+
+    let a4 = ModelEmbedder::with_dims("model-a", 4);
+    let k4 = knowledge_with(&f.store, &a4);
+    let s4 = settings("model-a", Some(4));
+    for _ in 0..3 {
+        let r = k4.reembed_step(&s4, 10).await;
+        assert!(matches!(r, Err(Error::Embedder(_))), "{r:?}");
+        assert_eq!(k4.stored_settings().expect("설정"), Some(s3.clone()));
+    }
+    assert_eq!(a4.calls(), 0, "차원만 다른데 포트를 불렀다");
+    for id in all_chunks(&f) {
+        let e = f.store.chunk_embedding(id).expect("읽기").expect("임베딩");
+        assert_eq!(e.model, "model-a");
+        assert_eq!(e.dims, 3);
+    }
+}
+
+// 검증: D10
+#[tokio::test]
+async fn done_carries_the_plan_from_before_the_settings_were_recorded() {
+    let f = three_records();
+    let a = ModelEmbedder::new("model-a");
+    let ka = knowledge_with(&f.store, &a);
+    let sa = settings("model-a", Some(3));
+    assert_eq!(
+        plan_when_done(&ka, &sa, 2).await,
+        ReindexPlan::Rebuild(ReindexReason::FirstTime)
+    );
+
+    let calls = a.calls();
+    let again = ka.reembed_step(&sa, 10).await.expect("한 걸음");
+    assert_eq!(
+        again,
+        ReembedProgress::Done {
+            embedded: 0,
+            plan: ReindexPlan::Keep
+        }
+    );
+    assert_eq!(a.calls(), calls);
+
+    let b = ModelEmbedder::new("model-b");
+    let kb = knowledge_with(&f.store, &b);
+    let sb = settings("model-b", Some(3));
+    assert_eq!(
+        plan_when_done(&kb, &sb, 2).await,
+        ReindexPlan::Rebuild(ReindexReason::ModelChanged)
+    );
+    assert_eq!(kb.stored_settings().expect("설정"), Some(sb));
 }
