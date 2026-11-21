@@ -66,7 +66,7 @@ pub(crate) fn parse_base(base: &str, origin: SourceName) -> Result<Url, DataErro
     }
 }
 
-fn is_allowed_scheme(url: &Url) -> bool {
+pub(crate) fn is_allowed_scheme(url: &Url) -> bool {
     match url.scheme() {
         "https" => url.host_str().is_some(),
         "http" => url.host_str().is_some_and(is_loopback_host),

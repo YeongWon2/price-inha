@@ -209,6 +209,9 @@ impl NewsError {
     /// 같은 요청을 나중에 다시 해 볼 만한가([`DataError::is_retryable`]과 같은 갈래):
     /// 시간 초과 · 한도 · 닿지 않음만 `true`.
     pub fn is_retryable(&self) -> bool {
-        todo!()
+        matches!(
+            self,
+            Self::Timeout { .. } | Self::RateLimited { .. } | Self::Unreachable { .. }
+        )
     }
 }
