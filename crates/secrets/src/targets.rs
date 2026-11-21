@@ -114,10 +114,30 @@ impl Slot {
     }
 }
 
+/// 가리기 대상 칸 하나를 가리키는 열쇠.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Key {
+    /// 줄 이름이 고정된 묶음의 칸.
+    Field(Entry, &'static str),
+    /// 공급자 키 줄(`PRICE_INHA_KEY__…`). 줄 이름으로 센다: 열 때 선언을 모르고 읽은 줄과
+    /// 뒤에 선언으로 등록한 같은 줄이 한 칸이 되어, 다시 등록해도 개수에 끝이 있다.
+    Line(String),
+}
+
+impl Key {
+    /// 묶음 `entry`의 칸 `field`의 열쇠. 공급자 칸은 줄 이름으로 센다.
+    fn of(entry: Entry, field: &'static str) -> Option<Self> {
+        match entry {
+            Entry::Provider(keys) => keys.env_name(field).map(Key::Line),
+            other => Some(Key::Field(other, field)),
+        }
+    }
+}
+
 /// 보관소 하나의 가리기 대상 전부.
 #[derive(Default)]
 pub(crate) struct Targets {
-    slots: HashMap<(Entry, &'static str), Slot>,
+    slots: HashMap<Key, Slot>,
 }
 
 impl Targets {
@@ -130,10 +150,19 @@ impl Targets {
     ) {
         let kind = entry.into();
         for &field in kind.fields() {
-            if let Some(value) = values.get(field) {
-                apply(self.slots.entry((kind, field)).or_default(), value.expose());
+            if let (Some(value), Some(key)) = (values.get(field), Key::of(kind, field)) {
+                apply(self.slots.entry(key).or_default(), value.expose());
             }
         }
+    }
+
+    /// 키 파일의 공급자 키 줄 하나(선언을 몰라도 된다)의 값을 그 줄의 지금 값으로 삼는다.
+    /// [`MIN_SECRET_CHARS`](crate::MIN_SECRET_CHARS) 미만 값은 가릴 수 없어 대상이 아니다.
+    pub(crate) fn set_current_line(&mut self, name: String, value: &str) {
+        self.slots
+            .entry(Key::Line(name))
+            .or_default()
+            .set_current(value);
     }
 
     /// 키 파일에 있는 값(열 때 읽었거나, 읽어서 내준 값)을 그 칸의 지금 값으로 삼는다.

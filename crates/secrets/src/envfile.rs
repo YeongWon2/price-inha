@@ -110,7 +110,7 @@ pub(crate) fn read_kind(
     let kind = entry.into();
     let mut found = Credentials::new();
     let mut complete = true;
-    for (&field, &env_name) in kind.fields().iter().zip(kind.env_names()) {
+    for (&field, env_name) in kind.fields().iter().zip(kind.env_names()) {
         let last = text
             .lines()
             .filter_map(split_line)
@@ -141,13 +141,13 @@ pub(crate) fn replace_kind(
     let names = kind.env_names();
     let mut out = Zeroizing::new(String::with_capacity(text.len() + 256));
     for line in text.lines() {
-        let ours = split_line(line).is_some_and(|(name, _)| names.contains(&name));
+        let ours = split_line(line).is_some_and(|(name, _)| names.iter().any(|ours| ours == name));
         if !ours {
             out.push_str(line);
             out.push('\n');
         }
     }
-    for (&field, &env_name) in kind.fields().iter().zip(names) {
+    for (&field, env_name) in kind.fields().iter().zip(&names) {
         if let Some(value) = values.get(field) {
             out.push_str(env_name);
             out.push('=');
@@ -158,10 +158,46 @@ pub(crate) fn replace_kind(
     out
 }
 
+/// `.env` 글에서 이름이 `prefix`로 시작하는 줄의 값을 모두 읽는다(선언을 몰라도 된다).
+///
+/// 같은 이름이 여러 번 나오면 마지막 줄이 남는다. 마지막 줄이 깨졌거나 값이 비었으면 그 이름은 뺀다
+/// (읽기는 그 공급자만 [`SecretsError::Corrupt`]로 알리고, 여기서는 다른 줄을 막지 않는다).
+pub(crate) fn read_prefixed(text: &str, prefix: &str) -> Vec<(String, Zeroizing<String>)> {
+    let mut last: Vec<(&str, &str)> = Vec::new();
+    for (name, src) in text.lines().filter_map(split_line) {
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        match last.iter_mut().find(|(seen, _)| *seen == name) {
+            Some(slot) => slot.1 = src,
+            None => last.push((name, src)),
+        }
+    }
+    last.into_iter()
+        .filter_map(|(name, src)| {
+            let value = parse_value(src)?;
+            (!value.is_empty()).then(|| (name.to_owned(), value))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::KeyKind;
+
+    #[test]
+    fn 머리로_시작하는_줄은_마지막_값만_읽고_깨진_줄은_뺀다() {
+        let text = "PRICE_INHA_KEY__A__K=첫-값-0001\n# 설명\nOTHER=keep\n\
+                    PRICE_INHA_KEY__A__K=둘째-값-0002\nPRICE_INHA_KEY__B__K=\"닫히지 않음\n\
+                    PRICE_INHA_KEY__C__K=\n";
+        let found = read_prefixed(text, "PRICE_INHA_KEY__");
+        let names: Vec<(&str, &str)> = found
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(names, vec![("PRICE_INHA_KEY__A__K", "둘째-값-0002")]);
+    }
 
     fn round_trip(value: &str) -> String {
         parse_value(&encode_value(value)).unwrap().to_string()

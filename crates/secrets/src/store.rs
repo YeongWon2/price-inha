@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock};
 
 use crate::kind::Entry;
+use crate::provider::KEY_LINE_PREFIX;
 use crate::targets::{Outcome, Targets};
 use crate::verify::check_fields;
 use crate::{
-    Credentials, HOME_ENV, KeyKind, MIN_SECRET_CHARS, SecretsError, Verifier, envfile, fsio,
+    Credentials, ENV_FILE, HOME_ENV, KeyKind, MIN_SECRET_CHARS, SecretsError, Verifier, envfile,
+    fsio,
 };
 
 /// 등록 성공 표시. 값은 없다 (C3: "키 값은 돌려주지 않는다").
@@ -127,6 +129,14 @@ impl SecretStore {
                 Ok(Some(values)) => targets.set_current(entry, &values),
                 Ok(None) | Err(SecretsError::Corrupt { .. }) => {}
                 Err(other) => return Err(other),
+            }
+        }
+        // 8차: 공급자 키 줄은 어떤 공급자가 선언했는지 몰라도 모두 가린다(모르면 가린다).
+        if let Some(text) = fsio::read_private(&dir.join(ENV_FILE), ENV_FILE)? {
+            for (name, value) in envfile::read_prefixed(&text, KEY_LINE_PREFIX) {
+                if value.chars().count() >= MIN_SECRET_CHARS {
+                    targets.set_current_line(name, &value);
+                }
             }
         }
         Ok(Self {

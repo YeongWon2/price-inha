@@ -1,6 +1,8 @@
 //! 키 종류와 종류별 칸 · 파일 · 저장 이름.
 
-use crate::{ENV_FILE, KeySlot};
+use std::borrow::Cow;
+
+use crate::{ENV_FILE, KeySlot, ProviderKeys};
 
 /// 키 종류 (C3: 증권사 · AI · 자료).
 ///
@@ -60,6 +62,9 @@ pub(crate) enum Entry {
     Slot(KeySlot),
     /// 웹 푸시 VAPID 비밀키. 칸: `private_key`.
     Vapid,
+    /// 8차 공급자 키. 칸과 줄 이름은 선언([`ProviderKeys`])이 정한다.
+    /// 이름 규칙([`ProviderKeys::check`])을 지난 선언만 여기에 온다.
+    Provider(ProviderKeys),
 }
 
 impl Entry {
@@ -76,16 +81,34 @@ impl Entry {
     }
 
     /// 칸 이름. 등록할 때 이 칸이 모두 있어야 하고 다른 칸은 없어야 한다.
-    pub(crate) const fn fields(self) -> &'static [&'static str] {
+    pub(crate) fn fields(self) -> &'static [&'static str] {
         match self {
             Entry::Kind(kind) => kind.fields(),
             Entry::Slot(slot) => slot.fields(),
             Entry::Vapid => &[Entry::VAPID_FIELD],
+            Entry::Provider(keys) => keys.fields(),
         }
     }
 
     /// `.env`에서 쓰는 줄 이름. [`Entry::fields`]와 같은 순서다.
-    pub(crate) const fn env_names(self) -> &'static [&'static str] {
+    pub(crate) fn env_names(self) -> Vec<Cow<'static, str>> {
+        if let Entry::Provider(keys) = self {
+            // 이름 규칙을 지난 선언만 오므로 칸마다 줄 이름이 있다.
+            return keys
+                .fields()
+                .iter()
+                .filter_map(|field| keys.env_name(field))
+                .map(Cow::Owned)
+                .collect();
+        }
+        self.static_env_names()
+            .iter()
+            .map(|&name| Cow::Borrowed(name))
+            .collect()
+    }
+
+    /// 줄 이름이 고정된 묶음(공급자 밖)의 줄 이름.
+    const fn static_env_names(self) -> &'static [&'static str] {
         match self {
             Entry::Kind(kind) => kind.env_names(),
             Entry::Slot(KeySlot::Dart) => &["PRICE_INHA_DART_API_KEY"],
@@ -93,6 +116,7 @@ impl Entry {
             Entry::Slot(KeySlot::Fred) => &["PRICE_INHA_FRED_API_KEY"],
             Entry::Slot(KeySlot::BackupGithubToken) => &["PRICE_INHA_BACKUP_GITHUB_TOKEN"],
             Entry::Vapid => &["PRICE_INHA_VAPID_PRIVATE_KEY"],
+            Entry::Provider(_) => &[],
         }
     }
 
@@ -100,7 +124,7 @@ impl Entry {
     pub(crate) const fn file_name(self) -> &'static str {
         match self {
             Entry::Kind(kind) => kind.file_name(),
-            Entry::Slot(_) | Entry::Vapid => ENV_FILE,
+            Entry::Slot(_) | Entry::Vapid | Entry::Provider(_) => ENV_FILE,
         }
     }
 }
