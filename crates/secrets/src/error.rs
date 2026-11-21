@@ -53,6 +53,10 @@ pub enum SecretsError {
         /// 파일 이름([`ENV_FILE`](crate::ENV_FILE)).
         file: &'static str,
     },
+    /// 공급자 키 선언([`ProviderKeys`](crate::ProviderKeys))이 이름 규칙을 어겼다.
+    /// 공급자 이름 · 칸 이름은 싣지 않는다.
+    #[error("공급자 키 선언이 이름 규칙에 맞지 않습니다")]
+    InvalidProviderKeys,
     /// 파일 · 폴더 작업 실패. 종류만 싣는다.
     #[error("파일 작업에 실패했습니다({op}): {kind}")]
     Io {

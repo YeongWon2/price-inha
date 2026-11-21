@@ -3,7 +3,9 @@
 use std::future::Future;
 
 use crate::kind::Entry;
-use crate::{Credentials, KeyKind, KeySlot, MIN_SECRET_CHARS, SecretsError, VerifyFailure};
+use crate::{
+    Credentials, KeyKind, KeySlot, MIN_SECRET_CHARS, ProviderKeys, SecretsError, VerifyFailure,
+};
 
 /// 그 키로 실제로 닿는지 확인한다 (C3 · E4).
 ///
@@ -27,6 +29,19 @@ pub trait Verifier: Send + Sync {
     fn verify_slot(
         &self,
         _slot: KeySlot,
+        _values: &Credentials,
+    ) -> impl Future<Output = Result<(), VerifyFailure>> + Send {
+        async { Err(VerifyFailure::Unreachable) }
+    }
+
+    /// 8차 공급자 키([`ProviderKeys`])를 확인한다. `Ok(())`면 저장한다. `Err`면 저장하지 않는다.
+    ///
+    /// `values`는 이름 규칙과 칸 검사를 지난 것만 온다. 기본 구현은 언제나
+    /// [`VerifyFailure::Unreachable`]이다(이 공급자를 확인할 줄 모르는 확인기로는 저장되지 않는다).
+    /// 그래서 이 메서드를 더해도 이미 있는 확인기 구현은 그대로 컴파일된다.
+    fn verify_provider(
+        &self,
+        _keys: ProviderKeys,
         _values: &Credentials,
     ) -> impl Future<Output = Result<(), VerifyFailure>> + Send {
         async { Err(VerifyFailure::Unreachable) }
