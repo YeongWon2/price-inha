@@ -8,8 +8,8 @@ use pi_paper::{
     AccountKind, ApprovedOrder, Broker, Order, OrderGroup, OrderType, Side, UnfilledTimeout,
 };
 use pi_rules::{
-    ApiBudget, BlockKind, Blocked, Book, CheckContext, Health, Outcome, Passed, PendingApproval,
-    Purpose, Reason, TeamStatus, TradeStage, Violation,
+    ApiBudget, BlockKind, Blocked, Book, CheckContext, Outcome, Passed, PendingApproval, Purpose,
+    Reason, TeamStatus, TradeStage, Violation,
 };
 use pi_store::{BlockReason, Trade, TradeId, TradeState};
 use pi_template::{RiskParams, UnfilledCancel};
@@ -56,11 +56,8 @@ impl Inputs {
             status: request.status,
             team: self.team,
             book: &self.book,
-            health: Health {
-                account_in_sync: trading.executor.ready(),
-                api_error: false,
-                data_anomaly: false,
-            },
+            // 시세 공급자 오류 · 자료 받기의 연속 실패는 실제 신호다(10차 10a 2번).
+            health: trading.health(self.now),
             open_orders: &self.open,
             trades_today: self.trades_today,
             // 모의계좌에는 바깥 API 요청 한도가 없다.
@@ -108,7 +105,7 @@ fn approved_of(order: &Order) -> ApprovedOrder {
     }
 }
 
-fn timeout_of(cancel: UnfilledCancel) -> UnfilledTimeout {
+pub(super) fn timeout_of(cancel: UnfilledCancel) -> UnfilledTimeout {
     match cancel {
         UnfilledCancel::After(after) => UnfilledTimeout::After(after),
         UnfilledCancel::AtClose => UnfilledTimeout::SessionClose,
@@ -245,10 +242,16 @@ impl Trading {
         let timeout = timeout_of(params.unfilled_cancel);
         let sent = if purpose.is_buy() {
             self.keep_quantity(trade, quantity)?;
+            // 실전중 템플릿의 주문은 실전 계좌의 것이다. 실전 주문은 만들지 않으므로 실행기가 막는다(E25).
+            let template_account = if self.live_in_use()? {
+                AccountKind::Live
+            } else {
+                AccountKind::Paper
+            };
             let submission = Submission {
                 trade_id: trade,
                 permit,
-                template_account: AccountKind::Paper,
+                template_account,
                 approval,
                 timeout,
             };
@@ -273,7 +276,11 @@ impl Trading {
     }
 
     /// 사는 수량을 매매에 남긴다. 승인이 붙어 바꿀 수 없으면 그대로 둔다(승인의 수량을 실행기가 대조한다).
-    fn keep_quantity(&self, trade: TradeId, quantity: Decimal) -> Result<(), TradingError> {
+    pub(super) fn keep_quantity(
+        &self,
+        trade: TradeId,
+        quantity: Decimal,
+    ) -> Result<(), TradingError> {
         let Some(quantity) = quantity.trunc().to_u64() else {
             return Ok(());
         };

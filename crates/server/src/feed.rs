@@ -111,16 +111,20 @@ impl Feed {
         }
     }
 
-    /// 받은 시세를 주문 길에 넘긴다(체결 · 손실 판단까지 마친 뒤 돌아온다).
+    /// 받은 시세를 주문 길에 넘긴다(체결 · 손실 판단까지 마친 뒤 돌아온다). 그 뒤에 이상을 보게 한다
+    /// (10차 10a 2번: 시세를 받은 뒤에 본다. 하나도 못 받았으면 공급자 오류 신호다).
     async fn pass_on(&self, quotes: Vec<pi_market::Quote>) {
         let Some(trading) = &self.trading else {
             return;
         };
+        let ok = !quotes.is_empty();
         for quote in quotes {
             if let Err(error) = trading.on_quote(quote).await {
                 tracing::warn!(%error, "받은 시세를 주문 길에 넘기지 못했습니다");
             }
         }
+        let asked = self.symbols.iter().filter(|s| !self.rejected.contains(s));
+        trading.after_feed(ok, &asked.cloned().collect::<Vec<_>>());
     }
 
     /// 시세 상태를 알린다. 마지막으로 알린 것과 같으면 다시 알리지 않는다.

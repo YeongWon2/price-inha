@@ -181,6 +181,11 @@ impl Desk {
         self.watching.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// (10차 10a 5번) 등록된 비밀 값을 가린 글. 저장소에 남길 까닭 글에 쓴다(E38).
+    pub(crate) fn redact(&self, text: &str) -> String {
+        self.secrets.redact(text)
+    }
+
     /// 지금 지켜보는 종목.
     pub(crate) fn symbols(&self) -> Vec<Symbol> {
         self.watching().symbols.clone()

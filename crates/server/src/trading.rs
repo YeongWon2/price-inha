@@ -16,12 +16,15 @@
 mod answer;
 mod base;
 mod day;
+mod due;
 mod http;
 mod link;
 mod marks;
 mod order;
+mod promote;
 mod stop;
 mod templates;
+mod watch;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -41,6 +44,7 @@ use crate::desk::Desk;
 use answer::Waiting;
 use base::{Calendars, DayLog};
 use marks::Marks;
+use watch::Watch;
 
 pub(crate) use answer::reject_word;
 pub(crate) use base::{TradingParts, default_wiring};
@@ -224,6 +228,10 @@ pub struct Trading {
     stops: Mutex<HashMap<TradeId, OrderId>>,
     /// 팀 상태를 읽고 바꾸는 일을 한 줄로 세운다.
     team_turn: Mutex<()>,
+    /// (10차 10a) 종목별 최근 시세 · 기준가 · 이상 감지의 기억.
+    watch: Mutex<Watch>,
+    /// (10차 10a) 답 없는 승인 요청의 처리를 한 줄로 세운다.
+    due_turn: tokio::sync::Mutex<()>,
     /// 저장되는 이벤트를 내보내는 손잡이(접속 관문이 뜬 뒤에 붙는다).
     publisher: OnceLock<Publisher>,
     /// (W5 3차) 승인 요청 · 하루 마감을 알리는 자리(3차 조립이 붙인다).
@@ -264,6 +272,11 @@ impl Trading {
     /// 저장소에 한다(하루 한도 멈춤: `TeamCause::DailyLossLimit`, 전체 정지: `TeamCause::MaxLoss`).
     pub async fn on_quote(&self, quote: Quote) -> Result<(), TradingError> {
         self.take_quote(quote).await
+    }
+
+    /// (10차 10a) 이 주문 길의 시계의 지금 시각.
+    pub(crate) fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.clock.now()
     }
 
     /// (W5 2차) 이 주문 길의 시장.

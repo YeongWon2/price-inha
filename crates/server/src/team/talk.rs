@@ -86,6 +86,7 @@ impl Crew {
             (today, now),
         )
         .await?;
+        self.trading.note_data(!gathered.all_failed);
         let price = self
             .trading
             .last_quote(symbol)

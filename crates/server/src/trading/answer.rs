@@ -31,7 +31,7 @@ pub(crate) struct Answered {
     pub(crate) reason: Option<&'static str>,
 }
 
-fn rejected(reason: &'static str) -> Answered {
+pub(super) fn rejected(reason: &'static str) -> Answered {
     Answered {
         approved: false,
         reason: Some(reason),
@@ -70,6 +70,10 @@ impl Trading {
     ) -> Result<Answered, TradingError> {
         let number = ApprovalNumber::new(number);
         let decision = Decision::from_wire(answer);
+        // 실전 승격을 묻는 번호면 주문이 아니라 템플릿을 올린다(10차 10a 7번).
+        if let Some(template) = self.promotion_of(&number)? {
+            return self.answer_promotion(&number, template, shown, decision);
+        }
         let answered = self
             .approvals
             .answer(&number, shown, decision)
@@ -147,7 +151,7 @@ impl Trading {
     }
 
     /// 승인대기인 매매를 막힘(승인 거절)으로 옮긴다. 이미 승인대기가 아니면 그대로 둔다.
-    fn block_rejected(&self, trade: TradeId, detail: &str) -> Result<(), TradingError> {
+    pub(super) fn block_rejected(&self, trade: TradeId, detail: &str) -> Result<(), TradingError> {
         let reason = BlockReason {
             kind: pi_store::BlockKind::ApprovalRejected,
             detail: format!("승인 거절: {detail}"),

@@ -98,7 +98,7 @@ fn turn_of(request: &CompletionRequest, last: &str) -> DemoTurn {
         DemoTurn::Score(role)
     } else if last.contains("판단을 JSON 객체 하나로") {
         DemoTurn::Verdict
-    } else if last.contains("[주문 안]") {
+    } else if last.contains("[주문 안]") || last.contains("[팔기 주문 안]") {
         DemoTurn::Draft
     } else {
         DemoTurn::Talk(role)

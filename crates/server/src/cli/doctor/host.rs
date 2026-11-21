@@ -30,29 +30,31 @@ pub(super) fn check_address(settings: &Settings) -> Check {
     }
 }
 
-/// 진단 5: 루프백이 아닌 주소에 여는데 접속 키가 없으면 문제(D2).
-pub(super) fn check_access_key(settings: &Settings, has_key: bool) -> Check {
+/// 진단 5: 루프백이 아닌 주소에 여는데 접속 키가 없으면 문제(D2). `has_key`가 `None`이면 저장소를 읽지
+/// 못한 것이라(다른 프로그램이 쓰는 중) "없다"고 하지 않고 확인하지 못했다고만 알린다(거짓 ✗ 금지).
+pub(super) fn check_access_key(settings: &Settings, has_key: Option<bool>) -> Check {
     let item = CheckItem::AccessKey;
-    if settings.bind.is_loopback() {
+    let bind = settings.bind;
+    if bind.is_loopback() {
         return good(
             item,
-            format!("{} 에만 엽니다(이 컴퓨터에서만 들어옵니다)", settings.bind),
+            format!("{bind} 에만 엽니다(이 컴퓨터에서만 들어옵니다)"),
         );
     }
-    if has_key {
-        good(
-            item,
-            format!("{} 에 열고 접속 키가 있습니다", settings.bind),
-        )
-    } else {
-        bad(
+    match has_key {
+        Some(true) => good(item, format!("{bind} 에 열고 접속 키가 있습니다")),
+        None => good(
             item,
             format!(
-                "루프백이 아닌 주소({})에 여는데 접속 키가 없습니다",
-                settings.bind
+                "{bind} 에 엽니다. 저장소를 읽지 못해 접속 키가 있는지 확인하지 못했습니다\
+(서버를 멈춘 뒤 다시 실행하면 확인합니다)"
             ),
+        ),
+        Some(false) => bad(
+            item,
+            format!("루프백이 아닌 주소({bind})에 여는데 접속 키가 없습니다"),
             "price-inha access-key 로 접속 키를 만듭니다",
-        )
+        ),
     }
 }
 

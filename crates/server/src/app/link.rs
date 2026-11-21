@@ -79,8 +79,9 @@ fn approval_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading
         tokio::spawn(async move {
             let link = format!("/phone/#/approvals/{}", number.as_str());
             let title = "승인이 필요해요";
+            // 구독이 하나도 없으면 "갔다"가 아니다(P20: 승인 경로가 막혔으면 답이 없어도 사지 않는다).
             let sent = linked
-                .notice(NoticeKind::ApprovalRequest, title, &summary, Some(link))
+                .notice_reached(NoticeKind::ApprovalRequest, title, &summary, Some(link))
                 .await;
             if let Some(trading) = trading.upgrade() {
                 trading.record_approval_notice(&number, sent);

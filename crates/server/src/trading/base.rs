@@ -15,12 +15,13 @@ use pi_paper::{
     RoundingMode, UnverifiedRules,
 };
 use pi_rules::{Book, Position, RulesConfig};
-use pi_store::{Store, StoreError, TeamCause, TeamChange, TeamState, TemplateState, UnixMillis};
+use pi_store::{Store, StoreError, TeamCause, TeamChange, TeamState, UnixMillis};
 use pi_template::RiskParams;
 use rust_decimal::Decimal;
 use serde_json::Value;
 
 use super::marks::{KIND_LOSS_BASIS, Marks};
+use super::watch::{KIND_REFERENCE_PRICES, Watch};
 use super::{
     CalendarFn, DayPlan, KIND_DAY_CLOSE, KIND_DAY_PLAN, KIND_DAY_START, Trading, TradingWiring,
 };
@@ -97,9 +98,44 @@ pub(super) struct DayLog {
     pub(super) plan: Option<(NaiveDate, DayPlan)>,
     /// (1차 보강) 마지막으로 남긴 손실 기준([`KIND_LOSS_BASIS`]).
     pub(super) basis: Option<Value>,
+    /// (10차 10a) 마지막으로 남긴 정규장 마지막 시세들([`KIND_REFERENCE_PRICES`]).
+    pub(super) references: Option<Value>,
+}
+
+/// 잠금 안에서 잡은 하루 일과 되돌릴 때 쓸 앞의 값.
+#[derive(Clone, Copy)]
+pub(super) enum Claim {
+    /// 하루 시작(앞에 남긴 날짜).
+    Start(Option<NaiveDate>),
+    /// 하루 마감(앞에 남긴 날짜).
+    Close(Option<NaiveDate>),
 }
 
 impl DayLog {
+    /// 그 날에 지금 할 일(시작 · 마감)을 한 번만 잡는다. 잡으면 바로 "남겼다"로 적어, 겹쳐 부른 다른 쪽이
+    /// 같은 날의 같은 일을 또 하지 않게 한다(V5: 그 날에 한 번만).
+    pub(super) fn claim(&mut self, date: NaiveDate, open: bool, over: bool) -> Option<Claim> {
+        let started = self.started == Some(date);
+        if !started && open {
+            let before = self.started.replace(date);
+            Some(Claim::Start(before))
+        } else if started && self.closed != Some(date) && over {
+            let before = self.closed.replace(date);
+            Some(Claim::Close(before))
+        } else {
+            None
+        }
+    }
+
+    /// 잡은 일을 남기지 못했을 때 되돌린다(그 사이 다른 날짜가 적혔으면 그대로 둔다).
+    pub(super) fn release(&mut self, date: NaiveDate, claim: Claim) {
+        match claim {
+            Claim::Start(before) if self.started == Some(date) => self.started = before,
+            Claim::Close(before) if self.closed == Some(date) => self.closed = before,
+            Claim::Start(_) | Claim::Close(_) => {}
+        }
+    }
+
     /// 저장된 이벤트에서 읽는다(다시 켜도 하루에 한 번씩만 남기게).
     fn read(store: &Store) -> Result<DayLog, StoreError> {
         let mut log = DayLog::default();
@@ -119,6 +155,10 @@ impl DayLog {
     fn absorb(&mut self, kind: &str, payload: &Value) {
         if kind == KIND_LOSS_BASIS {
             self.basis = Some(payload.clone());
+            return;
+        }
+        if kind == KIND_REFERENCE_PRICES {
+            self.references = Some(payload.clone());
             return;
         }
         let Some(date) = payload["date"]
@@ -197,6 +237,7 @@ impl Trading {
             &wiring.paper.initial_cash,
             &CURRENCIES,
         );
+        let watch = Watch::restore(days.references.as_ref());
         let trading = Arc::new(Trading {
             store,
             clock,
@@ -215,6 +256,8 @@ impl Trading {
             waiting: Mutex::new(HashMap::new()),
             stops: Mutex::new(HashMap::new()),
             team_turn: Mutex::new(()),
+            watch: Mutex::new(watch),
+            due_turn: tokio::sync::Mutex::new(()),
             publisher: OnceLock::new(),
             hooks: OnceLock::new(),
         });
@@ -401,17 +444,65 @@ impl Trading {
         }
     }
 
-    /// 지금 쓰는 템플릿 값: 가장 나중에 고른 모의중 템플릿. 없거나 읽을 수 없으면 없음.
+    /// 지금 쓰는 템플릿 값: 가장 나중에 고른 템플릿(모의중 · 승격대기 · 실전중 — 승격을 기다리는 동안에도
+    /// 손절 · 청산은 그 값으로 나간다). 없거나 읽을 수 없으면 없음.
     pub(crate) fn params(&self) -> Result<Option<RiskParams>, TradingError> {
-        let chosen = self
-            .store
-            .templates_in_state(TemplateState::Simulating)?
-            .into_iter()
-            .max_by_key(|template| template.id);
+        let chosen = self.template_in_use()?;
         Ok(chosen.and_then(|template| {
             pi_template::Template::from_json(&template.value.to_string())
                 .ok()
                 .map(|parsed| parsed.params)
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, day).unwrap_or_default()
+    }
+
+    // 결함(10차 10a 걸음 메모): 뒤에서 도는 tick과 하루 판단의 tick이 둘 다 "아직 시작을 남기지 않았다"를 본 뒤
+    // 각자 남겨 같은 날짜의 `day_start`가 두 번 남았다. 잠금 안에서 먼저 잡으면 한쪽만 한다.
+    #[test]
+    fn 하루_시작과_마감은_겹쳐_불러도_그_날에_한_번만_잡힌다() {
+        let mut log = DayLog::default();
+        assert!(matches!(
+            log.claim(date(17), true, false),
+            Some(Claim::Start(None))
+        ));
+        assert!(
+            log.claim(date(17), true, false).is_none(),
+            "두 번째는 잡지 못한다"
+        );
+        assert!(matches!(
+            log.claim(date(17), false, true),
+            Some(Claim::Close(None))
+        ));
+        assert!(log.claim(date(17), false, true).is_none());
+        // 다음 날도 한 번만.
+        let next = log.claim(date(18), true, false);
+        assert!(matches!(next, Some(Claim::Start(Some(day))) if day == date(17)));
+        assert!(log.claim(date(18), true, false).is_none());
+    }
+
+    #[test]
+    fn 남기지_못했으면_되돌려_다음_번에_다시_잡는다() {
+        let mut log = DayLog::default();
+        let Some(claim) = log.claim(date(17), true, false) else {
+            return;
+        };
+        log.release(date(17), claim);
+        assert_eq!(log.started, None);
+        assert!(
+            log.claim(date(17), true, false).is_some(),
+            "다시 잡을 수 있다"
+        );
+        // 장이 열리지 않았으면 잡지 않고, 시작을 남기지 않은 날은 마감도 잡지 않는다.
+        let mut idle = DayLog::default();
+        assert!(idle.claim(date(17), false, false).is_none());
+        assert!(idle.claim(date(17), false, true).is_none());
     }
 }

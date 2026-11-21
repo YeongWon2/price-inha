@@ -5,14 +5,17 @@
 //! 열린 WebSocket 닫기가 그 서버 안에서 일어난다, V41). 연결 자체가 안 되면 도는 서버가 없는 것이니 같은
 //! 저장소에 같은 규칙(소금 친 SHA-256만 저장, 새 세대, 접속 기록)으로 직접 만든다 — 이 길에서는 끊을 연결이
 //! 없다. 그 포트에서 다른 프로그램이 답하면 키를 만들지 않는다([`CliError::NotOurServer`]).
+//! (10차 10a 0번) 서비스 정의가 이 홈을 가리키면 그 정의의 주소에서도 도는 서버를 찾는다([`access_key_with`]).
 //! 원본 동작: Hermes 2.3 · OpenClaw 3.3(화면 없는 컴퓨터의 처음 설정은 터미널에서 일회용 자격을 한 번 보여 준다).
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use pi_gate::{Gate, GateConfig};
 use pi_secrets::SecretStore;
 use pi_store::Store;
 
+use super::peek::stored_generation;
 use super::service::Service;
 use crate::error::CliError;
 use crate::{ACCESS_KEY_PATH, AppError, DB_FILE, Settings};
@@ -72,39 +75,7 @@ pub async fn access_key(
     settings: &Settings,
     request: &AccessKeyRequest,
 ) -> Result<ShownAccessKey, CliError> {
-    let port = settings.port;
-    let (key, generation, via_server) = match Running::find(port).await {
-        Found::None => {
-            let (key, generation) = issue_directly(settings, request.rotate).await?;
-            (key, generation, false)
-        }
-        Found::Other => return Err(CliError::NotOurServer { port }),
-        Found::Ours(running) => {
-            // 그 서버가 이 보관 폴더로 도는 것이 아니면(저장소가 없다) 다른 서버다. 저장소를 새로 만들지 않는다.
-            let file = settings.home.join(DB_FILE);
-            if !file.is_file() {
-                return Err(CliError::NotOurServer { port });
-            }
-            let has_key = {
-                let store = Store::open(file).map_err(AppError::from)?;
-                store.access_key().map_err(AppError::from)?.is_some()
-            };
-            if has_key && !request.rotate {
-                return Err(CliError::AccessKeyExists);
-            }
-            let (key, generation) = running
-                .issue()
-                .await
-                .ok_or(CliError::NotOurServer { port })?;
-            (key, generation, true)
-        }
-    };
-    let text = shown_text(&key, generation, request.remote_name.as_deref(), via_server);
-    Ok(ShownAccessKey {
-        key,
-        generation,
-        text,
-    })
+    issue_at(settings, request, vec![Place::loopback(settings.port)]).await
 }
 
 /// (10차 10a 0번) 서비스 정의도 보고 접속 키를 만든다. 실행 파일의 `access-key`는 이 길을 쓴다.
@@ -127,8 +98,112 @@ pub async fn access_key_with(
     request: &AccessKeyRequest,
     service: &Service<'_>,
 ) -> Result<ShownAccessKey, CliError> {
-    let _ = (settings, request, service);
-    todo!("10차 10a 0번: 서비스 정의의 주소로 도는 서버 찾기")
+    let mut places = vec![Place::loopback(settings.port)];
+    if let Some(listen) = service.installed_listen(&settings.home) {
+        let port = listen.port.unwrap_or(pi_gate::DEFAULT_PORT);
+        places.push(Place::loopback(port));
+        if let Some(bind) = listen.bind {
+            places.push(Place::at(bind, port));
+        }
+    }
+    places.push(Place::at(settings.bind, settings.port));
+    issue_at(settings, request, places).await
+}
+
+/// 도는 서버를 찾아볼 주소 하나.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Place {
+    host: IpAddr,
+    port: u16,
+}
+
+impl Place {
+    fn loopback(port: u16) -> Place {
+        Place {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+        }
+    }
+
+    /// 여는 주소 → 물어볼 주소. 루프백이거나 모든 주소(`0.0.0.0` · `::`)면 루프백으로 묻는다.
+    fn at(bind: IpAddr, port: u16) -> Place {
+        if bind.is_loopback() || bind.is_unspecified() {
+            Place::loopback(port)
+        } else {
+            Place { host: bind, port }
+        }
+    }
+}
+
+/// 어느 길로 만들었나(안내 글이 다르다).
+enum How {
+    /// 도는 서버가 만들었다(앞 세대 연결이 끊긴다).
+    Server,
+    /// 도는 서버가 만들었는데 이 홈 저장소의 세대가 다르다(다른 홈의 서버일 수 있다).
+    ServerElsewhere,
+    /// 도는 서버를 찾지 못해 직접 만들었다.
+    Direct,
+}
+
+/// `places`를 차례로 물어 도는 서버를 찾고, 있으면 그 서버가, 어디에도 없으면 직접 만든다.
+async fn issue_at(
+    settings: &Settings,
+    request: &AccessKeyRequest,
+    places: Vec<Place>,
+) -> Result<ShownAccessKey, CliError> {
+    let mut asked: Vec<Place> = Vec::new();
+    let mut running = None;
+    for place in places {
+        // 포트 0은 "빈 포트를 골라 연다"는 설정이라 물어볼 주소가 없다.
+        if place.port == 0 || asked.contains(&place) {
+            continue;
+        }
+        asked.push(place);
+        let port = place.port;
+        match Running::find(place).await {
+            Found::None => {}
+            Found::Ours(found) if place.host.is_loopback() => {
+                running = Some((found, port));
+                break;
+            }
+            // 다른 프로그램이 답하거나, 서버가 도는데 루프백 경로가 아니다: 만들지 않는다.
+            Found::Ours(_) | Found::Other => return Err(CliError::NotOurServer { port }),
+        }
+    }
+    let (key, generation, how) = match running {
+        None => {
+            let (key, generation) = issue_directly(settings, request.rotate).await?;
+            (key, generation, How::Direct)
+        }
+        Some((running, port)) => {
+            // 그 서버가 이 보관 폴더로 도는 것이 아니면(저장소가 없다) 다른 서버다. 저장소를 새로 만들지 않고
+            // 읽기만 한다(스키마를 올리지 않는다).
+            let file = settings.home.join(DB_FILE);
+            let Some(before) = stored_generation(&file) else {
+                return Err(CliError::NotOurServer { port });
+            };
+            if before.is_some() && !request.rotate {
+                return Err(CliError::AccessKeyExists);
+            }
+            let (key, generation) = running
+                .issue()
+                .await
+                .ok_or(CliError::NotOurServer { port })?;
+            let same = stored_generation(&file).flatten() == Some(generation);
+            let how = if same {
+                How::Server
+            } else {
+                How::ServerElsewhere
+            };
+            (key, generation, how)
+        }
+    };
+    let text = shown_text(&key, generation, request.remote_name.as_deref(), &how);
+    Ok(ShownAccessKey {
+        key,
+        generation,
+        text,
+    })
 }
 
 /// 도는 서버가 없을 때: 같은 저장소에 직접 만든다. (키, 세대).
@@ -171,12 +246,8 @@ struct Running {
 }
 
 impl Running {
-    /// `127.0.0.1:<port>`에 그 컴퓨터의 세션을 청해 본다. 프록시를 거치지 않고 리다이렉트를 따라가지 않는다.
-    async fn find(port: u16) -> Found {
-        // 포트 0은 "빈 포트를 골라 연다"는 설정이라 물어볼 주소가 없다.
-        if port == 0 {
-            return Found::None;
-        }
+    /// 그 주소에 그 컴퓨터의 세션을 청해 본다. 프록시를 거치지 않고 리다이렉트를 따라가지 않는다.
+    async fn find(place: Place) -> Found {
         let built = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -186,7 +257,7 @@ impl Running {
         let Ok(client) = built else {
             return Found::Other;
         };
-        let origin = format!("http://127.0.0.1:{port}");
+        let origin = format!("http://{}", SocketAddr::new(place.host, place.port));
         let asked = client
             .post(format!("{origin}{}", pi_gate::SESSION_PATH))
             .header(reqwest::header::ORIGIN, &origin)
@@ -246,12 +317,19 @@ impl Running {
 }
 
 /// 터미널에 보여 줄 글. 키는 한 번만 나온다. 앞 세대 연결이 끊긴다는 말은 실제로 끊기는 길
-/// (`via_server`: 도는 서버가 만든 길)에서만 한다.
-fn shown_text(key: &str, generation: u64, remote_name: Option<&str>, via_server: bool) -> String {
-    let how = if via_server {
-        "도는 서버가 만들었습니다. 앞 세대 키로 들어온 원격 연결은 끊깁니다."
-    } else {
-        "도는 서버가 없어 직접 만들었습니다."
+/// (도는 서버가 만든 길)에서만 한다.
+fn shown_text(key: &str, generation: u64, remote_name: Option<&str>, how: &How) -> String {
+    let how = match how {
+        How::Server => "도는 서버가 만들었습니다. 앞 세대 키로 들어온 원격 연결은 끊깁니다.",
+        How::ServerElsewhere => {
+            "도는 서버가 만들었습니다. 앞 세대 키로 들어온 원격 연결은 끊깁니다. \
+다만 이 보관 폴더의 저장소에 적힌 세대가 서버가 답한 세대와 다릅니다. 그 서버가 다른 보관 폴더로 \
+도는 것일 수 있으니 --home 과 --port 를 확인하세요."
+        }
+        How::Direct => {
+            "도는 서버를 찾지 못해 직접 만들었습니다. 다른 주소에서 돌고 있다면 서버를 다시 \
+띄우세요(그래야 앞 세대 연결이 닫힙니다)."
+        }
     };
     let mut text = format!(
         "새 접속 키(세대 {generation}):\n\n    {key}\n\n\
@@ -275,11 +353,16 @@ mod tests {
 
     #[test]
     fn 키는_글에_한_번만() {
-        let text = shown_text("ABCDEFGHJKMNPQRSTVWX", 3, Some("mini.example.test"), true);
+        let text = shown_text(
+            "ABCDEFGHJKMNPQRSTVWX",
+            3,
+            Some("mini.example.test"),
+            &How::Server,
+        );
         assert_eq!(text.matches("ABCDEFGHJKMNPQRSTVWX").count(), 1);
         assert!(text.contains("https://mini.example.test/"));
         assert!(text.contains("끊깁니다"));
-        let direct = shown_text("K", 1, None, false);
+        let direct = shown_text("K", 1, None, &How::Direct);
         assert!(!direct.contains("https://"));
         assert!(!direct.contains("끊깁니다"), "끊을 연결이 없는 길");
     }

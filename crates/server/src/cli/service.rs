@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::runner::{CommandLine, CommandRunner};
 use crate::error::ServiceError;
 
+mod listen;
 mod render;
 mod steps;
 

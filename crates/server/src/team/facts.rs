@@ -20,6 +20,8 @@ pub(super) struct Gathered {
     pub(super) items: Vec<DataItem>,
     /// 저장한 자료 번호와 알게 된 시각(판단 뒤 매매에 붙인다).
     pub(super) facts: Vec<(FactId, UnixMillis)>,
+    /// (10차 10a 2번) 물어본 자료가 하나도 답하지 않았나(모두 오류). 자료 이상 신호로 쓴다.
+    pub(super) all_failed: bool,
 }
 
 /// 저장하는 자료 종류 이름.
@@ -153,10 +155,17 @@ pub(super) async fn gather(
     let mut gathered = Gathered {
         items: Vec::new(),
         facts: Vec::new(),
+        all_failed: false,
     };
+    let (mut asked, mut failed) = (0_u32, 0_u32);
     for request in requests(wiring, symbol, today) {
         let (kind, fetched) = match request {
-            Ok(request) => (request.kind(), adapter.fetch(&request).await),
+            Ok(request) => {
+                let fetched = adapter.fetch(&request).await;
+                asked += 1;
+                failed += u32::from(fetched.is_err());
+                (request.kind(), fetched)
+            }
             Err(kind) => (kind, Ok(Fetched::Missing(kind))),
         };
         let name = kind_name(kind);
@@ -181,5 +190,6 @@ pub(super) async fn gather(
             }),
         }
     }
+    gathered.all_failed = asked > 0 && failed == asked;
     Ok(gathered)
 }

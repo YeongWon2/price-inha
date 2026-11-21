@@ -21,7 +21,7 @@ use price_inha::{
     AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, Launch, Reach,
     RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
     SettingsError, SystemRunner, TeamWiring, TradingWiring, VERSION, Wiring, access_key,
-    announce_addr, doctor, restore,
+    access_key_with, announce_addr, doctor, restore,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -240,17 +240,20 @@ fn failed(error: &CliError) -> ExitCode {
 async fn serve(args: &[String]) -> ExitCode {
     let settings = Settings::from_process_env(args);
     let secrets = init_tracing(settings.as_ref().ok(), true);
+    // 기록 파일로 띄운 것(예약 작업)은 표준 오류를 볼 수 없다: 뜨지 못한 까닭을 기록에도 남긴다(가리기를 거친다).
+    let to_file = settings.as_ref().is_ok_and(|s| s.log_file.is_some());
+    let fail = |text: &str| {
+        if to_file {
+            tracing::error!("{text}");
+        }
+        say(text);
+        ExitCode::FAILURE
+    };
     match run(settings, secrets).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Settings(error)) => settings_failed(&error),
-        Err(Failure::App(error)) => {
-            say(&format!("서버 오류: {error}"));
-            ExitCode::FAILURE
-        }
-        Err(Failure::Signal) => {
-            say("끄기 신호를 기다릴 수 없습니다");
-            ExitCode::FAILURE
-        }
+        Err(Failure::App(error)) => fail(&format!("서버 오류: {error}")),
+        Err(Failure::Signal) => fail("끄기 신호를 기다릴 수 없습니다"),
     }
 }
 
@@ -356,7 +359,13 @@ async fn access_key_command(rotate: bool, settings: &Settings) -> ExitCode {
         rotate,
         remote_name: None,
     };
-    match access_key(settings, &request).await {
+    // 서비스 정의가 이 홈을 가리키면 그 정의의 주소에서도 도는 서버를 찾는다(10차 10a 0번).
+    let runner = SystemRunner;
+    let issued = match ServiceSetup::for_this_computer(&settings.home, Vec::new()) {
+        Ok(setup) => access_key_with(settings, &request, &Service::new(setup, &runner)).await,
+        Err(_) => access_key(settings, &request).await,
+    };
+    match issued {
         Ok(shown) => {
             show(shown.text());
             ExitCode::SUCCESS

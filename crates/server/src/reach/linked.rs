@@ -173,6 +173,31 @@ impl Linked {
         body: &str,
         link: Option<String>,
     ) -> bool {
+        let sent = self.deliver(kind, title, body, link).await;
+        sent.is_some_and(|(attempts, reached)| attempts == 0 || reached)
+    }
+
+    /// (10차 10a 5번) 알림 하나를 보내, 구독이 하나라도 **받았을 때만** 참이다(구독이 없으면 거짓).
+    /// 승인 요청의 "알림이 갔다"는 사람에게 닿았다는 뜻이어야 한다(P20: 닿지 않았으면 줄여서도 사지 않는다).
+    pub(crate) async fn notice_reached(
+        &self,
+        kind: NoticeKind,
+        title: &str,
+        body: &str,
+        link: Option<String>,
+    ) -> bool {
+        let sent = self.deliver(kind, title, body, link).await;
+        sent.is_some_and(|(_, reached)| reached)
+    }
+
+    /// 알림을 보낸다: (보내 본 구독 수, 하나라도 받았는가). 보내지 못했으면 없음.
+    async fn deliver(
+        &self,
+        kind: NoticeKind,
+        title: &str,
+        body: &str,
+        link: Option<String>,
+    ) -> Option<(usize, bool)> {
         let notice = NewNotice {
             kind,
             title: title.to_string(),
@@ -182,15 +207,15 @@ impl Linked {
         };
         match self.notifier.notify(notice).await {
             Ok(delivery) => {
-                delivery.attempts.is_empty()
-                    || delivery
-                        .attempts
-                        .iter()
-                        .any(|a| matches!(a.outcome, pi_notify::AttemptOutcome::Delivered { .. }))
+                let reached = delivery
+                    .attempts
+                    .iter()
+                    .any(|a| matches!(a.outcome, pi_notify::AttemptOutcome::Delivered { .. }));
+                Some((delivery.attempts.len(), reached))
             }
             Err(error) => {
                 tracing::warn!(%error, "알림을 보내지 못했습니다");
-                false
+                None
             }
         }
     }

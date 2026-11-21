@@ -6,6 +6,7 @@
 mod access;
 mod command;
 mod doctor;
+mod peek;
 mod restore;
 mod runner;
 mod service;

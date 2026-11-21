@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use pi_approval::{ApprovalNumber, ApprovalView, Notice};
 use pi_knowledge::TradeRecord;
 use pi_paper::{Broker, Order, OrderGroup, OrderStatus, Side};
-use pi_store::{ApprovalStatus, TradeState};
+use pi_store::{ApprovalStatus, TradeId, TradeState};
 use rust_decimal::Decimal;
 
 use super::Trading;
@@ -84,6 +84,25 @@ impl Trading {
         if let Err(error) = self.approvals.record_notice(number, notice) {
             tracing::warn!(%error, "승인 요청 알림 결과를 남기지 못했습니다");
         }
+    }
+
+    /// (10차 10a 4번) 그 보유 매매에 걸려 있는(또는 다시 내기를 기다리는) 파는 주문이 있는가.
+    pub(crate) async fn open_sell(&self, trade: TradeId) -> Result<bool, TradingError> {
+        if self.executor.pending_sell_key(trade).is_some() {
+            return Ok(true);
+        }
+        let now = self.clock.now();
+        let open = Broker::orders(self.paper(), OrderGroup::Open, None, now)
+            .await
+            .map_err(exec_text)?;
+        Ok(open
+            .iter()
+            .any(|o| o.side == Side::Sell && trade_of(o) == Some(trade.0)))
+    }
+
+    /// (10차 10a 4번) 그 매매에 남긴 수량(산 수량). 없으면 없음.
+    pub(crate) fn held_quantity(&self, trade: TradeId) -> Result<Option<u64>, TradingError> {
+        Ok(self.store.trade_quantity(trade)?)
     }
 
     /// 모의계좌의 끝난 주문 전부.

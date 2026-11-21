@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use super::base::{exec_text, lock, millis};
+use super::base::{Claim, exec_text, lock, millis};
 use super::{
     DayPlan, KIND_DAY_CLOSE, KIND_DAY_PLAN, KIND_DAY_START, TEAM_ANOMALY_HALT,
     TEAM_DAILY_LIMIT_HALT, TEAM_FULL_STOP, TEAM_OPERATING, TEAM_RESTING, Trading,
@@ -78,6 +78,9 @@ impl Trading {
         if let Err(error) = self.try_tick().await {
             tracing::warn!(%error, "하루 시작 · 마감을 보지 못했습니다");
         }
+        if let Err(error) = self.settle_due().await {
+            tracing::warn!(%error, "답 없는 승인 요청을 처리하지 못했습니다");
+        }
     }
 
     async fn try_tick(&self) -> Result<(), TradingError> {
@@ -93,16 +96,20 @@ impl Trading {
             return Ok(());
         };
         let date = calendar.today.date;
-        let (started, closed) = {
-            let log = lock(&self.days);
-            (log.started == Some(date), log.closed == Some(date))
+        // 뒤에서 도는 tick과 하루 판단의 tick이 겹쳐도 그 날에 한 번만 남기게, 할 일을 잠금 안에서 먼저 잡는다(V5).
+        let claimed = lock(&self.days).claim(date, now >= open && now < close, now >= close);
+        let done = match claimed {
+            Some(Claim::Start(_)) => self.day_start(date, now).await,
+            Some(Claim::Close(_)) => self.day_close(date).await,
+            None => return Ok(()),
         };
-        if !started && now >= open && now < close {
-            self.day_start(date, now).await?;
-        } else if started && !closed && now >= close {
-            self.day_close(date).await?;
+        if done.is_err()
+            && let Some(claim) = claimed
+        {
+            // 남기지 못했으면 잡은 것을 되돌려 다음 번에 다시 본다.
+            lock(&self.days).release(date, claim);
         }
-        Ok(())
+        done
     }
 
     /// 하루 시작: 남기고, 그날 시작 평가액을 새로 잡고, 하루 한도 멈춤을 쉬는 중으로 푼다.
@@ -111,7 +118,6 @@ impl Trading {
         self.reset_day_start(&books, date)?;
         self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
             .await?;
-        lock(&self.days).started = Some(date);
         let _turn = lock(&self.team_turn);
         if self.store.team_state()? == TeamState::DailyLimitHalt {
             let cause = TeamCause::NextTradingDayStart;
@@ -124,7 +130,8 @@ impl Trading {
     async fn day_close(&self, date: NaiveDate) -> Result<(), TradingError> {
         self.record(KIND_DAY_CLOSE, json!({ "date": date_text(date) }))
             .await?;
-        lock(&self.days).closed = Some(date);
+        // 오늘 정규장의 마지막 시세가 다음 거래일의 기준가다(결정 2026-11-21 11번).
+        self.save_references(date)?;
         {
             let _turn = lock(&self.team_turn);
             if self.store.team_state()? == TeamState::Operating {
@@ -133,6 +140,7 @@ impl Trading {
             }
         }
         self.announce_close(date);
+        self.consider_promotion(date).await;
         Ok(())
     }
 
@@ -169,7 +177,7 @@ impl Trading {
     /// 쉬는 중에는 저장소가 멈춤으로 가는 전이를 받지 않아(예: 전체 정지에서 다시 시작한 직후 손실이
     /// 아직 한도 밖) 손실 판단의 요구가 미뤄져 있을 수 있다. 운용 중이 된 이 자리에서 마지막 장부로
     /// 다시 판단해, 요구가 있으면 허용된 길(운용 중 → 멈춤)로 멈추고 [`TradingError::Halted`]를 돌려준다.
-    fn start_trading(&self, current: TeamState) -> Result<TeamState, TradingError> {
+    pub(super) fn start_trading(&self, current: TeamState) -> Result<TeamState, TradingError> {
         match current {
             TeamState::Operating => Ok(current),
             TeamState::Resting => {
@@ -214,7 +222,8 @@ impl Trading {
     pub(super) async fn take_quote(&self, quote: Quote) -> Result<(), TradingError> {
         self.remember(&quote);
         let now = self.clock.now();
-        let _ = self.calendar(now);
+        let calendar = self.calendar(now);
+        self.observe(&quote, calendar.as_ref());
         self.executor.on_quote(&quote).map_err(exec_text)?;
         self.watch_stops(&quote).await;
         let books = self.books(now).await?;
@@ -229,6 +238,8 @@ impl Trading {
 
     /// 실행기가 이상 감지 멈춤을 요구했다(E13).
     pub(super) fn anomaly(&self) -> Result<TeamState, TradingError> {
+        // 비정상이 생겼다: 스스로 풀리는 정상 시간을 처음부터 다시 센다.
+        self.unhealthy();
         let _turn = lock(&self.team_turn);
         let cause = TeamCause::AnomalyDetected;
         let detail = "증권사가 주문을 받지 않거나 응답하지 않음";

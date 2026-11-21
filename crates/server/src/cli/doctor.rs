@@ -7,6 +7,7 @@ use pi_secrets::{KeyKind, KeySlot, SecretStore};
 use serde_json::{Value, json};
 
 use crate::ai_link::{AiMethod, load_ai_choice};
+use crate::cli::peek::{access_key_generation, is_busy, open_read_only};
 use crate::cli::service::Service;
 use crate::{DB_FILE, Settings};
 
@@ -255,17 +256,6 @@ fn wide_permissions(_home: &Path) -> Result<Option<(String, String)>, std::io::E
     Ok(None)
 }
 
-/// 진단이 저장소의 잠금을 기다리는 상한.
-const DATABASE_BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
-
-/// 잠금에 걸렸나(다른 프로그램이 쓰는 중).
-fn is_busy(error: &rusqlite::Error) -> bool {
-    matches!(
-        error.sqlite_error_code(),
-        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
-    )
-}
-
 /// 잠금 때문에 저장소를 확인하지 못했다. 깨진 것이 아니므로 문제로 세지 않는다.
 fn in_use() -> Check {
     good(
@@ -275,56 +265,41 @@ fn in_use() -> Check {
     )
 }
 
-/// 진단 2: 저장소가 열리고 `PRAGMA integrity_check`가 ok, 스키마 버전을 안다. 접속 키가 있는지도 함께 읽는다.
+/// 진단 2: 저장소가 열리고 `PRAGMA integrity_check`가 ok, 스키마 버전을 안다. 접속 키가 있는지도 함께 읽는다
+/// (읽지 못했으면 `None` — "없다"가 아니라 "확인하지 못함"이다).
 /// 새로 만들거나 이전하거나 권한을 바꾸지 않으려고 `pi_store::Store::open`이 아니라 있는 파일만 **읽기 전용**으로
-/// 연다(9차 보강 2). 잠금에 걸린 것은 깨진 것이 아니다: 다른 프로그램(도는 서버)이 쓰는 중이라고 알린다.
-fn check_database(home: &Path) -> (Check, bool) {
+/// 연다(9차 보강 2). 곁 파일이 없으면 `immutable=1`로 열어 아무 파일도 만들지 않는다(10차 10a 0번).
+/// 잠금에 걸린 것은 깨진 것이 아니다: 다른 프로그램(도는 서버)이 쓰는 중이라고 알린다.
+fn check_database(home: &Path) -> (Check, Option<bool>) {
     let item = CheckItem::Database;
     let path = home.join(DB_FILE);
     if !path.exists() {
         return (
             good(item, "저장소가 아직 없습니다(처음 띄울 때 만듭니다)"),
-            false,
+            Some(false),
         );
     }
     let restore_fix = "백업이 있으면 price-inha restore <백업 파일> --identity <비밀키 파일> --into <빈 폴더> \
 로 되살린 뒤 그 폴더로 띄웁니다";
-    let flags =
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let conn = match rusqlite::Connection::open_with_flags(&path, flags) {
+    let conn = match open_read_only(&path) {
         Ok(conn) => conn,
-        Err(error) if is_busy(&error) => return (in_use(), false),
-        Err(_) => {
-            return (
-                bad(item, "저장소 파일을 열 수 없습니다", restore_fix),
-                false,
-            );
-        }
+        Err(error) if is_busy(&error) => return (in_use(), None),
+        Err(_) => return (bad(item, "저장소 파일을 열 수 없습니다", restore_fix), None),
     };
-    // 도는 서버가 쓰는 중이어도 오래 기다리지 않는다.
-    let _ = conn.busy_timeout(DATABASE_BUSY_WAIT);
     let integrity: Result<String, _> =
         conn.query_row("PRAGMA integrity_check", [], |row| row.get(0));
     match integrity {
         Ok(text) if text == "ok" => {}
-        Err(error) if is_busy(&error) => return (in_use(), false),
+        Err(error) if is_busy(&error) => return (in_use(), None),
         _ => {
-            return (
-                bad(
-                    item,
-                    "저장소가 깨졌습니다(integrity_check 실패)",
-                    restore_fix,
-                ),
-                false,
-            );
+            let what = "저장소가 깨졌습니다(integrity_check 실패)";
+            return (bad(item, what, restore_fix), None);
         }
     }
     let version: Result<i64, _> = conn.query_row("PRAGMA user_version", [], |row| row.get(0));
-    let has_key = conn
-        .query_row("SELECT EXISTS(SELECT 1 FROM key_hashes)", [], |row| {
-            row.get::<_, bool>(0)
-        })
-        .unwrap_or(false);
+    let has_key = access_key_generation(&conn)
+        .ok()
+        .map(|found| found.is_some());
     let known = i64::from(pi_store::SCHEMA_VERSION);
     let check = match version {
         Ok(v) if v == known => good(item, format!("저장소 정상(스키마 {v})")),
