@@ -6,6 +6,7 @@
 mod access_http;
 mod ai_link;
 mod app;
+mod cli;
 mod demo;
 mod desk;
 mod error;
@@ -36,7 +37,16 @@ pub use app::{
     FEED_LIVE, FEED_NO_BROKER_KEY, FEED_REQUEST_REJECTED, FEED_SETUP_REQUIRED, KIND_FEED_STATUS,
     KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, Wiring, announce_addr,
 };
-pub use error::{AppError, SettingsError, SetupRefusal, TeamError, TradingError};
+pub use cli::{
+    AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem, Command, CommandLine, CommandOutput,
+    CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE, LAUNCHD_LABEL, Os, RestoreRequest,
+    RestoreSummary, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, SYSTEMD_UNIT, Service,
+    ServiceAction, ServiceDefinition, ServiceReport, ServiceSetup, ServiceStatus, ShownAccessKey,
+    SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, doctor, restore,
+};
+pub use error::{
+    AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
+};
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
 pub use log::{RedactedLine, RedactingWriter};
 pub use reach::{

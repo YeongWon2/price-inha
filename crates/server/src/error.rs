@@ -224,3 +224,80 @@ pub enum TeamError {
     #[error("지식 검색 오류: {0}")]
     Knowledge(String),
 }
+
+/// (9차) 하위 명령(`service` · `doctor` · `access-key` · `restore` 등)의 실패. 비밀 값을 담지 않는다.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum CliError {
+    /// 모르는 하위 명령이다.
+    #[error("모르는 명령입니다: {0}")]
+    UnknownCommand(String),
+    /// 그 하위 명령이 모르는 인자다(인자의 값은 싣지 않는다).
+    #[error("모르는 인자입니다")]
+    UnknownArgument,
+    /// 꼭 있어야 하는 인자가 없거나 값이 없다.
+    #[error("인자가 빠졌습니다: {name}")]
+    MissingArgument {
+        /// 빠진 인자 이름(예: `--identity`).
+        name: &'static str,
+    },
+    /// 설정을 읽지 못했다.
+    #[error("설정을 읽지 못했습니다: {0}")]
+    Settings(#[from] SettingsError),
+    /// 이미 접속 키가 있는데 `--rotate` 없이 다시 만들려 했다.
+    #[error("이미 접속 키가 있습니다. 바꾸려면 --rotate 를 줍니다")]
+    AccessKeyExists,
+    /// 되살릴 폴더가 비어 있지 않다.
+    #[error("빈 폴더가 아닙니다: {}", into.display())]
+    NotEmpty {
+        /// 되살리려던 폴더.
+        into: std::path::PathBuf,
+    },
+    /// 파일을 읽지 못했다(백업 파일 · 비밀키 파일). 내용은 싣지 않는다.
+    #[error("{what} 파일을 읽지 못했습니다: {kind}")]
+    ReadFile {
+        /// 무엇을 읽으려 했나(예: "백업", "비밀키").
+        what: &'static str,
+        /// 입출력 오류 종류.
+        kind: std::io::ErrorKind,
+    },
+    /// 비밀키 파일에 age 비밀키가 없다(내용은 싣지 않는다).
+    #[error("비밀키 파일에서 age 비밀키를 찾지 못했습니다")]
+    BadIdentity,
+    /// 서버 조립 · 저장소 · 백업 오류.
+    #[error(transparent)]
+    App(#[from] AppError),
+    /// 서비스 관리 오류.
+    #[error(transparent)]
+    Service(#[from] ServiceError),
+}
+
+/// (9차) 서비스 등록 · 관리의 실패.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ServiceError {
+    /// 다른 보관 폴더를 가리키는 서비스 정의가 이미 있다. 덮어쓰지 않는다(Hermes 2.4).
+    #[error("다른 보관 폴더를 가리키는 서비스 정의가 있습니다: {}", existing.display())]
+    OtherHome {
+        /// 기존 정의가 가리키는 보관 폴더.
+        existing: std::path::PathBuf,
+    },
+    /// 보관 폴더가 절대 경로가 아니다.
+    #[error("보관 폴더는 절대 경로여야 합니다")]
+    RelativeHome,
+    /// 이 운영체제에서는 서비스를 등록할 수 없다.
+    #[error("이 운영체제의 서비스 관리자를 모릅니다")]
+    UnsupportedOs,
+    /// 정의 파일을 읽거나 쓰거나 지우지 못했다.
+    #[error("서비스 정의 파일 오류: {kind}")]
+    Io {
+        /// 입출력 오류 종류.
+        kind: std::io::ErrorKind,
+    },
+    /// 서비스 관리자 명령을 부르지 못했거나 실패했다.
+    #[error("{program} 명령이 실패했습니다")]
+    CommandFailed {
+        /// 부른 프로그램 이름.
+        program: String,
+    },
+}
