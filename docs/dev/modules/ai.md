@@ -164,64 +164,63 @@ D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에�
 `pi-secrets`로 그 trait을 구현하는 일과 AI 키 확인기를 `pi-secrets`의 확인기 trait에 잇는 일은 조립 단계(`price-inha`)에서 한다.
 이 모듈에서는 "이 자격으로 닿는지 확인하는 함수 `verify`"까지만 만든다. 위 본문에서 "`pi-secrets`에서 읽는다"는 말은 이 trait을 거친다는 뜻이다.
 
-## 10차 작업 (2026-11-21 발표 자료 대조)
+## 10차 작업 (2026-11-21 발표 자료 대조 — 로컬 임베딩)
 
-근거: `docs/dev/decisions.md` 2026-11-21 2번(공급자 확장 구조: trait 하나 + 등록부, "구조는 다, 구현은 하나씩") · 4번(임베딩은 Voyage AI 먼저, 키가 없으면 "쓸 수 없음"), `dev.md` D10(임베딩은 AI 공급자 어댑터로 만든다) · V31 · E38 · V47. 아래를 **테스트로 먼저 쓰고** 구현한다. **공개 API는 더하기만 한다**(`AiProvider` · `AiError` · `Credential` · `CredentialSource` · `Redactor`의 모양을 바꾸지 않는다 — server · agent가 기대어 컴파일한다).
+근거: `docs/dev/decisions.md` 2026-11-21 2번(공급자 확장 구조: trait 하나 + 등록부, "구조는 다, 구현은 하나씩") · 15번(사용자 결정: 임베딩은 **로컬 Ollama**, 무료 · 기록은 밖으로 0건), `dev.md` D10 · V23 · V31 · E38 · V47. 아래를 **테스트로 먼저 쓰고** 구현한다. **공개 API는 더하기만 한다**(`AiProvider` · `AiError` · `Credential` · `CredentialSource` · `Redactor`의 모양을 바꾸지 않는다 — server · agent가 기대어 컴파일한다).
 
 ### 공개 API (더하는 것)
 
 1. **임베딩 공급자 trait `EmbeddingProvider`** (`Send + Sync`, 비동기):
-   - `fn id(&self) -> &'static str` — 공급자 ID(등록부의 열쇠, 소문자 영문. Voyage는 `"voyage"` = 공개 상수 `VOYAGE_PROVIDER_ID`).
-   - `fn key_slots(&self) -> &'static [&'static str]` — 이 공급자가 쓰는 `pi-secrets` 키 칸 이름. Voyage는 `["voyage"]`(공개 상수 `VOYAGE_KEY_SLOT`). 칸을 실제로 만들고 등록 경로에 잇는 일은 server 차수.
+   - `fn id(&self) -> &'static str` — 공급자 ID(등록부의 열쇠, 소문자 영문). Ollama는 `"ollama"` = 공개 상수 `OLLAMA_PROVIDER_ID`.
+   - `fn key_slots(&self) -> &'static [&'static str]` — 이 공급자가 쓰는 `pi-secrets` 키 칸 이름. Ollama는 키가 없어 `&[]`. (나중에 붙일 바깥 공급자 — Voyage · OpenAI 등 — 는 자기 칸을 선언한다.)
    - `fn limits(&self) -> EmbeddingLimits` — 한 요청의 입력 개수 상한, 입력 하나의 글자 수 상한.
    - `async fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, AiError>`.
 2. **값 타입**:
-   - `EmbeddingRequest { model: String, inputs: Vec<String>, purpose: EmbedPurpose, dimensions: Option<u32> }`. 모델 이름은 늘 요청(설정값)에서 받는다. 라이브러리 안에 기본 모델을 박지 않는다(1차 3번과 같다).
-   - `EmbedPurpose`: `Document`(색인할 글) · `Query`(검색 질의).
+   - `EmbeddingRequest { model: String, inputs: Vec<String>, purpose: EmbedPurpose, dimensions: Option<u32> }`. 모델 이름은 늘 요청(설정값)에서 받는다. 라이브러리 안에 기본 모델을 박지 않는다(1차 3번과 같다. server 설정의 기본은 `bge-m3`, 결정 15번).
+   - `EmbedPurpose`: `Document`(색인할 글) · `Query`(검색 질의). Ollama는 둘을 같게 보낸다(bge-m3는 접두어가 필요 없다). 공급자마다 다르게 다룰 수 있게 값으로 둔다.
    - `EmbeddingResponse { vectors: Vec<Vec<f32>>, model: String, usage: EmbeddingUsage }` — `vectors[i]`는 `inputs[i]`의 벡터(같은 순서 · 같은 개수). `EmbeddingUsage { total_tokens: u64 }`.
    - `EmbeddingLimits { max_inputs_per_request: usize, max_input_chars: usize }`.
 3. **등록부 `EmbeddingRegistry`**: `new()`, `register(Arc<dyn EmbeddingProvider>) -> Result<(), RegistryError>`(같은 ID를 두 번 올리면 `RegistryError::Duplicate(id)`이고 앞의 것이 남는다), `get(id) -> Option<Arc<dyn EmbeddingProvider>>`, `ids() -> Vec<&'static str>`(이름순). 새 공급자는 어댑터 파일 하나 + `register` 한 줄로 붙는다(결정 2번). `RegistryError`는 `error.rs`에 **새 enum**으로 둔다(`AiError`에 갈래를 더하지 않는다 — 밖의 `match`가 깨진다).
-4. **Voyage 공급자 `VoyageEmbeddingProvider`**:
-   - `VoyageConfig { base_url, timeout, max_retries, retry_base_delay, max_inputs_per_request, max_input_chars }`와 `VoyageConfig::default()`(기본 주소 공개 상수 `VOYAGE_DEFAULT_BASE_URL = "https://api.voyageai.com"`, 다시 시도 `DEFAULT_MAX_RETRIES`, 한 요청 128개, 입력 하나 8,192자). 연결 제한 · 응답 크기 상한은 Anthropic의 `AnthropicLimits`와 같은 값 · 같은 뜻으로 `with_limits`에 받는다.
-   - `new(config, Arc<dyn CredentialSource>)`, `with_redactor(Arc<dyn Redactor>)`, `verify(&Credential) -> Result<(), AiError>`(키 확인기에 쓴다).
+4. **Ollama 공급자 `OllamaEmbeddingProvider`**:
+   - `OllamaConfig { base_url, timeout, max_retries, retry_base_delay, max_inputs_per_request, max_input_chars }`와 `OllamaConfig::default()`(기본 주소 공개 상수 `OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"`, 다시 시도 `DEFAULT_MAX_RETRIES`, 한 요청 64개, 입력 하나 8,192자). 연결 제한 · 응답 크기 상한은 Anthropic의 `AnthropicLimits`와 같은 값 · 같은 뜻으로 `with_limits`에 받는다.
+   - `new(config)`, `with_redactor(Arc<dyn Redactor>)`, `check(model) -> Result<(), AiError>`(Ollama가 떠 있고 그 모델을 받아 두었는지 확인. server의 진단 · 설정 화면이 쓴다).
 
 ### 동작 규칙 · 경계
 
-5. **요청 모양 (공식 문서 `https://docs.voyageai.com/reference/embeddings-api` 기준 — 기억으로 짓지 않는다, N1이 다시 확인한다)**: `POST {base_url}/v1/embeddings`, 헤더 `Authorization: Bearer <키>` · `content-type: application/json`. 본문 `{"input": [글…], "model": "<모델>", "input_type": "document" | "query"}`, `dimensions`가 `Some(n)`일 때만 `"output_dimension": n`을 싣는다(문서: 1024 기본, 256 · 512 · 2048을 받는 모델이 있고, 하나만 받는 모델도 있다). `output_dtype` · `encoding_format`은 보내지 않는다(기본값 = `float` 배열). `truncation`도 보내지 않는다(기본 참) — 대신 6번에서 길이를 먼저 막는다.
-6. **길이 · 개수 상한** (공식 문서: 목록 1,000개, 목록 전체 토큰은 모델마다 120K~1M, 입력 하나 문맥 32,000토큰): 우리는 더 좁게 막는다. 입력 하나가 `max_input_chars`(기본 8,192자 = knowledge의 `INDEX_PREFIX_CHARS`)를 넘거나 빈 글이면 **요청을 보내지 않고** `InvalidRequest`. 입력이 `max_inputs_per_request`(기본 128, 1,000보다 크게 설정하면 만들 때 1,000으로 자른다)보다 많으면 그 크기로 **잘라 차례로** 보내고 이어 붙인다. 한 조각이라도 실패하면 전체가 그 오류이고 받은 앞 조각은 버린다(전부 아니면 없음). 입력이 0개면 요청 없이 빈 응답. 128개 × knowledge 조각 400토큰 ≈ 51K토큰이라 가장 좁은 모델(120K)에도 든다.
-7. **가리기 (E38 · V47)**: 보내는 글마다 끼운 `Redactor`를 거친다(7차 1과 같은 자리). 길이 판단은 **가린 뒤** 글로 한다(CLI 8차 2와 같다).
-8. **키는 부를 때마다 읽는다**: `embed` · `verify`마다 `CredentialSource::current()`를 새로 부른다(키를 바꾸거나 지우면 다음 호출부터 바로 따른다). `None`이면 **바깥 요청 0건**으로 `NotConfigured`(V31) — 받는 쪽(knowledge)에서 이것이 "쓸 수 없음"이 된다. 줄바꿈 · 제어 문자가 든 키는 `InvalidCredential`(3차 8). 키는 요청 헤더 말고는 오류 · `Debug` · 기록 어디에도 없다.
-9. **응답 읽기**: 2xx 본문의 `data` 배열 길이가 보낸 개수와 같아야 하고, 각 원소의 `index`가 `0..n`을 하나씩 덮어야 한다(`index` 순서로 다시 줄 세운다 — 문서가 순서를 약속하지 않는다). `embedding`은 숫자 배열이고 모든 벡터 길이가 같아야 하며, `dimensions`가 `Some(n)`이면 길이가 `n`이어야 한다. 하나라도 어긋나면 `InvalidResponse`. `model` · `usage.total_tokens`는 응답의 것을 옮긴다(없으면 요청 모델 · 0).
-10. **오류 · 다시 시도** (공식 `https://docs.voyageai.com/docs/error-codes`: 400 · 401 · 403 · 429 · 500 · 502 · 503 · 504): 401 · 403 → `Auth{status}`, 429 → `RateLimited`, 500 이상 → `ProviderUnavailable`, 400 · 그 밖 4xx → `InvalidRequest`. 다시 시도 규칙은 Anthropic 공급자와 **같은 함수**를 쓴다(3차 1~4: 간격 · jitter · `Retry-After` 상한 600초, 시간 초과 · 연결 실패도 다시 시도, 인증 실패 · 잘못된 요청은 안 함). `https`가 아닌 기본 주소는 루프백 말고 거부(`InsecureBaseUrl`, 3차 5), 응답 크기 상한(3차 6), 연결 제한(3차 4)도 같다.
-11. **키 확인 `verify`**: 가장 싼 요청 — 입력 `["ping"]` 하나, `input_type` 없음, 설정의 모델로 한 번. 2xx이고 9번 모양이면 성공. Voyage는 모델 목록 API를 문서에서 확인하지 못해 이렇게 한다(토큰 몇 개가 과금된다는 것을 문서 주석에 적는다).
+5. **요청 모양 (Ollama 공식 API 문서 `https://github.com/ollama/ollama/blob/main/docs/api.md` "Generate Embeddings" 기준 — 기억으로 짓지 않는다, N1이 다시 확인한다)**: `POST {base_url}/api/embed`, `content-type: application/json`, 인증 헤더 없음. 본문 `{"model": "<모델>", "input": [글…]}`, `dimensions`가 `Some(n)`일 때만 `"dimensions": n`(문서가 그 칸을 주는지 N1이 확인하고, 없으면 `Some`일 때 요청 없이 `InvalidRequest`). `truncate`는 보내지 않는다 — 6번에서 길이를 먼저 막는다. 옛 `/api/embeddings`(입력 하나)는 쓰지 않는다.
+6. **바깥으로 나가지 않는다 (V23)**: `base_url`은 **루프백만** 받는다(`127.0.0.1` · `::1` · `localhost`). 그 밖은 만들 때 `InsecureBaseUrl`(같은 집 다른 기기의 Ollama를 쓰는 것은 다음 차수 후보 — 쓰려면 사용자 결정). 리다이렉트를 따라가지 않는다.
+7. **길이 · 개수 상한**: 입력 하나가 `max_input_chars`(기본 8,192자 = knowledge의 `INDEX_PREFIX_CHARS`)를 넘거나 빈 글이면 **요청을 보내지 않고** `InvalidRequest`. 입력이 `max_inputs_per_request`보다 많으면 그 크기로 **잘라 차례로** 보내고 이어 붙인다. 한 조각이라도 실패하면 전체가 그 오류(전부 아니면 없음). 입력이 0개면 요청 없이 빈 응답.
+8. **가리기 (E38 · V47)**: 로컬이어도 보내는 글마다 끼운 `Redactor`를 거친다(기록 · Ollama 로그에 비밀이 남지 않게). 길이 판단은 **가린 뒤** 글로 한다.
+9. **응답 읽기**: 2xx 본문의 `embeddings` 배열 길이가 보낸 개수와 같아야 하고, 모든 벡터 길이가 같아야 하며, `dimensions`가 `Some(n)`이면 길이가 `n`이어야 한다. 숫자가 아니거나 하나라도 어긋나면 `InvalidResponse`. `model`은 응답의 것(없으면 요청 모델), `usage.total_tokens`는 `prompt_eval_count`(없으면 0).
+10. **오류 · 다시 시도**: 연결 실패(Ollama가 꺼짐) → `Connection`(받는 쪽 knowledge에서 "쓸 수 없음"이 된다), 404 또는 본문 `error`가 "모델 없음" → `InvalidRequest`이고 다시 시도하지 않음(모델을 받아 두지 않았다 — 오류 문장에 `ollama pull <모델>` 안내), 400 → `InvalidRequest`, 500 이상 → `ProviderUnavailable`. 다시 시도는 Anthropic 공급자와 **같은 함수**(3차 1~4: 간격 · jitter, 시간 초과 · 연결 실패 · 5xx는 다시 시도, 잘못된 요청은 안 함). 응답 크기 상한(3차 6), 연결 제한(3차 4)도 같다. 첫 요청은 모델을 메모리에 올리느라 느릴 수 있으니 `timeout` 기본은 60초.
+11. **`check(model)`**: `GET {base_url}/api/tags`로 받아 둔 모델 목록을 보고, `name`이 `<모델>` 또는 `<모델>:latest`인 것이 있으면 성공, 없으면 `InvalidRequest`("`ollama pull <모델>`"), 연결 실패면 `Connection`. 임베딩을 돌리지 않으니 싸다.
 
 ### 원본 동작 근거
 
-원본에 없음 — 사용자 결정 2026-11-21 2번 · 4번. Hermes · OpenClaw의 임베딩 공급자는 OpenAI 기본이고(`docs/research/triggers-approval-memory-deep.md` 4.1 끝 "공급자"), Voyage 어댑터는 원본에 없다. 따르는 것: 다시 시도 · `Retry-After` · 오류 구분은 이 모듈의 Hermes 근거(`docs/research/hermes-agent.md` 3.2, 3차)를 그대로 쓴다. 요청 · 응답 모양은 Voyage 공식 문서가 근거다.
+원본에 없음 — 사용자 결정 2026-11-21 2번 · 15번. Hermes · OpenClaw의 임베딩 공급자는 OpenAI 기본이고 로컬 모델도 고를 수 있다(`docs/research/triggers-approval-memory-deep.md` 4.1 끝 "공급자"). 따르는 것: 다시 시도 · 오류 구분은 이 모듈의 Hermes 근거(`docs/research/hermes-agent.md` 3.2, 3차)를 그대로 쓴다. 요청 · 응답 모양은 Ollama 공식 API 문서가 근거다.
 
-### 테스트로 확인할 것 (가짜 서버만 — `wiremock`, 실제 `api.voyageai.com`을 부르지 않는다)
+### 테스트로 확인할 것 (가짜 서버만 — `wiremock`을 루프백에 띄운다. 실제 Ollama를 부르지 않는다)
 
-- 요청: 경로 `/v1/embeddings`, `Authorization: Bearer <시험 키>`, 본문의 `input` · `model` · `input_type`(`document` · `query` 둘 다), `dimensions`가 있을 때만 `output_dimension`이 있음, `output_dtype` · `encoding_format` · `truncation`이 없음.
-- 키 없음: `NotConfigured`이고 가짜 서버가 받은 요청 0건(V31). 키를 바꾸면 다음 호출의 헤더가 새 키(부를 때마다 읽기).
+- 요청: 경로 `/api/embed`, 인증 헤더 없음, 본문의 `model` · `input`, `dimensions`가 있을 때만 그 칸, `truncate`가 없음. `Document` · `Query`가 같은 본문.
+- 루프백이 아닌 기본 주소(`http://192.168.0.2:11434`, `https://example.com`)는 만들 때 거부. 리다이렉트를 따라가지 않음.
 - 가리기: 가리개가 `SECRET`을 `***`로 바꾸면 서버가 받은 `input`에 `SECRET`이 없다(E38 · V47). 가린 뒤 정확히 상한이면 통과, 한 글자 크면 요청 0건 `InvalidRequest`.
-- 나누기: 300개를 상한 128로 → 요청 3번(128 · 128 · 44), 결과 300개가 입력 순서대로. 두 번째 요청이 500을 다시 시도 끝까지 내면 전체 실패. 빈 입력 목록은 요청 0건 빈 응답.
-- 응답: `index`가 뒤섞여 와도 입력 순서로 맞춤, 개수 모자람 · `index` 겹침 · 길이 다른 벡터 · `dimensions`와 다른 길이 · 숫자 아닌 값 → `InvalidResponse`.
-- 오류 표의 줄마다(401 · 403 · 400 · 429 + `Retry-After` · 503) 다시 시도 여부와 횟수, `http://` 바깥 주소 거부.
+- 나누기: 150개를 상한 64로 → 요청 3번(64 · 64 · 22), 결과 150개가 입력 순서대로. 두 번째 요청이 500을 다시 시도 끝까지 내면 전체 실패. 빈 입력 목록은 요청 0건 빈 응답.
+- 응답: 개수 모자람 · 길이 다른 벡터 · `dimensions`와 다른 길이 · 숫자 아닌 값 → `InvalidResponse`. `prompt_eval_count`가 `usage`로.
+- 오류: 연결 실패(아무것도 안 뜬 포트) → `Connection`이고 다시 시도 횟수, 404 모델 없음 → `InvalidRequest` · 다시 시도 0 · 문장에 `ollama pull`, 503 → 다시 시도.
+- `check`: `/api/tags`에 `bge-m3:latest`가 있으면 `bge-m3`로 성공, 없으면 `InvalidRequest`, 꺼져 있으면 `Connection`.
 - 등록부: 같은 ID 두 번 → `Duplicate`이고 첫 것이 남음, `get` 모르는 ID → `None`, `ids()` 이름순.
-- 비밀: 오류 문장 · `Debug`에 시험 키 글자가 없다(테스트 주의 그대로).
-- `verify`: 2xx + 바른 모양이면 성공, 401이면 `Auth`.
 
 ### 잠긴 옛 테스트와 부딪히는 곳
 
-- 없앨 것이 없다. 새 trait · 타입 · 등록부 · 공급자를 **더하기만** 한다. `AiProvider` · `AiError` 갈래 · `Credential`은 그대로다(`Credential::ApiKey`의 문서 주석 "x-api-key 헤더로 나간다"는 "Anthropic은 `x-api-key`, Voyage는 `Authorization: Bearer`"로 문서만 고친다).
-- 다시 시도 · 주소 검사 · 응답 크기 상한 코드를 Voyage와 나눠 쓰도록 안에서 옮겨도 Anthropic 쪽 잠긴 테스트(`tests/anthropic*.rs`)는 그대로 통과해야 한다.
+- 없앨 것이 없다. 새 trait · 타입 · 등록부 · 공급자를 **더하기만** 한다. `AiProvider` · `AiError` 갈래 · `Credential`은 그대로다.
+- 다시 시도 · 주소 검사 · 응답 크기 상한 코드를 Ollama와 나눠 쓰도록 안에서 옮겨도 Anthropic 쪽 잠긴 테스트(`tests/anthropic*.rs`)는 그대로 통과해야 한다.
 - `Cargo.toml`: 새 바깥 의존이 필요 없다(`reqwest` · `serde_json` 안에서 한다). `architecture.toml`은 고치지 않는다.
 
 ### server 차수에서 잇는 것 (이 모듈 밖)
 
-`pi-knowledge`의 `Embedder` 포트와 이 모듈의 `EmbeddingProvider`는 **직접 이을 수 없다**: `architecture.toml`에서 `pi-ai`가 쓸 수 있는 내부 모듈은 `pi-secrets`뿐이고 `pi-knowledge`는 `pi-store`뿐이다. 그래서 server(`price-inha`, 모두 쓸 수 있음)가 감싸는 타입 하나를 둬 `pi_knowledge::Embedder`를 구현하고 안에서 `EmbeddingProvider::embed`를 부른다(`model()` · `dims()`는 설정값, 색인 글은 `Document`, 질의는 `Query`). 오류는 `NotConfigured` · `RateLimited` · `ProviderUnavailable` · `Timeout` · `Connection` → `EmbedError::Unavailable`, 그 밖 → `EmbedError::Failed`로 옮긴다. Voyage 키 칸(`voyage`)의 등록 경로 · 키 확인기 · 모델 이름과 차원 설정도 server 차수다.
+`pi-knowledge`의 `Embedder` 포트와 이 모듈의 `EmbeddingProvider`는 **직접 이을 수 없다**(`architecture.toml`: `pi-ai`는 `pi-secrets`만, `pi-knowledge`는 `pi-store`만). server가 감싸는 타입 하나로 `pi_knowledge::Embedder`를 구현하고 안에서 `EmbeddingProvider::embed`를 부른다(`model()` · `dims()`는 설정값 — 기본 `bge-m3` · 1024, 색인 글은 `Document`, 질의는 `Query`). 오류는 `Connection` · `RateLimited` · `ProviderUnavailable` · `Timeout` → `EmbedError::Unavailable`, 그 밖 → `EmbedError::Failed`. 설정 화면의 "뜻 검색 켜기"(Ollama 주소 · 모델 · `check` 결과), `doctor`의 Ollama 항목도 server 차수다. 뜻 검색은 사용자가 켜야 동작한다(기본 꺼짐).
 
-이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): D10
+이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): D10 V23
 
 ## 하지 않는 것
 
@@ -233,4 +232,4 @@ OAuth 로그인 절차와 구독 토큰을 API에 보내는 길은 만들지 않
 
 ## 필수 번호
 
-D4 V31 E38 V47 D24
+D4 V31 E38 V47 D24 D10 V23
