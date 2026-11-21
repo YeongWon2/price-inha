@@ -39,7 +39,7 @@
 
 ## 필수 번호
 
-C10 E12 E13 E16 E25 E29 E30 E33 V6
+C10 E12 E13 E16 E25 E29 E30 E33 V6 E22
 
 ## 1차 검토 참고 (다음 차수 후보)
 
@@ -94,3 +94,93 @@ C10 E12 E13 E16 E25 E29 E30 E33 V6
 
 ### 5차 구현 메모
 - `fits_trade`는 `permit.trade() == Some(매매 번호)`만 받는다. 묶이지 않은 표시는 submit · sell · retry_sell 모두 PermitMismatch. 시험 도우미 `permit(trade_id, ..)`는 묶인 표시, `unbound_permit`은 옛 길.
+
+## 6차 작업 (2026-11-21 답 없는 사기를 줄여 내기 — server 10a 에서 넘어옴)
+
+근거: `spec.md` FN2 3b3, `dev.md` E22, `docs/dev/decisions.md` 2026-11-16 5번(알림이 갔는데 답이 없으면 줄여서 다시 점검해 낸다, 알림이 가지 않았으면 사지 않는다 P20).
+왜: server 는 `expire_due` → `unhandled_due` → `pi_rules::reduce_within_limit`(승인 표시 없는 `Passed`) → 실행 → `record_due_handling(Reduced)` 로 잇는데, `submit`은 승인대기 매매를 승인 소비 결과(승인됨 · 소비됨 · 수량 같음)가 있어야만 받는다. 답 없음으로 닫힌 요청은 승인됨도 소비됨도 아니고 수량도 줄어서, 줄인 사는 주문을 낼 길이 없다(server 잠긴 시험 `crates/server/tests/round17/due.rs`의 `알림이_간_사기에_답이_없으면_한도_안으로_줄여_내고_한_번만_기록한다`).
+
+### 원본 동작 근거
+
+- 원본에 없음(우리 고유) — 스펙 FN2 3b3 · E22. 모의계좌와 주문 실행이 원본에 없다(위 "원본 동작 근거").
+- 따르는 조사 문서의 규칙: `docs/research/remote-access-security.md` 5.4(답 없음 규칙과의 관계) · RS10 · P19 · P20 — 승인 정본은 서버 레코드뿐이다(부르는 쪽의 말을 믿지 않고 저장소 기록과 대조한다). 확인 실패 · 거절을 "답 없음"으로 바꾸지 않는다. 알림이 가지 않은 답 없음은 사지 않는다.
+- persist-before-execute(`docs/research/agent-runtime-deep.md` 1장)는 그대로: 주문됨으로 저장한 뒤에만 `place_order`.
+
+### 공개 API (더하기만)
+
+- `Submission` · `ApprovalGrant` · `Executor::submit`은 그대로 둔다. 잠긴 시험(`tests/suite/common.rs`의 `buy`, `submit.rs` · `tied.rs` · `bind.rs` · `restart.rs`)과 server(`trading/order.rs`)가 `Submission`을 다섯 칸 구조체 글자로 만들기 때문에, 칸을 더하거나 `approval`의 타입을 바꾸면 깨진다. `ApprovalGrant`는 `pi-rules`의 것이라 이 모듈이 갈래를 더할 수도 없다.
+- 새 길 하나를 더한다: `Executor::submit_reduced(ReducedSubmission) -> Result<OrderId, Error>`.
+  - `ReducedSubmission { trade_id: TradeId, permit: CheckPermit, template_account: AccountKind, unanswered: pi_approval::ApprovalNumber, timeout: UnfilledTimeout }`. `unanswered`는 답 없음으로 닫힌 승인 요청의 번호다. 증표(`ApprovalGrant`)는 받지 않는다(승인이 없으므로).
+  - `lib.rs`에서 `ReducedSubmission`을 다시 내보낸다.
+- `Error`(이미 `#[non_exhaustive]`)에 두 갈래를 더한다.
+  - `NotAwaitingApproval(TradeState)`: 답 없음 줄임 길은 승인대기인 매매만 받는다. 지금 상태를 담는다(`NotHolding`과 같은 모양).
+  - `UnansweredMismatch`: 그 번호가 이 매매의 "답 없음 · 줄여서 낼 것"이 아니다(아래 대조 2 · 3 가운데 하나라도 어긋남). `ApprovalMismatch`와 같은 자리의 오류다.
+- 옛 길은 바뀌지 않는다: 승인대기 매매에 `submit`을 `approval: None`으로 부르면 여전히 `ApprovalRequired`, 답 없음 번호로 만든 `ApprovalGrant`를 `submit`에 주면 여전히 `ApprovalMismatch`(승인됨 · 소비됨이 아니므로).
+
+### 실행기가 스스로 대조하는 것 (server 를 믿지 않는다)
+
+순서대로 본다. 어긋나면 매매는 그대로이고, 저장도 주문도 하지 않는다.
+
+1. 준비됨(E16) → `NotReady`. 계좌 종류(E25)는 `submit`과 똑같이 템플릿 · 매매 · 표시의 계좌 종류를 증권사와 대조 → `AccountKindMismatch`(실전 계좌는 언제나 막힌다).
+2. 점검 통과 표시(E33): 종목이 매매의 종목과 같고, 방향이 **사기**이고, `permit.trade() == Some(매매 번호)` → 아니면 `PermitMismatch`(파는 표시 · 묶이지 않은 표시 · 다른 매매의 표시 포함).
+3. 매매 상태가 승인대기 → 아니면 `NotAwaitingApproval(상태)`. 판단됨 매매는 이 길로 받지 않는다(그것은 `submit`의 일).
+4. 승인 기록 대조(실행기의 `Approvals` 읽기만 쓴다 — `get` · `unhandled_due`. 읽을 때마다 저장소에서 다시 읽으므로 server 의 관리자가 남긴 알림 · 처리 기록이 보인다) → 하나라도 아니면 `UnansweredMismatch`. 저장소 오류는 `Error::Store`.
+   - `get(번호)`: 기록이 있고, 결과가 **답 없음**(`ApprovalStatus::NoAnswer`)이고, 소비되지 않았다(`consumed == false`). 기다림 · 승인됨 · 거절됨(지문 달라 무효가 된 것 포함) · 만료는 받지 않는다.
+   - `unhandled_due()`에 그 번호가 있고 할 일이 `DueAction::ReduceWithinLimit`다. 이 한 줄이 다음을 함께 본다: 사는 요청이다 / 알림이 갔다(`Notice::Sent`. 알림 실패 · 기록 없음은 `DoNotBuy`라 받지 않는다, P20) / 신호 유효 시간이 지나지 않았다(지났으면 `Dropped`) / **처리 기록이 아직 없다**(있으면 목록에 없다).
+   - 대상이 주문(`Subject::Order`)이고, 신호 id 가 `trade-<매매 번호>`이고, 종목 · 계좌가 매매와 같고, 방향이 사기이고, 호가 유형이 표시와 같다. 값은 대조하지 않는다(rules 가 지금 시세로 다시 셈한 지정가라 요청 때와 다를 수 있다).
+   - 수량: `0 < 표시 수량 ≤ 요청 수량(subject.quantity)`. `approval`의 `Reduced { quantity }` 규칙과 같은 범위다.
+5. 저장소의 매매 수량(`trade_quantity`)이 있으면 표시 수량이 그것 **이하**여야 한다(`submit`은 같음, 이 길은 이하) → 아니면 `PermitMismatch`. server 는 내기 전에 매매 수량을 줄인 수량으로 바꿔 두므로(`keep_quantity`) 보통은 같다. 실행기는 매매 수량을 고쳐 쓰지 않는다.
+6. 매매를 주문됨으로 **저장** → `place_order`. 큰 금액 확인 표시는 **붙이지 않는다**(`confirm_high_value = false`. `submit`은 증표가 있을 때만 붙인다). 그래서 승인이 필요한 금액의 주문은 두 겹으로 막힌다: 표시는 rules 의 권한으로만 나오고(`reduce_within_limit`의 `Passed`는 한도 이하, E33), 그래도 큰 금액 확인 기준 이상이면 증권사가 `ConfirmHighValueRequired`로 거부한다. 증권사 거부 뒤의 처리는 `submit`과 같다: 매매를 막힘(미체결 취소, 이유 남김)으로 옮기고 받지 않음 · 응답 없음은 `AnomalyStop`, 그 밖은 `Rejected`.
+
+한 번만: 같은 승인 번호로 두 번째 부르면 내지 않는다. 지키는 것은 둘이다.
+- 매매 상태 전이(실행기 몫): 첫 호출이 승인대기 → 주문됨으로 저장하므로(증권사가 거부했으면 막힘) 두 번째는 3번에서 `NotAwaitingApproval`. 신호 id 가 매매 하나에 묶여 있어 같은 번호를 다른 매매에 쓸 수도 없다(4번).
+- approval 의 처리 기록(부르는 쪽 몫): server 가 `record_due_handling`을 남긴 뒤에는 4번의 `unhandled_due`에 없어 `UnansweredMismatch`. 실행기는 처리 기록을 쓰지 않는다(approval 을 읽기만 한다).
+
+### 매매 상태 (store)
+
+- 승인대기 → 주문됨은 저장소 허용 표에 이미 있다(`crates/store/src/trade.rs`의 `allowed`: `(AwaitingApproval, Ordered)`). 승인 소비 길(`submit` + 증표)이 지금 쓰는 그 전이다. **store 차수는 필요 없다.**
+- 승인대기 매매의 수량 바꾸기(`set_trade_quantity`)도 승인이 붙지 않은 승인대기면 이미 된다(`plan.rs`). server 는 매매에 승인 번호를 붙이지 않는다.
+- 주문됨으로 가는 전이의 근거 칸 검사(`RationaleIncomplete`)는 그대로 `Error::Store`.
+
+### 테스트로 확인할 것 (`tests/suite/reduced.rs` 새 파일)
+
+옛 시험과 도우미는 고치지 않고 더하기만 한다. 승인 요청 · 알림 기록 · 시간 넘기기 · `expire_due`는 `pi-approval`의 공개 API 로 한다(`common.rs`에 도우미를 **더한다**: 예 `unanswered(trade_id, 수량, 값, 알림)`).
+
+- 정상: 요청 10주, 알림 감, 답 없음으로 닫힘 → 4주 표시로 `submit_reduced` → 주문 하나(4주, 확인 표시 없음), 매매는 주문됨, 승인 기록은 답 없음 · 소비 안 됨 그대로.
+- 수량 경계: 요청 수량과 같음(10) → 낸다 / 요청 수량 + 1(11) → `UnansweredMismatch` / 0 → `UnansweredMismatch`. 거부된 것은 승인대기 그대로 · 주문 없음.
+- 두 번 내기: 같은 번호 · 같은 매매로 다시 → `NotAwaitingApproval(Ordered)`, 주문은 하나뿐. 처리 기록(`record_due_handling(Reduced)`)을 남긴 번호 → 승인대기인 매매라도 `UnansweredMismatch`.
+- 파는 주문: 파는 표시 → `PermitMismatch`. 파는 요청의 답 없음 번호(`TeamDecides`) → `UnansweredMismatch`.
+- 다른 매매의 승인 번호(신호 id 가 다른 매매) → `UnansweredMismatch`. 다른 매매에 묶인 표시 · 묶이지 않은 표시 → `PermitMismatch`.
+- 요청의 결과: 기다림(아직 기다릴 시간 안) · 승인됨(소비 전) · 승인됨 + 소비됨 · 거절됨 · 만료(신호 유효 시간 지남) · 없는 번호 → 모두 `UnansweredMismatch`.
+- 알림: 알림 실패(`Notice::Failed`) · 알림 기록 없음 → `UnansweredMismatch`(P20).
+- 종목이 다른 요청 · 호가 유형이 다른 표시 → `UnansweredMismatch`.
+- 매매 상태: 판단됨 매매에 `submit_reduced` → `NotAwaitingApproval(Judged)`.
+- 매매 수량: 저장소 매매 수량보다 큰 표시 → `PermitMismatch`. 매매 수량 10 · 표시 4 → 낸다.
+- 계좌(E25): 템플릿 계좌 종류가 실전 → `AccountKindMismatch`, 매매 그대로 · 주문 없음.
+- 준비 전(E16) → `NotReady`.
+- 큰 금액: 큰 금액 확인 기준 이상의 줄인 주문 → 증권사가 거부해 `Rejected`, 매매는 막힘(미체결 취소). 지금 시험대의 모의계좌는 기준이 없으므로(`common.rs`의 `high_value_confirm_from: None`) 기준을 둔 시험대를 여는 도우미를 더한다.
+- 증권사 장애(E13) → `AnomalyStop`, 매매는 막힘(미체결 취소).
+- 옛 길 그대로: 답 없음 번호로 만든 증표를 `submit`에 주면 `ApprovalMismatch`.
+
+### 잠긴 옛 테스트와 부딪히는 곳
+
+- 없다(더하기만 하면). `submit.rs`의 `awaiting_approval_without_grant_is_refused`(`ApprovalRequired`)와 `bind.rs`의 `ApprovalMismatch` 시험들은 `submit`을 보므로 그대로 지난다.
+- 부딪히게 되는 모양(고르지 않는다): `Submission`에 칸 더하기, `approval`의 타입 바꾸기, `submit`이 승인대기 + `None`을 받게 하기.
+- `common.rs`는 도우미를 더하기만 한다. 있는 도우미(`buy` · `grant` · `permit`)의 모양을 바꾸지 않는다.
+
+### 필수 번호
+
+- `E22`를 더한다. 위 "## 필수 번호" 줄은 N1 의 red 커밋과 함께 고친다(번호만 먼저 넣으면 G1 이 실패한다). 새 시험은 `// 검증: E22`와 함께 닿는 번호(C10 · E25 · E33 · E16 · E13)를 적는다.
+
+### 하지 않는 것
+
+- 줄이는 셈 · 금액 한도 판정(rules 의 `reduce_within_limit`), 답 없음으로 닫기 · 처리 기록 남기기(approval · server), 알림(server).
+- 승인 기록을 쓰는 일. 실행기는 approval 을 읽기만 한다.
+- server 가 넘겨받을 것(server 10a): 사는 주문이고 답 없음 줄임이면 `submit` 대신 `submit_reduced`를 부른다. 주문은 나갔는데 처리 기록을 남기기 전에 꺼지면, 다시 켠 뒤 `unhandled_due`가 그 번호를 또 준다 — 이때 매매가 이미 주문됨 · 보유중이면 막힘으로 닫지 말고 `Reduced`(매매 수량)로 기록만 남겨야 한다(실행기는 `NotAwaitingApproval`로 다시 내기를 막을 뿐이다).
+
+### 6차 조정자 결정 (초안의 "물을 것" — 가장 보수적인 쪽)
+1. 모양은 새 메서드 `submit_reduced`로 한다(잠긴 시험이 `Submission`을 구조체 글자로 만든다).
+2. **금액 상한을 하나 더 둔다**: 줄인 주문의 `수량 × 지정가`가 요청 때의 `요청 수량 × 요청 값`을 넘으면 내지 않는다(`UnansweredMismatch`). 한도 판정은 rules가 하지만, 답 없는 주문이 사용자가 본 요청보다 커지는 길은 실행기에서도 막는다.
+3. 저장소 매매 수량과의 대조는 "이하"로 둔다.
+4. 알림 기록(`Notice::Sent`)이 없으면 내지 않는다(P20). server가 `record_notice`를 빠뜨리면 줄인 주문이 안 나가는 것이 의도다.
+5. 재시작 틈(주문은 나갔는데 처리 기록 전에 꺼짐)은 server 10a에서 고친다: 다시 켠 뒤 `unhandled_due`가 준 요청의 매매가 이미 주문됨 · 보유중이면 막힘으로 닫지 않고 `Reduced`(그 매매의 수량)로 기록만 남긴다.
