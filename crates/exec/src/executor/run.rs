@@ -10,12 +10,13 @@ use pi_paper::{
     OrderRequest, Side, UnfilledTimeout,
 };
 use pi_store::{AccountKind as StoreAccount, Trade, TradeId, TradeState};
+use rust_decimal::Decimal;
 use tokio::sync::mpsc::error::TryRecvError;
 
 use super::{Executor, SELL_RETRY_FIRST, SELL_RETRY_MAX, SellPurpose, SellRetry, TradeChange};
 use crate::error::Error;
 use crate::keep;
-use crate::track::{State, apply, block_unfilled, buy_key, millis};
+use crate::track::{State, apply, block_unfilled, buy_key, millis, parse_key};
 
 /// 파는 주문 한 번 내기.
 pub(super) struct SellAttempt {
@@ -145,20 +146,39 @@ impl Executor {
 
     /// 파는 주문을 낸다. 손절 · 청산은 먼저 같은 종목의 열린 파는 주문을 취소한다.
     /// 익절 · 팀장 팔기는 취소하지 않고 낸다.
+    ///
+    /// `limit`이면 (취소한 뒤) 그 매매의 남은 수량에서 그 매매에 열려 있는 파는 주문의 남은
+    /// 수량(증권사 기준)을 뺀 것과 대조하고, 넘으면 [`Error::SellTooLarge`]이다(8차: 취소 → 대조 → 주문).
     /// 받지 않음 · 응답 없음이면 다시 내기를 기다리는 것으로 남긴다(E30).
     pub(super) async fn send_sell(
         &self,
         attempt: SellAttempt,
         permit: CheckPermit,
+        limit: bool,
     ) -> Result<OrderId, Error> {
         let now = self.clock.now();
         // 팀장 팔기 · 익절은 다른 열린 파는 주문을 그대로 둔다(7차: 같은 종목 보유를 모두 판다).
-        if matches!(
-            attempt.purpose,
-            SellPurpose::StopLoss | SellPurpose::Liquidation
-        ) && let Err(e) = self.cancel_open_sells(&attempt.order.symbol, now).await
+        if is_stop(attempt.purpose)
+            && let Err(e) = self.cancel_open_sells(&attempt.order.symbol, now).await
         {
             return self.sell_failed(attempt, e, now);
+        }
+        if limit {
+            let open = match self
+                .open_sell_left(attempt.trade_id, &attempt.order.symbol, now)
+                .await
+            {
+                Ok(open) => open,
+                Err(e) => return self.sell_failed(attempt, e, now),
+            };
+            let held = self
+                .lock()
+                .remaining(attempt.trade_id)
+                .unwrap_or(Decimal::ZERO);
+            let remaining = (held - open).max(Decimal::ZERO);
+            if attempt.order.quantity > remaining {
+                return Err(Error::SellTooLarge { remaining });
+            }
         }
         let request = order_request(
             &attempt.order,
@@ -212,6 +232,27 @@ impl Executor {
         Err(result)
     }
 
+    /// 그 매매에 열려 있는 파는 주문의 남은(체결되지 않은) 수량의 합. 증권사의 열린 주문에서
+    /// 키로 그 매매의 파는 주문을 가려 센다.
+    async fn open_sell_left(
+        &self,
+        trade_id: TradeId,
+        symbol: &Symbol,
+        now: DateTime<Utc>,
+    ) -> Result<Decimal, BrokerError> {
+        let broker: &dyn Broker = self.broker.as_ref();
+        let open = broker.orders(OrderGroup::Open, Some(symbol), now).await?;
+        Ok(open
+            .iter()
+            .filter(|order| {
+                order.side == Side::Sell
+                    && order.client_order_id.as_deref().and_then(parse_key)
+                        == Some((trade_id, Side::Sell))
+            })
+            .map(|order| (order.quantity - order.execution.filled_quantity).max(Decimal::ZERO))
+            .sum())
+    }
+
     /// 같은 종목의 열린 파는 주문을 모두 취소한다. 이미 끝난 주문은 넘어간다.
     async fn cancel_open_sells(
         &self,
@@ -235,6 +276,11 @@ impl Executor {
         }
         Ok(())
     }
+}
+
+/// 손절 · 청산인가(먼저 열린 파는 주문을 취소하고, 다시 내기를 기다리는 동안 익절 · 팀장 팔기를 막는다).
+pub(super) fn is_stop(purpose: SellPurpose) -> bool {
+    matches!(purpose, SellPurpose::StopLoss | SellPurpose::Liquidation)
 }
 
 /// `attempts`번 실패한 뒤 기다릴 간격: `min(SELL_RETRY_FIRST × 2^(attempts-1), SELL_RETRY_MAX)`.

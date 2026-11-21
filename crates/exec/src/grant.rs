@@ -134,10 +134,13 @@ pub(crate) fn check_unanswered(
 }
 
 /// 줄인 주문이 사용자가 본 요청보다 크지 않은가: `0 < 수량 ≤ 요청 수량`이고
-/// `수량 × 지정가 ≤ 요청 수량 × 요청 값`(같으면 된다). 지정가가 없거나 셈이 넘치면 아니다.
+/// `수량 × 지정가 ≤ 요청 수량 × 요청 값`(같으면 된다). 지정가가 없거나 0 이하이거나 셈이 넘치면 아니다.
 fn within_request(subject: &OrderSubject, order: &ApprovedOrder) -> bool {
     let asked = Decimal::from(subject.quantity);
     if order.quantity <= Decimal::ZERO || order.quantity > asked {
+        return false;
+    }
+    if order.price.is_none_or(|price| price <= Decimal::ZERO) {
         return false;
     }
     let amount = order

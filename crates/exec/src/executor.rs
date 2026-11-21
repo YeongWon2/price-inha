@@ -22,7 +22,7 @@ use crate::error::Error;
 use crate::track::{State, adopt, apply, block_unfilled, buy_key, millis, parse_key};
 use crate::{grant, keep};
 pub use reduced::ReducedSubmission;
-use run::{SellAttempt, classify, fits_buy, fits_trade, paper_kind};
+use run::{SellAttempt, classify, fits_buy, fits_trade, is_stop, paper_kind};
 
 /// 파는 주문이 실패한 뒤 처음 다시 낼 때까지의 간격(E30). 실패할 때마다 두 배가 된다.
 pub const SELL_RETRY_FIRST: Duration = Duration::from_secs(1);
@@ -147,6 +147,8 @@ pub struct Executor {
     approvals: Approvals,
     /// 안쪽 상태(준비됨 · 보유 장부 · 다시 낼 파는 주문 · 구독 · 마지막 스냅샷).
     state: Mutex<State>,
+    /// 파는 주문 차례(대조 · 취소 · 주문을 한 묶음으로).
+    selling: tokio::sync::Mutex<()>,
 }
 
 impl std::fmt::Debug for Executor {
@@ -202,6 +204,7 @@ impl Executor {
             store,
             clock,
             state: Mutex::new(state),
+            selling: tokio::sync::Mutex::new(()),
         };
         Ok((executor, authority))
     }
@@ -326,6 +329,10 @@ impl Executor {
 
     /// 파는 주문을 낸다. 손절 · 청산은 먼저 같은 종목의 열린 파는 주문을 취소한다.
     ///
+    /// - 손절 · 청산이 다시 내기를 기다리는 매매의 익절 · 팀장 팔기는 [`Error::StopPending`](8차).
+    /// - 수량은 그 매매의 남은 수량에서 그 매매에 열려 있는 파는 주문의 남은 수량을 뺀 것 이하여야
+    ///   한다(아니면 [`Error::SellTooLarge`]). 손절 · 청산은 취소한 뒤의 수량으로 본다.
+    ///
     /// 증권사가 받지 않거나 응답하지 않으면 [`Error::AnomalyStop`]이고, 그 주문은 다시 내기를
     /// 기다리는 것([`Executor::pending_sells`])으로 남는다(E30). 매매는 보유중 그대로다.
     pub async fn sell(&self, submission: SellSubmission) -> Result<OrderId, Error> {
@@ -346,10 +353,21 @@ impl Executor {
         {
             return Err(Error::PermitMismatch);
         }
+        // 한 번에 하나의 파는 주문만 대조하고 낸다(열린 매도 확인과 주문 사이의 틈을 막는다).
+        let _turn = self.selling.lock().await;
         let key = {
             let mut state = self.lock();
+            // 손절 · 청산이 다시 내기를 기다리면 익절 · 팀장 팔기는 받지 않는다(8차). 기다리는 것은 그대로.
+            if !is_stop(submission.purpose)
+                && state
+                    .pending
+                    .get(&id)
+                    .is_some_and(|pending| is_stop(pending.retry.purpose))
+            {
+                return Err(Error::StopPending);
+            }
             // 장부는 스냅샷에서 되살리고, 없으면 맞춰 볼 때 증권사 보유로 만든다(3차). 그래도 없으면
-            // 남은 수량 0으로 본다(다른 매매 몫까지 팔지 않게).
+            // 남은 수량 0으로 본다(다른 매매 몫까지 팔지 않게). 열린 매도까지 뺀 대조는 내기 직전에 한다.
             let remaining = state.remaining(id).unwrap_or(Decimal::ZERO);
             if approved.quantity > remaining {
                 return Err(Error::SellTooLarge { remaining });
@@ -364,7 +382,7 @@ impl Executor {
             failed_before: 0,
             key,
         };
-        self.send_sell(attempt, submission.permit).await
+        self.send_sell(attempt, submission.permit, true).await
     }
 
     /// 실패한 파는 주문을 새 표시로 다시 낸다(E30). 표시 내용은 처음 내용과 같아야 한다.
@@ -382,6 +400,7 @@ impl Executor {
         if !self.ready() {
             return Err(Error::NotReady);
         }
+        let _turn = self.selling.lock().await;
         let pending = self.lock().pending.get(&trade_id).cloned();
         let Some(keep::Pending {
             retry,
@@ -413,7 +432,7 @@ impl Executor {
             failed_before: retry.attempts,
             key,
         };
-        self.send_sell(attempt, permit).await
+        self.send_sell(attempt, permit, false).await
     }
 
     /// 다시 내기를 기다리는 파는 주문들. 매매 번호 순서다.
