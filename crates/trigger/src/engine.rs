@@ -12,6 +12,7 @@ use pi_market::{Market, MarketAdapter, StalePolicy, Symbol};
 use rust_decimal::Decimal;
 use tokio::sync::watch;
 
+use crate::batch::DataState;
 use crate::inflight::InFlight;
 use crate::watch::QuoteWatch;
 use crate::{
@@ -204,6 +205,10 @@ pub struct Trigger {
     pub(crate) inflight: Arc<InFlight>,
     /// 다시 켤 때 되살려 다음 tick이 발사할 회차들.
     pub(crate) revived: Mutex<Vec<ReceiptKey>>,
+    /// 지금 보는 시세 조건들([`Trigger::replace_conditions`]가 바꾼다).
+    pub(crate) conditions: Mutex<Vec<ConditionJob>>,
+    /// 자료 변화 사건의 중복 표 · 속도 제한 · 묶음(메모리에만).
+    pub(crate) data: Mutex<DataState>,
 }
 
 impl Trigger {
@@ -211,28 +216,7 @@ impl Trigger {
     /// 없으면 [`Error::MissingMarket`], 시세 조건 값이 잘못되면 [`Error::InvalidCondition`],
     /// 다시 걸기 간격이 음수이면 [`Error::InvalidConfig`].
     pub fn new(config: TriggerConfig, ports: Ports) -> Result<Self, Error> {
-        let has_market = |market: Market| ports.markets.iter().any(|m| m.market() == market);
-        let mut seen = HashSet::new();
-        let jobs = config
-            .schedules
-            .iter()
-            .map(|job| (&job.id, job.market))
-            .chain(config.conditions.iter().map(|job| (&job.id, job.market)));
-        for (id, market) in jobs {
-            if !seen.insert(id) {
-                return Err(Error::DuplicateJob(id.clone()));
-            }
-            if !has_market(market) {
-                return Err(Error::MissingMarket(id.clone()));
-            }
-        }
-        if let Some(job) = config
-            .conditions
-            .iter()
-            .find(|job| !crate::condition::is_valid(&job.kind))
-        {
-            return Err(Error::InvalidCondition(job.id.clone()));
-        }
+        validate(&config.schedules, &config.conditions, &ports.markets)?;
         if config.rearm_percent.is_sign_negative() {
             return Err(Error::InvalidConfig("다시 걸기 간격은 0 이상이어야 한다"));
         }
@@ -240,6 +224,8 @@ impl Trigger {
             return Err(Error::InvalidConfig("시세 간격은 0보다 커야 한다"));
         }
         Ok(Self {
+            conditions: Mutex::new(config.conditions.clone()),
+            data: Mutex::new(DataState::default()),
             config,
             ports,
             running: tokio::sync::Mutex::new(()),
@@ -419,10 +405,44 @@ impl Trigger {
         jumped
     }
 
+    /// 지금 보는 시세 조건들(복사본).
+    pub(crate) fn conditions(&self) -> Vec<ConditionJob> {
+        lock(&self.conditions).clone()
+    }
+
     /// 그 시장의 어댑터.
     pub(crate) fn adapter(&self, market: Market) -> Option<&Arc<dyn MarketAdapter>> {
         self.ports.markets.iter().find(|m| m.market() == market)
     }
+}
+
+/// 작업 설정을 확인한다: id 겹침 · 시장 어댑터 없음 · 시세 조건 값.
+pub(crate) fn validate(
+    schedules: &[ScheduleJob],
+    conditions: &[ConditionJob],
+    markets: &[Arc<dyn MarketAdapter>],
+) -> Result<(), Error> {
+    let has_market = |market: Market| markets.iter().any(|m| m.market() == market);
+    let mut seen = HashSet::new();
+    let jobs = schedules
+        .iter()
+        .map(|job| (&job.id, job.market))
+        .chain(conditions.iter().map(|job| (&job.id, job.market)));
+    for (id, market) in jobs {
+        if !seen.insert(id) {
+            return Err(Error::DuplicateJob(id.clone()));
+        }
+        if !has_market(market) {
+            return Err(Error::MissingMarket(id.clone()));
+        }
+    }
+    if let Some(job) = conditions
+        .iter()
+        .find(|job| !crate::condition::is_valid(&job.kind))
+    {
+        return Err(Error::InvalidCondition(job.id.clone()));
+    }
+    Ok(())
 }
 
 /// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도 그대로 이어 쓴다.

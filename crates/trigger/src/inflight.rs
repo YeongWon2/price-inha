@@ -39,6 +39,8 @@ pub(crate) struct InFlight {
     count: AtomicUsize,
     /// 띄운 깨우기에 묶여 아직 끝나지 않은 작업들(작업마다 묶인 깨우기 수).
     jobs: Mutex<HashMap<JobId, usize>>,
+    /// 띄워 두고 아직 끝나지 않은 깨우기의 대상들(대상마다 수). 자료 깨우기는 대상이 실행 중이면 미룬다.
+    targets: Mutex<HashMap<Target, usize>>,
     handles: Mutex<Vec<JoinHandle<()>>>,
     finished: Mutex<Vec<Finished>>,
     alerts: Mutex<Vec<Alert>>,
@@ -58,6 +60,11 @@ impl InFlight {
         lock(&self.jobs).contains_key(job)
     }
 
+    /// 그 대상에 띄운 깨우기가 아직 실행 중인가.
+    pub(crate) fn target_running(&self, target: &Target) -> bool {
+        lock(&self.targets).contains_key(target)
+    }
+
     /// 기다리지 않고 지금까지 끝난 결과와 반영하다 생긴 저장소 오류를 가져간다(한 번만 낸다).
     pub(crate) fn drain(&self) -> Drained {
         lock(&self.handles).retain(|handle| !handle.is_finished());
@@ -67,15 +74,25 @@ impl InFlight {
         }
     }
 
-    fn enter(&self, members: &[Firing]) {
+    fn enter(&self, target: &Target, members: &[Firing]) {
         self.count.fetch_add(1, Ordering::SeqCst);
+        *lock(&self.targets).entry(target.clone()).or_default() += 1;
         let mut jobs = lock(&self.jobs);
         for firing in members {
             *jobs.entry(firing.key.job.clone()).or_default() += 1;
         }
     }
 
-    fn leave(&self, jobs_done: &[JobId]) {
+    fn leave(&self, target: &Target, jobs_done: &[JobId]) {
+        {
+            let mut targets = lock(&self.targets);
+            if let Some(count) = targets.get_mut(target) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    targets.remove(target);
+                }
+            }
+        }
         {
             let mut jobs = lock(&self.jobs);
             for job in jobs_done {
@@ -133,7 +150,7 @@ impl InFlight {
 pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
     let ports = trigger.ports.clone();
     let inflight = Arc::clone(&trigger.inflight);
-    inflight.enter(&members);
+    inflight.enter(&wake.target, &members);
     let task = Arc::clone(&inflight);
     let handle = tokio::spawn(async move {
         let ok = wake_guarded(&ports, &wake).await;
@@ -144,6 +161,7 @@ pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
         // 저장소가 패닉해도 `in_flight`가 줄고 작업이 실행 중으로 굳지 않게 drop에서 나간다(4차 1번).
         let _leave = LeaveGuard {
             inflight: Arc::clone(&task),
+            target: wake.target.clone(),
             jobs,
         };
         settle_members(&ports, &task, members, ok).await;
@@ -157,12 +175,13 @@ pub(crate) fn launch(trigger: &Trigger, wake: Wake, members: Vec<Firing>) {
 /// 띄운 바깥 작업이 어떻게 끝나든(패닉 포함) 묶인 작업과 수를 풀어 주는 지킴이.
 struct LeaveGuard {
     inflight: Arc<InFlight>,
+    target: Target,
     jobs: Vec<JobId>,
 }
 
 impl Drop for LeaveGuard {
     fn drop(&mut self) {
-        self.inflight.leave(&self.jobs);
+        self.inflight.leave(&self.target, &self.jobs);
     }
 }
 

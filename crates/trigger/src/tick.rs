@@ -29,8 +29,12 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
     let now = trigger.now();
     let clock_jumped = trigger.clock_jumped(now, trigger.ports.monotonic.elapsed());
     if trigger.ports.stop.is_stopped() {
+        // 전체 정지는 새 매매를 모두 멈춘다(F4 7b2): 모인 자료 사건은 깨우지 않고 버린다.
+        lock(&trigger.data).drop_all();
         let delay = stopped_delay(trigger, now).await;
-        return Ok(report(TickOutcome::Stopped, clock_jumped, delay));
+        let mut stopped = report(TickOutcome::Stopped, clock_jumped, delay);
+        stopped.data_dropped = lock(&trigger.data).take_dropped();
+        return Ok(stopped);
     }
     let calendars = load_calendars(trigger, now).await?;
     // 시세는 쓰기 잠금 밖에서 받는다(그동안 끝난 깨우기의 반영이 막히지 않게, 3차 6번).
@@ -39,7 +43,7 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
     let _writes = trigger.inflight.writes.lock().await;
 
     let mut states = load_states(trigger).await?;
-    for id in job_ids(trigger) {
+    for id in &job_ids(trigger) {
         if !states.contains_key(id) {
             let state = JobState::new(id.clone(), Some(now));
             save(trigger, &mut states, state).await?;
@@ -54,8 +58,12 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
 
     let mut errors = Vec::new();
     let opened = open_all(trigger, &mut states, firings, now, &mut errors).await;
+    // 자료 깨우기는 영수증 없이 띄운다. 같은 대상이 실행 중이면 묶음에 남겨 다음 tick에 다시 본다.
+    let data_config = &trigger.config.data;
+    let busy = trigger.inflight.target_running(&data_config.target);
+    let data = lock(&trigger.data).collect(now, &calendars, data_config, busy);
     let mut wakes = Vec::new();
-    for (wake, members) in group(trigger, opened, anomalies) {
+    for (wake, members) in group(trigger, opened, anomalies, data) {
         wakes.push(wake.clone());
         launch(trigger, wake, members);
     }
@@ -69,7 +77,7 @@ pub(crate) async fn tick(trigger: &Trigger) -> Result<TickReport, Error> {
         wakes,
         alerts: trigger.inflight.take_alerts(),
         clock_jumped,
-        data_dropped: 0,
+        data_dropped: lock(&trigger.data).take_dropped(),
         next_delay,
     })
 }
@@ -151,16 +159,22 @@ async fn stopped_delay(trigger: &Trigger, now: DateTime<Utc>) -> Duration {
     }
 }
 
-fn job_ids(trigger: &Trigger) -> impl Iterator<Item = &JobId> {
-    let config = &trigger.config;
-    let schedules = config.schedules.iter().map(|job| &job.id);
-    schedules.chain(config.conditions.iter().map(|job| &job.id))
+fn job_ids(trigger: &Trigger) -> Vec<JobId> {
+    let schedules = trigger.config.schedules.iter().map(|job| job.id.clone());
+    schedules
+        .chain(trigger.conditions().into_iter().map(|job| job.id))
+        .collect()
 }
 
 async fn load_calendars(trigger: &Trigger, now: DateTime<Utc>) -> Result<Calendars, Error> {
-    let config = &trigger.config;
-    let mut markets: Vec<Market> = config.schedules.iter().map(|job| job.market).collect();
-    markets.extend(config.conditions.iter().map(|job| job.market));
+    let mut markets: Vec<Market> = trigger
+        .config
+        .schedules
+        .iter()
+        .map(|job| job.market)
+        .collect();
+    markets.extend(trigger.conditions().iter().map(|job| job.market));
+    markets.extend(lock(&trigger.data).markets());
     let mut calendars = HashMap::new();
     for market in markets {
         if calendars.contains_key(&market) {
@@ -261,7 +275,7 @@ async fn fetch_quotes(
     now: DateTime<Utc>,
 ) -> (HashMap<(Market, Symbol), Quote>, Vec<TriggerEvent>) {
     let mut by_market: Vec<(Market, Vec<Symbol>)> = Vec::new();
-    for job in &trigger.config.conditions {
+    for job in &trigger.conditions() {
         match by_market
             .iter_mut()
             .find(|(market, _)| *market == job.market)
@@ -318,7 +332,7 @@ async fn plan_conditions(
     now: DateTime<Utc>,
     firings: &mut Vec<Firing>,
 ) -> Result<(), Error> {
-    for job in &trigger.config.conditions {
+    for job in &trigger.conditions() {
         let Some(state) = states.get(&job.id) else {
             continue;
         };
@@ -372,6 +386,7 @@ fn group(
     trigger: &Trigger,
     firings: Vec<Firing>,
     anomalies: Vec<TriggerEvent>,
+    data: Vec<TriggerEvent>,
 ) -> Vec<(Wake, Vec<Firing>)> {
     let mut groups: Vec<(Wake, Vec<Firing>)> = Vec::new();
     let slot_for = |groups: &mut Vec<(Wake, Vec<Firing>)>, target: &Target| -> usize {
@@ -398,13 +413,17 @@ fn group(
         let index = slot_for(&mut groups, &trigger.config.stale_target);
         groups[index].0.events.extend(anomalies);
     }
+    if !data.is_empty() {
+        let index = slot_for(&mut groups, &trigger.config.data.target);
+        groups[index].0.events.extend(data);
+    }
     for (wake, _) in &mut groups {
         wake.reason = reason_of(&wake.events);
     }
     groups
 }
 
-/// 묶인 사건들의 이유: `Anomaly` > `CatchUp` > `Schedule` > `Price`.
+/// 묶인 사건들의 이유: `Anomaly` > `CatchUp` > `Schedule` > `Price` > `Data`.
 fn reason_of(events: &[TriggerEvent]) -> WakeReason {
     let rank = |event: &TriggerEvent| match event {
         TriggerEvent::StaleQuote { .. } => (0, WakeReason::Anomaly),
@@ -420,7 +439,8 @@ fn reason_of(events: &[TriggerEvent]) -> WakeReason {
         .map_or(WakeReason::Price, |(_, reason)| reason)
 }
 
-/// 다음 tick까지: 다음 회차 · 시세 간격(시세 조건이 있고 장이 열렸을 때) · 60초 가운데 가장 짧은 것.
+/// 다음 tick까지: 다음 회차 · 시세 간격(시세 조건이 있고 장이 열렸을 때) · 자료 묶음을 보낼 때 ·
+/// 60초 가운데 가장 짧은 것.
 fn next_delay(
     trigger: &Trigger,
     states: &States,
@@ -449,13 +469,23 @@ fn next_delay(
             delay = delay.min(until);
         }
     }
-    let quoting = trigger.config.conditions.iter().any(|job| {
+    let quoting = trigger.conditions().iter().any(|job| {
         calendars
             .get(&job.market)
             .is_some_and(|calendar| calendar.session_at(now).is_some())
     });
     if quoting {
         delay = delay.min(trigger.config.quote_interval);
+    }
+    let data_config = &trigger.config.data;
+    if let Some(due) = lock(&trigger.data).next_due(now, calendars, data_config) {
+        // 대상이 실행 중이면 끝나기를 시세 간격마다 본다(짧게 돌지 않게).
+        let due = if trigger.inflight.target_running(&data_config.target) {
+            due.max(trigger.config.quote_interval)
+        } else {
+            due
+        };
+        delay = delay.min(due);
     }
     if delay.is_zero() {
         MIN_REFIRE_GAP

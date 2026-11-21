@@ -10,6 +10,7 @@
 //! - 판단 · 저장소 직접 쓰기 · 바깥 HTTP 입구는 없다. 저장은 [`TriggerStore`], 깨우기는 [`Waker`] 포트다.
 //! - 시각은 [`Clock`](벽시계) · [`Monotonic`](단조 시계)으로만 받는다.
 
+mod batch;
 mod clock;
 mod condition;
 mod data;
