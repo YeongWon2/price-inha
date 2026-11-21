@@ -30,6 +30,7 @@ pub trait MarketAdapter: Send + Sync {
         &self,
         symbols: &[Symbol],
     ) -> Result<Option<Vec<(Symbol, TradingStatus)>>, MarketError> {
-        todo!()
+        let _ = symbols;
+        Ok(None)
     }
 }

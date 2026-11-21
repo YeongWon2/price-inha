@@ -18,7 +18,9 @@ pub enum Market {
 impl Market {
     /// 이 시장의 자산 종류. `Kr` · `Us`는 [`AssetClass::Stock`].
     pub fn asset_class(self) -> AssetClass {
-        todo!()
+        match self {
+            Market::Kr | Market::Us => AssetClass::Stock,
+        }
     }
 }
 

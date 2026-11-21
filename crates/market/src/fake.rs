@@ -17,6 +17,7 @@ struct State {
     quotes: HashMap<Symbol, Quote>,
     calendar: Option<MarketCalendar>,
     quote_failure: Option<MarketError>,
+    statuses: HashMap<Symbol, TradingStatus>,
 }
 
 /// 정해 준 시세와 달력을 돌려주는 어댑터. 바깥으로 요청을 보내지 않는다.
@@ -60,7 +61,7 @@ impl FakeAdapter {
     /// 종목의 거래 상태를 정한다. 하나라도 정하면 `trading_statuses`가 `Some`(정한 종목만,
     /// 넘긴 순서)을 준다. 하나도 정하지 않았으면 `None`이다.
     pub fn set_status(&self, symbol: Symbol, status: TradingStatus) {
-        todo!()
+        self.state().statuses.insert(symbol, status);
     }
 
     /// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도
@@ -93,7 +94,21 @@ impl MarketAdapter for FakeAdapter {
         &self,
         symbols: &[Symbol],
     ) -> Result<Option<Vec<(Symbol, TradingStatus)>>, MarketError> {
-        todo!()
+        let state = self.state();
+        if state.statuses.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(
+            symbols
+                .iter()
+                .filter_map(|symbol| {
+                    state
+                        .statuses
+                        .get(symbol)
+                        .map(|status| (symbol.clone(), *status))
+                })
+                .collect(),
+        ))
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
