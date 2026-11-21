@@ -100,7 +100,7 @@ pub(crate) fn percent_of(value: Decimal, pct: Decimal) -> Option<Decimal> {
 
 /// `수량 × 단가 ≤ 예산`인 가장 큰 0 이상 정수. 단가가 0 이하이거나 셈이 넘치면 0이다.
 /// 나눗셈의 반올림으로 한 주가 더 붙지 않게 곱해서 다시 확인한다.
-fn floor_within(budget: Decimal, unit: Decimal) -> Decimal {
+pub(crate) fn floor_within(budget: Decimal, unit: Decimal) -> Decimal {
     if unit <= Decimal::ZERO || budget <= Decimal::ZERO {
         return Decimal::ZERO;
     }

@@ -308,8 +308,11 @@ pub(crate) fn common_violations(
         found.push(Violation::QuoteSymbolMismatch);
     }
     let side: Side = draft.purpose.side();
-    // 손절 · 청산은 열린 익절 매도에 막히지 않는다(열린 주문 취소는 exec가 한다).
-    let exempt = matches!(draft.purpose, Purpose::StopLoss | Purpose::Liquidation);
+    // 손절 · 청산 · 팀장 판단 매도는 열린 익절 매도에 막히지 않는다(열린 주문 취소는 exec가 한다).
+    let exempt = matches!(
+        draft.purpose,
+        Purpose::StopLoss | Purpose::Liquidation | Purpose::TeamExit
+    );
     let duplicate = !exempt
         && ctx
             .open_orders

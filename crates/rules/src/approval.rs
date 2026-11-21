@@ -4,8 +4,14 @@
 //! 거쳐 [`Passed`]가 된다. 승인 소비(한 번만 · 지문 비교)는 approval 모듈이 하고, 여기서는
 //! 그 결과를 증표로 받아 다시 점검한다(이 모듈은 approval에 기대지 않는다).
 
+use pi_paper::{ApprovedOrder, Side};
+use rust_decimal::Decimal;
+
 use crate::check::evaluate;
-use crate::{BlockKind, Blocked, CheckContext, OrderDraft, Passed, PendingApproval, Reason};
+use crate::sizing::floor_within;
+use crate::{
+    BlockKind, Blocked, CheckContext, OrderDraft, Passed, PendingApproval, Reason, Violation,
+};
 
 /// 승인 소비 결과의 증표: 승인 번호 글자와 승인한 내용의 지문 글자.
 /// approval 모듈이 `consume`에 성공한 뒤 만든다. 글자는 비어 있으면 안 된다.
@@ -84,6 +90,40 @@ pub fn reduce_within_limit(
     draft: &OrderDraft,
     ctx: &CheckContext<'_>,
 ) -> Result<Passed, Blocked> {
-    let _ = (pending, draft, ctx);
-    todo!()
+    let done = evaluate(draft, ctx)?;
+    let waiting = pending.order();
+    let same = done.order.side == Side::Buy
+        && waiting.side == Side::Buy
+        && done.order.market == waiting.market
+        && done.order.symbol == waiting.symbol
+        && done.order.order_type == waiting.order_type;
+    if !same {
+        return Err(Blocked {
+            kind: BlockKind::ApprovalRejected,
+            reason: Reason::ApprovalMismatch,
+        });
+    }
+    // 한 주의 값: 지정가는 다시 셈한 값, 시장가(한도 안이라 점검을 지난 것)는 셈에 쓴 진입가.
+    let unit = match done.order.price {
+        Some(price) => price,
+        None if done.order.quantity > Decimal::ZERO => done.amount / done.order.quantity,
+        None => Decimal::ZERO,
+    };
+    let limit = done.limit.unwrap_or(Decimal::ZERO);
+    let quantity = done
+        .order
+        .quantity
+        .min(waiting.quantity)
+        .min(floor_within(limit, unit));
+    if quantity <= Decimal::ZERO {
+        return Err(Blocked {
+            kind: BlockKind::PrincipleOrRationale,
+            reason: Reason::Violations(vec![Violation::NothingWithinLimit]),
+        });
+    }
+    let order = ApprovedOrder {
+        quantity,
+        ..done.order
+    };
+    Ok(Passed::new(order, quantity * unit))
 }

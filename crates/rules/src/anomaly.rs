@@ -6,13 +6,16 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use pi_market::{MarketCalendar, Quote, StalePolicy, Symbol};
+use pi_market::{MarketCalendar, Quote, StalePolicy, Symbol, is_stale};
 
 use crate::{Health, TeamStatus};
 
 /// 이상 감지 멈춤을 푸는 데 필요한 정상 유지 시간의 기본값: 60초(추정, 결정 13번).
 /// 시세가 30초 늦음 경계를 오가며 멈춤과 풀림이 번갈아 생기지 않게 한다.
 pub const DEFAULT_RECOVERY_HOLD: Duration = Duration::from_secs(60);
+
+/// 늦은 시세 기준의 상한(P11, 2차 2번과 같다): 받은 설정이 더 길어도 30초로 막는다.
+const STALE_CAP: Duration = Duration::from_secs(30);
 
 /// 이상 감지 멈춤을 푸는 기준(설정값).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +27,9 @@ pub struct RecoveryPolicy {
 impl Default for RecoveryPolicy {
     /// [`DEFAULT_RECOVERY_HOLD`](60초).
     fn default() -> Self {
-        todo!()
+        Self {
+            hold: DEFAULT_RECOVERY_HOLD,
+        }
     }
 }
 
@@ -62,8 +67,18 @@ pub enum HealthTransition {
 /// 장이 열려 있는데 시세가 `None`, 계좌 불일치, API 오류, 자료 이상.
 /// 장이 닫힌 동안의 오래된 시세는 정상이고, 달력이 지금을 덮지 않으면 늦은 것이다.
 pub fn is_abnormal(w: &HealthWatch<'_>) -> bool {
-    let _ = w;
-    todo!()
+    if !w.health.account_in_sync || w.health.api_error || w.health.data_anomaly {
+        return true;
+    }
+    let policy = StalePolicy {
+        max_age: w.stale.max_age.min(STALE_CAP),
+    };
+    // 달력이 지금을 덮지 않으면 장이 열렸는지 모른다 → 비정상(is_stale과 같은 읽기).
+    let open = !w.calendar.covers(w.now) || w.calendar.session_at(w.now).is_some();
+    w.quotes.iter().any(|(_, quote)| match quote {
+        Some(quote) => is_stale(quote, w.calendar, w.now, &policy),
+        None => open,
+    })
 }
 
 /// 팀 상태를 옮겨야 하는지 본다.
@@ -75,6 +90,19 @@ pub fn is_abnormal(w: &HealthWatch<'_>) -> bool {
 /// - `FullStop`은 정상이어도 풀지 않는다(전체 정지는 사람만 푼다, E9 · V42).
 /// - 그 밖은 `None`.
 pub fn evaluate_health(w: &HealthWatch<'_>) -> Option<HealthTransition> {
-    let _ = w;
-    todo!()
+    match w.team {
+        TeamStatus::Operating | TeamStatus::Resting => {
+            is_abnormal(w).then_some(HealthTransition::AnomalyHalt)
+        }
+        TeamStatus::AnomalyHalt => {
+            if is_abnormal(w) {
+                return None;
+            }
+            let since = w.healthy_since?;
+            // 시계가 어긋나 정상 시각이 지금보다 뒤면 머문 시간을 잴 수 없다 → 풀지 않는다.
+            let held = w.now.signed_duration_since(since).to_std().ok()?;
+            (held >= w.recovery.hold).then_some(HealthTransition::Recovered)
+        }
+        TeamStatus::DailyLimitHalt | TeamStatus::FullStop => None,
+    }
 }

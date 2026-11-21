@@ -161,9 +161,9 @@ impl Violation {
             | Violation::OverMaxOrderAmount
             | Violation::TradeCountReached
             | Violation::ApiLimitReached
-            | Violation::MarketBuyOverAutoLimit => Principle::P12,
+            | Violation::MarketBuyOverAutoLimit
+            | Violation::NothingWithinLimit => Principle::P12,
             Violation::NoPositiveEdge => Principle::P13,
-            Violation::NothingWithinLimit => todo!(),
         }
     }
 
@@ -206,7 +206,9 @@ impl Violation {
                 "시장가 사기가 자동 주문 금액 한도를 넘는다(승인이 필요한 사기는 지정가만)"
             }
             Violation::NoPositiveEdge => "비용 · 세금 · 미끄러짐을 뺀 기대값이 양수가 아니다",
-            Violation::NothingWithinLimit => todo!(),
+            Violation::NothingWithinLimit => {
+                "답 없는 사기를 자동 주문 금액 한도 안으로 줄이면 한 주도 살 수 없다"
+            }
         };
         text.to_string()
     }
@@ -290,7 +292,10 @@ impl Blocked {
                 format!("판단됨 상태가 아닌 매매의 주문 안은 받지 않는다(E20, 지금 {stage:?})")
             }
             Reason::TeamNotOperating(team) => {
-                format!("투자 팀이 운용 중이 아니라 사는 주문을 받지 않는다(E31, 지금 {team:?})")
+                format!(
+                    "투자 팀 상태 때문에 받지 않는다: 운용 중이 아니면 사는 주문, 전체 정지면 \
+                     걸어 둔 손절 · 청산이 아닌 파는 주문도 받지 않는다(E31 · E24, 지금 {team:?})"
+                )
             }
             Reason::MissingRationale(fields) => {
                 let codes: Vec<&str> = self

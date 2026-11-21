@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use crate::screen::{common_violations, missing_fields, plan_buy, plan_sell};
 use crate::sizing::percent_of;
 use crate::{
-    BlockKind, Blocked, CheckContext, OrderDraft, Outcome, Passed, PendingApproval, Reason,
-    TeamStatus, TradeStage, Violation,
+    BlockKind, Blocked, CheckContext, OrderDraft, Outcome, Passed, PendingApproval, Purpose,
+    Reason, TeamStatus, TradeStage, Violation,
 };
 
 /// 주문 안을 점검한다(C9). 순서는 FN1을 따르고, 앞에서 막히면 뒤는 보지 않는다.
@@ -15,6 +15,8 @@ use crate::{
 /// 1. 판단 상태: [`crate::TradeStage::Judged`]가 아니면 막힘(E20, [`crate::Reason::NotJudged`]).
 /// 2. 팀 상태: [`crate::TeamStatus::Operating`]이 아니면 사는 주문을 막는다(E31,
 ///    [`crate::Reason::TeamNotOperating`]). 손절 · 청산은 어떤 멈춤에서도 지나간다(E34).
+///    전체 정지(E24 · F4 7b2)에서는 손절 · 청산이 아닌 파는 주문(익절 · 팀장 판단 매도)도 같은
+///    막힘이다(4차).
 /// 3. 근거(P9 · E10): 빠진 칸이 있으면 [`crate::Reason::MissingRationale`].
 /// 4. 원칙 P1~P13과 주문 직전 점검 P12(E11 · E18): 어긴 것을 모두 모아
 ///    [`crate::Reason::Violations`]. 사는 주문에만 보는 것: P1 · P2(손절 < 진입) · P3 · P4 ·
@@ -67,6 +69,11 @@ pub(crate) fn evaluate(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Result<Eva
     }
     let buy = draft.purpose.is_buy();
     if buy && ctx.team != TeamStatus::Operating {
+        return Err(blocked(Reason::TeamNotOperating(ctx.team)));
+    }
+    // 전체 정지 중에는 걸어 둔 손절 · 청산만 판다(F4 7b2 · E24, 결정 2026-11-21 12번).
+    let armed_exit = matches!(draft.purpose, Purpose::StopLoss | Purpose::Liquidation);
+    if !buy && ctx.team == TeamStatus::FullStop && !armed_exit {
         return Err(blocked(Reason::TeamNotOperating(ctx.team)));
     }
     let missing = missing_fields(&draft.rationale);

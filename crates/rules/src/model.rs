@@ -270,8 +270,24 @@ impl SymbolStatus {
     /// - `Halted` → `{ vi: None, halted: Some(true) }`.
     /// - `Unknown`과 앞으로 더해질 모르는 변형 → `{ vi: None, halted: None }`(모르면 막는다).
     pub fn from_trading_status(status: TradingStatus) -> SymbolStatus {
-        let _ = status;
-        todo!()
+        match status {
+            TradingStatus::Normal => SymbolStatus {
+                vi: Some(false),
+                halted: Some(false),
+            },
+            TradingStatus::Vi => SymbolStatus {
+                vi: Some(true),
+                halted: None,
+            },
+            TradingStatus::Halted => SymbolStatus {
+                vi: None,
+                halted: Some(true),
+            },
+            _ => SymbolStatus {
+                vi: None,
+                halted: None,
+            },
+        }
     }
 }
 
