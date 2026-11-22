@@ -257,6 +257,7 @@ impl Trading {
             team_turn: Mutex::new(()),
             watch: Mutex::new(watch),
             due_turn: tokio::sync::Mutex::new(()),
+            held_back: Mutex::new(HashMap::new()),
             publisher: OnceLock::new(),
             hooks: OnceLock::new(),
         });

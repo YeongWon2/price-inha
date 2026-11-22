@@ -84,6 +84,30 @@ fn roles(model: &str) -> Vec<RoleConfig> {
         .collect()
 }
 
+/// 자료 어댑터: 출처 주소 · 키로 만든 `DataClient`를 (10b 보강 1번) DART 하루 상한으로 감싼다(주기 가져오기 ·
+/// 공시 보기 · 논의가 함께 센다).
+fn data_adapter(
+    wiring: &TeamWiring,
+    keys: Arc<dyn KeySource>,
+    shared: &Arc<Shared>,
+    store: &Store,
+    clock: &Arc<dyn Clock>,
+) -> Result<Arc<dyn DataAdapter>, TeamError> {
+    let data_clock = Arc::clone(shared) as Arc<dyn pi_data::Clock>;
+    let client = DataClient::new(wiring.data.clone(), keys, data_clock)
+        .map_err(|error| TeamError::Agent(error.to_string()))?;
+    let quota = super::quota::DailyQuota::new(
+        store.clone(),
+        super::quota::DART_USED_KEY,
+        wiring.dart_daily_limit,
+    );
+    Ok(Arc::new(super::quota::DartQuota::new(
+        Arc::new(client),
+        quota,
+        Arc::clone(clock),
+    )))
+}
+
 impl Crew {
     /// 만든다. 시연 모드면 가짜 AI를, 아니면 고른 AI 연결을 쓴다(둘 다 가리는 공급자로 감싼다).
     pub(crate) fn open(parts: CrewParts) -> Result<Arc<Crew>, TeamError> {
@@ -130,9 +154,7 @@ impl Crew {
             Arc::clone(&shared) as Arc<dyn pi_data::Clock>,
         ));
         let keys: Arc<dyn KeySource> = secrets;
-        let data_clock = Arc::clone(&shared) as Arc<dyn pi_data::Clock>;
-        let client = DataClient::new(wiring.data.clone(), keys, data_clock)
-            .map_err(|error| TeamError::Agent(error.to_string()))?;
+        let data = data_adapter(&wiring, keys, &shared, &store, &clock)?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
         let crew = Arc::new(Crew {
             journal: Journal::new(store.clone()),
@@ -143,7 +165,7 @@ impl Crew {
             team,
             roles,
             tools,
-            data: Arc::new(client) as Arc<dyn DataAdapter>,
+            data,
             wiring,
             demo,
             redactor,

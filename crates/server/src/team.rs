@@ -17,6 +17,7 @@
 //! - 다른 모듈의 로직을 다시 만들지 않는다(조립만 한다). 시각은 [`crate::Wiring::clock`]에서만 읽는다.
 
 mod build;
+mod changes;
 mod day;
 mod demo_ai;
 mod facts;
@@ -25,8 +26,10 @@ mod http;
 mod link;
 mod news;
 mod poll;
+mod quota;
 mod review;
 mod scout;
+mod seen;
 mod talk;
 mod tools;
 mod wake;

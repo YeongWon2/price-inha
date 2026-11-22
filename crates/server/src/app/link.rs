@@ -105,6 +105,22 @@ fn data_halt_hook(linked: &Arc<Linked>) -> crate::trading::DataHaltHook {
     })
 }
 
+/// (10b 보강 5번) 손절을 다시 내지 못하는 알림(N5). 종목 · 수량만 싣는다(까닭 글은 싣지 않는다).
+fn stuck_stop_hook(linked: &Arc<Linked>) -> crate::trading::StuckStopHook {
+    let linked = Arc::clone(linked);
+    Box::new(move |symbol, quantity| {
+        let body = format!(
+            "손절을 다시 내지 못하고 있습니다: {symbol} {quantity}주. 팀 상태와 장 시간을 확인하세요"
+        );
+        linked.notice_later(
+            NoticeKind::Anomaly,
+            "손절을 다시 내지 못하고 있습니다".to_string(),
+            body,
+            None,
+        );
+    })
+}
+
 /// 하루 마감 뒤: 백업(있으면) → 하루 정리 알림(V48 · V12 · E15).
 fn close_hook(
     linked: &Arc<Linked>,
@@ -161,6 +177,7 @@ pub(super) fn attach(
         approval: approval_hook(linked, Arc::downgrade(trading)),
         closed: close_hook(linked, Arc::downgrade(trading), crew.map(Arc::downgrade)),
         data_halt: data_halt_hook(linked),
+        stuck_stop: stuck_stop_hook(linked),
     });
 }
 

@@ -7,9 +7,9 @@
 //! - 네이버 하루 요청 상한(`TeamWiring::news_daily_limit`)을 논의 · 주기 가져오기가 함께 센다([`NewsDesk::take`]).
 //!   센 수는 저장소에 남겨 다시 켜도 그날 수를 잇는다. 키는 머리글로만 보내고 주소에 싣지 않는다(`pi_data`).
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use pi_agent::DataItem;
 use pi_data::{
     NAVER_NEWS_KEYS, NaverNews, NaverNewsConfig, NewsError, NewsFetched, NewsItem, NewsKeySource,
@@ -17,6 +17,9 @@ use pi_data::{
 };
 use pi_secrets::SecretStore;
 use pi_store::{FactId, NewFact, Store, UnixMillis};
+
+use super::quota::DailyQuota;
+pub(super) use super::quota::kst_date;
 
 /// 한 번에 받을 기사 수.
 const NEWS_ITEMS: u16 = 20;
@@ -55,18 +58,12 @@ pub(crate) struct NewsDesk {
     keys: Arc<SecretStore>,
     store: Store,
     base_url: String,
-    limit: u32,
-    /// (날짜, 그날 쓴 수). 처음 쓸 때 저장소에서 읽는다.
-    used: Mutex<Option<(NaiveDate, u32)>>,
+    /// 하루 요청 상한(논의 · 주기 가져오기가 함께 센다).
+    quota: DailyQuota,
 }
 
 fn millis(at: DateTime<Utc>) -> UnixMillis {
     UnixMillis(at.timestamp_millis())
-}
-
-/// 한국 날짜(하루 상한은 한국 날짜로 센다).
-pub(super) fn kst_date(at: DateTime<Utc>) -> NaiveDate {
-    (at + chrono::Duration::hours(9)).date_naive()
 }
 
 impl NewsDesk {
@@ -88,10 +85,9 @@ impl NewsDesk {
         NewsDesk {
             registry,
             keys,
+            quota: DailyQuota::new(store.clone(), USED_KEY, limit),
             store,
             base_url,
-            limit,
-            used: Mutex::new(None),
         }
     }
 
@@ -102,41 +98,7 @@ impl NewsDesk {
 
     /// 오늘(한국 날짜) 요청 하나를 쓴다. 상한에 닿았으면 거짓. 센 수는 저장소에 남긴다.
     pub(super) fn take(&self, now: DateTime<Utc>) -> bool {
-        let today = kst_date(now);
-        let mut used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
-        let count = match *used {
-            Some((date, count)) if date == today => count,
-            Some(_) => 0,
-            None => self.saved_count(today),
-        };
-        if count >= self.limit {
-            *used = Some((today, count));
-            return false;
-        }
-        let count = count + 1;
-        *used = Some((today, count));
-        let text = format!("{} {count}", today.format("%Y-%m-%d"));
-        if let Err(error) = self.store.set_knowledge_meta(USED_KEY, &text) {
-            tracing::warn!(%error, "뉴스 요청 수를 남기지 못했습니다");
-        }
-        true
-    }
-
-    /// 저장소에 남긴 그날의 수(다른 날이거나 없으면 0).
-    fn saved_count(&self, today: NaiveDate) -> u32 {
-        let saved = self.store.knowledge_meta(USED_KEY).ok().flatten();
-        let Some(saved) = saved else {
-            return 0;
-        };
-        let mut parts = saved.split(' ');
-        let date = parts
-            .next()
-            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-        let count = parts.next().and_then(|c| c.parse::<u32>().ok());
-        match (date, count) {
-            (Some(date), Some(count)) if date == today => count,
-            _ => 0,
-        }
+        self.quota.take(now)
     }
 
     /// 그 종목의 뉴스를 찾는다(최신순). 키가 없거나 상한이면 묻지 않는다.

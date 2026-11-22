@@ -95,34 +95,61 @@ pub(super) fn disclosures(
     })
 }
 
+/// 그 종목의 재무 요청(지난해 사업보고서 · 연결). 고유번호가 없으면 없음.
+pub(super) fn financials(
+    wiring: &TeamWiring,
+    symbol: &str,
+    today: NaiveDate,
+) -> Option<FactRequest> {
+    let corp = wiring
+        .corp_codes
+        .get(&pi_market::Symbol::new(symbol))?
+        .clone();
+    let year = u16::try_from(today.year() - 1).unwrap_or(0);
+    Some(FactRequest::Financials {
+        corp,
+        year,
+        report: ReportCode::Annual,
+        fs: FsDiv::Consolidated,
+    })
+}
+
+/// 종목이 없는 거시 요청들: 국내 금리 · 환율(ECOS), 미국 금리(FRED).
+pub(super) fn macros(wiring: &TeamWiring, today: NaiveDate) -> [FactRequest; 3] {
+    [
+        FactRequest::KoreaRate(dated(&wiring.korea_rate, today)),
+        FactRequest::KoreaFx(dated(&wiring.korea_fx, today)),
+        FactRequest::UsRate {
+            series_id: US_RATE_SERIES.to_string(),
+            from: today - Days::days(US_RATE_DAYS),
+            to: today,
+        },
+    ]
+}
+
 /// 종목 하나의 판단 자료 요청들. 고유번호가 없으면 그 자리는 `Err(종류)`(받을 수 없음)이다.
 fn requests(
     wiring: &TeamWiring,
     symbol: &str,
     today: NaiveDate,
 ) -> Vec<Result<FactRequest, FactKind>> {
-    let corp = wiring
-        .corp_codes
-        .get(&pi_market::Symbol::new(symbol))
-        .cloned();
-    let year = u16::try_from(today.year() - 1).unwrap_or(0);
-    let financials = corp.map(|corp| FactRequest::Financials {
-        corp,
-        year,
-        report: ReportCode::Annual,
-        fs: FsDiv::Consolidated,
-    });
-    vec![
+    let mut list = vec![
         disclosures(wiring, symbol, today).ok_or(FactKind::Disclosure),
-        financials.ok_or(FactKind::Financials),
-        Ok(FactRequest::KoreaRate(dated(&wiring.korea_rate, today))),
-        Ok(FactRequest::KoreaFx(dated(&wiring.korea_fx, today))),
-        Ok(FactRequest::UsRate {
-            series_id: US_RATE_SERIES.to_string(),
-            from: today - Days::days(US_RATE_DAYS),
-            to: today,
-        }),
-    ]
+        financials(wiring, symbol, today).ok_or(FactKind::Financials),
+    ];
+    list.extend(macros(wiring, today).into_iter().map(Ok));
+    list
+}
+
+/// 기간 안에 공시가 없을 때의 자료 내용(사용자 결정 18).
+const NO_DISCLOSURE: &str = "공시 없음";
+
+/// 하루 상한에 닿아 묻지 않은 자료의 글.
+fn limited(kind: FactKind) -> &'static str {
+    match kind {
+        FactKind::Financials => "재무 없음(한도)",
+        _ => "공시 없음(한도)",
+    }
 }
 
 /// 받은 자료 하나를 저장할 모양으로.
@@ -181,6 +208,19 @@ pub(super) async fn gather(
         let (kind, fetched) = match request {
             Ok(request) => {
                 let fetched = adapter.fetch(&request).await;
+                // (10b 보강 1번) DART 하루 상한에 닿아 묻지 않은 것은 "없음(한도)"이고 자료 이상으로 세지 않는다.
+                if matches!(&fetched, Err(error) if super::quota::over_limit(error)) {
+                    gathered.items.push(DataItem {
+                        name: format!(
+                            "{} · {}",
+                            kind_name(request.kind()),
+                            limited(request.kind())
+                        ),
+                        content: None,
+                        known_at: millis(now),
+                    });
+                    continue;
+                }
                 let no_key = matches!(fetched, Err(DataError::NoKey { .. }));
                 // (10b 9번) FRED 키는 새로 더한 선택 키다: 키가 없으면 자료에 넣지 않는다(받지 못한 자료로 세어
                 // 논의를 지켜보기로 바꾸지 않는다).
@@ -211,6 +251,12 @@ pub(super) async fn gather(
                     known_at: millis(known),
                 });
             }
+            // (사용자 결정 18) 기간 안에 공시가 없다(DART "조회된 데이터 없음" 013)는 것도 자료다: 빈 자료가 아니다.
+            Ok(Fetched::Missing(FactKind::Disclosure)) => gathered.items.push(DataItem {
+                name: name.to_string(),
+                content: Some(NO_DISCLOSURE.to_string()),
+                known_at: millis(now),
+            }),
             _ => gathered.items.push(DataItem {
                 name: name.to_string(),
                 content: None,
@@ -219,4 +265,62 @@ pub(super) async fn gather(
         }
     }
     Ok(gathered)
+}
+
+#[cfg(test)]
+mod tests {
+    use pi_data::{FakeDataAdapter, SourceName};
+
+    use super::*;
+
+    async fn disclosure_item(fake: &FakeDataAdapter) -> DataItem {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("facts.db")).unwrap();
+        let wiring = TeamWiring::official();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let now = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 11, 16, 1, 0, 0).unwrap();
+        let gathered = gather(fake, &store, &wiring, "005930", (today, now))
+            .await
+            .unwrap();
+        gathered
+            .items
+            .into_iter()
+            .find(|item| item.name.starts_with("disclosure"))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn 기간_안에_공시가_없으면_공시_없음_자료다() {
+        let fake = FakeDataAdapter::new();
+        fake.set(
+            FactKind::Disclosure,
+            Ok(Fetched::Missing(FactKind::Disclosure)),
+        );
+        let item = disclosure_item(&fake).await;
+        assert_eq!(item.content.as_deref(), Some(NO_DISCLOSURE));
+    }
+
+    #[tokio::test]
+    async fn 공시_요청이_실패하면_빈_자료다() {
+        let fake = FakeDataAdapter::new();
+        let failed = DataError::Unreachable {
+            origin: SourceName::Dart,
+            url: "http://127.0.0.1/api/list.json".to_string(),
+            detail: "connect".to_string(),
+        };
+        fake.set(FactKind::Disclosure, Err(failed));
+        let item = disclosure_item(&fake).await;
+        assert!(item.content.is_none());
+    }
+
+    #[tokio::test]
+    async fn 하루_상한이면_공시_없음_한도로_적고_빈_자료로_둔다() {
+        let fake = FakeDataAdapter::new();
+        let limited = DataError::RateLimited {
+            origin: SourceName::Dart,
+        };
+        fake.set(FactKind::Disclosure, Err(limited));
+        let item = disclosure_item(&fake).await;
+        assert!(item.name.contains("공시 없음(한도)") && item.content.is_none());
+    }
 }

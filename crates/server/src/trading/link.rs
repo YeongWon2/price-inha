@@ -19,11 +19,15 @@ pub(crate) type CloseHook = Box<dyn Fn(NaiveDate) + Send + Sync>;
 /// (10b 0번 라) 자료 이상으로 이상 감지 멈춤이 됐을 때 부른다(묶기는 주문 길이 한다). 오래 붙잡지 않는다.
 pub(crate) type DataHaltHook = Box<dyn Fn() + Send + Sync>;
 
+/// (10b 보강 5번) 손절 대기가 막힌 채 오래 이어질 때 부른다(종목, 수량 — 까닭 글은 싣지 않는다). 오래 붙잡지 않는다.
+pub(crate) type StuckStopHook = Box<dyn Fn(String, String) + Send + Sync>;
+
 /// 주문 길이 알리는 자리.
 pub(crate) struct Hooks {
     pub(crate) approval: ApprovalHook,
     pub(crate) closed: CloseHook,
     pub(crate) data_halt: DataHaltHook,
+    pub(crate) stuck_stop: StuckStopHook,
 }
 
 /// 승인 결과의 글자.
@@ -78,6 +82,12 @@ impl Trading {
     pub(super) fn announce_data_halt(&self) {
         if let Some(hooks) = self.hooks.get() {
             (hooks.data_halt)();
+        }
+    }
+
+    pub(super) fn announce_stuck_stop(&self, symbol: &str, quantity: &str) {
+        if let Some(hooks) = self.hooks.get() {
+            (hooks.stuck_stop)(symbol.to_string(), quantity.to_string());
         }
     }
 

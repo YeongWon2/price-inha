@@ -52,7 +52,9 @@ pub(crate) use answer::reject_word;
 pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use chosen::CHOOSE_TEMPLATE_NOTICE;
 pub(crate) use http::routes;
-pub(crate) use link::{ApprovalHook, CloseHook, DataHaltHook, Hooks, approval_status_word};
+pub(crate) use link::{
+    ApprovalHook, CloseHook, DataHaltHook, Hooks, StuckStopHook, approval_status_word,
+};
 pub(crate) use templates::change_of;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
@@ -235,6 +237,8 @@ pub struct Trading {
     watch: Mutex<Watch>,
     /// (10차 10a) 답 없는 승인 요청의 처리를 한 줄로 세운다.
     due_turn: tokio::sync::Mutex<()>,
+    /// (10b 보강 5번) 막힌 다시 내기의 물러서기(매매 번호 → 다음에 볼 때 · 까닭). 기다리는 대기만큼만 둔다.
+    held_back: Mutex<HashMap<TradeId, retry::HeldBack>>,
     /// 저장되는 이벤트를 내보내는 손잡이(접속 관문이 뜬 뒤에 붙는다).
     publisher: OnceLock<Publisher>,
     /// (W5 3차) 승인 요청 · 하루 마감을 알리는 자리(3차 조립이 붙인다).

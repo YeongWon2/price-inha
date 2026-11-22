@@ -49,6 +49,8 @@ impl Crew {
         let found = match self.data.fetch(&request).await {
             Ok(Fetched::Facts(found)) => found,
             Ok(Fetched::Missing(_)) => return Ok(None),
+            // 하루 상한에 닿은 것은 "공시 없음(한도)"이다(DART 어댑터가 그날 한 번 남긴다).
+            Err(error) if super::quota::over_limit(&error) => return Ok(None),
             Err(error) => {
                 tracing::warn!(%error, "공시를 받지 못했다");
                 return Ok(None);
