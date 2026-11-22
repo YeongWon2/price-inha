@@ -182,7 +182,11 @@ pub(crate) fn swing() -> RiskParams {
         },
         chase_limit_pct: Some(pct(2)),
         max_trades_per_day: 3,
-        triggers: vec![TriggerKind::Quote, TriggerKind::Disclosure],
+        triggers: vec![
+            TriggerKind::Quote,
+            TriggerKind::Disclosure,
+            TriggerKind::News,
+        ],
         rebalance: None,
         approval_wait: approval_wait(),
         unfilled_cancel: UnfilledCancel::After(Duration::from_secs(600)),
