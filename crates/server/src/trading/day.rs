@@ -120,6 +120,8 @@ impl Trading {
         self.reset_day_start(&books, date)?;
         self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
             .await?;
+        // 세션이 시작되면 손절 · 청산의 물러서기를 비워 곧바로 다시 낸다(10b 보강 2 1번 다).
+        self.forget_urgent_backoff(now);
         let _turn = lock(&self.team_turn);
         if self.store.team_state()? == TeamState::DailyLimitHalt {
             let cause = TeamCause::NextTradingDayStart;

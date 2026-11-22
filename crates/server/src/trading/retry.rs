@@ -9,10 +9,14 @@
 //!   막힐 때마다 두 배로(최대 10분) 늘린다. 같은 까닭의 기록은 처음 한 번만 남긴다. 손절 대기가 막힌 때부터
 //!   10분 넘게 이어지면 사용자에게 한 번 알린다("손절을 다시 내지 못하고 있습니다" — 종목 · 수량만, 까닭 글은
 //!   싣지 않는다). 다시 냈거나 대기가 사라지면 물러서기를 지운다(기억은 기다리는 대기만큼만 둔다).
+//! - (10b 보강 2 1번) 손절 · 청산의 물러서기는 손절을 늦추지 않는다: (가) 장 밖(`MarketClosed`) · 달력 없음으로
+//!   막히면 다음에 볼 때를 다음 세션 시작 시각 이하로 자른다(그 시각을 모르면 5초 뒤), (나) 그 밖의 까닭으로 막히면
+//!   간격 상한이 5초다(익절 · 팀장 팔기는 10분 그대로), (다) 하루가 시작되면 손절 · 청산의 물러서기 간격을 비운다
+//!   (같은 까닭 기록 한 번 · 10분 알림을 위한 까닭 · 처음 막힌 때는 둔다).
 
 use chrono::{DateTime, Duration, Utc};
 use pi_exec::{SellPurpose, SellRetry};
-use pi_rules::{Outcome, Purpose, SymbolStatus};
+use pi_rules::{Blocked, Outcome, Purpose, Reason, SymbolStatus, Violation};
 
 use super::base::lock;
 use super::{OrderRequest, Trading};
@@ -22,6 +26,8 @@ use crate::TradingError;
 const BACKOFF_FIRST_SECONDS: i64 = 1;
 /// 막힌 다시 내기의 물러서기 간격 상한(초, 10분).
 const BACKOFF_MAX_SECONDS: i64 = 600;
+/// 손절 · 청산 다시 내기의 물러서기 간격 상한(초, 10b 보강 2 1번 나).
+const URGENT_BACKOFF_MAX_SECONDS: i64 = 5;
 /// 손절 대기가 이만큼(초) 넘게 막혀 있으면 알린다(10분).
 const STUCK_STOP_SECONDS: i64 = 600;
 
@@ -43,17 +49,50 @@ pub(super) struct HeldBack {
 enum Tried {
     /// 다시 냈다(또는 아직 때가 아니라 실행기가 받지 않았다).
     Done,
-    /// 막혔다(까닭).
-    Blocked(String),
+    /// 막혔다.
+    Blocked(Hold),
 }
 
-/// 다음 물러서기 간격(초): 처음은 1초, 그 뒤로 두 배씩, 최대 10분.
-fn next_interval(current: i64) -> i64 {
-    if current <= 0 {
-        BACKOFF_FIRST_SECONDS
-    } else {
-        current.saturating_mul(2).min(BACKOFF_MAX_SECONDS)
+/// 막힌 까닭.
+struct Hold {
+    /// 사람이 읽는 까닭.
+    reason: String,
+    /// 장 밖(`MarketClosed`) · 달력 없음으로 막혔나.
+    closed: bool,
+}
+
+impl Hold {
+    fn other(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            closed: false,
+        }
     }
+
+    fn of(blocked: &Blocked) -> Self {
+        let closed = matches!(&blocked.reason, Reason::Violations(list) if list.contains(&Violation::MarketClosed));
+        Self {
+            reason: blocked.detail(),
+            closed,
+        }
+    }
+}
+
+/// 다음 물러서기 간격(초): 처음은 1초, 그 뒤로 두 배씩, 최대 `max`초.
+fn next_interval(current: i64, max: i64) -> i64 {
+    if current <= 0 {
+        BACKOFF_FIRST_SECONDS.min(max)
+    } else {
+        current.saturating_mul(2).min(max)
+    }
+}
+
+/// 손절 · 청산인가(물러서기가 손절을 늦추면 안 되는 파는 주문).
+fn urgent(purpose: SellPurpose) -> bool {
+    matches!(
+        purpose_of(purpose),
+        Purpose::StopLoss | Purpose::Liquidation
+    )
 }
 
 /// 실행기의 파는 목적 → 규칙 엔진의 목적.
@@ -88,7 +127,7 @@ impl Trading {
                 Ok(Tried::Done) => {
                     lock(&self.held_back).remove(&trade);
                 }
-                Ok(Tried::Blocked(reason)) => self.hold_back(&pending, reason, now),
+                Ok(Tried::Blocked(hold)) => self.hold_back(&pending, hold, now),
                 Err(error) => {
                     tracing::warn!(%error, trade = trade.0, "실패한 파는 주문을 다시 내지 못했습니다");
                 }
@@ -96,9 +135,23 @@ impl Trading {
         }
     }
 
-    /// 막힌 대기를 물러서게 한다: 간격을 두 배로(최대 10분), 새 까닭이면 한 번 남기고, 손절이 오래 막혔으면 알린다.
-    fn hold_back(&self, pending: &SellRetry, reason: String, now: DateTime<Utc>) {
+    /// 막힌 대기를 물러서게 한다: 간격을 두 배로(최대 10분, 손절 · 청산은 5초), 새 까닭이면 한 번 남기고,
+    /// 손절이 오래 막혔으면 알린다. 손절 · 청산이 장 밖 · 달력 없음으로 막혔으면 다음 세션 시작 시각보다 늦게 보지 않는다.
+    fn hold_back(&self, pending: &SellRetry, hold: Hold, now: DateTime<Utc>) {
         let trade = pending.trade_id;
+        let Hold { reason, closed } = hold;
+        let urgent = urgent(pending.purpose);
+        let (max, latest) = match (urgent, closed) {
+            (false, _) => (BACKOFF_MAX_SECONDS, None),
+            (true, false) => (URGENT_BACKOFF_MAX_SECONDS, None),
+            (true, true) => {
+                let soon = now + Duration::seconds(URGENT_BACKOFF_MAX_SECONDS);
+                (
+                    BACKOFF_MAX_SECONDS,
+                    Some(self.next_session_start(now).unwrap_or(soon)),
+                )
+            }
+        };
         let (new_reason, tell) = {
             let mut held = lock(&self.held_back);
             let entry = held.entry(trade).or_insert_with(|| HeldBack {
@@ -108,8 +161,9 @@ impl Trading {
                 since: now,
                 told: false,
             });
-            entry.interval = next_interval(entry.interval);
-            entry.next_at = now + Duration::seconds(entry.interval);
+            entry.interval = next_interval(entry.interval, max);
+            let next_at = now + Duration::seconds(entry.interval);
+            entry.next_at = latest.map_or(next_at, |latest| next_at.min(latest));
             let new_reason = entry.reason != reason;
             if new_reason {
                 entry.reason = reason.clone();
@@ -133,6 +187,35 @@ impl Trading {
         }
     }
 
+    /// 지금 뒤로 가장 먼저 열리는 세션의 시작 시각(오늘 · 다음 영업일). 달력을 모르면 없음.
+    fn next_session_start(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let calendar = self.calendar(now)?;
+        [&calendar.today, &calendar.next_business_day]
+            .into_iter()
+            .flat_map(|day| day.sessions.iter())
+            .map(|session| session.start)
+            .filter(|start| *start > now)
+            .min()
+    }
+
+    /// (10b 보강 2 1번 다) 하루가 시작되면 손절 · 청산의 물러서기 간격을 비워 곧바로 다시 보게 한다.
+    pub(super) fn forget_urgent_backoff(&self, now: DateTime<Utc>) {
+        let urgent: Vec<_> = self
+            .executor
+            .pending_sells()
+            .into_iter()
+            .filter(|pending| urgent(pending.purpose))
+            .map(|pending| pending.trade_id)
+            .collect();
+        let mut held = lock(&self.held_back);
+        for trade in urgent {
+            if let Some(entry) = held.get_mut(&trade) {
+                entry.interval = 0;
+                entry.next_at = now;
+            }
+        }
+    }
+
     /// 그 자리의 시세 · 장부 · 팀 상태로 다시 점검하고, 지나면 다시 낸다.
     async fn retry_one(
         &self,
@@ -141,21 +224,21 @@ impl Trading {
     ) -> Result<Tried, TradingError> {
         let purpose = purpose_of(pending.purpose);
         let Some(request) = self.retry_request(pending, purpose) else {
-            return Ok(Tried::Blocked("보유 자리나 시세가 없습니다".to_string()));
+            return Ok(Tried::Blocked(Hold::other("보유 자리나 시세가 없습니다")));
         };
         let params = self.params_for(purpose)?.ok_or(TradingError::NoTemplate)?;
         let inputs = match self.inputs(&request, now).await? {
             Ok(inputs) => inputs,
-            Err(blocked) => return Ok(Tried::Blocked(blocked.detail())),
+            Err(blocked) => return Ok(Tried::Blocked(Hold::of(&blocked))),
         };
         let passed = match pi_rules::check(&request.draft, &inputs.context(self, &params, &request))
         {
             Outcome::Pass(passed) => passed,
-            Outcome::Blocked(blocked) => return Ok(Tried::Blocked(blocked.detail())),
+            Outcome::Blocked(blocked) => return Ok(Tried::Blocked(Hold::of(&blocked))),
             Outcome::NeedsApproval(_) => {
-                return Ok(Tried::Blocked(
-                    "승인을 요구합니다(다시 내지 않습니다)".to_string(),
-                ));
+                return Ok(Tried::Blocked(Hold::other(
+                    "승인을 요구합니다(다시 내지 않습니다)",
+                )));
             }
         };
         let trade = pending.trade_id;
@@ -169,9 +252,9 @@ impl Trading {
                 Ok(Tried::Done)
             }
             Err(pi_exec::Error::RetryNotDue { .. }) => Ok(Tried::Done),
-            Err(pi_exec::Error::PermitMismatch) => Ok(Tried::Blocked(
-                "표시 내용이 처음 낸 주문과 다릅니다(PermitMismatch)".to_string(),
-            )),
+            Err(pi_exec::Error::PermitMismatch) => Ok(Tried::Blocked(Hold::other(
+                "표시 내용이 처음 낸 주문과 다릅니다(PermitMismatch)",
+            ))),
             Err(pi_exec::Error::AnomalyStop(error)) => {
                 self.anomaly()?;
                 Err(TradingError::Broker(error.to_string()))
@@ -223,10 +306,23 @@ mod tests {
         let mut interval = 0;
         let mut seen = Vec::new();
         for _ in 0..12 {
-            interval = next_interval(interval);
+            interval = next_interval(interval, BACKOFF_MAX_SECONDS);
             seen.push(interval);
         }
         assert_eq!(&seen[..4], &[1, 2, 4, 8]);
         assert_eq!(seen.last().copied(), Some(BACKOFF_MAX_SECONDS));
+    }
+
+    #[test]
+    fn 손절_청산의_간격은_5초를_넘지_않는다() {
+        let mut interval = 0;
+        for _ in 0..12 {
+            interval = next_interval(interval, URGENT_BACKOFF_MAX_SECONDS);
+            assert!(interval <= URGENT_BACKOFF_MAX_SECONDS);
+        }
+        assert_eq!(interval, URGENT_BACKOFF_MAX_SECONDS);
+        assert!(urgent(SellPurpose::StopLoss));
+        assert!(!urgent(SellPurpose::TakeProfit));
+        assert!(!urgent(SellPurpose::TeamExit));
     }
 }
