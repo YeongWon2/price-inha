@@ -40,7 +40,11 @@ async fn failed_stop(bench: &Bench, at: chrono::DateTime<chrono::Utc>) -> pi_sto
 /// 시세를 1초씩 넣으며 팔릴 때까지 간다. 가짜 시계가 `limit`을 넘으면 실패한다.
 async fn sold_by(bench: &Bench, held: pi_store::TradeId, limit: chrono::DateTime<chrono::Utc>) {
     let deadline = Instant::now() + STEP;
-    while bench.trade_state(held) != TradeState::Sold {
+    // 복기(Reviewed)는 팔린 뒤의 상태다: 밤을 넘기면 놓친 장 마감 복기가 장 시작 직후 돌아 곧바로 옮길 수 있다.
+    while !matches!(
+        bench.trade_state(held),
+        TradeState::Sold | TradeState::Reviewed
+    ) {
         assert!(
             bench.now() <= limit,
             "손절이 {limit} 안에 팔려야 한다(물러서기가 손절을 늦추면 안 된다): 지금 {}",
