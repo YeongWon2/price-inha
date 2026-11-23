@@ -368,5 +368,12 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 5. **시험**: 화면 시험은 `crates/server/tests/web/*.test.ts`(vitest)에 둔다 — 승인 카드 그리기 · 닫기 · 요약이 HTML로 해석되지 않음, 키 칸 규칙, 화면이 부르는 경로 목록 같은 순수 논리. Rust 쪽은 실행 파일(또는 `App`)로 각 페이지 경로가 200 · 맞는 내용 형식 · CSP를 주는지, dist의 모든 파일이 경로로 닿는지, 옛 페이지 경로가 그대로인지. **잠긴 옛 시험이 HTML 글자를 직접 보는 경우**(예: round18 `screens.rs`) 그 내용이 JS 번들로 옮겨 가 깨지면, N1이 같은 뜻을 dist 안에서 찾도록만 고치고 고친 시험마다 까닭을 보고한다(뜻을 바꾸지 않는다).
 6. 이 차수에서 하지 않는 것: 화면 모양 새로 그리기, React 같은 틀, office · notify 크레이트 고치기.
 
+### 11차 보강 (검토 되돌림 — 2026-11-23 조정자)
+1. **승인 번호는 글자다**: 서버의 `office.approval` 이벤트 `number`는 `ApprovalNumber`(무작위 hex 글자)다. 화면 시험(`tests/web/office-approval.test.ts`)이 숫자를 쓰고 글자를 "틀린 몸통"으로 버리게 해서, 실제 카드가 한 장도 그려지지 않는다. 시험을 글자 번호로 고치고(빈 글자 · 글자가 아닌 것은 버림), 화면도 글자로 받는다. 경로는 `encodeURIComponent` 그대로.
+2. **package-lock 다시 만들기**: 항목 55개에 `resolved` · `integrity`가 없다. 같은 판 그대로 lock을 다시 만들어 모든 항목에 해시가 있게 한다(N1).
+3. **wss 머리**: CSP `connect-src`에 `ws://<Host>`와 함께 `wss://<Host>`를 적는다(https 원격, 오래된 브라우저). 같은 Host 검사.
+4. **dist의 숨은 파일**: build.rs는 이름이 `.`으로 시작하는 파일(`.DS_Store` 등)을 넣지 않는다.
+5. 참고(다음 차수 후보): 승인 단추를 보내는 동안 막기, `submitKeyFields`를 화면에 쓰거나 지우기(키 칸 비우는 때를 한 규칙으로), three 형 정의, minify.
+
 ### 원본 동작 근거 (11차)
 원본에 없음(우리 고유) — 화면 빌드 방식 바꾸기. 사무실 화면의 동작은 앞 차수의 DeskRPG 조사(`docs/research/` 사무실 문서)를 그대로 따른다(옮기기만).
