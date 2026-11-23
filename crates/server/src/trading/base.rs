@@ -494,6 +494,36 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 11, day).unwrap_or_default()
     }
 
+    // 15차 5번 (나): 되읽기 합치기만 따로 본다(보강 시험 — 지금 구현에서 통과하는 것이 정상).
+    // 최고 평가액은 통화별로 저장된 것과 새 것 가운데 높은 쪽, 새 통화는 새 값, 날짜 · 그날 시작 평가액은 새 기준 그대로.
+    #[test]
+    fn 되읽기_합치기는_통화별_최고를_높은_쪽으로_두고_날짜와_그날_시작은_새_기준을_따른다() {
+        let saved = serde_json::json!({
+            "date": "2026-11-23",
+            "day_start": {"KRW": "900", "USD": "50"},
+            "peak": {"KRW": "1500", "USD": "70"},
+        });
+        let latest = serde_json::json!({
+            "date": "2026-11-24",
+            "day_start": {"KRW": "1000", "USD": "60", "JPY": "5"},
+            "peak": {"KRW": "1200", "USD": "80", "JPY": "7"},
+        });
+        let merged = merge_basis(Some(saved), &latest);
+        assert_eq!(
+            merged["peak"]["KRW"], "1500",
+            "저장된 최고가 더 높으면 높은 쪽"
+        );
+        assert_eq!(merged["peak"]["USD"], "80", "새 최고가 더 높으면 새 쪽");
+        assert_eq!(merged["peak"]["JPY"], "7", "저장에 없던 통화는 새 값");
+        assert_eq!(merged["date"], "2026-11-24", "날짜는 새 기준");
+        assert_eq!(
+            merged["day_start"], latest["day_start"],
+            "그날 시작 평가액은 새 기준 그대로"
+        );
+        // 저장된 기준이 없으면 새 기준 그대로.
+        assert_eq!(merge_basis(None, &latest), latest);
+    }
+
     // 결함(10차 10a 걸음 메모): 뒤에서 도는 tick과 하루 판단의 tick이 둘 다 "아직 시작을 남기지 않았다"를 본 뒤
     // 각자 남겨 같은 날짜의 `day_start`가 두 번 남았다. 잠금 안에서 먼저 잡으면 한쪽만 한다.
     #[test]

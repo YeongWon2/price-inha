@@ -187,6 +187,41 @@ fn 폰_manifest는_설치할_수_있는_모양이고_아이콘이_묶음_안에_
     }
 }
 
+/// `text` 안에서 `prefix` 다음에 이어지는 파일 이름(영문 · 숫자 · `.` `-` `_`)을 모두 뽑는다.
+fn names_after(text: &str, prefix: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(prefix) {
+        rest = &rest[at + prefix.len()..];
+        let end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+            .unwrap_or(rest.len());
+        let name = &rest[..end];
+        if name.ends_with(".js") || name.ends_with(".css") {
+            out.push(name.to_owned());
+        }
+    }
+    out
+}
+
+/// 폰 html이 부르는 `assets/` 안의 파일과, 그 js가 `./이름.js`로 끌어오는 조각을 모두(되풀이해서) 모은다.
+fn phone_loaded_assets() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut todo = names_after(&built_page("phone/index.html"), "assets/");
+    while let Some(name) = todo.pop() {
+        if found.contains(&name) {
+            continue;
+        }
+        if name.ends_with(".js") {
+            let body = std::fs::read_to_string(dist_dir().join("assets").join(&name))
+                .unwrap_or_else(|error| panic!("dist/assets/{name}이 있어야 한다: {error}"));
+            todo.extend(names_after(&body, "./"));
+        }
+        found.push(name);
+    }
+    found
+}
+
 // 검증: V10 V12
 #[test]
 fn 폰_묶음에는_three가_없고_바깥_주소도_부르지_않는다() {
@@ -194,6 +229,25 @@ fn 폰_묶음에는_three가_없고_바깥_주소도_부르지_않는다() {
     for name in ["sw.js", "manifest.webmanifest"] {
         let body = String::from_utf8(dist_phone(name)).expect("글 파일");
         texts.push((format!("dist/phone/{name}"), body));
+    }
+    // 폰이 불러오는 묶음(assets/phone-*.js · css와 그것이 끌어오는 조각)도 본다(15차 5번 가).
+    let loaded = phone_loaded_assets();
+    assert!(
+        loaded
+            .iter()
+            .any(|n| n.starts_with("phone-") && n.ends_with(".js")),
+        "폰 html이 phone-*.js를 부른다: {loaded:?}"
+    );
+    assert!(
+        loaded
+            .iter()
+            .any(|n| n.starts_with("phone-") && n.ends_with(".css")),
+        "폰 html이 phone-*.css를 부른다: {loaded:?}"
+    );
+    for name in loaded {
+        let body = std::fs::read_to_string(dist_dir().join("assets").join(&name))
+            .unwrap_or_else(|error| panic!("dist/assets/{name}이 있어야 한다: {error}"));
+        texts.push((format!("dist/assets/{name}"), body));
     }
     for (what, body) in texts {
         let lower = body.to_lowercase();
