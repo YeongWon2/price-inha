@@ -145,3 +145,7 @@
     - push 전 검사는 pre-push 관문(`.githooks/pre-push`)이 맡는다. lock 파일이 바뀐 push에서는 발행일(`supply.py`)과 함께 보안 공지(`cargo deny check advisories`)도 본다. 네트워크가 없으면 경고만 한다.
     - 밤 CI가 하던 측정(7번)과 감사(8번)는 손으로 돌리는 `scripts/nightly.sh {audit,mutants,coverage,stress,all}`로 옮겼다. 결과는 `target/nightly/`, 보고만 하고 판정에 넣지 않는다.
     - 끝났다는 기준은 그대로 `scripts/verify.sh`가 0으로 끝나는 것이다.
+11. **(2026-11-24 조정자, 사용자 "남은 후보 진행해" · "알아서 추천대로") 남은 후보 정리**
+    - server 15차로 처리: 폰 "3D 사무실" 단추 → `/office/`, 승인 · 거절 보내는 동안 단추 막기, CSP에 `wss://<Host>`, 키 칸 비우기를 `submitKeyFields` 한 규칙으로, 폰 묶음 three 시험 · `merge_basis` 단위 시험.
+    - 파이프라인: GR이 대조 표 머리 아래 설명 줄을 건너뛰고, "reopen 뒤에 쓴다"를 안내한다. office · notify 지시서 머리말의 옛 화면 자리를 고쳤다.
+    - **하지 않음**: chrono 교체 — 8개 크레이트(market · paper · exec · rules · data · trigger · server …)의 공개 형에 들어 있어 바꾸면 거의 모든 모듈을 다시 연다. 받은 공지는 "관리 중단"이지 취약점이 아니다(9번에서 수용). 취약점 공지가 나오거나 고친 판이 끊기면 그때 `jiff` 등으로 옮기는 차수를 연다. three 형 정의는 로컬 선언 유지(`@types/three` 새 의존 안 들임). minify는 끈 채 둔다. 저장 잠금의 디스크 대기는 영향이 작아 둔다.
