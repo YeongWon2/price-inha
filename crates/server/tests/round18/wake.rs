@@ -178,6 +178,8 @@ async fn 네이버_뉴스_검색은_하루_상한을_넘지_않는다() {
         .news_limit(4)
         .start(kst(monday(), 10, 0))
         .await;
+    // 뉴스를 구독하는 템플릿(스윙)을 쓴다(10b-2: 쓰는 템플릿이 없으면 주기 가져오기를 하지 않는다).
+    bench.ready().await;
     // 세 시간을 15분씩 간다. 상한이 없으면 종목 둘 × 12걸음으로 4번을 넘는다.
     for _ in 0..12 {
         bench.set(plus(bench.now(), 15 * 60));
