@@ -1,9 +1,9 @@
 // 폰 화면: 알림 켜기(웹 푸시 구독), 승인 카드, 알림 목록, 하루 정리.
 // 3D 사무실은 단추로 따로 연다(이 묶음은 3D를 불러오지 않는다).
 import "./phone.css";
-import { API, approvalPath, decidePath, type Verb } from "../paths";
+import { API, SCREEN_ROOTS, approvalPath, decidePath, type Verb } from "../paths";
 
-const OFFICE_PATH = "/";
+const OFFICE_PATH = SCREEN_ROOTS.office;
 
 interface Notice {
   seq: number;
@@ -117,6 +117,7 @@ async function showApproval(id: string): Promise<void> {
     $part(card, "result").textContent = "";
     // 결정 4번: 지문 앞 6자리를 보이기만 한다. 사용자가 치지 않는다.
     (card.querySelector('[data-field="code"]') as HTMLInputElement).value = (approval.fingerprint || "").slice(0, 6);
+    setDecideButtons(card, false);
     card.hidden = false;
   } catch {
     card.hidden = true;
@@ -127,6 +128,14 @@ function $part(card: HTMLElement, name: string): HTMLElement {
   return card.querySelector('[data-part="' + name + '"]') as HTMLElement;
 }
 
+/** 카드의 승인 · 거절 단추를 함께 막거나 켠다. */
+function setDecideButtons(card: HTMLElement, locked: boolean): void {
+  for (const verb of ["approve", "reject"]) {
+    const button = card.querySelector<HTMLButtonElement>('[data-action="' + verb + '"]');
+    if (button) button.disabled = locked;
+  }
+}
+
 async function decide(verb: Verb): Promise<void> {
   const card = $('[data-card="approval"]');
   const result = $part(card, "result");
@@ -134,6 +143,10 @@ async function decide(verb: Verb): Promise<void> {
     result.textContent = "승인 내용을 아직 받지 못했어요.";
     return;
   }
+  // 보내는 동안 두 단추를 막는다(첫 클릭 안에서 바로). 성공하면 막힌 채 두고, 실패하면 다시 켠다.
+  if (card.dataset.deciding === "1") return;
+  card.dataset.deciding = "1";
+  setDecideButtons(card, true);
   try {
     // 화면이 받은 승인 카드의 지문을 그대로 보낸다(서버가 지금 내용의 지문과 비교한다).
     await postJson(decidePath(card.dataset.approvalId, verb), {
@@ -142,6 +155,9 @@ async function decide(verb: Verb): Promise<void> {
     result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
   } catch (error) {
     result.textContent = "처리하지 못했어요: " + message(error);
+    setDecideButtons(card, false);
+  } finally {
+    delete card.dataset.deciding;
   }
 }
 

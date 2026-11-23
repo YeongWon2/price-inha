@@ -7,6 +7,14 @@ export type ScreenName = "setup" | "keys" | "office" | "phone";
 /** 승인 카드의 답. */
 export type Verb = "approve" | "reject";
 
+/** 화면이 열리는 주소(단추가 다른 화면으로 갈 때 쓴다). */
+export const SCREEN_ROOTS: Readonly<Record<ScreenName, string>> = {
+  setup: "/",
+  keys: "/keys",
+  office: "/office/",
+  phone: "/phone/",
+};
+
 /** 화면들이 부르는 경로 이름 → 경로. */
 export const API = {
   session: "/api/session",

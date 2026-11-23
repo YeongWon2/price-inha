@@ -57,7 +57,9 @@ fn content_type(rel: &str) -> &'static str {
 /// 화면이 할 수 있는 일을 좁힌다: 같은 출처의 묶음(스크립트 · 모양 · 그림 · manifest · 서비스 워커)만 쓰고,
 /// 연결은 같은 출처로만 한다. 빌드한 화면에는 인라인 스크립트 · 모양이 없어 `'unsafe-inline'`을 두지 않는다.
 ///
-/// `connect-src`의 `'self'`가 웹소켓을 포함하지 않는 브라우저가 있어 `ws://<Host>`를 따로 적는다.
+/// `connect-src`의 `'self'`가 웹소켓을 포함하지 않는 브라우저가 있어 `ws://<Host>`를 따로 적고,
+/// https 뒤(역방향 프록시 · Tailscale serve)에서 화면이 `wss://`로 붙어도 막히지 않게 같은 Host의
+/// `wss://<Host>`도 적는다. 바깥 주소는 더하지 않는다.
 /// `Host`는 접속 관문이 이미 허용 목록과 포트를 확인한 값이다.
 fn content_security_policy(host: Option<&str>) -> String {
     let socket = host
@@ -67,7 +69,7 @@ fn content_security_policy(host: Option<&str>) -> String {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
         })
-        .map(|host| format!(" ws://{host}"))
+        .map(|host| format!(" ws://{host} wss://{host}"))
         .unwrap_or_default();
     format!(
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; \
@@ -160,7 +162,7 @@ mod tests {
     fn 화면_정책은_같은_출처의_연결만_연다() {
         let policy = content_security_policy(Some("127.0.0.1:7878"));
         assert!(policy.contains("default-src 'none'"));
-        assert!(policy.contains("connect-src 'self' ws://127.0.0.1:7878;"));
+        assert!(policy.contains("connect-src 'self' ws://127.0.0.1:7878 wss://127.0.0.1:7878;"));
         assert!(policy.contains("script-src 'self';"), "{policy}");
         assert!(!policy.contains("unsafe-inline"), "{policy}");
         let odd = content_security_policy(Some("evil.example; script-src *"));

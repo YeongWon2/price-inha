@@ -2,7 +2,7 @@
 // 본문에만 실어 보내고, 화면 · 브라우저 저장소 어디에도 남기지 않으며, 서버 답으로 칸을 다시 채우지 않는다.
 import "./keys.css";
 import { API } from "../paths";
-import { applyKeyFieldRules, clearKeyFields } from "./field";
+import { applyKeyFieldRules, submitKeyFields } from "./field";
 
 // 바깥 키 칸: item 이름 → 칸 이름.
 const SLOT_FIELDS: Record<string, string> = {
@@ -136,43 +136,44 @@ function wire(buttonId: string, messageId: string, item: string, fields: Fields)
   const $button = byId<HTMLButtonElement>(buttonId);
   const $message = byId(messageId);
   $button.addEventListener("click", () => {
-    let values: Record<string, string> | null = {};
-    const inputs: HTMLInputElement[] = [];
+    const inputs: Record<string, HTMLInputElement> = {};
     Object.keys(fields).forEach((name) => {
-      const input = byId<HTMLInputElement>(fields[name]);
-      (values as Record<string, string>)[name] = input.value;
-      inputs.push(input);
+      inputs[name] = byId<HTMLInputElement>(fields[name]);
     });
     $button.disabled = true;
-    fetch(API.remoteKeys, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ item: item, fields: values }),
-    })
-      .then((reply) =>
-        reply
-          .json()
-          .catch(() => null)
-          .then((data: { registered?: unknown; error?: unknown } | null) => {
-            if (reply.ok && data && data.registered) {
-              say($message, "등록했습니다");
-              loadSlots();
-            } else if (reply.status === 401) {
-              say($message, "먼저 로그인하세요");
-            } else {
-              say($message, (data && REASONS[String(data.error)]) || "등록하지 못했습니다");
-            }
-          }),
-      )
-      .catch(() => {
-        say($message, "서버에 닿지 못했습니다");
+    // 받아들여졌을 때만 칸을 비운다(거절 · 실패면 그대로 둔다).
+    void submitKeyFields(inputs, (values) =>
+      fetch(API.remoteKeys, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item: item, fields: values }),
       })
-      .then(() => {
-        clearKeyFields(inputs);
-        values = null;
-        $button.disabled = false;
-      });
+        .then((reply) =>
+          reply
+            .json()
+            .catch(() => null)
+            .then((data: { registered?: unknown; error?: unknown } | null) => {
+              if (reply.ok && data && data.registered) {
+                say($message, "등록했습니다");
+                loadSlots();
+                return true;
+              }
+              if (reply.status === 401) {
+                say($message, "먼저 로그인하세요");
+              } else {
+                say($message, (data && REASONS[String(data.error)]) || "등록하지 못했습니다");
+              }
+              return false;
+            }),
+        )
+        .catch(() => {
+          say($message, "서버에 닿지 못했습니다");
+          return false;
+        }),
+    ).then(() => {
+      $button.disabled = false;
+    });
   });
 }
 

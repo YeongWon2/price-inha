@@ -112,8 +112,16 @@ function say(card: HTMLElement | null, text: string): void {
   if (result) result.textContent = text;
 }
 
+function lockVerbs(card: HTMLElement | null, locked: boolean): void {
+  if (!card) return;
+  for (const button of card.querySelectorAll<HTMLButtonElement>("button[data-verb]")) button.disabled = locked;
+}
+
 /**
- * 승인 · 거절을 보낸다. 폰과 같이 GET /api/approvals/{id}로 전체 지문을 받아, 그 앞 6자가 카드에 보인
+ * 승인 · 거절을 보낸다. 보내는 동안 그 카드의 두 단추를 막고(같은 카드에서 두 번 눌러도 한 번만 나간다),
+ * 실패하면 다시 켜며, 보냈으면 막힌 채 둔다(이미 결정됨).
+ *
+ * 폰과 같이 GET /api/approvals/{id}로 전체 지문을 받아, 그 앞 6자가 카드에 보인
  * 지문 앞 6자와 같을 때만 POST /api/approvals/{id}/{verb} `{"fingerprint": 전체 지문}`을 보낸다.
  */
 export async function decideApproval(
@@ -123,6 +131,21 @@ export async function decideApproval(
   fetcher: FetchLike,
 ): Promise<DecideOutcome> {
   const card = findCard(root, number);
+  if (card?.dataset.deciding === "1") return "failed";
+  if (card) card.dataset.deciding = "1";
+  lockVerbs(card, true);
+  const outcome = await send(card, number, verb, fetcher);
+  if (card) delete card.dataset.deciding;
+  if (outcome !== "sent") lockVerbs(card, false);
+  return outcome;
+}
+
+async function send(
+  card: HTMLElement | null,
+  number: string,
+  verb: Verb,
+  fetcher: FetchLike,
+): Promise<DecideOutcome> {
   const shown = card ? (part(card, "code")?.textContent ?? "") : "";
   try {
     const reply = await fetcher(approvalPath(number), { credentials: "same-origin", cache: "no-store" });

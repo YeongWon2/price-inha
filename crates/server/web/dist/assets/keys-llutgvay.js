@@ -1,5 +1,5 @@
-import { t as API } from "./paths-eaovp6ha.js";
-import { n as clearKeyFields, t as applyKeyFieldRules } from "./field-m814s57n.js";
+import { t as API } from "./paths-m4cykb5a.js";
+import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/keys/main.ts
 var SLOT_FIELDS = {
 	dart: "api_key",
@@ -89,15 +89,12 @@ function wire(buttonId, messageId, item, fields) {
 	const $button = byId(buttonId);
 	const $message = byId(messageId);
 	$button.addEventListener("click", () => {
-		let values = {};
-		const inputs = [];
+		const inputs = {};
 		Object.keys(fields).forEach((name) => {
-			const input = byId(fields[name]);
-			values[name] = input.value;
-			inputs.push(input);
+			inputs[name] = byId(fields[name]);
 		});
 		$button.disabled = true;
-		fetch(API.remoteKeys, {
+		submitKeyFields(inputs, (values) => fetch(API.remoteKeys, {
 			method: "POST",
 			credentials: "same-origin",
 			headers: { "Content-Type": "application/json" },
@@ -109,13 +106,15 @@ function wire(buttonId, messageId, item, fields) {
 			if (reply.ok && data && data.registered) {
 				say($message, "등록했습니다");
 				loadSlots();
-			} else if (reply.status === 401) say($message, "먼저 로그인하세요");
+				return true;
+			}
+			if (reply.status === 401) say($message, "먼저 로그인하세요");
 			else say($message, data && REASONS[String(data.error)] || "등록하지 못했습니다");
+			return false;
 		})).catch(() => {
 			say($message, "서버에 닿지 못했습니다");
-		}).then(() => {
-			clearKeyFields(inputs);
-			values = null;
+			return false;
+		})).then(() => {
 			$button.disabled = false;
 		});
 	});

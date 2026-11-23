@@ -1,5 +1,5 @@
-import { t as API } from "./paths-eaovp6ha.js";
-import { n as clearKeyFields, t as applyKeyFieldRules } from "./field-m814s57n.js";
+import { t as API } from "./paths-m4cykb5a.js";
+import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/setup/main.ts
 /** 이 화면의 요소. 칸 · 단추 · 글 자리를 같은 모양(value · checked · disabled · hidden · textContent)으로 다룬다. */
 function byId(id) {
@@ -317,11 +317,12 @@ function showRejected(payload) {
 	setText($rejectedText, list.length === 0 ? "" : "증권사가 거절한 종목 (빼고 받는 중 · 종목을 확인하세요): " + list.join(", "));
 	$rejected.hidden = list.length === 0;
 }
-function register(path, body, inputs, $message, $button) {
+function register(path, body, $message, $button) {
+	var accepted = false;
 	$button.disabled = true;
 	setText($message, "확인하는 중…");
 	$message.className = "msg";
-	fetch(path, {
+	return fetch(path, {
 		method: "POST",
 		credentials: "same-origin",
 		cache: "no-store",
@@ -339,7 +340,7 @@ function register(path, body, inputs, $message, $button) {
 		});
 	}).then(function(result) {
 		if (result.ok && result.data && result.data.registered === true) {
-			clearKeyFields(inputs);
+			accepted = true;
 			setText($message, "등록됨");
 			$message.className = "msg ok";
 		} else {
@@ -354,6 +355,7 @@ function register(path, body, inputs, $message, $button) {
 		$message.className = "msg bad";
 	}).then(function() {
 		$button.disabled = false;
+		return accepted;
 	});
 }
 var aiPicked = false;
@@ -458,17 +460,20 @@ function wireKey(buttonId, messageId, item, fields) {
 	var $button = byId(buttonId);
 	var $message = byId(messageId);
 	$button.addEventListener("click", function() {
-		var values = {};
-		var inputs = [];
+		var inputs = {};
 		Object.keys(fields).forEach(function(name) {
-			var input = byId(fields[name]);
-			values[name] = input.value.trim();
-			inputs.push(input);
+			inputs[name] = byId(fields[name]);
 		});
-		register(SETUP_KEYS_PATH, {
-			item,
-			fields: values
-		}, inputs, $message, $button);
+		submitKeyFields(inputs, function(raw) {
+			var values = {};
+			Object.keys(raw).forEach(function(name) {
+				values[name] = raw[name].trim();
+			});
+			return register(SETUP_KEYS_PATH, {
+				item,
+				fields: values
+			}, $message, $button);
+		});
 	});
 }
 function showBackup(view) {
@@ -647,7 +652,9 @@ function wireSetup() {
 			return code.trim();
 		}).filter(function(code) {
 			return code.length > 0;
-		}) }, [$input], $message, $button);
+		}) }, $message, $button).then(function(accepted) {
+			if (accepted) $input.value = "";
+		});
 	});
 }
 function showEvent(frame) {

@@ -1,6 +1,6 @@
-import { n as approvalPath, r as decidePath, t as API } from "./paths-eaovp6ha.js";
+import { i as decidePath, n as SCREEN_ROOTS, r as approvalPath, t as API } from "./paths-m4cykb5a.js";
 // src/phone/main.ts
-var OFFICE_PATH = "/";
+var OFFICE_PATH = SCREEN_ROOTS.office;
 var $ = (selector) => document.querySelector(selector);
 var lastSeq = 0;
 function message(error) {
@@ -90,6 +90,7 @@ async function showApproval(id) {
 		$part(card, "fingerprint").textContent = approval.fingerprint || "";
 		$part(card, "result").textContent = "";
 		card.querySelector("[data-field=\"code\"]").value = (approval.fingerprint || "").slice(0, 6);
+		setDecideButtons(card, false);
 		card.hidden = false;
 	} catch {
 		card.hidden = true;
@@ -98,6 +99,13 @@ async function showApproval(id) {
 function $part(card, name) {
 	return card.querySelector("[data-part=\"" + name + "\"]");
 }
+/** 카드의 승인 · 거절 단추를 함께 막거나 켠다. */
+function setDecideButtons(card, locked) {
+	for (const verb of ["approve", "reject"]) {
+		const button = card.querySelector("[data-action=\"" + verb + "\"]");
+		if (button) button.disabled = locked;
+	}
+}
 async function decide(verb) {
 	const card = $("[data-card=\"approval\"]");
 	const result = $part(card, "result");
@@ -105,11 +113,17 @@ async function decide(verb) {
 		result.textContent = "승인 내용을 아직 받지 못했어요.";
 		return;
 	}
+	if (card.dataset.deciding === "1") return;
+	card.dataset.deciding = "1";
+	setDecideButtons(card, true);
 	try {
 		await postJson(decidePath(card.dataset.approvalId, verb), { fingerprint: card.dataset.fingerprint });
 		result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
 	} catch (error) {
 		result.textContent = "처리하지 못했어요: " + message(error);
+		setDecideButtons(card, false);
+	} finally {
+		delete card.dataset.deciding;
 	}
 }
 async function loadDailySummary() {

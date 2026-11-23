@@ -1,4 +1,11 @@
 // src/paths.ts
+/** 화면이 열리는 주소(단추가 다른 화면으로 갈 때 쓴다). */
+var SCREEN_ROOTS = {
+	setup: "/",
+	keys: "/keys",
+	office: "/office/",
+	phone: "/phone/"
+};
 /** 화면들이 부르는 경로 이름 → 경로. */
 var API = {
 	session: "/api/session",
@@ -48,4 +55,4 @@ function approvalPath(id) {
 function decidePath(id, verb) {
 	return approvalPath(id) + "/" + verb;
 }
-export { approvalPath as n, decidePath as r, API as t };
+export { decidePath as i, SCREEN_ROOTS as n, approvalPath as r, API as t };

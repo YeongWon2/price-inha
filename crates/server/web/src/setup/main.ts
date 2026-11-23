@@ -3,7 +3,7 @@
 // 화면 글은 같다). 서버가 준 글자는 언제나 textContent로만 넣는다.
 import "./setup.css";
 import { API } from "../paths";
-import { applyKeyFieldRules, clearKeyFields } from "../keys/field";
+import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
 
 /** 서버가 보낸 JSON 또는 그 조각. 모양은 쓰는 자리에서 확인한다(옛 화면과 같은 확인). */
 type Data = any;
@@ -334,12 +334,14 @@ function byId(id: string): HTMLInputElement {
     $rejected.hidden = list.length === 0;
   }
 
-  // 등록 요청을 보낸다. 값은 본문으로만 나가고 어디에도 남기지 않는다. 성공하면 칸을 비운다.
-  function register(path: Data, body: Data, inputs: Data, $message: Data, $button: Data) {
+  // 등록 요청을 보낸다. 값은 본문으로만 나가고 어디에도 남기지 않는다. 받아들여졌는지(`true`)를 알려 준다.
+  // 칸을 비우는 일은 부른 쪽이 한다(키 칸은 `submitKeyFields`가, 종목 입력은 아래 단추가).
+  function register(path: Data, body: Data, $message: Data, $button: Data): Promise<boolean> {
+    var accepted = false;
     $button.disabled = true;
     setText($message, "확인하는 중…");
     $message.className = "msg";
-    fetch(path, {
+    return fetch(path, {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
@@ -353,7 +355,7 @@ function byId(id: string): HTMLInputElement {
       })
       .then(function (result: Data) {
         if (result.ok && result.data && result.data.registered === true) {
-          clearKeyFields(inputs);
+          accepted = true;
           setText($message, "등록됨");
           $message.className = "msg ok";
         } else {
@@ -373,7 +375,10 @@ function byId(id: string): HTMLInputElement {
         setText($message, "서버에 닿지 않습니다.");
         $message.className = "msg bad";
       })
-      .then(function () { $button.disabled = false; });
+      .then(function () {
+        $button.disabled = false;
+        return accepted;
+      });
   }
 
   // AI 연결 칸(고른 방식 · 경로 · 확인 상태 · 옛 파일 알림)을 그린다. 키 값은 오지 않는다.
@@ -489,14 +494,16 @@ function byId(id: string): HTMLInputElement {
     var $button = byId(buttonId);
     var $message = byId(messageId);
     $button.addEventListener("click", function () {
-      var values: Record<string, string> = {};
-      var inputs: HTMLInputElement[] = [];
+      var inputs: Record<string, HTMLInputElement> = {};
       Object.keys(fields).forEach(function (name: Data) {
-        var input = byId(fields[name]);
-        values[name] = input.value.trim();
-        inputs.push(input);
+        inputs[name] = byId(fields[name]);
       });
-      register(SETUP_KEYS_PATH, { item: item, fields: values }, inputs, $message, $button);
+      // 받아들여졌을 때만 칸을 비운다(키 화면과 같은 규칙).
+      void submitKeyFields(inputs, function (raw) {
+        var values: Record<string, string> = {};
+        Object.keys(raw).forEach(function (name) { values[name] = raw[name].trim(); });
+        return register(SETUP_KEYS_PATH, { item: item, fields: values }, $message, $button);
+      });
     });
   }
 
@@ -662,7 +669,9 @@ function byId(id: string): HTMLInputElement {
       var symbols = $input.value.split(",")
         .map(function (code: Data) { return code.trim(); })
         .filter(function (code: Data) { return code.length > 0; });
-      register(SETUP_SYMBOLS_PATH, { symbols: symbols }, [$input], $message, $button);
+      register(SETUP_SYMBOLS_PATH, { symbols: symbols }, $message, $button).then(function (accepted: boolean) {
+        if (accepted) { $input.value = ""; }
+      });
     });
   }
 
