@@ -9,6 +9,7 @@ mod persist;
 mod reduced;
 mod restart;
 mod resume;
+mod retry_cap;
 mod sell;
 mod submit;
 mod team_exit;

@@ -392,6 +392,12 @@ impl Executor {
     /// - 또 실패하면 [`Error::AnomalyStop`]이고 횟수가 하나 늘며 간격이 두 배가 된다(가장 길게
     ///   [`SELL_RETRY_MAX`]).
     /// - 되면 기다리는 목록에서 빠진다.
+    /// - 수량은 `sell`과 같은 규칙으로 대조한다(9차): 그 매매의 남은 수량에서 그 매매에 이미 열려
+    ///   있는 파는 주문의 남은 수량을 뺀 것 이하여야 한다. 넘으면 [`Error::SellTooLarge`]이고
+    ///   기다리는 것은 그대로다(횟수도 늘지 않는다). 손절 · 청산은 같은 종목의 열린 파는 주문을
+    ///   먼저 취소한 뒤의 수량으로 본다.
+    /// - 맞지 않는 대기([`Error::PermitMismatch`]로 막힌 것)는 쓰는 쪽이
+    ///   [`Executor::forget_pending_sell`]로 지우고 새로 판단한다.
     pub async fn retry_sell(
         &self,
         trade_id: TradeId,
@@ -450,6 +456,15 @@ impl Executor {
     /// 다시 켠 뒤에도 같다(E30). 되면 그 주문의 `client_order_id`가 이 키다.
     pub fn pending_sell_key(&self, trade_id: TradeId) -> Option<String> {
         self.lock().pending.get(&trade_id).map(|p| p.key.clone())
+    }
+
+    /// 그 매매의 다시 내기 대기를 지우고 지운 것을 돌려준다(9차). 없으면 `None`.
+    ///
+    /// 대기의 멱등성 키([`Executor::pending_sell_key`])도 함께 지우고 스냅샷에 남긴다. 다른 매매의
+    /// 대기는 건드리지 않는다. 손절 · 청산 대기도 지울 수 있다(쓰는 쪽이 고른다). 맞지 않는 대기
+    /// (`PermitMismatch`로 막힌 것)는 쓰는 쪽이 이것으로 지우고 새로 판단한다.
+    pub fn forget_pending_sell(&self, _trade_id: TradeId) -> Option<SellRetry> {
+        todo!("9차: 대기 지우기")
     }
 
     /// 손절 감시 자리들. 매매 번호 순서다.
