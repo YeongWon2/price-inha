@@ -6,7 +6,7 @@
 //!
 //! 이 파일은 기존 묶음(`suite.rs`)과 따로 도는 테스트 실행 파일이라 도우미를 안에 둔다.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
@@ -25,8 +25,11 @@ use tokio::runtime::{Builder, Runtime};
 /// 삼성전자. 기준가 70,000원(호가 단위 100원).
 const SAM: &str = "005930";
 
-/// 체결을 일으키는 횟수. 한 번에 1주씩 70,000원에 산다(묶는 돈 70,011원 × 100 < 처음 돈).
-const FILLS: i64 = 100;
+/// 체결을 일으키는 횟수. 한 번에 1주씩 70,000원에 산다(묶는 돈 70,011원 × 140 < 처음 돈).
+const FILLS: i64 = 140;
+
+/// 체결이 일어나는 동안 장부를 함께 읽는 스레드 수.
+const READERS: usize = 4;
 
 fn d(text: &str) -> Decimal {
     text.parse().unwrap()
@@ -209,50 +212,63 @@ fn account_snapshot_matches_separate_reads_when_nothing_moves() {
 fn account_snapshot_never_mixes_holdings_and_cash_while_fills_happen() {
     let (broker, authority) = open();
     let done = AtomicBool::new(false);
-    let reader_now = at(0);
+    // 쓰는 쪽이 마지막으로 쓴 시각(정규장 시작 뒤 초). 읽는 쪽 `now`가 이것을 따라가
+    // 마감 취소 경로도 체결과 함께 돈다.
+    let clock = AtomicI64::new(0);
 
     std::thread::scope(|scope| {
         let writer = scope.spawn(|| {
             let rt = runtime();
             for i in 0..FILLS {
+                clock.store(2 * i, Ordering::SeqCst);
                 place_buy(&broker, &authority, &rt, at(2 * i));
+                clock.store(2 * i + 1, Ordering::SeqCst);
                 let filled = at(2 * i + 1);
                 broker.on_quote(&quote(filled), filled);
             }
             done.store(true, Ordering::SeqCst);
         });
 
-        let reader = scope.spawn(|| {
-            let mut reads = 0_u64;
-            loop {
-                let finished = done.load(Ordering::SeqCst);
-                let snapshot = broker.account_snapshot(reader_now);
-                let (value, quantity) = valuation(&snapshot);
-                assert!(
-                    quantity >= Decimal::ZERO && quantity <= Decimal::from(FILLS),
-                    "보유 수량은 0 ~ {FILLS}주: {quantity} ({snapshot:?})"
-                );
-                assert_eq!(
-                    value,
-                    consistent(quantity),
-                    "{reads}번째 읽기: 보유 {quantity}주와 현금이 섞이지 않은 평가액이어야 한다 \
-                     ({snapshot:?})"
-                );
-                reads += 1;
-                if finished {
-                    break;
-                }
-            }
-            reads
-        });
+        let readers: Vec<_> = (0..READERS)
+            .map(|reader| {
+                let (broker, done, clock) = (&broker, &done, &clock);
+                scope.spawn(move || {
+                    let mut reads = 0_u64;
+                    loop {
+                        let finished = done.load(Ordering::SeqCst);
+                        let now = at(clock.load(Ordering::SeqCst));
+                        let snapshot = broker.account_snapshot(now);
+                        let (value, quantity) = valuation(&snapshot);
+                        assert!(
+                            quantity >= Decimal::ZERO && quantity <= Decimal::from(FILLS),
+                            "읽는 스레드 {reader}: 보유 수량은 0 ~ {FILLS}주: {quantity} \
+                             ({snapshot:?})"
+                        );
+                        assert_eq!(
+                            value,
+                            consistent(quantity),
+                            "읽는 스레드 {reader}의 {reads}번째 읽기({now}): 보유 {quantity}주와 \
+                             현금이 섞이지 않은 평가액이어야 한다 ({snapshot:?})"
+                        );
+                        reads += 1;
+                        if finished {
+                            break;
+                        }
+                    }
+                    reads
+                })
+            })
+            .collect();
 
         writer
             .join()
             .expect("체결을 일으키는 스레드가 멈추지 않아야 한다");
-        let reads = reader
-            .join()
-            .expect("읽는 스레드의 확인이 모두 맞아야 한다");
-        assert!(reads >= 1, "적어도 한 번은 읽어야 한다");
+        for reader in readers {
+            let reads = reader
+                .join()
+                .expect("읽는 스레드의 확인이 모두 맞아야 한다");
+            assert!(reads >= 1, "읽는 스레드마다 적어도 한 번은 읽어야 한다");
+        }
     });
 
     let last = broker.account_snapshot(at(2 * FILLS));
