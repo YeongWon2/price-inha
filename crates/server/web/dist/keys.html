@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가격인하 · 키 등록</title>
+  <script type="module" crossorigin src="/assets/keys-nms8kpp7.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/paths-eaovp6ha.js">
+  <link rel="modulepreload" crossorigin href="/assets/field-m814s57n.js">
+  <link rel="stylesheet" crossorigin href="/assets/keys-du99hnqb.css">
+</head>
+<body>
+  <h1>키 등록</h1>
+  <p class="hint">이 화면은 키를 저장만 합니다. 등록한 키 값은 다시 보여 주지 않습니다.</p>
+
+  <div class="item">
+    <h2>증권사 키</h2>
+    <label for="k-client-id">client_id</label>
+    <input id="k-client-id" type="password" autocomplete="new-password" spellcheck="false">
+    <label for="k-client-secret">client_secret</label>
+    <input id="k-client-secret" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-broker" type="button">증권사 키 등록</button>
+    <span id="k-broker-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>AI 키</h2>
+    <label for="k-api-key">api_key</label>
+    <input id="k-api-key" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-ai" type="button">AI 키 등록</button>
+    <span id="k-ai-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>DART 키 (공시 · 재무) <span id="k-slot-dart-reg" class="hint"></span></h2>
+    <label for="k-slot-dart">api_key</label>
+    <input id="k-slot-dart" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-slot-dart-button" type="button">등록</button>
+    <span id="k-slot-dart-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>ECOS 키 (한국은행 통계) <span id="k-slot-ecos-reg" class="hint"></span></h2>
+    <label for="k-slot-ecos">api_key</label>
+    <input id="k-slot-ecos" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-slot-ecos-button" type="button">등록</button>
+    <span id="k-slot-ecos-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>FRED 키 (미국 금리) <span id="k-slot-fred-reg" class="hint"></span></h2>
+    <label for="k-slot-fred">api_key</label>
+    <input id="k-slot-fred" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-slot-fred-button" type="button">등록</button>
+    <span id="k-slot-fred-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <div class="item">
+    <h2>백업 GitHub 토큰 <span id="k-slot-backup_github_token-reg" class="hint"></span></h2>
+    <label for="k-slot-backup_github_token">token</label>
+    <input id="k-slot-backup_github_token" type="password" autocomplete="new-password" spellcheck="false">
+    <button id="k-slot-backup_github_token-button" type="button">등록</button>
+    <span id="k-slot-backup_github_token-msg" class="msg" aria-live="polite"></span>
+  </div>
+
+  <!-- 공급자 칸(네이버 뉴스 등)은 공급자 선언에서 만든 칸 목록을 읽어 그린다. -->
+  <div id="k-providers"></div>
+
+</body>
+</html>

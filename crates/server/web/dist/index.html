@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가격인하</title>
+  <script type="module" crossorigin src="/assets/setup-owxfehy6.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/paths-eaovp6ha.js">
+  <link rel="modulepreload" crossorigin href="/assets/field-m814s57n.js">
+  <link rel="stylesheet" crossorigin href="/assets/setup-kfbl1k3t.css">
+</head>
+<body>
+<main>
+  <h1>가격인하</h1>
+  <ul id="status" aria-live="polite">
+    <li id="st-conn" class="warn">연결하는 중</li>
+    <li id="st-demo" class="warn" hidden>시연 모드 (가짜 시세)</li>
+    <li id="st-feed" hidden></li>
+    <li id="fix-broker-item" hidden><button id="fix-broker" type="button">증권사 키 고치기</button></li>
+    <li id="st-late" class="warn" hidden>시세 늦음</li>
+  </ul>
+
+  <section id="setup-view" hidden>
+    <h2>시작 전 필수 설정</h2>
+    <p class="hint">필수 항목이 모두 등록되면 바로 시작합니다. 키는 이 컴퓨터에만 저장되고 다시 보여 주지 않습니다.</p>
+    <p id="setup-missing" class="warn"></p>
+    <button id="close-setup" type="button" hidden>본 화면으로 돌아가기</button>
+
+    <div class="item">
+      <h3>증권사 키 (필수) <span id="reg-broker" class="badge"></span></h3>
+      <label for="f-client-id">client_id</label>
+      <input id="f-client-id" type="password" autocomplete="new-password" spellcheck="false">
+      <label for="f-client-secret">client_secret</label>
+      <input id="f-client-secret" type="password" autocomplete="new-password" spellcheck="false">
+      <button id="b-broker" type="button">증권사 키 등록</button>
+      <span id="m-broker" class="msg" aria-live="polite"></span>
+    </div>
+
+    <div class="item">
+      <h3>AI 연결 (필수, API 키 또는 Claude Code CLI 사용 가운데 하나) <span id="reg-ai" class="badge"></span></h3>
+      <label class="pick"><input id="ai-pick-api" type="radio" name="ai-method" value="api_key"> API 키</label>
+      <label class="pick"><input id="ai-pick-cli" type="radio" name="ai-method" value="cli"> Claude Code CLI 사용 (구독)</label>
+      <span id="m-ai" class="msg" aria-live="polite"></span>
+      <div id="ai-api-box">
+        <label for="f-api-key">API 키 (api_key)</label>
+        <input id="f-api-key" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-ai-key" type="button">API 키 등록</button>
+        <span id="m-ai-key" class="msg" aria-live="polite"></span>
+      </div>
+      <div id="ai-cli-box" hidden>
+        <p class="hint warn">구독 약관은 자동화된 이용과 증권 매매 목적 이용을 제한할 수 있습니다. 판단은 사용자에게 있습니다.</p>
+        <label for="f-cli-command">실행 파일 경로 (절대 경로)</label>
+        <input id="f-cli-command" type="text" autocomplete="off" spellcheck="false">
+        <label for="f-cli-config-dir">전용 로그인 폴더 (절대 경로, 비우면 평소 로그인)</label>
+        <input id="f-cli-config-dir" type="text" autocomplete="off" spellcheck="false">
+        <p class="hint">로그인은 터미널에서 공식 CLI로 합니다: <code>claude auth login</code></p>
+        <button id="b-ai-cli" type="button">확인</button>
+        <p id="ai-cli-state" class="hint" aria-live="polite"></p>
+      </div>
+      <p id="ai-legacy" class="hint" hidden>예전 구독 토큰 파일(auth.json)은 더 쓰지 않습니다. 필요 없으면 지워도 됩니다.</p>
+    </div>
+
+    <div class="item">
+      <h3>지켜볼 종목 (필수) <span id="reg-symbols" class="badge"></span></h3>
+      <label for="f-symbols">종목 코드 (쉼표로 나눔, 예: 005930,000660)</label>
+      <input id="f-symbols" type="text" autocomplete="off" spellcheck="false">
+      <button id="b-symbols" type="button">종목 등록</button>
+      <span id="m-symbols" class="msg" aria-live="polite"></span>
+      <p id="symbols-now" class="hint"></p>
+    </div>
+
+    <div class="item">
+      <h3>바깥 키 (선택)</h3>
+      <p class="hint">자료 출처 키와 백업 토큰입니다. 등록할 때 그곳에 한 번 확인하고, 맞아야 저장합니다. 등록 여부만 보이고 값은 다시 보여 주지 않습니다. 없어도 시작합니다.</p>
+      <div class="slot">
+        <h4>DART 키 (공시 · 재무) <span id="reg-slot-dart" class="badge"></span></h4>
+        <label for="f-slot-dart">api_key</label>
+        <input id="f-slot-dart" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-dart" type="button">등록</button>
+        <span id="m-slot-dart" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>ECOS 키 (한국은행 통계) <span id="reg-slot-ecos" class="badge"></span></h4>
+        <label for="f-slot-ecos">api_key</label>
+        <input id="f-slot-ecos" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-ecos" type="button">등록</button>
+        <span id="m-slot-ecos" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>FRED 키 (미국 금리) <span id="reg-slot-fred" class="badge"></span></h4>
+        <label for="f-slot-fred">api_key</label>
+        <input id="f-slot-fred" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-fred" type="button">등록</button>
+        <span id="m-slot-fred" class="msg" aria-live="polite"></span>
+      </div>
+      <div class="slot">
+        <h4>백업 GitHub 토큰 <span id="reg-slot-backup_github_token" class="badge"></span></h4>
+        <label for="f-slot-backup_github_token">token</label>
+        <input id="f-slot-backup_github_token" type="password" autocomplete="new-password" spellcheck="false">
+        <button id="b-slot-backup_github_token" type="button">등록</button>
+        <span id="m-slot-backup_github_token" class="msg" aria-live="polite"></span>
+      </div>
+      <!-- 공급자 칸(네이버 뉴스 등)은 공급자 선언에서 만든 칸 목록을 읽어 그린다. -->
+      <div id="provider-slots"></div>
+      <p class="hint">예전의 한 칸짜리 자료 키는 아직 등록할 수 없음: 자료 출처마다 위의 칸에 따로 등록합니다.</p>
+    </div>
+    <div class="item">
+      <h3>백업 (선택) <span id="reg-backup" class="badge"></span></h3>
+      <label for="f-backup-repo">비공개 GitHub 저장소 (소유자/이름)</label>
+      <input id="f-backup-repo" data-backup="repo" type="text" autocomplete="off" spellcheck="false">
+      <label for="f-backup-recipient">age 수신자 공개키 (age1…)</label>
+      <input id="f-backup-recipient" data-backup="recipient" type="text" autocomplete="off" spellcheck="false">
+      <button id="b-backup" type="button">백업 설정 저장</button>
+      <span id="m-backup" class="msg" aria-live="polite"></span>
+      <p class="hint">GitHub 토큰은 키처럼 따로 등록합니다. 공개키만 넣고 비밀키는 넣지 않습니다.</p>
+    </div>
+    <div class="item">
+      <h3>접속 키 (다른 기기에서 들어올 때)</h3>
+      <button id="b-access-key" type="button">접속 키 만들기/바꾸기</button>
+      <span id="m-access-key" class="msg" aria-live="polite"></span>
+      <p id="access-key-once" class="hint" hidden>새 접속 키: <code id="access-key-value"></code>
+        (지금 한 번만 보입니다. 바꾸면 다른 기기는 새 키를 넣어야 다시 들어옵니다.)</p>
+      <p class="hint">키를 만들거나 바꾸는 일과 잠금 풀기는 팀이 도는 이 컴퓨터에서만 됩니다.</p>
+      <h4>잠긴 기기</h4>
+      <ul id="access-locked"></ul>
+      <h4>접속 기록</h4>
+      <button id="b-access-log" type="button">다시 읽기</button>
+      <ul id="access-log"></ul>
+    </div>
+  </section>
+
+  <section id="main-view">
+  <p><button id="open-setup" type="button">설정 열기 (종목 · 키 다시 등록)</button></p>
+  <p id="rejected" class="bad" hidden><span id="rejected-text"></span>
+    <button id="fix-symbols" type="button">종목 고치기</button></p>
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr><th>종목</th><th class="num">현재가</th><th>통화</th><th>받은 시각</th></tr>
+      </thead>
+      <tbody id="quotes"></tbody>
+    </table>
+  </div>
+  <p id="empty">아직 받은 시세가 없습니다.</p>
+
+  <h2>최근 이벤트</h2>
+  <ul id="events"></ul>
+  <p id="no-events">아직 받은 이벤트가 없습니다.</p>
+  </section>
+  <noscript>이 화면은 스크립트가 켜져 있어야 시세를 보여 줍니다.</noscript>
+</main>
+</body>
+</html>

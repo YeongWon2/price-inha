@@ -120,7 +120,7 @@ pub struct Launch {
 ///
 /// 1. 보관 폴더에서 비밀 보관소(`SecretStore::open(home)`)와 저장소(`home/`[`DB_FILE`])를 연다.
 /// 2. 지켜볼 종목을 정한다: 인자 · 환경 변수로 줬으면 그것, 아니면 보관 폴더에 저장된 것.
-/// 3. 접속 관문을 `bind:port`에 연다. 공개 경로 `GET /`는 `web/index.html`을 내준다
+/// 3. 접속 관문을 `bind:port`에 연다. 공개 경로 `GET /`는 빌드한 화면 `web/dist/index.html`을 내준다
 ///    (프로그램에 넣어 둔 것). 가리기 자리에는 `SecretStore::redact`를 끼운다.
 ///    설정 상태는 세션이 있어야 열리는 경로에, 키 · 종목 등록은 그 컴퓨터에서만 열리는 경로
 ///    (`pi_gate::GateBuilder::local_routes`)에 끼운다([`crate::SETUP_PATH`] 등).

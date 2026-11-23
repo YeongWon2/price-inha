@@ -6,9 +6,9 @@
 //! 같게 동작하고(이벤트 · 알림을 더 내지 않는다), 웹 자산 경로만 함께 단다.
 //!
 //! - 웹 자산(공개 경로, 세션 없이 열린다 · Host와 상대 주소 확인은 받는다):
-//!   `pi_office::web_assets()`는 [`OFFICE_ASSETS_PREFIX`] 아래(`GET /office/`는 `index.html`),
-//!   `pi_notify::phone_assets()`는 [`PHONE_ASSETS_PREFIX`] 아래(`GET /phone/`는 `index.html`)에 단다.
-//!   `Content-Type`은 파일 끝으로 정하고(폰 묶음은 묶음이 준 값), 없는 파일은 404다.
+//!   화면 빌드 결과(`web/dist`, server 11차)의 사무실 쪽은 [`OFFICE_ASSETS_PREFIX`] 아래(`GET /office/`는
+//!   `office/index.html`), 폰 쪽은 [`PHONE_ASSETS_PREFIX`] 아래(`GET /phone/`는 `phone/index.html`), 두 쪽이
+//!   부르는 묶음은 `/assets/` 아래에 단다. `Content-Type`은 파일 끝으로 정하고, 없는 파일은 404다.
 //! - 사무실(`pi_office::Office`): 이벤트 포트는 접속 관문의 `Publisher::publish`(번호 있는 이벤트, E37),
 //!   시계는 [`crate::Wiring::clock`]. 팀 상태가 바뀌면 `set_team_state`, 논의에 든 담당은
 //!   `Activity::Discussing`(끝나면 `Working`)으로 알린다(V13 · V15). 경로 [`OFFICE_PATH`] · [`OFFICE_CHAT_PATH`].

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e293b">
+  <title>가격인하</title>
+  <link rel="manifest" href="/phone/manifest.webmanifest">
+  <link rel="icon" href="/phone/icon-192.png">
+  <script type="module" src="/src/phone/main.ts"></script>
+</head>
+<body>
+  <header>
+    <h1>가격인하</h1>
+    <button type="button" data-action="open-office">3D 사무실</button>
+  </header>
+
+  <section id="push-setup">
+    <h2>폰 알림</h2>
+    <p class="muted" data-part="push-status">알림을 켜면 승인 요청과 이상을 바로 받아요.</p>
+    <button type="button" data-action="enable-push">알림 켜기</button>
+  </section>
+
+  <section id="approval" data-card="approval" data-approval-id="" data-fingerprint="" hidden>
+    <h2>승인이 필요해요</h2>
+    <p data-part="summary"></p>
+    <p class="muted">내용 지문 <span data-part="fingerprint"></span></p>
+    <label class="row">6자리 확인 코드(서버 화면의 코드와 같은지 보세요)
+      <input type="text" data-field="code" inputmode="numeric" maxlength="6" readonly tabindex="-1">
+    </label>
+    <div class="row">
+      <button type="button" data-action="approve">승인</button>
+      <button type="button" data-action="reject">거절</button>
+    </div>
+    <p class="muted" data-part="result" role="status"></p>
+  </section>
+
+  <section id="daily-summary">
+    <h2>하루 정리</h2>
+    <div data-part="done"><h3>한 일</h3><p class="muted">아직 없어요.</p></div>
+    <div data-part="pnl"><h3>손익</h3><p class="muted">아직 없어요.</p></div>
+    <div data-part="review"><h3>복기</h3><p class="muted">아직 없어요.</p></div>
+  </section>
+
+  <section>
+    <h2>알림</h2>
+    <ul id="notice-list"></ul>
+  </section>
+
+</body>
+</html>
