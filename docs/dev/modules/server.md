@@ -464,3 +464,16 @@ office · notify 크레이트의 옛 화면 시험을 지우면서 화면 쪽 �
 | `crates/server/tests/web/phone-app.test.ts` | 유지 | 단추 글 "3D 사무실"은 그대로, 가는 곳은 새 시험이 본다 |
 | `crates/server/tests/web/office-approval.test.ts` · `key-fields.test.ts` | 유지 | 보내는 경로 · 지문 · 칸 비우기 규칙은 그대로, 막기 · 화면 연결은 새 시험이 본다 |
 | 그 밖의 server 시험 | 유지 | 15차와 무관 |
+
+### 15차 보강 (N2 뒤 시험 결함, 조정자)
+
+N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞 대조 표가 둘을 "유지"로 잘못 적었다. 시험만 고치고 뜻은 그대로 둔다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/phone-app.test.ts` 거절 시험("거절도 같은 카드의 지문을 그대로 보낸다") | 고침 | 지시서 15차 2번: 성공한 카드는 막힌 채다 — 거절 시험은 카드를 새로 띄운 뒤(승인 열기) 거절을 누르게 한다 |
+| `crates/server/tests/round20/pages.rs` 바깥 원천 검사(`assert_no_outside_source`) | 고침 | 지시서 15차 3번: 같은 Host의 `wss://<addr>`도 허용한다(다른 주소는 그대로 막는다) |
+| `crates/server/tests/round21/main.rs` | 고침 | 테스트 clippy(`-D warnings`): 가져온 `round20/common.rs`의 안 쓰는 항목 때문에 dead-code — round21이 쓰는 것만 둔 자기 도움 파일로 |
+| 그 밖의 server 시험 | 유지 | 15차 앞 대조 표 그대로 |
