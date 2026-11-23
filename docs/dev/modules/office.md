@@ -1,6 +1,6 @@
 # office 모듈 (T20, T21)
 
-크레이트 `pi-office`, 폴더 `crates/office/`(서버) + `crates/office/web/office/`(3D 사무실 · 채팅 화면). 구성 요소 A3 · A1. `pi-store`를 쓴다. 이벤트를 보내는 길은 포트로 받는다(조립에서 gate의 Publisher를 끼운다).
+크레이트 `pi-office`, 폴더 `crates/office/`(서버)(서버만. 3D 사무실 · 채팅 화면은 server 11차부터 `crates/server/web/office/` — 아래 '옛 화면 정리'). 구성 요소 A3 · A1. `pi-store`를 쓴다. 이벤트를 보내는 길은 포트로 받는다(조립에서 gate의 Publisher를 끼운다).
 근거: `dev.md` D1 · D11 · C2 · C5 · E3 · E6 · E37 · V1 · V13~V15, `spec.md` F7.
 
 ## 원본 동작 근거

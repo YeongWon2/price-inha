@@ -1,6 +1,6 @@
 # notify 모듈 (T22, 잠금 알림 E2)
 
-크레이트 `pi-notify`, 폴더 `crates/notify/`(서버) + `crates/notify/web/phone/`(폰 PWA). 구성 요소 A3 알림 · A1 폰 화면. `pi-store`(11차의 구독 표)를 쓴다. 가리기와 시계는 포트로 받는다.
+크레이트 `pi-notify`, 폴더 `crates/notify/`(서버)(서버만. 폰 PWA 화면은 server 11차부터 `crates/server/web/phone/` — 아래 '옛 화면 정리'). 구성 요소 A3 알림 · A1 폰 화면. `pi-store`(11차의 구독 표)를 쓴다. 가리기와 시계는 포트로 받는다.
 근거: `dev.md` D11 · N5 · C7 · E2 · E38 · V10 · V11 · V12, `spec.md` F7 1a · FN2 1.
 
 ## 원본 동작 근거
