@@ -9,12 +9,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-pi-store = { path = "../store" }
-pi-template = { path = "../template" }
-rust_decimal = { version = "1.43.0", features = ["serde"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
-thiserror = "2.0.21"
+pi-store.workspace = true
+pi-template.workspace = true
+rust_decimal = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

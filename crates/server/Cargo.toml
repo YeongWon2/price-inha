@@ -9,49 +9,49 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-async-trait = "0.1.92"
-axum = "0.8.9"
-chrono = "0.4.45"
-pi-agent = { version = "0.1.0", path = "../agent" }
-pi-ai = { version = "0.1.0", path = "../ai" }
-pi-approval = { version = "0.1.0", path = "../approval" }
-pi-backup = { version = "0.1.0", path = "../backup" }
-pi-data = { version = "0.1.0", path = "../data" }
-pi-exec = { version = "0.1.0", path = "../exec" }
-pi-gate = { version = "0.1.0", path = "../gate" }
-pi-journal = { version = "0.1.0", path = "../journal" }
-pi-knowledge = { version = "0.1.0", path = "../knowledge" }
-pi-market = { version = "0.1.0", path = "../market" }
-pi-notify = { version = "0.1.0", path = "../notify" }
-pi-office = { version = "0.1.0", path = "../office" }
-pi-paper = { version = "0.1.0", path = "../paper" }
-pi-rules = { version = "0.1.0", path = "../rules" }
-pi-secrets = { version = "0.1.0", path = "../secrets" }
-pi-store = { version = "0.1.0", path = "../store" }
-pi-template = { version = "0.1.0", path = "../template" }
-pi-trigger = { version = "0.1.0", path = "../trigger" }
-reqwest = { version = "0.13.5", default-features = false }
-rusqlite = { version = "0.42.0", features = ["bundled"] }
-rust_decimal = "1.43.0"
-serde_json = "1.0.154"
-thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
-tracing = "0.1.44"
-url = "2.5.8"
-tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "ansi"] }
-zeroize = "1.9.1"
+async-trait.workspace = true
+axum.workspace = true
+chrono = { workspace = true, default-features = true }
+pi-agent.workspace = true
+pi-ai.workspace = true
+pi-approval.workspace = true
+pi-backup.workspace = true
+pi-data.workspace = true
+pi-exec.workspace = true
+pi-gate.workspace = true
+pi-journal.workspace = true
+pi-knowledge.workspace = true
+pi-market.workspace = true
+pi-notify.workspace = true
+pi-office.workspace = true
+pi-paper.workspace = true
+pi-rules.workspace = true
+pi-secrets.workspace = true
+pi-store.workspace = true
+pi-template.workspace = true
+pi-trigger.workspace = true
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+rust_decimal.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tracing.workspace = true
+url.workspace = true
+tracing-subscriber.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
-age = "0.12.1"
+age.workspace = true
 base64 = "0.23.1"
-chrono = "0.4.45"
-futures = "0.3.34"
-pi-notify = { version = "0.1.0", path = "../notify", features = ["test-redirect"] }
-reqwest = { version = "0.13.5", default-features = false }
-rusqlite = { version = "0.42.0", features = ["bundled"] }
-sha2 = "0.11.1"
-tempfile = "3.27.0"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
-tokio-tungstenite = "0.30.0"
-url = "2.5.8"
-wiremock = "0.6.5"
+chrono = { workspace = true, default-features = true }
+futures.workspace = true
+pi-notify = { workspace = true, features = ["test-redirect"] }
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
+tokio-tungstenite.workspace = true
+url.workspace = true
+wiremock.workspace = true

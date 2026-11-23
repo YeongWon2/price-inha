@@ -97,6 +97,8 @@ AI 검토에서 기계로 잡을 수 있는 종류의 문제가 나오면, 고�
 **새 모듈을 더하는 절차** (N0, 조정자): (1) `architecture.toml`에 그 크레이트 항목(과 새 금지 모양, 그 표본을 `scripts/selftest.py` `PATTERN_SAMPLES`에)을 더하고 `[crates.price-inha] internal`에 이름을 더한다. (2) 같은 커밋에 워크스페이스 뼈대 `crates/<모듈>/`(`Cargo.toml`, 문서 주석만 있는 `src/lib.rs`, `src/error.rs`)를 만든다(워크스페이스는 `crates/*`를 이미 구성원으로 둔다). (3) `python3.14 scripts/selftest.py`를 돌려 통과시키고 커밋한다. (4) 그다음 N1을 시작한다. 검사 스크립트(`scripts/lib.sh`)는 `crates/<모듈>/Cargo.toml`이 있는 모듈만 검사한다. 그래서 뼈대를 만든 뒤 G1 전까지는 전체 검사(`scripts/verify.sh`)가 그 모듈의 필수 번호 빠짐으로 실패한다. 이 사이에는 모듈별 검사(`scripts/verify.sh <모듈>`)를 쓴다.
 조립(`crates/server`)은 2026-11-16부터 gate가 아니라 server 모듈이다(`docs/dev/modules/server.md`).
 
+의존의 판은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다(QMIT 결정 5). 크레이트에는 `<이름> = { workspace = true }`(기능은 `features = [...]`로 더함)로만 적고, 판(문자열이나 `version =`)을 직접 적으면 ARCH-DEP-WORKSPACE로 막는다. 크레이트끼리 판이 갈려 사람에게 묻는 중인 것만 `architecture.toml`의 `[dep_workspace] pending`에 둔다.
+
 컨벤션 요약: 오류는 모듈마다 `src/error.rs`의 `thiserror` enum, 공개 항목에는 문서 주석, 라이브러리는 환경 변수 · 시계를 직접 읽지 않고 인자로 받음, 기록은 `tracing`(`println!` 금지), 돈은 십진수, 파일 500줄 · 함수 80줄 이하.
 
 ## 7. 필수 번호를 테스트에 적는 법

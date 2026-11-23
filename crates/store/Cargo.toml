@@ -9,11 +9,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-rusqlite = { version = "0.42.0", features = ["bundled", "backup"] }
-serde = "1.0.229"
-serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
-thiserror = "2.0.21"
+rusqlite = { workspace = true, features = ["bundled", "backup"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror.workspace = true
 
 [dev-dependencies]
-serde = "1.0.229"
-tempfile = "3.27.0"
+serde.workspace = true
+tempfile.workspace = true

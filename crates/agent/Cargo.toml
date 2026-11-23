@@ -9,14 +9,14 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-async-trait = "0.1.92"
-pi-ai = { path = "../ai" }
-pi-store = { path = "../store" }
-rust_decimal = "1.43.0"
-serde_json = "1.0.154"
-thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["time", "sync", "macros", "rt"] }
+async-trait.workspace = true
+pi-ai.workspace = true
+pi-store.workspace = true
+rust_decimal.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time", "sync", "macros", "rt"] }
 
 [dev-dependencies]
-tempfile = "3.27.0"
-tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }

@@ -172,6 +172,12 @@ def main():
             add_dep(fx, "crates/server", 'openssl-sys = { path = "../../../vendor/openssl-sys" }')
         case(fx, "금지된 의존을 잡는다 (openssl-sys)", ban, arch, "[ARCH-DEP-BAN]")
 
+        def pinned():
+            vendor(fx, "thiserror")
+            add_dep(fx, "crates/store", 'thiserror = { path = "../../../vendor/thiserror", version = "0.0.0" }')
+        case(fx, "크레이트에 판을 직접 적으면 잡는다 (workspace.dependencies)", pinned, arch,
+             "[ARCH-DEP-WORKSPACE] crates/store/Cargo.toml:")
+
         def extra():
             shutil.copytree(fx / "crates/store", fx / "crates/extra")
             p = fx / "crates/extra/Cargo.toml"

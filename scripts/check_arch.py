@@ -80,6 +80,37 @@ for name in crates:
     if name not in local:
         report("ARCH-CRATE", "Cargo.toml", f"규칙 표의 {name} 크레이트가 없다", "크레이트를 만들거나 표에서 뺀다")
 
+# 의존의 판은 루트 [workspace.dependencies] 한 곳에서 정한다. 크레이트에 판을 직접 적으면 잡는다.
+dw = RULES.get("dep_workspace")
+if dw:
+    sec_rx = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+    for name, pkg in local.items():
+        manifest = Path(pkg["manifest_path"]).relative_to(ROOT).as_posix()
+        dep_sec, table_dep = False, None
+        for n, raw in enumerate((ROOT / manifest).read_text(encoding="utf-8").splitlines(), 1):
+            line = raw.split("#", 1)[0].strip()
+            m = sec_rx.match(line)
+            if m:
+                parts = [p.strip().strip("\"'") for p in m.group(1).split(".")]
+                kinds = ("dependencies", "dev-dependencies", "build-dependencies")
+                dep_sec = parts[-1] in kinds  # [dependencies], [target.'cfg(..)'.dependencies]
+                table_dep = parts[-1] if len(parts) >= 2 and parts[-2] in kinds else None  # [dependencies.foo]
+                continue
+            if not line or "=" not in line:
+                continue
+            key, val = (s.strip() for s in line.split("=", 1))
+            if table_dep:
+                dep, pinned = table_dep, key == "version"
+            elif dep_sec:
+                dep = key.split(".", 1)[0].strip("\"'")
+                pinned = (val.startswith(("\"", "'")) and not key.endswith(".workspace")) or (
+                    key.endswith(".version") or re.search(r"(^|[{,\s])version\s*=", val) is not None)
+            else:
+                continue
+            if pinned and dep not in dw.get("pending", []):
+                report("ARCH-DEP-WORKSPACE", f"{manifest}:{n}", f"{dep} 의 판을 크레이트에 직접 적었다 — {dw['why']}",
+                       dw["fix"].replace("{dep}", dep))
+
 all_pkgs = {p["name"] for p in meta["packages"]}
 for b in RULES.get("banned_deps", []):
     if b["name"] in all_pkgs:

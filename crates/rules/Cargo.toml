@@ -9,11 +9,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-pi-market = { path = "../market" }
-pi-paper = { path = "../paper" }
-pi-template = { path = "../template" }
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
-rust_decimal = "1.43.0"
-thiserror = "2.0.21"
+pi-market.workspace = true
+pi-paper.workspace = true
+pi-template.workspace = true
+chrono = { workspace = true, features = ["std"] }
+rust_decimal.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
