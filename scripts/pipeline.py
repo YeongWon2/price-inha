@@ -190,7 +190,8 @@ def reconcile_tables(text):
         if line.strip() != "### 대조":
             continue
         rows, j = [], i + 1
-        while j < len(lines) and not lines[j].strip():
+        # 머리와 표 사이의 빈 줄 · 설명 글은 건너뛴다(다음 머리 전까지).
+        while j < len(lines) and not lines[j].lstrip().startswith(("|", "#")):
             j += 1
         while j < len(lines) and lines[j].lstrip().startswith("|"):
             cells = [c.strip() for c in lines[j].strip().strip("|").split("|")]
@@ -211,7 +212,8 @@ def check_reconcile(m, d):
         before = len(reconcile_tables(old))
     if len(tables) <= before or not tables[-1]:
         return 1, (f"✗ 대조 표 없음 — 고치기: {brief_path(m)} 의 이번 차수 절 아래 '### 대조' 표"
-                   "(시험 · 문서 경로 | 판정 | 근거)를 쓴다\nGR 실패: " + m)
+                   "(시험 · 문서 경로 | 판정 | 근거)를 쓴다. 다시 연(reopen) 때의 지시서보다 표가 하나 늘어야 한다 — "
+                   "reopen 전에 써서 커밋한 표는 이번 차수 표로 세지 않으니 reopen 뒤에 쓴다\nGR 실패: " + m)
     out, bad = [], False
     for row in tables[-1]:
         path, verdict, why = (row + ["", "", ""])[:3]

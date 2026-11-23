@@ -409,6 +409,11 @@ def main():
                                             ("`docs/dev/modules/store.md`", "열어 둠", "물음"))),
                  ["bash", "-c", f"{py} scripts/pipeline.py gate GR store && git log -1 --format=%s"],
                  ["GR 통과", "docs(store): 대조 표"], should_fail=False)
+            case(fx, "대조: 머리와 표 사이에 설명 줄이 있어도 표를 읽는다(근거 없는 지움을 잡는다)",
+                 lambda: (reopened(), append(fx, brief, "### 대조\n\n이번 차수 설명 한 줄.\n\n"
+                                             "| 시험 · 문서 경로 | 판정 | 근거 |\n|---|---|---|\n"
+                                             "| `crates/store/tests/t.rs` | 지움 | 낡아 보임 |")),
+                 pl + ["gate", "GR", "store"], "✗ 근거 없는 지움")
 
             def drop_fn_unlisted():
                 to_n1(("`crates/store/tests/t.rs`", "유지", "이번 차수와 무관"))
