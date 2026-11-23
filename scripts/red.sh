@@ -16,14 +16,25 @@ say "✓ 컴파일됨"
 
 # shellcheck disable=SC2046
 n=$(grep -rhcE '^\s*#\[(tokio::)?test' $(module_test_dirs "$m") 2>/dev/null | awk '{s+=$1} END{print s+0}')
-if [ "$n" -lt 1 ]; then say "✗ 테스트 없음"; fail=1; else say "✓ 테스트 ${n}개"; fi
+# shellcheck disable=SC2046
+nw=$(grep -rhcE '^\s*(it|test)(\.each\([^)]*\))?\(' --include='*.ts' $(module_test_dirs "$m") 2>/dev/null | awk '{s+=$1} END{print s+0}')
+n=$((n + nw))
+if [ "$n" -lt 1 ]; then say "✗ 테스트 없음"; fail=1; else say "✓ 테스트 ${n}개 (화면 ${nw}개)"; fi
 
 # shellcheck disable=SC2046
 out=$(cargo test $(module_pkgs "$m") --no-fail-fast 2>&1); code=$?
 passed=$(printf '%s\n' "$out" | grep -E '^test result:' | sed -E 's/.* ([0-9]+) passed.*/\1/' | awk '{s+=$1} END{print s+0}')
 failed=$(printf '%s\n' "$out" | grep -E '^test result:' | sed -E 's/.* ([0-9]+) failed.*/\1/' | awk '{s+=$1} END{print s+0}')
-if [ "$code" -eq 0 ]; then say "✗ 테스트가 이미 통과함 (red가 아니다)"; fail=1
-else say "✓ red: 실패 ${failed}개 · 통과 ${passed}개"; fi
+# 화면 시험(vitest)도 red 에 든다: Rust 시험이나 화면 시험 가운데 하나라도 실패해야 red.
+wcode=0
+for w in $(module_web "$m"); do
+  if ! command -v npm >/dev/null; then say "✗ 화면 시험: npm 없음 — 고치기: Node.js LTS 를 설치한다"; fail=1; continue; fi
+  if ! web_deps "$w" >/tmp/pi-red-web-$m.log 2>&1; then say "✗ 화면 의존성 (npm ci) 실패"; tail -20 /tmp/pi-red-web-$m.log; fail=1; continue; fi
+  if wout=$(npm --prefix "$w" test --silent 2>&1); then say "  화면 시험 (vitest): 통과"
+  else wcode=1; say "  화면 시험 (vitest): 실패 — $(printf '%s\n' "$wout" | grep -E 'Tests? .*(failed|passed)' | tail -1)"; fi
+done
+if [ "$code" -eq 0 ] && [ "$wcode" -eq 0 ]; then say "✗ 테스트가 이미 통과함 (red가 아니다)"; fail=1
+else say "✓ red: 실패 ${failed}개 · 통과 ${passed}개 (Rust)"; fi
 if [ "$passed" -gt 0 ]; then
   say "  참고: 구현 전인데 통과하는 테스트 — 아무것도 확인하지 않는 테스트인지 본다"
   printf '%s\n' "$out" | grep -E '^test .* \.\.\. ok$' | head -20 | sed 's/^/    /'

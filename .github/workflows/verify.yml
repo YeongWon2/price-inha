@@ -41,6 +41,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+      # 결정 1: 화면은 Vite(crates/server/web). verify.sh 3w 검사가 npm ci · tsc · vitest · 빌드 대조를 돈다.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
       - name: 시험용 git 이름(검사기 자체 시험이 가짜 저장소에 커밋한다)
         run: |
           git config --global user.name "ci"

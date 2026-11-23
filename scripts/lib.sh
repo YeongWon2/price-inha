@@ -31,6 +31,33 @@ module_test_dirs() {
   echo "$out"
 }
 
+# 모듈의 화면 프로젝트(Vite). crates/<모듈>/web/package.json 이 있으면 그 폴더. 결정 1(2026-11-23 자리 조정).
+# 화면 시험(vitest)은 crates/<모듈>/tests/web/ 에 둔다 — 잠금(red/<모듈>)이 Rust 시험과 같이 덮는다.
+module_web() {
+  local d
+  for d in $(module_dirs "$1"); do [ -f "$d/web/package.json" ] && echo "$d/web"; done
+}
+
+web_deps() { # node_modules 를 package-lock 그대로 맞춘다(없거나 lock 이 더 새로우면 npm ci)
+  local w="$1"
+  if [ ! -f "$w/node_modules/.package-lock.json" ] || [ "$w/package-lock.json" -nt "$w/node_modules/.package-lock.json" ]; then
+    (cd "$w" && npm ci --no-audit --no-fund --loglevel=error)
+  fi
+}
+
+dist_hash() { # 빌드 결과 폴더의 지문(파일 이름 + 내용)
+  if [ -d "$1" ]; then (cd "$1" && find . -type f | LC_ALL=C sort | xargs shasum -a 256 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  else echo none; fi
+}
+
+web_dist_fresh() { # 지금 dist 가 소스로 다시 빌드한 것과 같은가
+  local w="$1" before after
+  before=$(dist_hash "$w/dist")
+  (cd "$w" && npm run --silent build) || return 1
+  after=$(dist_hash "$w/dist")
+  [ "$before" = "$after" ] || { echo "빌드하니 dist 가 바뀌었다 — 고치기: npm --prefix $w run build 결과를 함께 커밋한다"; return 1; }
+}
+
 # 지시서의 "## 필수 번호" 아래 줄에서 번호를 뽑는다.
 required_ids() {
   awk '/^## 필수 번호/{p=1;next} /^## /{p=0} p' "docs/dev/modules/$1.md" \

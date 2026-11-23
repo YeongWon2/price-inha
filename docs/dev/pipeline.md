@@ -52,6 +52,7 @@ N0 계획 ─→ N1 테스트 작성(red) ─→ G1 red 확인 ─→ N2 구현(
 | 1 | `cargo fmt --all --check` | 모양이 다르다 |
 | 2 | clippy (실행 코드는 엄격, 테스트는 `unwrap` 허용) | `unsafe` · `unwrap` · `expect` · `panic!` · `todo!` · `dbg!` · `println!` · 문서 주석 없는 공개 항목 등이 있다 |
 | 3 | `cargo test --workspace` | 테스트가 깨진다 |
+| 3w | 화면(Vite, `crates/<모듈>/web/package.json`이 있을 때): `npm ci` · `npm run typecheck` · `npm test`(vitest) · `npm run build` 뒤 `web/dist`가 그대로인가 | 화면 형 오류 · 화면 시험 실패 · 커밋한 `dist`가 소스와 다르다(빌드 결과를 함께 커밋한다). 화면 시험은 `crates/<모듈>/tests/web/*.test.ts`에 두어 잠금이 같이 덮는다. G1(red)은 Rust 시험이나 화면 시험 가운데 하나라도 실패하면 red다 |
 | 4 | 잠긴 테스트 비교 | red 뒤에 테스트를 고쳤다 |
 | 5 | 필수 번호 | 지시서의 필수 번호가 테스트에 없다 |
 | 5b | 원본 동작 근거 | 지시서에 "원본 동작 근거" 절이 없거나, 따르는 조사 문서를 가리키지 않는다(원본에 없는 기능이면 "원본에 없음"이라고 적어야 한다) |

@@ -43,6 +43,17 @@ run "2b clippy (테스트)" cargo clippy $pkgs --tests -- -D warnings \
 # shellcheck disable=SC2086
 run "3 테스트" cargo test $pkgs
 
+# 3w 화면(Vite): 의존성 · 형 검사 · vitest · 빌드한 dist 가 커밋된 것과 같은가
+for m in $mods; do
+  for w in $(module_web "$m"); do
+    if ! command -v npm >/dev/null; then bad "3w 화면: npm 없음 ($m) — 고치기: Node.js LTS 를 설치한다"; continue; fi
+    run "3w 화면 의존성 (npm ci): $m" web_deps "$w"
+    run "3w 화면 형 검사 (tsc): $m" npm --prefix "$w" run --silent typecheck
+    run "3w 화면 시험 (vitest): $m" npm --prefix "$w" test --silent
+    run "3w 화면 빌드 · dist 대조: $m" web_dist_fresh "$w"
+  done
+done
+
 # 4 잠긴 테스트
 for m in $mods; do
   if git rev-parse -q --verify "refs/tags/red/$m" >/dev/null; then
