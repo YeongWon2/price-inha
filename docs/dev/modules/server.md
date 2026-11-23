@@ -328,6 +328,8 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 3. 멈춤 상태의 템플릿(전체 정지)은 깨우기를 걸지 않는다(사지 않으므로) — 손절 · 청산은 10a 보강 4번 그대로.
 4. 시험: (가) 뉴스를 구독하지 않은 템플릿(예: 단타 프리셋을 확인해 뉴스가 없으면 그것, 없으면 시험에서 구독을 바꾼 템플릿)에서 새 뉴스가 와도 scout가 깨어나지 않고 네이버 주기 요청 0건. (나) 공시를 구독하지 않으면 DART · FRED · ECOS 주기 요청 0건이고 거시 값이 바뀌어도 깨어나지 않는다. (다) 시세를 구독하지 않으면 시세 조건이 걸리지 않지만 손절은 나간다. (라) 템플릿을 뉴스 구독이 있는 것으로 바꾸면 그 뒤 새 뉴스로 깨어난다. (마) 쓰는 템플릿이 없으면 주기 요청 0건. 잠긴 round18 `wake.rs` · `macro_wake.rs` · `dart.rs`(스윙 프리셋)는 그대로 통과해야 한다.
 
+5. 참고(N3 뒤 조정자, 다음 차수 후보): 쓰는 템플릿을 매 tick 읽지 말고 바뀔 때만 읽기(읽기 오류 경고가 초마다 쌓이지 않게), 구독을 다시 켤 때 멈춘 사이 쌓인 뉴스 · 공시 · 거시 변화를 한꺼번에 깨우지 않기, 해제 직전 대기열에 든 사건 버리기(`DataTriggerConfig.enabled`), 값 바뀜 · 멈춤 → 다시 시작 시험.
+
 ### 10c 기억 · 화면
 12. **검색 도구** (knowledge 4차): `knowledge_search` 도구에 날짜(from · to)와 실수 유형 조건을 내보낸다. 복기 때 실수 기록(`RecordText::mistakes`), 시장 메모, 뉴스 · 공시 요약(`external`, 자동 회상 제외)을 색인한다. `TradeCatalog::mistakes`를 저장소로 구현한다.
 13. **뜻 검색** (ai 10차, 결정 15): 설정의 "뜻 검색 켜기"(기본 꺼짐, Ollama 주소는 루프백만 · 모델 기본 `bge-m3`)가 켜지면 `OllamaEmbeddingProvider`를 `EmbeddingRegistry`에 등록하고, 감싸는 타입으로 `pi_knowledge::Embedder`를 구현해 `Knowledge::with_embedder`에 건다. `reembed_step`을 한가할 때 한 걸음씩 돌린다(간격 · 취소). `doctor`에 Ollama 항목. `hybrid_search`는 store · knowledge 다음 차수 뒤에 잇는다.
