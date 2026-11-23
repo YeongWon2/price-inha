@@ -477,3 +477,4 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | `crates/server/tests/round20/pages.rs` 바깥 원천 검사(`assert_no_outside_source`) | 고침 | 지시서 15차 3번: 같은 Host의 `wss://<addr>`도 허용한다(다른 주소는 그대로 막는다) |
 | `crates/server/tests/round21/main.rs` | 고침 | 테스트 clippy(`-D warnings`): 가져온 `round20/common.rs`의 안 쓰는 항목 때문에 dead-code — round21이 쓰는 것만 둔 자기 도움 파일로 |
 | 그 밖의 server 시험 | 유지 | 15차 앞 대조 표 그대로 |
+- 15차 N3 참고(다음 차수 후보): 사무실 막기 시험에 지문 불일치 뒤 다시 켜기 · 두 카드가 서로 막지 않기 더하기, 폰에서 POST 중 다른 승인 "open"이 오면 앞 결과 글이 새 카드에 찍힘, 설정 화면 키 칸은 소스 글자만 시험(jsdom 행동 시험 없음), phone-approval-lock 두 시험이 순서에 묶임. 15차 보강에서 red.sh 시험 clippy가 dead_code를 잡게 고쳤다(G1이 놓친 round21 도움 파일).
