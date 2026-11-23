@@ -149,3 +149,10 @@ server의 장부 셈(`trading/base.rs` `books()`)이 보유(`Broker::holdings`)�
 
 1. **한 번에 읽는 장부**: `Paper`에 보유 전체와 통화별 현금(available · held · unsettled)을 **같은 잠금 안에서** 함께 읽어 돌려주는 공개 메서드(예: `snapshot(now) -> AccountSnapshot`)를 더한다. 체결(`on_quote`) · 주문 · 정산과 같은 잠금 순서를 지켜 교착이 없게 한다. 기존 `holdings` · `cash`는 그대로 둔다.
 2. 시험: 한 스레드가 `on_quote`로 체결을 계속 일으키는 동안 다른 스레드가 `snapshot`을 여러 번 읽어도, 매번 "현금 + 보유 수량 × 체결가"의 합(수수료 · 세금 반영 규칙 그대로)이 체결 전후의 일관된 값 가운데 하나다(섞인 값이 나오지 않는다). 따로 읽는 `holdings` · `cash`로는 섞일 수 있음을 보이는 대조 시험은 필요 없다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/paper/tests/` (기존 시험 전부) | 유지 | 9차는 새 메서드를 더할 뿐, 기존 `holdings` · `cash` 동작을 바꾸지 않는다 |
+| `docs/dev/modules/paper.md` 앞 차수 규칙 | 유지 | 9차와 부딪히는 규칙 없음 |
