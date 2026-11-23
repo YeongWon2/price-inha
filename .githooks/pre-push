@@ -27,6 +27,14 @@ while read -r _lref lsha _rref rsha; do
         *) fail=1 ;;
       esac
     fi
+    # 보안 공지(RustSec): GitHub CI 대신 여기서 본다(2026-11-24 사용자 "로컬에서 다해결"). 네트워크가 없으면 경고만.
+    if command -v cargo-deny >/dev/null 2>&1; then
+      if ! aout=$(cargo deny check advisories 2>&1); then
+        if printf '%s' "$aout" | grep -qiE 'fetch|network|resolve host|timed out'; then
+          echo "- 경고: 보안 공지를 받지 못했다(네트워크). 네트워크가 되면 scripts/nightly.sh audit 를 돌린다"
+        else printf '%s\n' "$aout" | grep -E '^(error|warning)' | head -20; echo "✗ 보안 공지 — 고치기: 판을 올리거나 결정 문서에 수용 사유를 적고 deny.toml · .cargo/audit.toml 에 같은 사유로 더한다"; fail=1; fi
+      else echo "✓ 보안 공지 (cargo deny check advisories)"; fi
+    else echo "- 경고: cargo-deny 가 없어 보안 공지 검사를 건너뛴다"; fi
   fi
 done
 if [ "$fail" -ne 0 ]; then

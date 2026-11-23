@@ -80,16 +80,16 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 
-**영향 범위** (QMIT 결정 6): `scripts/verify.sh --affected [--base <ref>]`는 `scripts/affected.py`가 고른 모듈만 돈다. 기준(기본 `origin/main`, 없으면 `HEAD~1`)과 작업 트리(커밋 안 된 것 포함)의 차이에서 바뀐 `crates/<모듈>/`과 그 크레이트에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존), 바뀐 지시서 `docs/dev/modules/<모듈>.md`의 모듈을 고른다. 그래프가 못 따라가는 변경(루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `.cargo/` · `.github/`, 그 밖에 모르는 곳)은 전체를 돈다. 문서만 바뀌었으면 "바뀐 코드 없음"으로 0이다. CI는 PR에서 `--affected --base origin/<대상 브랜치>`, main push · 밤(매일 03:00 KST) · 손으로 돌릴 때 전체를 돈다.
+**영향 범위** (QMIT 결정 6): `scripts/verify.sh --affected [--base <ref>]`는 `scripts/affected.py`가 고른 모듈만 돈다. 기준(기본 `origin/main`, 없으면 `HEAD~1`)과 작업 트리(커밋 안 된 것 포함)의 차이에서 바뀐 `crates/<모듈>/`과 그 크레이트에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존), 바뀐 지시서 `docs/dev/modules/<모듈>.md`의 모듈을 고른다. 그래프가 못 따라가는 변경(루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `.cargo/`, 그 밖에 모르는 곳)은 전체를 돈다. 문서만 바뀌었으면 "바뀐 코드 없음"으로 0이다. GitHub CI는 쓰지 않는다(2026-11-24 사용자 "깃허브 ci는 하지말자 로컬에서 다해결하면돼"): push 전 검사는 pre-push 관문이, 전체 검사는 손으로 돌리는 `scripts/verify.sh`가 맡는다.
 
 **로컬 pre-push 관문** (QMIT 결정 4): `.githooks/pre-push`가 push되는 범위(원격 sha 기준, 새 브랜치면 `origin/main`)로 `verify.sh --affected`를 돌리고 실패하면 push를 막는다. 저장소마다 한 번 `git config core.hooksPath .githooks`로 켠다(꺼져 있으면 `verify.sh`가 참고 줄로 알린다). 관문을 건너뛰는 push는 하지 않는다.
 
 **공급망 규칙** (QMIT 결정 8):
 - **새 바깥 의존은 사용자 승인으로만.** 새 바깥 의존(루트 `Cargo.toml` `[workspace.dependencies]`에 새 이름, `crates/*/web/package.json`에 새 이름)은 N2(와 다른 노드)가 더하지 않고 멈춰 보고한다. 조정자가 사용자 승인을 받아 `architecture.toml`(그 크레이트의 `external`, 테스트 · 실행 파일 전용이면 `[dep_workspace] extra`, 화면이면 `[web] allowed`)과 의존을 같은 커밋에 더한다. 기계로는 6번 검사가 막는다: `[workspace.dependencies]`의 바깥 이름이 크레이트별 `external`의 합(`price-inha`의 `"*"`는 빼고)과 `[dep_workspace] extra` 밖이면 ARCH-DEP-NEW, `package.json`의 의존 이름이 `[web] allowed` 밖이면 ARCH-WEB-DEP.
 - **오프라인(G2)**: 10번 검사(cargo-deny licenses · bans · sources). 라이선스 허용 목록 · 예외는 `deny.toml`에 있고, 바꾸는 것은 조정자가 사용자 확인 뒤에만 한다.
-- **네트워크(G2 밖)**: `.github/workflows/audit.yml`이 보안 공지(`cargo audit` · `cargo deny check advisories`, 무시 목록은 `.cargo/audit.toml`과 `deny.toml`에 같은 사유로)와 새 판 발행일(`scripts/supply.py`)을 본다. PR · push는 기준 판에 없던 새 판만 보고 `[supply] min_age_days`(14일)보다 새것이면 실패, 밤(매일 02:00 KST)은 `--all`로 모든 판을 보고만 한다.
+- **네트워크(G2 밖)**: 보안 공지(`cargo audit` · `cargo deny check advisories`, 무시 목록은 `.cargo/audit.toml`과 `deny.toml`에 같은 사유로)와 새 판 발행일(`scripts/supply.py`)은 pre-push 관문과 `scripts/nightly.sh audit`이 본다. pre-push는 기준 판에 없던 새 판만 보고 `[supply] min_age_days`(14일)보다 새것이면 막는다. `nightly.sh audit`은 손으로 돌리며 `--all`로 모든 판을 보고만 한다.
 - **발행일 검사** `python3.14 scripts/supply.py [--since <ref>] [--head <ref>] [--all]`: `Cargo.lock`의 crates.io 패키지와 `crates/*/web/package-lock.json`의 npm 패키지의 발행 시각을 crates.io · npm 레지스트리에서 받는다(동시 4개 이하, 캐시 `.pipeline/supply-cache.json`). 기본 기준은 `origin/main`. 종료 0 통과 · 1 너무 새 판 · 2 기준 오류 · 3 발행일을 받지 못함(네트워크). `--offline-fixture <json>`은 자체 시험용 가짜 발행일 표다.
-- **pre-push**: push 범위에서 `Cargo.lock`이나 `package-lock.json`이 바뀌었을 때만 `supply.py --since <원격 sha> --head <로컬 sha>`를 돌린다. 너무 새 판이면 push를 막고, 네트워크가 없으면(종료 3) 경고만 한다.
+- **pre-push**: push 범위에서 `Cargo.lock`이나 `package-lock.json`이 바뀌었을 때만 `supply.py --since <원격 sha> --head <로컬 sha>`와 `cargo deny check advisories`를 돌린다. 너무 새 판이거나 보안 공지가 있으면 push를 막고, 네트워크가 없으면 경고만 한다.
 
 어긴 곳은 `✗ [규칙 번호] 파일:줄`과 **왜** · **고치기**가 함께 찍힌다. 구현 에이전트는 그 안내대로 고치고 다시 돌린다.
 규칙이 틀렸다고 보면 코드를 우회하지 말고 멈춰서 알린다. 규칙(`architecture.toml`, `Cargo.toml`의 lints, 검사 스크립트)은 조정자가 사용자 확인 뒤에만 고친다.
@@ -166,6 +166,16 @@ fn 확인에_실패한_키는_저장하지_않는다() { ... }
 - 규칙(`architecture.toml`), 검사 스크립트, 그래프, 루트 `Cargo.toml` · `clippy.toml`을 고치면 자체 시험을 다시 돌려야 한다. `verify.sh`의 0번 검사가 규칙의 지문이 마지막 자체 시험 때와 같은지 본다.
 - `architecture.toml`에 금지 모양을 더하면 `selftest.py`의 표본에도 "어긴 코드 한 줄"을 더해야 한다. 없으면 자체 시험이 실패한다.
 
-## 10. 밤 CI: 변이 시험 · 커버리지 — 보고만, 판정 아님
+## 10. 로컬 측정: 변이 시험 · 커버리지 · 반복 실행 — 보고만, 판정 아님
 
-`.github/workflows/nightly.yml`(매일 04:00 KST · 손으로 실행 가능)이 게이트 자체를 잰다(QMIT 결정 7). 변이 시험은 `cargo-mutants`로 돈 · 안전 핵심 크레이트(`pi-rules` · `pi-paper` · `pi-exec` · `pi-gate`)를 `--in-diff` 없이 전체 돌려 시험이 일부러 넣은 버그를 잡는지(caught · missed)를 본다. 커버리지는 `cargo-llvm-cov`로 워크스페이스 전체 줄 커버리지를 크레이트별 표로 낸다. 결과는 job summary와 artifact로만 남기고 **성공 · 실패 판정에는 넣지 않는다**(두 job 모두 `continue-on-error`). 환경에 따라 흔들리는 측정은 판정에서 뺀다. 끝났다는 기준은 여전히 `scripts/verify.sh`뿐이다. 놓친 변이가 보이면 해당 모듈을 다시 열 때(reopen) 시험을 보강하는 근거로 쓴다. 도구 판은 발행 14일 넘은 것만 고정한다(공급망 규칙 8 · 9): cargo-mutants 27.1.0, cargo-llvm-cov 0.9.1.
+GitHub CI는 쓰지 않는다(2026-11-24 사용자). 게이트 자체를 재는 측정(QMIT 결정 7)은 손으로 `scripts/nightly.sh`를 돌린다. 결과는 `target/nightly/`에 남고 **성공 · 실패 판정에는 넣지 않는다**. 끝났다는 기준은 여전히 `scripts/verify.sh`뿐이다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `scripts/nightly.sh audit` | 보안 공지(`cargo audit` · `cargo deny check advisories`)와 모든 판 발행일 보고(`supply.py --all`). 네트워크 필요 |
+| `scripts/nightly.sh mutants [-p 패키지…]` | `cargo-mutants`로 돈 · 안전 핵심 크레이트(기본 `pi-rules` · `pi-paper` · `pi-exec` · `pi-gate`)의 시험이 일부러 넣은 버그를 잡는지(caught · missed) |
+| `scripts/nightly.sh coverage` | `cargo-llvm-cov`로 워크스페이스 줄 커버리지를 크레이트별 표로 |
+| `scripts/nightly.sh stress <번> [cargo test 인자…]` | 간헐 실패 찾기: 여러 번 돌려 실패 줄만 모은다 |
+| `scripts/nightly.sh all` | audit · mutants · coverage 차례로 |
+
+놓친 변이가 보이면 해당 모듈을 다시 열 때(reopen) 시험을 보강하는 근거로 쓴다. 도구 판은 발행 14일 넘은 것만 고정한다(공급망 규칙 8 · 9): cargo-mutants 27.1.0, cargo-llvm-cov 0.9.1. 도구가 없으면 스크립트가 설치 명령을 알려 준다.

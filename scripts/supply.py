@@ -14,7 +14,7 @@ Cargo.lock 의 crates.io 패키지와 crates/*/web/package-lock.json 의 npm 패
     python3.14 scripts/supply.py --offline-fixture f.json  네트워크 없이 가짜 발행일 표로(자체 시험)
 
 종료: 0 통과 · 1 너무 새 판이 있음 · 2 사용법/기준 오류 · 3 발행일을 받지 못한 판이 있음(네트워크).
-네트워크가 필요하다. verify.sh(G2, 오프라인)에는 넣지 않는다 — audit.yml 과 pre-push 가 부른다.
+네트워크가 필요하다. verify.sh(G2, 오프라인)에는 넣지 않는다 — pre-push 와 scripts/nightly.sh audit 가 부른다.
 """
 import argparse
 import json

@@ -141,3 +141,7 @@
 7. **흔들림 격리 · 게이트 신뢰**: 흔들리는 시험(지금 셋)을 원인부터 고친다. 밤 CI에서 변이 시험(cargo-mutants)과 커버리지로 게이트 자체를 잰다(판정에는 넣지 않고 보고만 — 환경에 따라 흔들리는 측정은 판정에서 뺀다).
 8. **공급망 규칙** (위키에 없음 — 우리 고유): 새 바깥 의존(크레이트 · npm)은 발행된 지 14일 넘은 판만, 더하기 전에 사용자 승인. `cargo-deny`로 라이선스 허용 목록 · 출처(crates.io만) · 금지 의존을 검사한다. 판 발행일 확인은 네트워크가 필요하니 밤 CI와 의존을 바꿀 때만 돈다.
 9. **(2026-11-24 사용자, 8번 뒤)** 보안 권고를 고친 판은 14일을 기다리지 않는다(사유 · 권고 번호를 남긴다) — url 2.5.8 → 2.5.9(RUSTSEC-2026-0592). 갈린 판은 base64 0.23 · rand 0.9로 맞춘다. `webpki-root-certs`(CDLA-Permissive-2.0, 모질라 루트 인증서 데이터)는 그 크레이트 하나만 예외로 허용한다. chrono · basic-toml의 "관리 중단" 권고는 사유와 함께 수용하고 교체(예: chrono → jiff)는 다음 차수 후보로 둔다.
+10. **(2026-11-24 사용자, 9번 뒤) GitHub CI는 쓰지 않는다** — 사용자 "깃허브 ci는 하지말자 로컬에서 다해결하면돼". `.github/`(verify · audit · nightly · stress 워크플로와 dependabot)를 지웠다. 대신 (조정자, 사용자 "알아서 추천대로"):
+    - push 전 검사는 pre-push 관문(`.githooks/pre-push`)이 맡는다. lock 파일이 바뀐 push에서는 발행일(`supply.py`)과 함께 보안 공지(`cargo deny check advisories`)도 본다. 네트워크가 없으면 경고만 한다.
+    - 밤 CI가 하던 측정(7번)과 감사(8번)는 손으로 돌리는 `scripts/nightly.sh {audit,mutants,coverage,stress,all}`로 옮겼다. 결과는 `target/nightly/`, 보고만 하고 판정에 넣지 않는다.
+    - 끝났다는 기준은 그대로 `scripts/verify.sh`가 0으로 끝나는 것이다.

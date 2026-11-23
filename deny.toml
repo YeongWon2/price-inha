@@ -1,5 +1,5 @@
 # cargo-deny 설정 (QMIT 결정 8 공급망 규칙, docs/dev/pipeline.md 5장).
-# licenses · bans · sources 는 오프라인으로 verify.sh 10번 검사가 돌고, advisories 는 네트워크라 audit.yml 이 돈다.
+# licenses · bans · sources 는 오프라인으로 verify.sh 10번 검사가 돌고, advisories 는 네트워크라 pre-push 와 scripts/nightly.sh audit 가 돈다.
 # 고치는 것은 조정자가 사용자 확인 뒤에만 한다(규칙 파일).
 
 [graph]

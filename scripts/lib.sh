@@ -93,7 +93,7 @@ rules_hash() {
   cat scripts/*.sh scripts/*.py docs/dev/architecture.toml docs/dev/graph.toml Cargo.toml clippy.toml deny.toml 2>/dev/null | shasum -a 256 | cut -d' ' -f1
 }
 
-# 공급망 검사기 cargo-deny 의 고정 판(QMIT 결정 8). 발행 14일이 지난 판. CI(verify.yml · audit.yml)와 같아야 한다.
+# 공급망 검사기 cargo-deny 의 고정 판(QMIT 결정 8). 발행 14일이 지난 판. GitHub CI 는 쓰지 않는다(2026-11-24 사용자).
 DENY_VERSION="0.20.2"
 
 # 지시서에 "## 원본 동작 근거" 절이 있고, 조사 문서를 가리키거나 "원본에 없음"이라고 적었는가.

@@ -135,7 +135,7 @@ if [ -n "$off" ]; then bad "9 검사를 끈 곳 — 고치기: #[ignore] · #[al
 else ok "9 검사를 끈 곳 없음"; fi
 
 # 10 공급망 (cargo-deny, QMIT 결정 8): 라이선스 · 금지 크레이트 · 출처(crates.io 만). 오프라인으로 되는 것만.
-# 보안 공지(advisories)와 새 판 발행일(scripts/supply.py)은 네트워크라 audit.yml · pre-push 가 본다.
+# 보안 공지(advisories)와 새 판 발행일(scripts/supply.py)은 네트워크라 pre-push · scripts/nightly.sh audit 가 본다.
 if ! cargo deny --version >/dev/null 2>&1; then
   bad "10 공급망 (cargo-deny): cargo-deny 가 없다 — 고치기: cargo install cargo-deny --version $DENY_VERSION --locked"
 elif out=$(cargo deny --offline check licenses bans sources 2>&1); then ok "10 공급망 (cargo-deny)"
