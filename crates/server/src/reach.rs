@@ -133,6 +133,28 @@ pub const DAILY_SUMMARY_PATH: &str = "/api/daily-summary";
 /// 담당이 쓰는 지식 검색 도구의 이름(T16).
 pub const KNOWLEDGE_TOOL: &str = "knowledge_search";
 
+/// (10차 10c 14번) 사무실 승인 카드 이벤트(번호 있는 이벤트). 주문이 승인을 기다리면 내용
+/// `{"number": 승인 번호, "summary": 가린 내용, "short_code": 지문 앞 6자, "status": "pending"}`을 내고,
+/// 답이 나면(폰 · 사무실 어느 쪽이든 [`APPROVAL_DECIDE_PATH`] · [`crate::APPROVAL_ANSWER_PATH`]) 같은 번호로
+/// `status`가 `"approved"` · `"rejected"`인 것을 낸다. 승인 · 거절은 폰과 같은 경로 · 같은 지문 대조다.
+pub const KIND_OFFICE_APPROVAL: &str = "office.approval";
+
+/// (10차 10c 13번) 뜻 검색 설정. `GET` → `{"enabled", "base_url", "model"}`(처음에는 꺼짐 ·
+/// `pi_ai::OLLAMA_DEFAULT_BASE_URL` · [`DEFAULT_EMBED_MODEL`]). `POST` 같은 모양 → 200 같은 모양.
+/// 주소가 루프백(`127.0.0.1` · `::1` · `localhost`)이 아니면 400 `{"error": `[`SEMANTIC_LOOPBACK_ONLY`]`}`이고
+/// 그대로 둔다. 세션 · Origin 확인을 받고, `POST`는 그 컴퓨터에서만 받는다. 설정은 보관 폴더의
+/// [`SEMANTIC_SETTINGS_FILE`]에 남는다(비밀이 아니다).
+pub const SETUP_SEMANTIC_PATH: &str = "/api/setup/semantic";
+
+/// 보관 폴더 안 뜻 검색 설정 파일 이름.
+pub const SEMANTIC_SETTINGS_FILE: &str = "semantic-settings.json";
+
+/// 뜻 검색 설정 거부: Ollama 주소가 루프백이 아니다.
+pub const SEMANTIC_LOOPBACK_ONLY: &str = "loopback_only";
+
+/// 뜻 검색의 기본 임베딩 모델(결정 15번, Ollama `bge-m3`, 1024차원).
+pub const DEFAULT_EMBED_MODEL: &str = "bge-m3";
+
 /// 자동 회상으로 꺼낸 지난 매매가 판단 기록의 자료 이름에 붙는 머리. 뒤에 매매 번호가 온다(V22).
 pub const RECALL_SOURCE_PREFIX: &str = "지난 매매 #";
 
