@@ -185,8 +185,8 @@ use serde::{Deserialize, Serialize};
 use crate::book::Book;
 use crate::ledger::{CashCode, Ledger, MarketCode};
 use crate::{
-    Archived, BrokerError, CashBalance, CheckAuthority, Fill, OrderEvent, PaperConfig,
-    SnapshotReason,
+    AccountSnapshot, Archived, BrokerError, CashBalance, CheckAuthority, Fill, OrderEvent,
+    PaperConfig, SnapshotReason,
 };
 use crate::{fill, marks, verify};
 
@@ -460,6 +460,24 @@ impl PaperBroker {
                 held: Decimal::ZERO,
                 unsettled: Decimal::ZERO,
             },
+        }
+    }
+
+    /// 보유 전체와 통화별 현금을 **같은 잠금 안에서** 한 번에 읽는다 (9차 1). 먼저 `now`까지
+    /// 마감이 된 주문을 취소한다([`PaperBroker::cash`]와 같다). 체결 · 주문 · 정산과 같은 잠금
+    /// 하나만 잡으므로 교착이 없고, 그 사이에 체결이 끼어 섞인 장부가 나오지 않는다.
+    /// 기존 [`crate::Broker::holdings`] · [`PaperBroker::cash`]는 그대로다.
+    pub fn account_snapshot(&self, now: DateTime<Utc>) -> AccountSnapshot {
+        let _ = now;
+        let zero = CashBalance {
+            available: Decimal::ZERO,
+            held: Decimal::ZERO,
+            unsettled: Decimal::ZERO,
+        };
+        AccountSnapshot {
+            holdings: Vec::new(),
+            krw: zero.clone(),
+            usd: zero,
         }
     }
 

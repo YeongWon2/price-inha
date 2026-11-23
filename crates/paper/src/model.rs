@@ -310,6 +310,18 @@ pub struct Holding {
     pub average_purchase_price: Decimal,
 }
 
+/// 한 번에 읽은 장부 (9차). 보유 전체와 통화별 현금을 **같은 잠금 안에서** 함께 읽은 값이다.
+/// 그래서 그 사이에 체결이 끼어 섞인 값(보유는 체결 전, 현금은 체결 뒤)이 나오지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountSnapshot {
+    /// 보유 전체. 종목 글자 순서다([`crate::Broker::holdings`]에 종목을 주지 않은 것과 같다).
+    pub holdings: Vec<Holding>,
+    /// 원화 현금([`crate::PaperBroker::cash`]의 원화와 같다).
+    pub krw: CashBalance,
+    /// 달러 현금([`crate::PaperBroker::cash`]의 달러와 같다).
+    pub usd: CashBalance,
+}
+
 /// 시장별 수수료율 (`Commission`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commission {

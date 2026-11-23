@@ -33,9 +33,9 @@ pub use config::{
 };
 pub use error::{BrokerError, InvalidReason, SnapshotReason};
 pub use model::{
-    AccountKind, Archived, CashBalance, CloseReason, Commission, Execution, Fill, Holding,
-    ModifyRequest, Order, OrderAck, OrderEvent, OrderEventKind, OrderGroup, OrderId, OrderRequest,
-    OrderStatus, OrderType, Side, UnfilledTimeout,
+    AccountKind, AccountSnapshot, Archived, CashBalance, CloseReason, Commission, Execution, Fill,
+    Holding, ModifyRequest, Order, OrderAck, OrderEvent, OrderEventKind, OrderGroup, OrderId,
+    OrderRequest, OrderStatus, OrderType, Side, UnfilledTimeout,
 };
 pub use paper::{
     Fault, IDEMPOTENCY_WINDOW, MAX_EXCHANGE_LEAD, MAX_SAME_TIME_PRICES, PaperBroker, Snapshot,
