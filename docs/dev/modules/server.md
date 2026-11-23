@@ -373,7 +373,8 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 2. **package-lock 다시 만들기**: 항목 55개에 `resolved` · `integrity`가 없다. 같은 판 그대로 lock을 다시 만들어 모든 항목에 해시가 있게 한다(N1).
 3. **wss 머리**: CSP `connect-src`에 `ws://<Host>`와 함께 `wss://<Host>`를 적는다(https 원격, 오래된 브라우저). 같은 Host 검사.
 4. **dist의 숨은 파일**: build.rs는 이름이 `.`으로 시작하는 파일(`.DS_Store` 등)을 넣지 않는다.
-5. 참고(다음 차수 후보): 승인 단추를 보내는 동안 막기, `submitKeyFields`를 화면에 쓰거나 지우기(키 칸 비우는 때를 한 규칙으로), three 형 정의, minify.
+   - (N2 뒤 조정자) 3번은 이 걸음에서 하지 않는다: 잠긴 round20 `pages.rs`가 바깥 원천으로 `ws://<Host>`만 허용한다. 다음 차수에 시험과 함께 한다(지금은 CSP3의 `'self'`가 wss를 덮는다).
+5. 참고(다음 차수 후보): 흔들리는 시험 둘 — round9 `loss` 하루 손실(AnomalyHalt), round10 `day::아무것도_누르지_않아도_하루_시작과_논의와_마감_기록이_남는다`(Resting/Operating, 2026-11-24 한 번), wss 머리(위), 승인 단추를 보내는 동안 막기, `submitKeyFields`를 화면에 쓰거나 지우기(키 칸 비우는 때를 한 규칙으로), three 형 정의, minify.
 
 ### 원본 동작 근거 (11차)
 원본에 없음(우리 고유) — 화면 빌드 방식 바꾸기. 사무실 화면의 동작은 앞 차수의 DeskRPG 조사(`docs/research/` 사무실 문서)를 그대로 따른다(옮기기만).
