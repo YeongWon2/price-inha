@@ -16,6 +16,8 @@
 mod answer;
 mod base;
 #[cfg(test)]
+mod basis_order;
+#[cfg(test)]
 mod books_race;
 mod chosen;
 mod day;

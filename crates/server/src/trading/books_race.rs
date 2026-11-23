@@ -33,13 +33,13 @@ use rust_decimal::Decimal;
 use crate::{App, CalendarFn, Settings, Trading, TradingWiring, Upstreams, Wiring};
 
 /// 사고파는 종목.
-const SYMBOL: &str = "000660";
+pub(super) const SYMBOL: &str = "000660";
 /// 지정가 = 시세(원).
-const PRICE: i64 = 100_000;
+pub(super) const PRICE: i64 = 100_000;
 /// 한 번에 사고파는 수량(평가액의 10%라 섞이면 크게 어긋난다).
-const QUANTITY: i64 = 10;
+pub(super) const QUANTITY: i64 = 10;
 /// 처음 원화 현금.
-const CASH: i64 = 10_000_000;
+pub(super) const CASH: i64 = 10_000_000;
 /// 사고팔기를 되풀이하는 횟수(체결은 그 두 배).
 const ROUNDS: usize = 2_000;
 /// 장부를 셈하는 작업 수.
@@ -59,7 +59,7 @@ impl Clock for TestClock {
     }
 }
 
-fn kst(date: NaiveDate, hour: u32, minute: u32) -> DateTime<Utc> {
+pub(super) fn kst(date: NaiveDate, hour: u32, minute: u32) -> DateTime<Utc> {
     let offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
     offset
         .from_local_datetime(&date.and_hms_opt(hour, minute, 0).unwrap())
@@ -151,7 +151,7 @@ fn dead_base_url() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-async fn start(home: &std::path::Path, at: DateTime<Utc>) -> App {
+pub(super) async fn start(home: &std::path::Path, at: DateTime<Utc>) -> App {
     let home = home.to_str().unwrap();
     let args: Vec<String> = ["--home", home, "--port", "0", "--interval-ms", "20"]
         .iter()
@@ -186,7 +186,7 @@ async fn start(home: &std::path::Path, at: DateTime<Utc>) -> App {
         .expect("서버가 떠야 한다")
 }
 
-fn quote(at: DateTime<Utc>) -> Quote {
+pub(super) fn quote(at: DateTime<Utc>) -> Quote {
     Quote {
         symbol: Symbol::new(SYMBOL),
         price: Decimal::from(PRICE),
@@ -197,7 +197,7 @@ fn quote(at: DateTime<Utc>) -> Quote {
 }
 
 /// 같은 값으로 사거나 파는 지정가 주문을 `at`에 내고, 1밀리초 뒤에 받은 그 값의 시세로 체결시킨다.
-async fn fill(trading: &Trading, side: Side, at: DateTime<Utc>) {
+pub(super) async fn fill(trading: &Trading, side: Side, at: DateTime<Utc>) {
     let approved = ApprovedOrder {
         market: Market::Kr,
         symbol: Symbol::new(SYMBOL),

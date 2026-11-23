@@ -414,6 +414,8 @@ impl Trading {
 
     /// 손실 기준을 저장소에 남긴다(화면에는 보내지 않는다).
     fn save_basis(&self, payload: &Value) -> Result<(), TradingError> {
+        #[cfg(test)]
+        super::basis_order::before_save(self);
         self.store
             .append_at(KIND_LOSS_BASIS, payload, millis(self.clock.now()))?;
         Ok(())
