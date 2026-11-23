@@ -76,3 +76,12 @@ N5 E2 E38 V10 V11 V12
 - `HttpTransport::redirect_to`를 `test-redirect` feature 뒤로 옮긴다(기본은 꺼짐). 기본 빌드에서 그 함수가 없는지 시험한다.
 
 - `HttpTransport::redirect_to`를 `test-redirect` feature(기본 꺼짐) 뒤로 옮겼다. notify 자기 시험은 dev-dependency로 자신을 이 feature를 켜서 쓴다. server는 자기 `Cargo.toml`의 dev-dependencies에서 `pi-notify`에 `features = ["test-redirect"]`를 켜야 한다(server 6차).
+
+## 옛 화면 정리 (2026-11-24, 결정 1 · server 11차 뒤)
+
+server 11차에서 화면을 `crates/server/web`(Vite)으로 옮겼고, server는 더는 이 크레이트의 화면 자산을 쓰지 않는다. 이 크레이트에서 옛 화면을 지운다.
+
+1. 지울 것: `crates/notify/web/` 폴더 전체, `src/phone.rs`(`Asset` · `phone_asset` · `phone_assets`)와 `lib.rs`의 내보내기 · 문서 주석의 `web/phone/` 언급, 그것만 보는 시험(`tests/suite/phone.rs`).
+2. 남길 것: 이 크레이트의 다른 기능(이벤트 · 알림 · 그 밖의 공개 API)과 그 시험은 그대로. 다른 크레이트(특히 server)는 고치지 않는다 — server가 아직 이것을 쓰면 멈추고 보고한다.
+3. 지우는 시험이 보던 동작 가운데 화면 쪽 동작(예: 응답 목록 정리, 서비스 워커 · manifest 모양)이 server의 시험(`crates/server/tests/web/`, `round20`)에 이미 있는지 보고, 없는 것은 목록으로 보고한다(server 다음 차수에 옮긴다).
+4. 시험: 지운 뒤 이 크레이트의 공개 API에 화면 자산이 없다(이름이 없어 컴파일되지 않는 것은 시험할 수 없으니, 남은 시험이 통과하고 `web/` 폴더가 없음을 Rust 시험 하나로 본다 — `CARGO_MANIFEST_DIR` 아래 `web`이 없다).

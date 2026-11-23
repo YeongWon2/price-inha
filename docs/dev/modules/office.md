@@ -51,3 +51,12 @@ C2 C5 E3 E6 E37 V1 V13 V14 V15 D20
 - 2차 후보 2: 화면(`office.js` `trim`)이 줄을 버릴 때 끝난(complete · failed) 응답은 응답 표에서도 지운다. 오는 중인 응답은 남긴다.
 - 2차 후보 3(대조표 `conformance.md`에 적을 것): 탭이 숨으면 걷기를 멈추고 돌아오면 목적지에 바로 놓는 것은 원본과 다르다. 까닭: 숨은 탭은 브라우저가 그리기를 멈춰 걷기 계산을 이어 갈 수 없고, 돌아온 순간 서버가 알린 마지막 자리가 맞는 모습이다(서버는 지도를 모르고 자리 이름만 보낸다).
 - 넘김: server — 스냅샷은 `last_seq`를 먼저 읽고 `agents()` · `pending_responses()`를 읽는다(server 조립).
+
+## 옛 화면 정리 (2026-11-24, 결정 1 · server 11차 뒤)
+
+server 11차에서 화면을 `crates/server/web`(Vite)으로 옮겼고, server는 더는 이 크레이트의 화면 자산을 쓰지 않는다. 이 크레이트에서 옛 화면을 지운다.
+
+1. 지울 것: `crates/office/web/` 폴더 전체, `src/web.rs`(`WebAsset` · `web_assets` · `INDEX_PATH` · `MAP_PATH`)와 `lib.rs`의 내보내기, 그것만 보는 시험(`tests/web_assets.rs`, `tests/web_prune.rs`).
+2. 남길 것: 이 크레이트의 다른 기능(이벤트 · 알림 · 그 밖의 공개 API)과 그 시험은 그대로. 다른 크레이트(특히 server)는 고치지 않는다 — server가 아직 이것을 쓰면 멈추고 보고한다.
+3. 지우는 시험이 보던 동작 가운데 화면 쪽 동작(예: 응답 목록 정리, 서비스 워커 · manifest 모양)이 server의 시험(`crates/server/tests/web/`, `round20`)에 이미 있는지 보고, 없는 것은 목록으로 보고한다(server 다음 차수에 옮긴다).
+4. 시험: 지운 뒤 이 크레이트의 공개 API에 화면 자산이 없다(이름이 없어 컴파일되지 않는 것은 시험할 수 없으니, 남은 시험이 통과하고 `web/` 폴더가 없음을 Rust 시험 하나로 본다 — `CARGO_MANIFEST_DIR` 아래 `web`이 없다).
