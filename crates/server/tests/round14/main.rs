@@ -8,5 +8,7 @@
 mod access;
 mod common;
 mod page;
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/refs.rs"]
+mod screen_refs;
+#[path = "../support/served.rs"]
+mod screen_served;

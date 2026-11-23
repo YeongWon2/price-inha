@@ -13,6 +13,8 @@ mod knowledge;
 mod lock;
 mod office;
 mod phone;
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/dist.rs"]
+mod screen_dist;
+#[path = "../support/files.rs"]
+mod screen_files;
 mod secrets;

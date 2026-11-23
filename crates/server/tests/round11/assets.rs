@@ -7,7 +7,8 @@
 use price_inha::{OFFICE_ASSETS_PREFIX, PHONE_ASSETS_PREFIX};
 
 use crate::common::{Bench, get_anonymous, kst, monday};
-use crate::screen::{dist_dir, dist_files};
+use crate::screen_dist::dist_dir;
+use crate::screen_files::dist_files;
 
 fn office_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or_default() {

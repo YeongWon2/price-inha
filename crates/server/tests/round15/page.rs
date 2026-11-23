@@ -23,7 +23,7 @@ async fn settings_screen_has_input_and_button_for_each_slot() {
     let page = get_with(bench.addr(), "/", None).await;
     assert_eq!(page.status, 200);
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
-    let text = crate::screen::served_page(bench.addr(), &page.text).await;
+    let text = crate::screen_served::served_page(bench.addr(), &page.text).await;
     assert!(text.contains(SETUP_KEYS_PATH));
     assert!(text.contains(SETUP_SLOTS_PATH), "칸별 등록 여부를 읽는다");
     for item in ITEMS {
@@ -47,7 +47,7 @@ async fn remote_keys_screen_has_input_and_button_for_each_slot() {
     let page = get_with(bench.addr(), KEYS_PAGE_PATH, Some(&cookie)).await;
     assert_eq!(page.status, 200);
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
-    let text = crate::screen::served_page(bench.addr(), &page.text).await;
+    let text = crate::screen_served::served_page(bench.addr(), &page.text).await;
     assert!(text.contains(REMOTE_KEYS_PATH));
     assert!(text.contains(SETUP_SLOTS_PATH), "칸별 등록 여부를 읽는다");
     for item in ITEMS {
@@ -70,7 +70,7 @@ async fn issued_access_key_is_wiped_from_screen_after_sixty_seconds() {
     let page = get_with(bench.addr(), "/", None).await;
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
     // 빌드는 숫자 60000을 같은 값 `6e4`로 쓴다(값은 같다).
-    let text = crate::screen::served_page(bench.addr(), &page.text).await;
+    let text = crate::screen_served::served_page(bench.addr(), &page.text).await;
     assert!(
         text.contains("ACCESS_KEY_SHOW_MS = 60000;") || text.contains("ACCESS_KEY_SHOW_MS = 6e4;"),
         "발급한 키를 보여 두는 시간은 60초"

@@ -1178,7 +1178,7 @@ async fn cli_공급자의_시간_제한은_ai_요청_시간_제한과_같다() {
 
 fn page() -> String {
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
-    crate::screen::built_page("index.html")
+    crate::screen_built::built_page("index.html")
 }
 
 // 검증: D11, V46

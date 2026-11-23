@@ -4,7 +4,9 @@
 use price_inha::KEYS_PAGE_PATH;
 
 use crate::common::{Bench, get, session};
-use crate::screen::{built_page, dist_dir, dist_files};
+use crate::screen_built::built_page;
+use crate::screen_dist::dist_dir;
+use crate::screen_files::dist_files;
 
 /// 파일 끝으로 정한 내용 형식(앞부분).
 fn wanted_type(path: &str) -> &'static str {
@@ -94,7 +96,7 @@ fn 화면_묶음은_vite가_만든_해시_이름이고_소스_경로를_부르�
     ] {
         let html = std::fs::read_to_string(dist_dir().join(page))
             .unwrap_or_else(|error| panic!("dist/{page}이 있어야 한다: {error}"));
-        let entries: Vec<String> = crate::screen::bundle_refs(&html);
+        let entries: Vec<String> = crate::screen_refs::bundle_refs(&html);
         assert!(
             entries.iter().any(|url| is_hashed_bundle(url)),
             "dist/{page}는 해시 붙은 묶음(/assets/<이름>-<해시>.js)을 부른다: {entries:?}"

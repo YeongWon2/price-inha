@@ -15,5 +15,11 @@ mod dist;
 mod pages;
 mod source;
 // 빌드 결과(dist)를 읽는 도우미(옛 시험과 함께 쓴다).
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/built.rs"]
+mod screen_built;
+#[path = "../support/dist.rs"]
+mod screen_dist;
+#[path = "../support/files.rs"]
+mod screen_files;
+#[path = "../support/refs.rs"]
+mod screen_refs;

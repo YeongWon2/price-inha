@@ -7,6 +7,8 @@
 // 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod common;
 mod page;
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/refs.rs"]
+mod screen_refs;
+#[path = "../support/served.rs"]
+mod screen_served;
 mod slots;

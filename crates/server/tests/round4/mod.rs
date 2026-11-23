@@ -88,7 +88,7 @@ fn kind_follows_rule(kind: &str) -> bool {
 
 fn page() -> String {
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
-    crate::screen::built_page("index.html")
+    crate::screen_built::built_page("index.html")
 }
 
 /// 화면에서 `<section id="...">`의 시작과 끝(닫는 태그 뒤) 자리.

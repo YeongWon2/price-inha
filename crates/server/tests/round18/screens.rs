@@ -20,7 +20,7 @@ async fn 설정_화면과_키_화면은_새_칸_목록_경로를_읽고_옛_자�
         let page = get(bench.addr(), path).await;
         assert_eq!(page.status, 200, "{path} 화면을 받는다");
         // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
-        let text = crate::screen::served_page(bench.addr(), &page.text).await;
+        let text = crate::screen_served::served_page(bench.addr(), &page.text).await;
         assert!(
             text.contains(SETUP_PROVIDERS_PATH),
             "{path} 화면이 공급자 칸 목록({SETUP_PROVIDERS_PATH})을 읽는다"

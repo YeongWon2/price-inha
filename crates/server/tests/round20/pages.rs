@@ -3,7 +3,7 @@
 use price_inha::KEYS_PAGE_PATH;
 
 use crate::common::{Bench, Reply, get, session};
-use crate::screen::dist_dir;
+use crate::screen_dist::dist_dir;
 
 /// 경로 · 세션이 필요한가 · 내용 형식 · 캐시 · HTML 쪽인가(dist 안의 파일 이름).
 struct Page {

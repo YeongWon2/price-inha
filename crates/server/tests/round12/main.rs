@@ -9,7 +9,9 @@ mod backup;
 mod common;
 mod day;
 mod order;
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/refs.rs"]
+mod screen_refs;
+#[path = "../support/served.rs"]
+mod screen_served;
 mod stop;
 mod tools;

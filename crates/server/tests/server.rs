@@ -12,8 +12,12 @@ mod round4;
 // 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod round5;
 mod round6;
-#[path = "support/screen.rs"]
-mod screen;
+#[path = "support/built.rs"]
+mod screen_built;
+#[path = "support/dist.rs"]
+mod screen_dist;
+#[path = "support/refs.rs"]
+mod screen_refs;
 mod setup;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1186,9 +1190,9 @@ async fn 장이_닫힌_동안은_시세_늦음을_알리지_않는다() {
 #[tokio::test]
 async fn 서버가_화면_한_장을_내주고_화면은_바깥_주소를_부르지_않는다() {
     // 11차(Vite 이전): 내주는 화면은 빌드 결과 dist/index.html이고, 스크립트는 그 쪽이 부르는 묶음에 있다.
-    let html_path = screen::dist_dir().join("index.html");
+    let html_path = screen_dist::dist_dir().join("index.html");
     let html = std::fs::read_to_string(&html_path).expect("dist/index.html이 있어야 한다");
-    let page = screen::built_page("index.html");
+    let page = screen_built::built_page("index.html");
     assert!(
         page.to_ascii_lowercase().contains("<html"),
         "화면은 HTML이다"
@@ -1623,7 +1627,7 @@ async fn 가진_달력이_지금을_덮지_않으면_장이_닫혔다고_보지_
 #[test]
 fn 화면은_새_시세_상태를_글자로_보여_줄_줄_안다() {
     // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
-    let page = screen::built_page("index.html");
+    let page = screen_built::built_page("index.html");
     for state in [
         FEED_CONNECTING,
         FEED_BROKER_REJECTED,

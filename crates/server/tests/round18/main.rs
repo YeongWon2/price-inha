@@ -33,8 +33,10 @@ mod dart;
 mod keys;
 mod macro_wake;
 mod news;
-#[path = "../support/screen.rs"]
-mod screen;
+#[path = "../support/refs.rs"]
+mod screen_refs;
+#[path = "../support/served.rs"]
+mod screen_served;
 mod screens;
 mod source;
 mod stop_backoff;
