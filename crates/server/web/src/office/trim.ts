@@ -1,6 +1,5 @@
 // 응답 목록 정리(server 12차 3번 · 옛 office `web_prune`, C5): 대화 줄이 넘치면 오래된 줄을 버리고,
 // 버린 줄의 응답이 끝난 것(complete · failed)이면 응답 표에서도 지운다. 오는 중인 응답은 남긴다.
-// 뼈대: 몸통은 N2가 `office/main.ts`의 정리 함수와 같은 동작으로 채운다.
 
 /** 한 대화에 남기는 줄 수(사무실 화면과 같다). */
 export const KEEP_LINES = 200;
@@ -24,8 +23,10 @@ export function trimLines(
   responses: Map<string, ResponseStatus>,
   keep: number = KEEP_LINES,
 ): void {
-  void lines;
-  void responses;
-  void keep;
-  throw new Error("trimLines: 아직 없다(N2)");
+  if (lines.length <= keep) { return; }
+  for (const line of lines.splice(0, lines.length - keep)) {
+    if (line.kind !== "resp") { continue; }
+    const status = responses.get(line.requestId)?.status;
+    if (status === "complete" || status === "failed") { responses.delete(line.requestId); }
+  }
 }

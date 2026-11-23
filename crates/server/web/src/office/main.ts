@@ -11,6 +11,7 @@ import "./office.css";
 import { API } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
 import type { OfficeMap, Scene } from "./scene3d";
+import { trimLines, type Line } from "./trim";
 
 const SESSION_PATH = API.session;
 const SNAPSHOT_PATH = API.office;
@@ -19,7 +20,6 @@ const WS_PATH = API.socket;
 const MAP_PATH = "./office-map.json";
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 10000;
-const KEEP_LINES = 200;
 const FOLLOW_PX = 80;
 
 const AGENT_IDS = ["news", "strategy", "risk", "review", "trader", "leader"];
@@ -44,10 +44,6 @@ interface ChatResponse {
   error?: string;
   updatedAt?: unknown;
 }
-/** 채팅 줄: 내 말 또는 응답 자리. */
-type Line =
-  | { kind: "me"; id: string; room: string; agent: string; text: string; failed?: boolean }
-  | { kind: "resp"; requestId: string };
 type MyLine = Extract<Line, { kind: "me" }>;
 
 const state = {
@@ -132,15 +128,6 @@ function linesOf(key: string): Line[] {
   return state.lines.get(key) as Line[];
 }
 
-/** 줄이 넘치면 오래된 줄을 버린다. 버린 줄의 응답이 끝난 것(complete · failed)이면 응답 표에서도 지운다(오래 켠 탭). */
-function trim(lines: Line[]): void {
-  if (lines.length <= KEEP_LINES) { return; }
-  for (const line of lines.splice(0, lines.length - KEEP_LINES)) {
-    const status = line.kind === "resp" ? state.responses.get(line.requestId)?.status : null;
-    if (line.kind === "resp" && (status === "complete" || status === "failed")) { state.responses.delete(line.requestId); }
-  }
-}
-
 /** 응답 객체는 requestId별로 updatedAt이 크거나 같은 것만 받아 덮어쓴다(늦게 온 옛 상태는 버린다). */
 function applyChat(resp: ChatResponse | null | undefined): void {
   if (!resp || typeof resp.requestId !== "string") { return; }
@@ -164,7 +151,7 @@ function applyChat(resp: ChatResponse | null | undefined): void {
     } else {
       lines.push(entry);
     }
-    trim(lines);
+    trimLines(lines, state.responses);
   }
   if (convKeyOf(resp) === state.conversation) { renderLog(false); }
 }
@@ -253,7 +240,7 @@ async function send(room: string, agent: string, text: string, existing?: MyLine
   if (!existing) {
     const lines = linesOf(room === ROOM_TEAM ? ROOM_TEAM : agent);
     lines.push(line);
-    trim(lines);
+    trimLines(lines, state.responses);
   }
   renderLog(true);
   try {

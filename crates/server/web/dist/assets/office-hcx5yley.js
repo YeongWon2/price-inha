@@ -115,6 +115,18 @@ async function decideApproval(root, number, verb, fetcher) {
 		return "failed";
 	}
 }
+/**
+* `lines`가 `keep`줄을 넘으면 앞(오래된 쪽)에서 넘친 만큼 버린다(`lines`를 그 자리에서 고친다).
+* 버린 응답 줄의 응답이 끝난 것(`complete` · `failed`)이면 `responses`에서도 지운다.
+*/
+function trimLines(lines, responses, keep = 200) {
+	if (lines.length <= keep) return;
+	for (const line of lines.splice(0, lines.length - keep)) {
+		if (line.kind !== "resp") continue;
+		const status = responses.get(line.requestId)?.status;
+		if (status === "complete" || status === "failed") responses.delete(line.requestId);
+	}
+}
 // \0vite/preload-helper.js
 var scriptRel = /* @__PURE__ */ (function detectScriptRel() {
 	const relList = typeof document !== "undefined" && document.createElement("link").relList;
@@ -226,7 +238,6 @@ var WS_PATH = API.socket;
 var MAP_PATH = "./office-map.json";
 var RETRY_MIN_MS = 1e3;
 var RETRY_MAX_MS = 1e4;
-var KEEP_LINES = 200;
 var FOLLOW_PX = 80;
 var AGENT_IDS = [
 	"news",
@@ -336,14 +347,6 @@ function linesOf(key) {
 	if (!state.lines.has(key)) state.lines.set(key, []);
 	return state.lines.get(key);
 }
-/** 줄이 넘치면 오래된 줄을 버린다. 버린 줄의 응답이 끝난 것(complete · failed)이면 응답 표에서도 지운다(오래 켠 탭). */
-function trim(lines) {
-	if (lines.length <= KEEP_LINES) return;
-	for (const line of lines.splice(0, lines.length - KEEP_LINES)) {
-		const status = line.kind === "resp" ? state.responses.get(line.requestId)?.status : null;
-		if (line.kind === "resp" && (status === "complete" || status === "failed")) state.responses.delete(line.requestId);
-	}
-}
 /** 응답 객체는 requestId별로 updatedAt이 크거나 같은 것만 받아 덮어쓴다(늦게 온 옛 상태는 버린다). */
 function applyChat(resp) {
 	if (!resp || typeof resp.requestId !== "string") return;
@@ -366,7 +369,7 @@ function applyChat(resp) {
 			}
 			lines.splice(end, 0, entry);
 		} else lines.push(entry);
-		trim(lines);
+		trimLines(lines, state.responses);
 	}
 	if (convKeyOf(resp) === state.conversation) renderLog(false);
 }
@@ -461,7 +464,7 @@ async function send(room, agent, text, existing) {
 	if (!existing) {
 		const lines = linesOf(room === ROOM_TEAM ? ROOM_TEAM : agent);
 		lines.push(line);
-		trim(lines);
+		trimLines(lines, state.responses);
 	}
 	renderLog(true);
 	try {
