@@ -452,3 +452,15 @@ office · notify 크레이트의 옛 화면 시험을 지우면서 화면 쪽 �
 - three 형 정의는 지금의 로컬 선언(`web/src/office/three.d.ts`)을 유지한다 — `@types/three`는 새 바깥 의존이라 들이지 않는다.
 - 묶음 줄이기(minify)는 끈 채 둔다 — 옛 시험이 dist 안의 글을 찾고, 집 안 서버라 크기 영향이 작다.
 - 저장 잠금이 tokio 작업 스레드에서 디스크 쓰기를 기다리는 것 — 영향이 작아 두고, 기록 저장이 느려지면 다시 본다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/round20/dist.rs::폰_묶음에는_three가_없고_바깥_주소도_부르지_않는다` | 고침 | 지시서 15차 5번 (가): 폰이 불러오는 `assets/phone-*.js` · css도 본다(더 세게만) |
+| `crates/server/src/page.rs` 단위 시험(`connect-src 'self' ws://127.0.0.1:7878;`) | 고침 | 지시서 15차 3번: `wss://<Host>`가 더해져 기대 글이 바뀐다(N2가 src와 함께) |
+| `crates/server/tests/round4/mod.rs` CSP 시험 | 유지 | `ws://<Host>` 뒤에 `wss://`를 덧붙이면 지금 기대(`contains`)가 그대로 맞는다 |
+| `crates/server/tests/round20/pages.rs` | 유지 | `'self'` 허용만 본다 |
+| `crates/server/tests/web/phone-app.test.ts` | 유지 | 단추 글 "3D 사무실"은 그대로, 가는 곳은 새 시험이 본다 |
+| `crates/server/tests/web/office-approval.test.ts` · `key-fields.test.ts` | 유지 | 보내는 경로 · 지문 · 칸 비우기 규칙은 그대로, 막기 · 화면 연결은 새 시험이 본다 |
+| 그 밖의 server 시험 | 유지 | 15차와 무관 |
