@@ -4,6 +4,7 @@
 //! `127.0.0.1:0`으로 띄우고, AI는 시연용 가짜 공급자, 웹 푸시 · GitHub · 자료 · 토스증권은 로컬 가짜 서버뿐이다.
 //! 실제 증권사 · AI 서버 · GitHub를 부르지 않는다.
 
+// 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod anomaly;
 mod assets;
 mod backup;
@@ -12,4 +13,6 @@ mod knowledge;
 mod lock;
 mod office;
 mod phone;
+#[path = "../support/screen.rs"]
+mod screen;
 mod secrets;

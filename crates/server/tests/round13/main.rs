@@ -4,7 +4,10 @@
 //! `127.0.0.1:0`으로 띄우고, AI 키 확인 · 웹 푸시 · GitHub는 로컬 가짜 서버나 아무도 듣지 않는
 //! 로컬 주소뿐이다. 실제 증권사 · AI 서버 · GitHub를 부르지 않는다.
 
+// 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod backup;
 mod common;
 mod keys;
 mod restore;
+#[path = "../support/screen.rs"]
+mod screen;

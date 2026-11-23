@@ -1177,8 +1177,8 @@ async fn cli_공급자의_시간_제한은_ai_요청_시간_제한과_같다() {
 // ───────────── 5 · 8. 화면 ─────────────
 
 fn page() -> String {
-    let page_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("web/index.html");
-    std::fs::read_to_string(&page_path).expect("web/index.html이 있어야 한다")
+    // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
+    crate::screen::built_page("index.html")
 }
 
 // 검증: D11, V46

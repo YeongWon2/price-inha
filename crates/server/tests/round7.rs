@@ -10,6 +10,10 @@
 //! - 9번(`spawn_blocking`)은 바깥에서 볼 수 있는 동작이 없어 테스트하지 않는다.
 //! - 14번은 문서 주석뿐이다.
 
+// 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
+#[path = "support/screen.rs"]
+mod screen;
+
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -1117,8 +1121,8 @@ fn path의_상대_경로_항목은_cli_후보가_아니다() {
 // 검증: D11, V46
 #[test]
 fn 화면은_사용자가_고치던_cli_경로_칸을_상태로_덮지_않는다() {
-    let page_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("web/index.html");
-    let page = std::fs::read_to_string(page_path).expect("web/index.html이 있어야 한다");
+    // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
+    let page = screen::built_page("index.html");
     assert!(page.contains("f-cli-command") && page.contains("f-cli-config-dir"));
     // 사용자가 칸을 고친 것을 알아채야(입력 이벤트) 상태를 다시 그릴 때 그 칸을 덮지 않을 수 있다.
     // 지금 화면은 칸에 초점이 있을 때만 덮지 않아, 고친 뒤 다른 곳을 누르면 다음 상태가 덮는다.

@@ -25,6 +25,7 @@
 //! - `subscribe`: 쓰는 템플릿의 구독(시세 · 공시 · 뉴스)이 깨우기와 주기 가져오기를 정한다 · 바꾸면 다시 건다 ·
 //!   쓰는 템플릿이 없으면 아무것도 걸지 않는다.
 
+// 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod backoff;
 mod carry;
 mod common;
@@ -32,6 +33,8 @@ mod dart;
 mod keys;
 mod macro_wake;
 mod news;
+#[path = "../support/screen.rs"]
+mod screen;
 mod screens;
 mod source;
 mod stop_backoff;

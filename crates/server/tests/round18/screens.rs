@@ -19,12 +19,14 @@ async fn 설정_화면과_키_화면은_새_칸_목록_경로를_읽고_옛_자�
     for path in ["/", KEYS_PAGE_PATH] {
         let page = get(bench.addr(), path).await;
         assert_eq!(page.status, 200, "{path} 화면을 받는다");
+        // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
+        let text = crate::screen::served_page(bench.addr(), &page.text).await;
         assert!(
-            page.text.contains(SETUP_PROVIDERS_PATH),
+            text.contains(SETUP_PROVIDERS_PATH),
             "{path} 화면이 공급자 칸 목록({SETUP_PROVIDERS_PATH})을 읽는다"
         );
         assert!(
-            !has_old_data_item(&page.text),
+            !has_old_data_item(&text),
             "{path} 화면에 옛 자료 키(item \"data\") 칸이 없다"
         );
     }

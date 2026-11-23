@@ -4,6 +4,9 @@
 //! `127.0.0.1:0`으로 띄우고, 자료 출처(DART · ECOS · FRED)와 GitHub은 로컬 가짜 서버로 흉내 낸다.
 //! 시험의 키 값은 모두 가짜 글자다.
 
+// 11차(Vite 이전): 옛 시험이 빌드한 화면(dist)에서 같은 뜻을 찾는 도우미.
 mod common;
 mod page;
+#[path = "../support/screen.rs"]
+mod screen;
 mod slots;

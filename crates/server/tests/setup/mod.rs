@@ -1446,8 +1446,8 @@ async fn 종목으로_볼_수_없는_입력은_저장하지_않는다() {
 // ───────────── 규칙 7: 화면 ─────────────
 
 fn page() -> String {
-    let page_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("web/index.html");
-    std::fs::read_to_string(&page_path).expect("web/index.html이 있어야 한다")
+    // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 빌드한 화면과 그 묶음에서 찾는다.
+    crate::screen::built_page("index.html")
 }
 
 // 검증: C3, V46, D11

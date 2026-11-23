@@ -76,10 +76,9 @@ async fn 세션이면_키_화면이_열리고_다른_기기_키가_등록되며_
     let cookie = login(addr).await;
     let page = get_with(addr, KEYS_PAGE_PATH, Some(&cookie)).await;
     assert_eq!(page.status, 200, "{}", page.text());
-    assert!(
-        page.text().contains(REMOTE_KEYS_PATH),
-        "화면이 등록 경로를 부른다"
-    );
+    // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
+    let text = crate::screen::served_page(addr, &page.text()).await;
+    assert!(text.contains(REMOTE_KEYS_PATH), "화면이 등록 경로를 부른다");
     let saved = post_with(
         addr,
         REMOTE_KEYS_PATH,

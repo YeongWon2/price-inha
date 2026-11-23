@@ -69,7 +69,8 @@ async fn 설정_화면에_백업_설정_칸이_있다() {
         "{}",
         page.content_type
     );
-    let text = page.text();
+    // 11차(Vite 이전): 스크립트가 묶음으로 나가므로 받은 화면 뒤에 그 쪽이 부르는 묶음을 이어 본다.
+    let text = crate::screen::served_page(bench.addr(), &page.text()).await;
     assert!(text.contains(SETUP_BACKUP_PATH), "백업 설정 경로를 부른다");
     assert!(text.contains("data-backup=\"repo\""), "저장소 이름 칸");
     assert!(text.contains("data-backup=\"recipient\""), "공개키 칸");
