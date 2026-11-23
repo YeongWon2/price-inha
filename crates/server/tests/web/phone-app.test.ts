@@ -189,6 +189,12 @@ describe("폰 앱(jsdom)", () => {
 
   it("거절도 같은 카드의 지문을 그대로 보낸다", async () => {
     // 검증: V10
+    // 앞 시험에서 승인이 성공한 카드는 막힌 채다(15차 2번): 승인 열기 경로로 카드를 새로 띄운 뒤 누른다.
+    worker.dispatchEvent(
+      new MessageEvent("message", { data: { type: "open", link: `http://localhost/phone/approvals/${ID}` } }),
+    );
+    await settle();
+    calls.length = 0;
     click('[data-action="reject"]');
     await settle();
     const posted = calls.filter((x) => x.method === "POST");

@@ -88,13 +88,14 @@ fn allows_self(policy: &str, name: &str) -> bool {
         .any(|s| s == "'self'")
 }
 
-/// 바깥 출처를 여는 원천이 없다(`*` · `http:` · `https:` · 다른 호스트). 웹소켓은 `ws://<그 Host>`만,
+/// 바깥 출처를 여는 원천이 없다(`*` · `http:` · `https:` · 다른 호스트). 웹소켓은 `ws://<그 Host>` · `wss://<그 Host>`만,
 /// 망을 타지 않는 `data:` · `blob:`은 된다.
 fn assert_no_outside_source(policy: &str, addr: &str, what: &str) {
     for part in policy.split(';') {
         for source in part.split_whitespace().skip(1) {
             let ok = source.starts_with('\'')
                 || source == format!("ws://{addr}")
+                || source == format!("wss://{addr}")
                 || matches!(source, "data:" | "blob:");
             assert!(ok, "{what}: CSP가 바깥 원천을 연다: {source} ({policy})");
         }

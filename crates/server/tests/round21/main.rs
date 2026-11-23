@@ -5,10 +5,9 @@
 //! `127.0.0.1:0` · 시연 모드로 띄운다(바깥으로 나가지 않는다). 이상한 Host는 접속 관문이 403으로 막아 화면까지
 //! 오지 못하므로, "이상하면 `'self'`만"은 `src/page.rs`의 단위 시험이 본다.
 
-#[path = "../round20/common.rs"]
 mod common;
 
-use common::Bench;
+use common::{Bench, STEP};
 
 /// 응답 머리 `content-security-policy`에서 `connect-src`의 항목들.
 fn connect_src(policy: &str) -> Vec<String> {
@@ -26,7 +25,7 @@ fn connect_src(policy: &str) -> Vec<String> {
 
 async fn page_policy(addr: std::net::SocketAddr, path: &str) -> (u16, String) {
     let request = reqwest::Client::new().get(format!("http://{addr}{path}"));
-    let reply = tokio::time::timeout(common::STEP, request.send())
+    let reply = tokio::time::timeout(STEP, request.send())
         .await
         .expect("응답이 시간 안에 와야 한다")
         .expect("요청이 닿아야 한다");
