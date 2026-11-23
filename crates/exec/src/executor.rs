@@ -438,7 +438,7 @@ impl Executor {
             failed_before: retry.attempts,
             key,
         };
-        self.send_sell(attempt, permit, false).await
+        self.send_sell(attempt, permit, true).await
     }
 
     /// 다시 내기를 기다리는 파는 주문들. 매매 번호 순서다.
@@ -463,8 +463,11 @@ impl Executor {
     /// 대기의 멱등성 키([`Executor::pending_sell_key`])도 함께 지우고 스냅샷에 남긴다. 다른 매매의
     /// 대기는 건드리지 않는다. 손절 · 청산 대기도 지울 수 있다(쓰는 쪽이 고른다). 맞지 않는 대기
     /// (`PermitMismatch`로 막힌 것)는 쓰는 쪽이 이것으로 지우고 새로 판단한다.
-    pub fn forget_pending_sell(&self, _trade_id: TradeId) -> Option<SellRetry> {
-        todo!("9차: 대기 지우기")
+    pub fn forget_pending_sell(&self, trade_id: TradeId) -> Option<SellRetry> {
+        let removed = self.lock().pending.remove(&trade_id)?;
+        // 스냅샷 저장만 실패하면 다음 저장에서 맞춘다(지운 것은 이미 메모리에서 빠졌다).
+        self.persist().ok();
+        Some(removed.retry)
     }
 
     /// 손절 감시 자리들. 매매 번호 순서다.
