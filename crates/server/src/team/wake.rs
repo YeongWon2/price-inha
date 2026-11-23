@@ -237,7 +237,10 @@ struct CrewWaker(Arc<Crew>);
 impl CrewWaker {
     async fn open(&self) -> Result<(), WakeError> {
         let fail = |error: crate::TeamError| WakeError(error.to_string());
-        if self.0.plan_day().await.map_err(fail)? == DayPlan::Trade {
+        // (10b-2) 장 시작의 공시 보기는 쓰는 템플릿이 공시를 구독할 때만 깨우기를 만든다.
+        if self.0.plan_day().await.map_err(fail)? == DayPlan::Trade
+            && super::poll::disclosure_subscribed(&self.0)
+        {
             self.0.scan().await.map_err(fail)?;
         }
         Ok(())

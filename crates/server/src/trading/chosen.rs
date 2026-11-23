@@ -11,7 +11,7 @@
 
 use pi_rules::Purpose;
 use pi_store::TemplateState;
-use pi_template::{RiskParams, Template};
+use pi_template::{RiskParams, Template, TriggerKind};
 
 use super::Trading;
 use super::base::millis;
@@ -45,6 +45,18 @@ impl Trading {
             found.extend(self.store.templates_in_state(state)?);
         }
         Ok(found.into_iter().max_by_key(|template| template.id))
+    }
+
+    /// (10b-2, 결정 19) 쓰는 템플릿의 구독(`RiskParams.triggers`): 무엇이 팀을 깨우는가. 쓰는 템플릿이 없거나
+    /// 멈춤이면(사지 않으므로) 없음 — 아무 깨우기도 걸지 않는다. 손절 · 청산 감시는 이것과 상관없다.
+    pub(crate) fn wake_subscriptions(&self) -> Result<Option<Vec<TriggerKind>>, TradingError> {
+        let Some(template) = self.template_in_use()? else {
+            return Ok(None);
+        };
+        if template.state == TemplateState::Stopped {
+            return Ok(None);
+        }
+        Ok(params_of(&template).map(|params| params.triggers))
     }
 
     /// 쓰는 템플릿이 실전중인가. 실전 주문은 만들지 않으므로 그 템플릿의 사는 주문은 나가지 않는다(E25).

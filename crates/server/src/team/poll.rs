@@ -14,6 +14,10 @@
 //!   장 밖 · 휴장일에 나온 공시는 다음 장 시작의 공시 보기가 맡는다. DART 공시 간격도 네이버와 같은 방식으로
 //!   `하루 × 종목 수 ÷ 상한`보다 짧지 않게 늘리고, 요청마다 하루 수를 센다([`super::quota::DartQuota`]).
 //! - (10b 보강 3번) 장 시작 뒤 하루 한 번 재무 · 거시 값을 받아 지난번 값과 다르면 넘긴다([`super::changes`]).
+//! - (10b-2, 결정 19) 쓰는 템플릿의 구독([`crate::Trading::wake_subscriptions`])을 고리마다 읽어 건다: 시세가 없으면
+//!   시세 조건을 비우고, 공시가 없으면 DART 공시 · 재무 · 거시를 부르지 않고(넘기지도 않는다), 뉴스가 없으면 네이버를
+//!   부르지 않는다. 쓰는 템플릿이 없거나 멈춤이면 아무것도 걸지 않는다. 구독은 깨우기만 정한다(손절 감시 · 논의의
+//!   자료 받기는 그대로).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +26,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use pi_data::{FactValue, Fetched, NewsFetched, NewsItem};
 use pi_market::SessionKind;
 use pi_market::Symbol;
+use pi_template::TriggerKind;
 use pi_trigger::{
     ConditionJob, DEFAULT_WATCH_CHANGE_PERCENT, DataChange, DataKind, DataPush, Target, Trigger,
     watch_conditions,
@@ -58,6 +63,38 @@ fn midnight(date: NaiveDate) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
+/// (10b-2) 쓰는 템플릿이 구독하는 깨우기. 기본값은 아무것도 걸지 않음.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Subscribed {
+    quote: bool,
+    disclosure: bool,
+    news: bool,
+}
+
+impl Subscribed {
+    /// 쓰는 템플릿의 구독. 없거나(멈춤 포함) 읽지 못하면 아무것도 걸지 않는다.
+    fn of(crew: &Crew) -> Subscribed {
+        let kinds = match crew.trading.wake_subscriptions() {
+            Ok(Some(kinds)) => kinds,
+            Ok(None) => return Subscribed::default(),
+            Err(error) => {
+                tracing::warn!(%error, "쓰는 템플릿의 구독을 읽지 못했다");
+                return Subscribed::default();
+            }
+        };
+        Subscribed {
+            quote: kinds.contains(&TriggerKind::Quote),
+            disclosure: kinds.contains(&TriggerKind::Disclosure),
+            news: kinds.contains(&TriggerKind::News),
+        }
+    }
+}
+
+/// 장 시작의 공시 보기가 깨우기를 만드는가: 쓰는 템플릿이 공시를 구독할 때만(10b-2).
+pub(super) fn disclosure_subscribed(crew: &Crew) -> bool {
+    Subscribed::of(crew).disclosure
+}
+
 /// 시세 조건 · 자료 가져오기 고리.
 pub(super) struct Poller {
     crew: Arc<Crew>,
@@ -92,14 +129,16 @@ impl Poller {
             if *stop.borrow() {
                 return;
             }
-            self.refresh_conditions().await;
+            let subscribed = Subscribed::of(&self.crew);
+            self.refresh_conditions(subscribed.quote).await;
             let now = self.crew.clock.now();
             if let Some(open) = self.session_open(now) {
                 if self.due(self.last_poll, self.crew.wiring.data_poll, now) {
                     self.last_poll = Some(now);
-                    self.poll(now).await;
+                    self.poll(now, subscribed).await;
                 }
-                if now >= open {
+                // 재무 · 거시 바뀜은 공시 구독에 묶는다(결정 19).
+                if subscribed.disclosure && now >= open {
                     self.changes.daily(&self.crew, &self.trigger, now).await;
                 }
             }
@@ -137,14 +176,17 @@ impl Poller {
         (now >= open - margin && now <= close + margin).then_some(open)
     }
 
-    /// 지켜보는 종목 · 기준가로 시세 조건을 만들고, 바뀌었으면 엔진의 목록을 바꾼다.
-    async fn refresh_conditions(&mut self) {
+    /// 지켜보는 종목 · 기준가로 시세 조건을 만들고, 바뀌었으면 엔진의 목록을 바꾼다. 시세를 구독하지 않으면
+    /// 빈 목록이다(10b-2).
+    async fn refresh_conditions(&mut self, quote: bool) {
         let trading = &self.crew.trading;
         let now = self.crew.clock.now();
-        let watched: Vec<(Symbol, rust_decimal::Decimal)> = self
-            .crew
-            .desk
-            .symbols()
+        let symbols = if quote {
+            self.crew.desk.symbols()
+        } else {
+            Vec::new()
+        };
+        let watched: Vec<(Symbol, rust_decimal::Decimal)> = symbols
             .into_iter()
             .filter_map(|symbol| {
                 let reference = trading.reference_price(symbol.as_str(), now)?;
@@ -167,23 +209,26 @@ impl Poller {
         }
     }
 
-    /// 지켜보는 종목마다 새 공시 · 새 뉴스를 가져와 넘긴다.
-    async fn poll(&mut self, now: DateTime<Utc>) {
+    /// 지켜보는 종목마다 새 공시 · 새 뉴스를 가져와 넘긴다(구독한 것만).
+    async fn poll(&mut self, now: DateTime<Utc>, subscribed: Subscribed) {
         let symbols = self.crew.desk.symbols();
         if symbols.is_empty() {
             return;
         }
         let wiring = &self.crew.wiring;
-        let dart = self.due(
-            self.last_dart,
-            self.spread(wiring.dart_daily_limit, symbols.len()),
-            now,
-        );
-        let news = self.due(
-            self.last_news,
-            self.spread(wiring.news_daily_limit, symbols.len()),
-            now,
-        ) && self.crew.news.has_key();
+        let dart = subscribed.disclosure
+            && self.due(
+                self.last_dart,
+                self.spread(wiring.dart_daily_limit, symbols.len()),
+                now,
+            );
+        let news = subscribed.news
+            && self.due(
+                self.last_news,
+                self.spread(wiring.news_daily_limit, symbols.len()),
+                now,
+            )
+            && self.crew.news.has_key();
         if dart {
             self.last_dart = Some(now);
         }
