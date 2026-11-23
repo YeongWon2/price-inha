@@ -141,6 +141,21 @@ fix = "루트 Cargo.toml [workspace.dependencies] 에 {dep} 의 판을 두고 �
 # base64: gate 0.22.1 / backup · notify · secrets · server 0.23.1
 # rand: approval · gate 0.9.5 / notify 0.10.3
 pending = ["base64", "rand"]
+# 새 바깥 의존은 사용자 승인으로만 들어온다(QMIT 결정 8). 루트 [workspace.dependencies]의 바깥 이름은
+# 크레이트별 external 의 합(price-inha 의 "*" 는 빼고)이나 아래 목록 안이어야 한다. 밖이면 ARCH-DEP-NEW.
+# 아래는 라이브러리 external 에 없는 것: 테스트용(dev) 의존과 실행 파일(price-inha)만 쓰는 의존.
+extra = ["proptest", "static_assertions", "tokio-tungstenite", "tracing-subscriber", "wiremock"]
+new_why = "새 바깥 의존은 공급망 위험이라 사용자 승인으로만 더한다(QMIT 결정 8)"
+new_fix = "{dep} 를 더하지 말고 멈춰 조정자에게 알린다. 조정자가 사용자 승인을 받아 architecture.toml(그 크레이트의 external, 테스트 · 실행 파일 전용이면 [dep_workspace] extra)에 더한다"
+
+# 화면(npm) 의존 이름의 허용 목록(QMIT 결정 8). crates/*/web/package.json 의 dependencies · devDependencies
+# 이름이 여기 밖이면 ARCH-WEB-DEP. 더하는 것은 ARCH-DEP-NEW 와 같이 사용자 승인으로만.
+[web]
+allowed = ["three", "jsdom", "typescript", "vite", "vitest"]
+
+# 공급망 발행일 검사(scripts/supply.py): 기준 판에 없던 새 판은 이 날수가 지나야 들인다(QMIT 결정 8).
+[supply]
+min_age_days = 14
 
 # 코드에 있으면 안 되는 모양. scope: 검사할 폴더(glob), except: 빼는 폴더.
 [[patterns]]

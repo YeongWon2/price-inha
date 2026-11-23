@@ -111,6 +111,31 @@ if dw:
                 report("ARCH-DEP-WORKSPACE", f"{manifest}:{n}", f"{dep} 의 판을 크레이트에 직접 적었다 — {dw['why']}",
                        dw["fix"].replace("{dep}", dep))
 
+    # 새 바깥 의존(QMIT 결정 8): 루트 [workspace.dependencies]의 바깥 이름은 허용 목록의 합 안이어야 한다.
+    allowed = {e for r in crates.values() for e in r["external"] if e != "*"} | set(dw.get("extra", []))
+    root_deps = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8")).get("workspace", {}).get("dependencies", {})
+    for dep, spec in root_deps.items():
+        if isinstance(spec, dict) and "path" in spec:
+            continue  # 내부 크레이트
+        if dep not in allowed:
+            report("ARCH-DEP-NEW", "Cargo.toml", f"[workspace.dependencies]의 {dep} 는 허용 목록에 없는 새 바깥 의존이다 — "
+                   + dw.get("new_why", "새 바깥 의존은 사용자 승인으로만 더한다"),
+                   dw.get("new_fix", "멈추고 조정자에게 알린다").replace("{dep}", dep))
+
+# 화면(npm) 의존 이름(QMIT 결정 8)
+web = RULES.get("web")
+if web is not None:
+    for pj in sorted(ROOT.glob("crates/*/web/package.json")):
+        rel = pj.relative_to(ROOT).as_posix()
+        data = json.loads(pj.read_text(encoding="utf-8"))
+        for sec in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+            for dep in data.get(sec, {}):
+                if dep not in web["allowed"]:
+                    report("ARCH-WEB-DEP", rel, f"{sec} 의 {dep} 는 허용 목록([web] allowed)에 없는 새 화면 의존이다 — "
+                           "새 바깥 의존은 사용자 승인으로만 더한다(QMIT 결정 8)",
+                           f"{dep} 를 더하지 말고 멈춰 조정자에게 알린다. 조정자가 사용자 승인을 받아 "
+                           "docs/dev/architecture.toml [web] allowed 에 더한다")
+
 all_pkgs = {p["name"] for p in meta["packages"]}
 for b in RULES.get("banned_deps", []):
     if b["name"] in all_pkgs:

@@ -1,0 +1,52 @@
+# cargo-deny 설정 (QMIT 결정 8 공급망 규칙, docs/dev/pipeline.md 5장).
+# licenses · bans · sources 는 오프라인으로 verify.sh 10번 검사가 돌고, advisories 는 네트워크라 audit.yml 이 돈다.
+# 고치는 것은 조정자가 사용자 확인 뒤에만 한다(규칙 파일).
+
+[graph]
+all-features = false
+
+[licenses]
+# 이 저장소는 MIT 로 배포한다. 지금 의존 나무에 실제로 쓰이는 허용형 라이선스만 둔다(2026-11-24 `cargo deny list`).
+# 여러 라이선스 가운데 고를 수 있는 크레이트(예: MIT OR Apache-2.0)는 하나만 맞으면 된다.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.9
+# 전체 허용이 아니라 그 크레이트 하나만: 모질라 루트 인증서 묶음(데이터)의 라이선스. reqwest → rustls-platform-verifier 경로.
+# 허용형(상업 제한 없음)이지만 소프트웨어가 아닌 데이터 라이선스라 목록에는 넣지 않았다(사용자 확인 대상, 2026-11-24).
+exceptions = [
+  { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
+
+[licenses.private]
+ignore = true # 우리 크레이트(publish = false)
+
+[bans]
+multiple-versions = "warn" # 같은 크레이트 여러 판은 알리기만 한다
+wildcards = "deny"
+allow-wildcard-paths = true # 워크스페이스 안의 path 의존
+# architecture.toml [[banned_deps]] 와 같아야 한다(D1: 모든 운영체제에서 같은 빌드).
+deny = [
+  { crate = "openssl-sys", reason = "모든 운영체제에서 같은 빌드가 되어야 한다(D1). reqwest 는 rustls 로 쓴다" },
+  { crate = "native-tls", reason = "모든 운영체제에서 같은 빌드가 되어야 한다(D1). reqwest 는 rustls 로 쓴다" },
+]
+
+[sources]
+# crates.io 만. git 출처 · 다른 레지스트리는 막는다.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[advisories]
+# .cargo/audit.toml 의 ignore 와 같게 둔다(사유도 같이).
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 의 상수 시간 연산 문제. age 0.12.1(최신) → hpke → p256 경로로만 들어온다. 백업(crates/backup)은 age 의 x25519 받는이만 쓰고 P-256 은 쓰지 않는다. age 가 고친 판을 내면 이 줄을 지운다" },
+]

@@ -90,8 +90,11 @@ find_python() { # tomllib가 있는 Python
 
 # 검사 규칙 전체의 지문. 규칙이 바뀌면 자체 시험을 다시 돌려야 한다.
 rules_hash() {
-  cat scripts/*.sh scripts/*.py docs/dev/architecture.toml docs/dev/graph.toml Cargo.toml clippy.toml 2>/dev/null | shasum -a 256 | cut -d' ' -f1
+  cat scripts/*.sh scripts/*.py docs/dev/architecture.toml docs/dev/graph.toml Cargo.toml clippy.toml deny.toml 2>/dev/null | shasum -a 256 | cut -d' ' -f1
 }
+
+# 공급망 검사기 cargo-deny 의 고정 판(QMIT 결정 8). 발행 14일이 지난 판. CI(verify.yml · audit.yml)와 같아야 한다.
+DENY_VERSION="0.20.2"
 
 # 지시서에 "## 원본 동작 근거" 절이 있고, 조사 문서를 가리키거나 "원본에 없음"이라고 적었는가.
 origin_ok() {

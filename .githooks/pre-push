@@ -14,6 +14,20 @@ while read -r _lref lsha _rref rsha; do
   esac
   echo "pre-push 관문: 기준 $base"
   if ! bash scripts/verify.sh --affected --base "$base"; then fail=1; fi
+  # 공급망 발행일(QMIT 결정 8): lock 파일이 바뀐 push 에서만. 네트워크가 없으면 경고만 한다.
+  if [ -n "$(git diff --name-only "$base" "$lsha" -- Cargo.lock 'crates/*/web/package-lock.json' 2>/dev/null)" ]; then
+    . scripts/lib.sh
+    PY=$(find_python)
+    if [ -z "$PY" ]; then echo "- 경고: Python 3.11 이상이 없어 공급망 발행일 검사(scripts/supply.py)를 건너뛴다"
+    else
+      "$PY" scripts/supply.py --since "$base" --head "$lsha"
+      case $? in
+        0) ;;
+        3) echo "- 경고: 발행일을 확인하지 못했다(네트워크). 네트워크가 되면 scripts/supply.py --since $base 를 돌린다" ;;
+        *) fail=1 ;;
+      esac
+    fi
+  fi
 done
 if [ "$fail" -ne 0 ]; then
   echo

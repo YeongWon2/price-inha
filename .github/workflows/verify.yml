@@ -48,6 +48,16 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
+      # QMIT 결정 8: verify.sh 10번(cargo-deny, 오프라인 licenses · bans · sources). 판은 scripts/lib.sh DENY_VERSION.
+      - name: cargo-deny 캐시
+        id: deny-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-0.20.2-${{ runner.os }}-${{ runner.arch }}
+      - name: cargo-deny 설치
+        if: steps.deny-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-deny --version 0.20.2 --locked
       - name: 시험용 git 이름(검사기 자체 시험이 가짜 저장소에 커밋한다)
         run: |
           git config --global user.name "ci"

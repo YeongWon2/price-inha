@@ -49,6 +49,7 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 - G1을 지난 뒤 `crates/<모듈>/tests/`는 잠긴다. `verify.sh`가 `red/<모듈>` 태그와 비교해 바뀌면 실패시킨다.
 - 테스트가 스펙과 다르거나 통과할 수 없게 쓰였으면 N2는 고치지 않고 멈춰 알린다. 조정자가 N1로 되돌린다.
 - N3가 문제를 찾으면 N2로 돌아간다. N3는 직접 고치지 않는다.
+- 새 바깥 의존(Rust · npm 새 이름)이 필요하면 N2는 더하지 않고 멈춰 보고한다. 조정자가 사용자 승인을 받아 더한다(5장 공급망 규칙, QMIT 결정 8).
 - 병렬 노드는 자기 모듈 폴더만 고친다. 루트 파일과 다른 모듈은 건드리지 않는다.
 - 원본 조사(그래프 밖의 일)는 `docs/research/`에만 쓴다. 노드의 범위 검사는 그 폴더를 보지 않는다(`graph.toml`의 `outside_graph`). 노드는 그 폴더를 고치지 않는다.
 - 커밋은 실행기와 조정자만 한다. 실행기는 G1 잠금(`lock`)과 G2 통과 때 그 모듈 폴더만 커밋한다(한 번에 하나씩). 에이전트가 직접 `git commit`을 부르지 않는다.
@@ -75,12 +76,20 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 | 7 | 비밀 글자 | 키처럼 생긴 글자나 `.env` · `auth.json`이 저장소에 있다 |
 | 8 | 바깥 주소 | 테스트가 실제 증권사 · AI 주소를 쓴다 |
 | 9 | 검사 끄기 | `#[ignore]`나 지시서에 없는 `#[allow]`가 있다 |
+| 10 | 공급망 (`cargo deny --offline check licenses bans sources`, 설정은 루트 `deny.toml`) | 허용 목록 밖 라이선스, crates.io 밖 출처(git · 다른 레지스트리), 금지 크레이트(`openssl-sys` · `native-tls`)가 의존 나무에 있다. cargo-deny가 없으면 ✗와 설치 안내(`cargo install cargo-deny --version <scripts/lib.sh DENY_VERSION> --locked`) |
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 
 **영향 범위** (QMIT 결정 6): `scripts/verify.sh --affected [--base <ref>]`는 `scripts/affected.py`가 고른 모듈만 돈다. 기준(기본 `origin/main`, 없으면 `HEAD~1`)과 작업 트리(커밋 안 된 것 포함)의 차이에서 바뀐 `crates/<모듈>/`과 그 크레이트에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존), 바뀐 지시서 `docs/dev/modules/<모듈>.md`의 모듈을 고른다. 그래프가 못 따라가는 변경(루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `.cargo/` · `.github/`, 그 밖에 모르는 곳)은 전체를 돈다. 문서만 바뀌었으면 "바뀐 코드 없음"으로 0이다. CI는 PR에서 `--affected --base origin/<대상 브랜치>`, main push · 밤(매일 03:00 KST) · 손으로 돌릴 때 전체를 돈다.
 
 **로컬 pre-push 관문** (QMIT 결정 4): `.githooks/pre-push`가 push되는 범위(원격 sha 기준, 새 브랜치면 `origin/main`)로 `verify.sh --affected`를 돌리고 실패하면 push를 막는다. 저장소마다 한 번 `git config core.hooksPath .githooks`로 켠다(꺼져 있으면 `verify.sh`가 참고 줄로 알린다). 관문을 건너뛰는 push는 하지 않는다.
+
+**공급망 규칙** (QMIT 결정 8):
+- **새 바깥 의존은 사용자 승인으로만.** 새 바깥 의존(루트 `Cargo.toml` `[workspace.dependencies]`에 새 이름, `crates/*/web/package.json`에 새 이름)은 N2(와 다른 노드)가 더하지 않고 멈춰 보고한다. 조정자가 사용자 승인을 받아 `architecture.toml`(그 크레이트의 `external`, 테스트 · 실행 파일 전용이면 `[dep_workspace] extra`, 화면이면 `[web] allowed`)과 의존을 같은 커밋에 더한다. 기계로는 6번 검사가 막는다: `[workspace.dependencies]`의 바깥 이름이 크레이트별 `external`의 합(`price-inha`의 `"*"`는 빼고)과 `[dep_workspace] extra` 밖이면 ARCH-DEP-NEW, `package.json`의 의존 이름이 `[web] allowed` 밖이면 ARCH-WEB-DEP.
+- **오프라인(G2)**: 10번 검사(cargo-deny licenses · bans · sources). 라이선스 허용 목록 · 예외는 `deny.toml`에 있고, 바꾸는 것은 조정자가 사용자 확인 뒤에만 한다.
+- **네트워크(G2 밖)**: `.github/workflows/audit.yml`이 보안 공지(`cargo audit` · `cargo deny check advisories`, 무시 목록은 `.cargo/audit.toml`과 `deny.toml`에 같은 사유로)와 새 판 발행일(`scripts/supply.py`)을 본다. PR · push는 기준 판에 없던 새 판만 보고 `[supply] min_age_days`(14일)보다 새것이면 실패, 밤(매일 02:00 KST)은 `--all`로 모든 판을 보고만 한다.
+- **발행일 검사** `python3.14 scripts/supply.py [--since <ref>] [--head <ref>] [--all]`: `Cargo.lock`의 crates.io 패키지와 `crates/*/web/package-lock.json`의 npm 패키지의 발행 시각을 crates.io · npm 레지스트리에서 받는다(동시 4개 이하, 캐시 `.pipeline/supply-cache.json`). 기본 기준은 `origin/main`. 종료 0 통과 · 1 너무 새 판 · 2 기준 오류 · 3 발행일을 받지 못함(네트워크). `--offline-fixture <json>`은 자체 시험용 가짜 발행일 표다.
+- **pre-push**: push 범위에서 `Cargo.lock`이나 `package-lock.json`이 바뀌었을 때만 `supply.py --since <원격 sha> --head <로컬 sha>`를 돌린다. 너무 새 판이면 push를 막고, 네트워크가 없으면(종료 3) 경고만 한다.
 
 어긴 곳은 `✗ [규칙 번호] 파일:줄`과 **왜** · **고치기**가 함께 찍힌다. 구현 에이전트는 그 안내대로 고치고 다시 돌린다.
 규칙이 틀렸다고 보면 코드를 우회하지 말고 멈춰서 알린다. 규칙(`architecture.toml`, `Cargo.toml`의 lints, 검사 스크립트)은 조정자가 사용자 확인 뒤에만 고친다.

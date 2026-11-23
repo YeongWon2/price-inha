@@ -58,7 +58,7 @@ def required_ids(module):
 
 
 def build_fixture(fx):
-    for f in ["Cargo.toml", "clippy.toml", ".gitignore"]:
+    for f in ["Cargo.toml", "clippy.toml", ".gitignore", "deny.toml"]:
         shutil.copy(ROOT / f, fx / f)
     shutil.copytree(ROOT / "scripts", fx / "scripts")
     (fx / "docs").mkdir()
@@ -183,6 +183,32 @@ def main():
             p = fx / "crates/extra/Cargo.toml"
             p.write_text(p.read_text().replace("pi-store", "pi-extra"))
         case(fx, "표에 없는 크레이트를 잡는다", extra, arch, "[ARCH-CRATE]")
+
+        # --- 공급망 (QMIT 결정 8)
+        case(fx, "허용 목록에 없는 새 바깥 의존을 workspace.dependencies 에 더하면 잡는다",
+             lambda: (fx / "Cargo.toml").write_text((fx / "Cargo.toml").read_text().replace(
+                 "[workspace.dependencies]\n", '[workspace.dependencies]\nleftpad = "1.0.0"\n')),
+             arch, "[ARCH-DEP-NEW] Cargo.toml")
+
+        def web_dep():
+            (fx / "crates/server/web").mkdir(parents=True, exist_ok=True)
+            (fx / "crates/server/web/package.json").write_text(
+                '{"name": "x", "private": true, "dependencies": {"three": "0.0.1"}, "devDependencies": {"left-pad": "1.3.0"}}\n')
+        case(fx, "허용 목록 밖의 화면(npm) 의존 이름을 잡는다", web_dep, arch,
+             "[ARCH-WEB-DEP] crates/server/web/package.json")
+
+        times = tmp / "supply-fixture.json"
+        times.write_text('{"now": "2026-11-24T00:00:00Z", "cargo": {"leftpad@9.9.9": "2026-11-20T00:00:00Z",'
+                         ' "leftpad@9.9.8": "2026-10-01T00:00:00Z"}}\n')
+        supply = [py, "scripts/supply.py", "--since", "base", "--offline-fixture", str(times)]
+
+        def new_lock(ver):
+            append(fx, "Cargo.lock", f'[[package]]\nname = "leftpad"\nversion = "{ver}"\n'
+                   'source = "registry+https://github.com/rust-lang/crates.io-index"')
+        case(fx, "발행일: 기준에 없던 새 판이 14일 안이면 잡는다", lambda: new_lock("9.9.9"), supply,
+             "[SUPPLY-YOUNG] cargo leftpad 9.9.9")
+        case(fx, "발행일: 14일이 지난 새 판은 통과", lambda: new_lock("9.9.8"), supply,
+             "공급망 발행일 통과", should_fail=False)
 
         # --- 아키텍처 · 컨벤션: 금지 모양 (규칙 파일의 모든 모양에 시험이 있어야 한다)
         ids = [p["id"] for p in RULES.get("patterns", [])]
