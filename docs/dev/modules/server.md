@@ -344,6 +344,8 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 - 메모리 시험: 리눅스는 `/proc/self/status`, `/proc` 없는 유닉스는 `ps -o rss=`. 지금도 통과(500MB 아래).
 - 다음 차수 후보: 시장 메모 색인(담당이 메모를 쓰는 자리를 정한 뒤), "한가할 때만" 다시 만들기(논의 중 멈춤)의 시험, `hybrid_search`.
 
+- 10c N3 참고(다음 차수 후보): 날짜 조건의 근거를 `updated_at`(복기 시각일 수 있음) 대신 실제 팔린 시각으로, `discussing` 수를 Drop 가드로(논의가 panic · 취소되면 다시 만들기가 영영 쉼), 끄는 순간 진행 중인 걸음도 끊기, `doctor` Ollama 확인에 짧은 전체 제한(3~5초), 뜻 검색 도구 시간 제한, 검색 결과 snippet에 "바깥 글" 표시, 원격에서 설정 POST가 403인 시험, Mistake · MarketNote를 자동 회상 종류에 넣을지, 설정 파일에 루프백 아닌 주소가 있을 때 진단 글, 접수번호 없는 공시의 기록 키 중복.
+
 ### 걸음마다 테스트 주의
 가짜 시세 · 가짜 AI · 가짜 자료 서버만. 실제 토스 · 네이버 · Ollama · GitHub 주소 금지. 앞 차수 잠긴 테스트(특히 `round9/loss.rs:160-168`, `setup/mod.rs`의 `/api/setup` 칸)를 깨지 않는다.
 
