@@ -20,7 +20,7 @@ allow = [
 ]
 confidence-threshold = 0.9
 # 전체 허용이 아니라 그 크레이트 하나만: 모질라 루트 인증서 묶음(데이터)의 라이선스. reqwest → rustls-platform-verifier 경로.
-# 허용형(상업 제한 없음)이지만 소프트웨어가 아닌 데이터 라이선스라 목록에는 넣지 않았다(사용자 확인 대상, 2026-11-24).
+# 허용형(상업 제한 없음)이지만 소프트웨어가 아닌 데이터 라이선스라 목록에는 넣지 않았다(결정 9: 이 크레이트 하나만 예외 유지, 2026-11-24).
 exceptions = [
   { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
 ]
@@ -49,4 +49,6 @@ allow-git = []
 # .cargo/audit.toml 의 ignore 와 같게 둔다(사유도 같이).
 ignore = [
   { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 의 상수 시간 연산 문제. age 0.12.1(최신) → hpke → p256 경로로만 들어온다. 백업(crates/backup)은 age 의 x25519 받는이만 쓰고 P-256 은 쓰지 않는다. age 가 고친 판을 내면 이 줄을 지운다" },
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml. 결정 9: 관리 중단 권고, 취약점 아님, 교체는 다음 차수 후보" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono. 결정 9: 관리 중단 권고, 취약점 아님, 교체는 다음 차수 후보" },
 ]

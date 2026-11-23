@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 pi-store.workspace = true
-rand = "0.9.5"
+rand.workspace = true
 rust_decimal.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -43,7 +43,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 age.workspace = true
-base64 = "0.23.1"
+base64.workspace = true
 chrono = { workspace = true, default-features = true }
 futures.workspace = true
 pi-notify = { workspace = true, features = ["test-redirect"] }

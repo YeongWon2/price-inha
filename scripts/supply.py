@@ -5,6 +5,7 @@ Cargo.lock 의 crates.io 패키지와 crates/*/web/package-lock.json 의 npm 패
 기준 판(--since, 기본 origin/main)에 없던 새 판이 min_age_days(architecture.toml [supply], 기본 14일)보다
 새것이면 실패한다. 이미 있던 판은 보지 않는다. 막 나온 판은 탈취된 계정이 올린 것일 수 있어
 며칠 기다려 다른 사람들이 먼저 걸러 내게 한다.
+예외: architecture.toml [supply] security_fixes 에 사람이 적은 판(보안 권고를 고친 판)은 14일 안이어도 통과(결정 9).
 
     python3.14 scripts/supply.py                       새 판만 (실패하면 1)
     python3.14 scripts/supply.py --since <ref>          기준을 바꾼다
@@ -147,9 +148,20 @@ class Times:
             CACHE.write_text(json.dumps(self.cache, sort_keys=True, indent=0) + "\n", encoding="utf-8")
 
 
+def supply_rules():
+    return tomllib.loads((ROOT / "docs/dev/architecture.toml").read_text(encoding="utf-8")).get("supply", {})
+
+
 def min_age_days():
-    rules = tomllib.loads((ROOT / "docs/dev/architecture.toml").read_text(encoding="utf-8"))
-    return int(rules.get("supply", {}).get("min_age_days", 14))
+    return int(supply_rules().get("min_age_days", 14))
+
+
+def security_fixes():
+    """사람이 정한 보안 수정 판 예외(결정 9): (cargo, 이름, 판) → 권고 번호. 14일 안이어도 통과시킨다."""
+    out = {}
+    for f in supply_rules().get("security_fixes", []):
+        out[("cargo", f["crate"], f["version"])] = f["advisory"]
+    return out
 
 
 def main():
@@ -188,6 +200,7 @@ def main():
         got = list(ex.map(times.get, order))
     times.save()
 
+    fixes = security_fixes()
     young, unknown = [], []
     for pkg, t in zip(order, got):
         if t is None:
@@ -195,6 +208,10 @@ def main():
             continue
         age = now - parse_time(t)
         if age < timedelta(days=days):
+            if pkg in fixes:
+                print(f"✓ [SUPPLY-SECFIX] {pkg[0]} {pkg[1]} {pkg[2]} — {t[:10]} 발행, {age.days}일 지남. "
+                      f"{fixes[pkg]} 을 고친 판이라 통과(architecture.toml [supply] security_fixes, 결정 9)")
+                continue
             young.append((pkg, t[:10], age.days))
     for (kind, name, ver), when, age in young:
         print(f"✗ [SUPPLY-YOUNG] {kind} {name} {ver} — {when} 발행, {age}일 지남 (기준 {days}일)")

@@ -210,6 +210,16 @@ def main():
         case(fx, "발행일: 14일이 지난 새 판은 통과", lambda: new_lock("9.9.8"), supply,
              "공급망 발행일 통과", should_fail=False)
 
+        def secfix():
+            new_lock("9.9.9")
+            p = fx / "docs/dev/architecture.toml"
+            p.write_text(p.read_text(encoding="utf-8").replace(
+                "security_fixes = [\n",
+                'security_fixes = [\n  { crate = "leftpad", version = "9.9.9", advisory = "RUSTSEC-0000-0000", reason = "시험" },\n'),
+                encoding="utf-8")
+        case(fx, "발행일: 14일 안이어도 security_fixes 에 적힌 보안 수정 판은 통과 (결정 9)", secfix, supply,
+             ["[SUPPLY-SECFIX] cargo leftpad 9.9.9", "공급망 발행일 통과"], should_fail=False)
+
         # --- 아키텍처 · 컨벤션: 금지 모양 (규칙 파일의 모든 모양에 시험이 있어야 한다)
         ids = [p["id"] for p in RULES.get("patterns", [])]
         for pid in ids:

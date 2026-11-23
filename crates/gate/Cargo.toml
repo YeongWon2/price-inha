@@ -10,9 +10,9 @@ workspace = true
 
 [dependencies]
 axum = { workspace = true, features = ["ws"] }
-base64 = "0.22.1"
+base64.workspace = true
 pi-store.workspace = true
-rand = "0.9.5"
+rand.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
