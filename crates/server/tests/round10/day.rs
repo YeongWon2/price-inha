@@ -5,7 +5,7 @@ use std::time::Duration;
 use chrono::NaiveDate;
 use pi_store::{RoomEvent, Store, TeamState};
 use price_inha::{
-    DAY_ROOM, DayPlan, DemoTurn, KIND_DAY_CLOSE, KIND_DAY_DISCUSSION, KIND_DAY_START,
+    DAY_ROOM, DayPlan, DemoTurn, KIND_DAY_CLOSE, KIND_DAY_DISCUSSION, KIND_DAY_PLAN, KIND_DAY_START,
 };
 use serde_json::{Value, json};
 
@@ -23,14 +23,18 @@ fn day_room(store: &Store) -> Vec<RoomEvent> {
     store.room_events(DAY_ROOM, 0, 1000).unwrap()
 }
 
-/// 장 시작 전에 띄우고 장 시작을 지나게 해 하루 운용 판단 논의가 남을 때까지 기다린다.
+/// 장 시작 전에 띄우고 장 시작을 지나게 해 하루 운용 판단 논의와 그날 하루 계획(팀 상태를 바꾼 뒤 남는다)이
+/// 남을 때까지 기다린다(13차 3번: 논의만 기다리면 상태가 바뀌기 전에 단언할 수 있다).
 async fn open_day(bench: &Bench) {
     bench.script(DemoTurn::Verdict, &watch_verdict());
     bench.set(kst(monday(), 9, 1));
     let store = bench.store();
     wait_for(
-        "장 시작에 하루 운용 판단 논의가 남는다",
-        || !on_date(&store, KIND_DAY_DISCUSSION, monday()).is_empty(),
+        "장 시작에 하루 운용 판단 논의와 그날 하루 계획이 남는다",
+        || {
+            !on_date(&store, KIND_DAY_DISCUSSION, monday()).is_empty()
+                && !on_date(&store, KIND_DAY_PLAN, monday()).is_empty()
+        },
     )
     .await;
 }

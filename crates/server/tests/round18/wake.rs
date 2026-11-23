@@ -172,6 +172,8 @@ async fn 새_공시와_새_뉴스가_뉴스_공시_시세_담당을_깨우고_�
 async fn 네이버_뉴스_검색은_하루_상한을_넘지_않는다() {
     let bench = Plan::live()
         .watching(&[WATCHED, HYNIX])
+        // HYNIX도 장중 시세가 있어야 이상 감지 멈춤과 섞이지 않는다(13차 4번).
+        .priced(HYNIX, ENTRY)
         .without_data_keys()
         .with_naver()
         .polling(Duration::from_secs(1))

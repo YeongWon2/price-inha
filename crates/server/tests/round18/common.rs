@@ -789,6 +789,7 @@ pub struct Plan {
     poll: Duration,
     news_limit: u32,
     dart_limit: u32,
+    prices: Vec<(&'static str, i64)>,
 }
 
 impl Plan {
@@ -803,6 +804,7 @@ impl Plan {
             poll: Duration::from_secs(3600),
             news_limit: 25_000,
             dart_limit: DEFAULT_DART_DAILY_LIMIT,
+            prices: Vec::new(),
         }
     }
 
@@ -820,6 +822,13 @@ impl Plan {
             symbols: symbols.to_vec(),
             ..self
         }
+    }
+
+    /// 띄우기 전에 가짜 시세 서버에 그 종목의 값을 넣는다([`WATCHED`] 말고도).
+    pub fn priced(self, symbol: &'static str, price: i64) -> Plan {
+        let mut prices = self.prices;
+        prices.push((symbol, price));
+        Plan { prices, ..self }
     }
 
     /// 자료 키(DART · ECOS)를 등록하지 않는다(자료 키는 선택이다).
@@ -864,7 +873,10 @@ impl Plan {
         prepare(dir.path(), &self).await;
         let clock = TestClock::at(at);
         let live = if self.live {
-            let initial = HashMap::from([(WATCHED.to_string(), WATCHED_PRICE)]);
+            let mut initial = HashMap::from([(WATCHED.to_string(), WATCHED_PRICE)]);
+            for (symbol, price) in &self.prices {
+                initial.insert((*symbol).to_string(), *price);
+            }
             let prices: Prices = Arc::new(Mutex::new(initial));
             let quotes = fake_quotes(Arc::clone(&clock), Arc::clone(&prices)).await;
             let scout: ScoutReply = Arc::new(Mutex::new(None));

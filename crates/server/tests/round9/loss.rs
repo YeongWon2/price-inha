@@ -61,7 +61,9 @@ async fn 하루_손실_한도에_닿으면_그날_매수가_멈추고_다음_거
     );
 
     bench.trade_today();
-    let at = kst(tuesday(), 9, 30);
+    // 시계를 다시 건너뛰지 않는다: 건너뛸 때마다 이상 감지가 낡은 시세를 한 번 셀 수 있어, 두 번 연달아면
+    // 이상 감지 멈춤과 섞인다(13차 2번). 다음 거래일 장 시작 시각 그대로 판단한다.
+    let at = bench.now();
     bench.quote(NAVER, 100_000, at).await;
     let trade = bench.judged(NAVER);
     let placed = bench.place(buy(trade, NAVER, at)).await;
