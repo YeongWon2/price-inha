@@ -252,13 +252,19 @@ fn limit_reasons(
     let Some(quote) = latest else {
         return;
     };
-    let threshold = band - margin;
-    match (quote.price - reference).checked_div(reference) {
-        Some(change) if change >= threshold => reasons.push(SuspectReason::NearUpperLimit),
-        Some(change) if change <= -threshold => reasons.push(SuspectReason::NearLowerLimit),
-        Some(_) => {}
-        // 잴 수 없으면(넘침) 가격제한 근처일 수 있다고 본다(모르면 멈춤).
-        None => reasons.push(SuspectReason::NearUpperLimit),
+    // 뺄셈이나 나눗셈이 넘치면 잴 수 없으니 가격제한 근처일 수 있다고 본다(모르면 멈춤).
+    let change = quote
+        .price
+        .checked_sub(reference)
+        .and_then(|diff| diff.checked_div(reference));
+    let (Some(threshold), Some(change)) = (band.checked_sub(margin), change) else {
+        reasons.push(SuspectReason::NearUpperLimit);
+        return;
+    };
+    if change >= threshold {
+        reasons.push(SuspectReason::NearUpperLimit);
+    } else if change <= -threshold {
+        reasons.push(SuspectReason::NearLowerLimit);
     }
 }
 
