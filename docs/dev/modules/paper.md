@@ -156,3 +156,14 @@ server의 장부 셈(`trading/base.rs` `books()`)이 보유(`Broker::holdings`)�
 |---|---|---|
 | `crates/paper/tests/` (기존 시험 전부) | 유지 | 9차는 새 메서드를 더할 뿐, 기존 `holdings` · `cash` 동작을 바꾸지 않는다 |
 | `docs/dev/modules/paper.md` 앞 차수 규칙 | 유지 | 9차와 부딪히는 규칙 없음 |
+
+## 9차 보강 (2026-11-24 조정자, N3 참고 1 — 동작 잠금)
+
+N3가 `account_snapshot`을 일부러 잠금을 나눈 변이로 바꿔 보니 `round9` 섞임 시험이 30번 중 2번만 잡았다(읽는 스레드 하나, 체결 100번이 몇 ms에 끝남). 구현은 옳으니 **동작 잠금**으로 시험만 단단하게 한다: 읽는 스레드를 넷으로, 체결을 140번 이상으로(N3가 복사본에서 잠금 나눈 변이를 20/20 잡고 정상 구현은 20/20 통과함을 확인). 읽는 쪽 `now`도 쓰는 쪽 시각을 따라가게 해 마감 취소 경로도 함께 본다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/paper/tests/round9.rs::account_snapshot_never_mixes_holdings_and_cash_while_fills_happen` | 고침 | 지시서 9차 보강(읽는 스레드 · 체결 수 늘림, 뜻 그대로) |
+| 그 밖의 paper 시험 | 유지 | 보강과 무관 |
