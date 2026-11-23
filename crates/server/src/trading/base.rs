@@ -153,7 +153,7 @@ impl DayLog {
 
     fn absorb(&mut self, kind: &str, payload: &Value) {
         if kind == KIND_LOSS_BASIS {
-            self.basis = Some(payload.clone());
+            self.basis = Some(merge_basis(self.basis.take(), payload));
             return;
         }
         if kind == KIND_REFERENCE_PRICES {
@@ -182,6 +182,30 @@ impl DayLog {
             _ => {}
         }
     }
+}
+
+/// (14차) 되읽을 때 손실 기준 기록을 합친다: 날짜 · 그날 시작은 마지막 기록의 것, 통화별 최고 평가액은
+/// 지금까지 읽은 기록들의 `max`. 저장 순서가 뒤집혀 낮은 최고가 나중에 남아도 최고는 뒤로 가지 않는다.
+fn merge_basis(before: Option<Value>, latest: &Value) -> Value {
+    let mut merged = latest.clone();
+    let Some(before) = before else { return merged };
+    let (Some(old), Some(new)) = (before["peak"].as_object(), merged["peak"].as_object_mut())
+    else {
+        return merged;
+    };
+    for (code, old_text) in old {
+        let old_peak = old_text.as_str().and_then(|t| t.parse::<Decimal>().ok());
+        let new_peak = new
+            .get(code)
+            .and_then(Value::as_str)
+            .and_then(|t| t.parse::<Decimal>().ok());
+        if let Some(old_peak) = old_peak
+            && new_peak.is_none_or(|n| old_peak > n)
+        {
+            new.insert(code.clone(), Value::String(old_peak.to_string()));
+        }
+    }
+    merged
 }
 
 /// 승인 관리자의 시계 자리에 같은 시계를 끼운다.
@@ -251,6 +275,7 @@ impl Trading {
             paper_day: Mutex::new(None),
             quotes: Mutex::new(HashMap::new()),
             marks: Mutex::new(marks),
+            save_turn: Mutex::new(()),
             days: Mutex::new(days),
             waiting: Mutex::new(HashMap::new()),
             stops: Mutex::new(HashMap::new()),
@@ -357,6 +382,9 @@ impl Trading {
         now: DateTime<Utc>,
         reset_day: Option<NaiveDate>,
     ) -> Result<Vec<Book>, TradingError> {
+        // (14차) 셈 · 꺼내기 · 저장을 저장 전용 잠금 안에서 한 줄로 세운다: 먼저 꺼낸 기록이 먼저 저장돼
+        // 낮은 최고를 담은 기록이 나중에 남지 않는다. 잠금 순서는 언제나 저장 잠금 → `marks`(거꾸로 잡지 않는다).
+        let _save_turn = lock(&self.save_turn);
         let snapshot = self.executor.broker().account_snapshot(now);
         let quotes = lock(&self.quotes).clone();
         let today = self.date_of(now);

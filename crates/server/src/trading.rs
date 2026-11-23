@@ -229,6 +229,8 @@ pub struct Trading {
     quotes: Mutex<HashMap<String, Quote>>,
     /// 통화별 그날 시작 · 최고 평가액과 마지막으로 셈한 장부.
     marks: Mutex<Marks>,
+    /// (14차) 손실 기준을 셈 · 꺼내기 · 저장하는 순서를 한 줄로 세운다(`marks`보다 먼저 잡는다).
+    save_turn: Mutex<()>,
     /// 하루 시작 · 마감과 오늘 판단.
     days: Mutex<DayLog>,
     /// 승인을 기다리는 주문 안(승인 번호 → 다시 점검할 것).
