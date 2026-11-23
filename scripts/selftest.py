@@ -342,6 +342,68 @@ def main():
             case(fx, "권한: 맡지 않은 곳을 고치면 잡는다",
                  lambda: (sh(pl + ["start", "N1", "store"], fx), append(fx, "crates/ai/src/lib.rs", "// 남의 모듈")),
                  pl + ["scope"], "맡지 않은 곳")
+
+            # --- 대조 노드 R (QMIT 결정 1)
+            brief = "docs/dev/modules/store.md"
+            store_ids = ", ".join(required_ids("store"))
+
+            def reopened(lock=False):
+                sh(pl + ["reopen", "store"] + (["--lock"] if lock else []) + ["자체 시험"], fx)
+                sh(pl + ["start", "R", "store"], fx)
+
+            def table(*rows):
+                append(fx, brief, "### 대조\n\n| 시험 · 문서 경로 | 판정 | 근거 |\n|---|---|---|\n"
+                       + "\n".join(f"| {p} | {v} | {w} |" for p, v, w in rows))
+
+            def to_n1(*rows):
+                reopened()
+                table(*rows)
+                sh(pl + ["gate", "GR", "store"], fx)
+                sh(pl + ["start", "N1", "store"], fx)
+                todo_lib()
+
+            case(fx, "대조: 다시 연 모듈은 R 없이 N1 을 시작할 수 없다",
+                 lambda: sh(pl + ["reopen", "store", "자체 시험"], fx), pl + ["start", "N1", "store"], "먼저 R(대조)")
+            case(fx, "대조: 대조 표가 없으면 GR 실패", reopened, pl + ["gate", "GR", "store"], "✗ 대조 표 없음")
+            case(fx, "대조: 지움 줄에 근거가 없으면 GR 실패",
+                 lambda: (reopened(), table(("`crates/store/tests/t.rs`", "지움", "낡아 보임"))),
+                 pl + ["gate", "GR", "store"], "✗ 근거 없는 지움")
+            case(fx, "대조: 지움 줄에 근거가 있으면 GR 통과하고 지시서를 커밋한다",
+                 lambda: (reopened(), table(("`crates/store/tests/t.rs`", "지움", '사용자 "옛 시험은 버린다"'),
+                                            ("`docs/dev/modules/store.md`", "열어 둠", "물음"))),
+                 ["bash", "-c", f"{py} scripts/pipeline.py gate GR store && git log -1 --format=%s"],
+                 ["GR 통과", "docs(store): 대조 표"], should_fail=False)
+
+            def drop_fn_unlisted():
+                to_n1(("`crates/store/tests/t.rs`", "유지", "이번 차수와 무관"))
+                (fx / "crates/store/tests/t.rs").write_text(
+                    f"// 검증: {store_ids}\n#[test]\nfn adds_again() {{\n    assert_eq!(pi_store::add(1, 2), 3);\n}}\n")
+            case(fx, "대조: 표에 없는 시험 함수를 지우면 G1 실패", drop_fn_unlisted,
+                 pl + ["gate", "G1", "store"], "✗ 대조 표에 없는 시험을 지웠다")
+
+            def drop_file_listed():
+                to_n1(("`crates/store/tests/t.rs`", "지움", "QMIT 결정 1 자체 시험"))
+                (fx / "crates/store/tests/t.rs").unlink()
+                (fx / "crates/store/tests/t2.rs").write_text(
+                    f"// 검증: {store_ids}\n#[test]\nfn adds_again() {{\n    assert_eq!(pi_store::add(1, 2), 3);\n}}\n")
+            case(fx, "대조: 표의 지움에 있는 시험 파일만 지우면 G1 통과", drop_file_listed,
+                 pl + ["gate", "G1", "store"], "G1 통과", should_fail=False)
+
+            # --- 동작 잠금 (QMIT 결정 2)
+            case(fx, "동작 잠금: 시험이 지금 구현에서 모두 통과하면 G1 통과", None,
+                 red + ["store", "--lock"], "G1 통과: store (동작 잠금)", should_fail=False)
+            case(fx, "동작 잠금: 지금 구현에서 실패하는 시험이 있으면 G1 실패", todo_lib,
+                 red + ["store", "--lock"], "✗ 동작 잠금인데")
+            case(fx, "동작 잠금: reopen --lock 이 상태에 남고 status 에 보인다",
+                 lambda: sh(pl + ["reopen", "store", "--lock", "옮기기"], fx), pl + ["status"],
+                 "동작 잠금", should_fail=False)
+
+            # --- 모델 승급 (QMIT 결정 3)
+            case(fx, "승급: 같은 실패 2번이면 한 등급 위 모델로 다시 맡기라고 하고 상태에 남긴다",
+                 lambda: (sh(pl + ["start", "N1", "store"], fx), sh(pl + ["gate", "G1", "store"], fx)),
+                 ["bash", "-c", f"{py} scripts/pipeline.py gate G1 store; {py} -c "
+                  "'import json;print(json.load(open(\".pipeline/state.json\"))[\"store\"][\"escalate_model\"])'"],
+                 ["같은 실패 2번 — 이 노드를 한 등급 위 모델로", "True"], should_fail=False)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

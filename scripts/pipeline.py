@@ -4,13 +4,13 @@
     pipeline.py status                 모듈마다 지금 어느 단계인가
     pipeline.py next                   지금 시작할 수 있는 노드 (여러 개면 병렬)
     pipeline.py prompt <노드> <모듈>   그 노드에 줄 프롬프트 (고정 틀 + 지시서)
-    pipeline.py start <노드> <모듈>    노드 시작 (앞 단계가 안 끝났으면 거부)
-    pipeline.py gate <G1|G2> <모듈>    기계 검사를 돌리고 결과를 기록 (같은 실패 3번이면 사람에게)
+    pipeline.py start <노드> <모듈> [--lock]   노드 시작 (앞 단계가 안 끝났으면 거부). N1 --lock: 동작 잠금 모드
+    pipeline.py gate <GR|G1|G2> <모듈>  기계 검사를 돌리고 결과를 기록 (같은 실패 2번이면 모델 승급, 3번이면 사람에게)
     pipeline.py lock <모듈>            G1 통과 뒤 테스트를 커밋하고 red/<모듈> 태그로 잠근다
     pipeline.py review <모듈> <통과|되돌림> [메모]   AI 검토 판정 기록
     pipeline.py scope                  진행 중인 노드가 맡지 않은 곳을 고쳤는지
     pipeline.py resume <모듈>          사람에게 넘어간 모듈을 사람이 다시 연다
-    pipeline.py reopen <모듈> <이유>   테스트가 틀렸을 때 조정자가 N1 로 되돌린다
+    pipeline.py reopen <모듈> [--lock] <이유>   조정자가 다시 연다. R(대조)부터 돈다. --lock: 동작 잠금 모드
     pipeline.py amend <모듈> <이유>    뜻이 안 바뀌는 테스트 결함(이름 · 모양)을 조정자가 바로잡고 다시 잠근다
 
 상태는 .pipeline/state.json 에 둔다.
@@ -18,6 +18,7 @@
 import fnmatch
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -30,10 +31,10 @@ STATE_FILE = ROOT / ".pipeline/state.json"
 COAUTHOR = "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 # 모듈 → 폴더. 기본은 crates/<모듈>(server 는 crates/server). 2026-11-16 조립을 gate 에서 server 로 떼어 냄.
 DIRS = {}
-# 단계 순서: 할 일 → N1 중 → red 확인됨 → 잠김 → N2 중 → green → N3 중 → 검토 통과
-ORDER = ["todo", "n1", "red_ok", "locked", "n2", "green", "n3", "reviewed"]
+# 단계 순서: 할 일 → (다시 연 모듈만: R 대조 중 → 대조 확인됨) → N1 중 → red 확인됨 → 잠김 → N2 중 → green → N3 중 → 검토 통과
+ORDER = ["todo", "r", "r_ok", "n1", "red_ok", "locked", "n2", "green", "n3", "reviewed"]
 LABEL = {
-    "todo": "할 일", "n1": "N1 테스트 작성 중", "red_ok": "red 확인됨 (잠그기 전)", "locked": "테스트 잠김",
+    "todo": "할 일", "r": "R 대조 중", "r_ok": "대조 확인됨", "n1": "N1 테스트 작성 중", "red_ok": "red 확인됨 (잠그기 전)", "locked": "테스트 잠김",
     "n2": "N2 구현 중", "green": "green (기계 검사 통과)", "n3": "N3 AI 검토 중", "reviewed": "검토 통과",
     "escalated": "사람에게 넘김",
 }
@@ -73,8 +74,11 @@ def run(cmd):
 def runnable(st):
     out = []
     for m, spec in GRAPH["modules"].items():
-        s = mod(st, m)["stage"]
+        d = mod(st, m)
+        s = d["stage"]
         if s == "todo" and all(at_least(st, n, "green") for n in spec["needs"]):
+            out.append(("R" if d.get("reconcile") else "N1", m))
+        elif s == "r_ok":
             out.append(("N1", m))
         elif s == "locked":
             out.append(("N2", m))
@@ -88,6 +92,9 @@ def cmd_status(st, _):
         d = mod(st, m)
         extra = f" · 같은 실패 {d['fails']}번" if d["fails"] else ""
         extra += f" · 검토 되돌림 {d['rounds']}번" if d["rounds"] else ""
+        extra += " · 동작 잠금" if d.get("mode") == "lock" and d["stage"] != "reviewed" else ""
+        extra += " · 모델 승급" if d.get("escalate_model") else ""
+        extra += " · 대조 먼저" if d.get("reconcile") and d["stage"] == "todo" else ""
         needs = f" (먼저: {', '.join(spec['needs'])})" if spec["needs"] else ""
         print(f"{m:8} {LABEL[d['stage']]}{extra}{needs}")
     todo = [f"pipeline.py lock {m}" for m in GRAPH["modules"] if st[m]["stage"] == "red_ok"]
@@ -111,25 +118,37 @@ def cmd_prompt(st, a):
 
 def cmd_start(st, a):
     node, m = a[0], a[1]
+    lock = "--lock" in a[2:]
     d = mod(st, m)
-    want = {"N1": "todo", "N2": "locked", "N3": "green"}[node]
+    want = {"R": "todo", "N1": "r_ok" if d["stage"] == "r_ok" else "todo", "N2": "locked", "N3": "green"}[node]
     if d["stage"] == "escalated":
         sys.exit(f"아직 안 된다: {m} 은 사람에게 넘어갔다. 사람이 pipeline.py resume {m} 을 해야 한다")
-    if node == "N1":
+    if node in ("R", "N1"):
         late = [n for n in GRAPH["modules"][m]["needs"] if not at_least(st, n, "green")]
         if late:
             sys.exit(f"아직 안 된다: {m} 은 {', '.join(late)} 이(가) green 이 된 뒤에 시작한다")
+    if node == "R" and not d.get("reconcile"):
+        sys.exit(f"아직 안 된다: R(대조)은 다시 연(reopen) 모듈만 돈다. {m} 은 N1 부터 한다")
+    if node == "N1" and d.get("reconcile"):
+        sys.exit(f"아직 안 된다: {m} 은 다시 열렸다. 먼저 R(대조)을 하고 gate GR 을 통과한다 (pipeline.py start R {m})")
+    if lock and node != "N1":
+        sys.exit("--lock 은 N1 에만 쓴다 (동작 잠금 모드)")
     if d["stage"] != want:
         sys.exit(f"아직 안 된다: {node} {m} 은 '{LABEL[want]}' 단계에서 시작한다 (지금: {LABEL[d['stage']]})")
     d["stage"] = node.lower()
-    d["fails"], d["last_fail"] = 0, ""
-    d["log"].append(f"{node} 시작")
+    d["fails"], d["last_fail"], d["escalate_model"] = 0, "", False
+    if lock:
+        d["mode"] = "lock"
+    d["log"].append(f"{node} 시작" + (" (동작 잠금)" if lock else ""))
     save(st)
     print(f"{node} {m} 시작. 고칠 수 있는 곳: {', '.join(allowed(node, m))}")
+    if node == "N1" and d.get("mode") == "lock":
+        print("동작 잠금 모드: G1 은 시험이 지금 구현에서 모두 통과해야 통과한다 (src 는 고치지 않는다)")
 
 
 def allowed(node, m):
-    return [w.replace("{dir}", x) for w in GRAPH["nodes"][node]["writes"] for x in (dirs(m) if "{dir}" in w else [""])]
+    return [w.replace("{dir}", x).replace("{module}", m)
+            for w in GRAPH["nodes"][node]["writes"] for x in (dirs(m) if "{dir}" in w else [""])]
 
 
 def changed_files():
@@ -138,7 +157,7 @@ def changed_files():
 
 
 def scope_problems(st):
-    active = [(d["stage"].upper(), m) for m, d in st.items() if d["stage"] in ("n1", "n2")]
+    active = [(d["stage"].upper(), m) for m, d in st.items() if d["stage"] in ("r", "n1", "n2")]
     globs = [g for n, m in active for g in allowed(n, m)] + GRAPH.get("outside_graph", [])
     return [f for f in changed_files() if not any(fnmatch.fnmatch(f, g) for g in globs)]
 
@@ -153,22 +172,114 @@ def cmd_scope(st, _):
     print("✓ 고친 곳이 모두 맡은 범위 안이다")
 
 
+# --- 대조(R) 표 (QMIT 결정 1). 지시서의 그 차수 절 아래 "### 대조" 표: 시험 · 문서 경로 | 판정 | 근거
+VERDICTS = {"유지", "고침", "지움", "열어둠"}
+# "지움"의 근거: 사용자 말(따옴표로 옮김) · 결정 번호 · 지시서 확정 항목(차수) 가운데 하나.
+EVIDENCE = re.compile(r'사용자[^|"“]*["“][^"”]+["”]|결정\s*\d+|지시서\s*\d+차')
+TEST_FN = re.compile(r'#\[(?:tokio::)?test[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)')
+
+
+def brief_path(m):
+    return f"docs/dev/modules/{m}.md"
+
+
+def reconcile_tables(text):
+    """지시서 글에서 "### 대조" 표들을 [(줄 목록)] 으로. 줄은 [경로, 판정, 근거] 칸."""
+    tables, lines = [], text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() != "### 대조":
+            continue
+        rows, j = [], i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        while j < len(lines) and lines[j].lstrip().startswith("|"):
+            cells = [c.strip() for c in lines[j].strip().strip("|").split("|")]
+            if not all(re.fullmatch(r":?-+:?", c) for c in cells if c):
+                rows.append(cells)
+            j += 1
+        tables.append(rows[1:])  # 첫 줄은 머리
+    return tables
+
+
+def check_reconcile(m, d):
+    """GR: 이번 차수의 대조 표가 있고, 판정이 넷 가운데 하나이고, "지움" 줄마다 근거가 적혔는가 (형식 검사)."""
+    text = (ROOT / brief_path(m)).read_text(encoding="utf-8")
+    tables = reconcile_tables(text)
+    before = 0
+    if d.get("reopen_at"):
+        _, old = run(["git", "show", f"{d['reopen_at']}:{brief_path(m)}"])
+        before = len(reconcile_tables(old))
+    if len(tables) <= before or not tables[-1]:
+        return 1, (f"✗ 대조 표 없음 — 고치기: {brief_path(m)} 의 이번 차수 절 아래 '### 대조' 표"
+                   "(시험 · 문서 경로 | 판정 | 근거)를 쓴다\nGR 실패: " + m)
+    out, bad = [], False
+    for row in tables[-1]:
+        path, verdict, why = (row + ["", "", ""])[:3]
+        v = verdict.replace(" ", "")
+        if v not in VERDICTS:
+            out.append(f"✗ 판정이 넷 가운데 하나가 아니다 — {path}: '{verdict}' (유지 · 고침 · 지움 · 열어 둠)")
+            bad = True
+        elif v == "지움" and not EVIDENCE.search(why):
+            out.append(f"✗ 근거 없는 지움 — {path}: 근거 칸에 사용자 \"…\" · 결정 <번호> · 지시서 <N>차 가운데 하나를 적는다")
+            bad = True
+    out.append(f"{'GR 실패' if bad else 'GR 통과'}: {m} (대조 {len(tables[-1])}줄)")
+    return (1 if bad else 0), "\n".join(out)
+
+
+def test_inventory(files):
+    """{시험 파일: 시험 함수 이름 집합}. files: {경로: 글}."""
+    return {f: set(TEST_FN.findall(body)) if f.endswith(".rs") else set() for f, body in files.items()}
+
+
+def unlisted_deletions(m, base):
+    """red 태그 이전 판(base) 대비 지운 시험 파일 · 시험 함수 가운데 대조 표의 "지움"에 없는 것."""
+    tdirs = [x + "/tests" for x in dirs(m)]
+    _, names = run(["git", "-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", base, "--", *tdirs])
+    old = test_inventory({f: run(["git", "show", f"{base}:{f}"])[1] for f in names.split("\0") if f})
+    now = test_inventory({str(f.relative_to(ROOT)): f.read_text(encoding="utf-8", errors="replace")
+                          for x in tdirs for f in sorted((ROOT / x).rglob("*")) if f.is_file()})
+    tables = reconcile_tables((ROOT / brief_path(m)).read_text(encoding="utf-8"))
+    listed = [r[0] for r in (tables[-1] if tables else []) if len(r) > 1 and r[1].replace(" ", "") == "지움"]
+    gone_files = [f for f in old if f not in now]
+    left = set().union(*now.values()) if now else set()
+    gone_fns = sorted({fn for f, fns in old.items() if f in now for fn in fns} - left)
+    miss = [f for f in gone_files if not any(f in c for c in listed)]
+    miss += [fn for fn in gone_fns if not any(re.search(rf"(?<!\w){re.escape(fn)}(?!\w)", c) for c in listed)]
+    return miss
+
+
 def cmd_gate(st, a):
     gate, m = a[0], a[1]
     d = mod(st, m)
-    need = {"G1": "n1", "G2": "n2"}[gate]
+    need = {"GR": "r", "G1": "n1", "G2": "n2"}[gate]
     if d["stage"] != need:
         sys.exit(f"아직 안 된다: {gate} {m} 은 '{LABEL[need]}' 단계에서 돌린다 (지금: {LABEL[d['stage']]})")
-    code, out = run(["bash", "scripts/red.sh", m] if gate == "G1" else ["bash", "scripts/verify.sh", m])
+    if gate == "GR":
+        code, out = check_reconcile(m, d)
+    elif gate == "G1":
+        code, out = run(["bash", "scripts/red.sh", m] + (["--lock"] if d.get("mode") == "lock" else []))
+        miss = unlisted_deletions(m, d["base"]) if d.get("base") else []
+        if miss:
+            code = 1
+            out += ("\n✗ 대조 표에 없는 시험을 지웠다 — 고치기: 되살리거나, R(대조)이 근거와 함께 '지움'으로 적은 것만 지운다\n"
+                    + "\n".join("   " + x for x in miss) + "\n")
+    else:
+        code, out = run(["bash", "scripts/verify.sh", m])
     bad = scope_problems(st)
     if bad:
         code = 1
         out += "\n✗ 맡지 않은 곳을 고쳤다: " + ", ".join(bad) + " — 고치기: 그 변경을 되돌린다\n"
     print(out)
     if code == 0:
-        d["stage"] = "red_ok" if gate == "G1" else "green"
-        d["fails"], d["last_fail"] = 0, ""
+        d["stage"] = {"GR": "r_ok", "G1": "red_ok", "G2": "green"}[gate]
+        d["fails"], d["last_fail"], d["escalate_model"] = 0, "", False
         d["log"].append(f"{gate} 통과")
+        if gate == "GR":
+            # 대조 표는 바로 커밋한다. 남겨 두면 N1 의 범위 검사가 "맡지 않은 곳"으로 본다.
+            d["reconcile"] = False
+            run(["git", "add", "--", brief_path(m)])
+            c, _ = run(["git", "commit", "-q", "-m", f"docs({m}): 대조 표 (R)\n\nGR 통과." + COAUTHOR, "--", brief_path(m)])
+            print("커밋했다: docs(%s) 대조 표" % m if c == 0 else "커밋할 변경 없음")
         if gate == "G1":
             # red 를 확인하면 바로 잠근다. 남겨 두면 그 사이에 테스트가 바뀌거나 다른 모듈의 범위 검사에 걸린다.
             save(st)
@@ -188,6 +299,10 @@ def cmd_gate(st, a):
     if d["fails"] >= GRAPH["max_same_failure"]:
         d["stage"] = "escalated"
         print(f"■ 같은 실패가 {d['fails']}번 되풀이됐다. 멈추고 사람에게 넘긴다.")
+    elif d["fails"] >= GRAPH.get("escalate_model_at", GRAPH["max_same_failure"]):
+        d["escalate_model"] = True
+        d["log"].append("모델 승급")
+        print(f"▲ 같은 실패 {d['fails']}번 — 이 노드를 한 등급 위 모델로 다시 맡긴다(Haiku→Sonnet→Opus→Fable…)")
     save(st)
     sys.exit(1)
 
@@ -198,7 +313,7 @@ def cmd_lock(st, a):
     if d["stage"] != "red_ok":
         sys.exit(f"아직 안 된다: 잠그기는 G1 을 통과한 뒤에 한다 (지금: {LABEL[d['stage']]})")
     # G1 뒤에 고친 것이 있을 수 있으니 잠그기 직전에 한 번 더 확인한다.
-    code, out = run(["bash", "scripts/red.sh", m])
+    code, out = run(["bash", "scripts/red.sh", m] + (["--lock"] if d.get("mode") == "lock" else []))
     if code != 0:
         d["stage"] = "n1"
         save(st)
@@ -209,6 +324,7 @@ def cmd_lock(st, a):
         sys.exit("커밋 실패:\n" + out)
     run(["git", "tag", "-f", f"red/{m}"])
     d["stage"] = "locked"
+    d.pop("base", None)
     d["log"].append("테스트 잠금")
     save(st)
     print(f"잠갔다: red/{m}")
@@ -244,13 +360,27 @@ def cmd_resume(st, a):
 
 
 def cmd_reopen(st, a):
-    """테스트가 틀렸을 때 조정자가 N1 로 되돌린다. 잠금 태그를 지운다."""
-    d = mod(st, a[0])
-    run(["git", "tag", "-d", f"red/{a[0]}"])
-    d.update(stage="todo", fails=0, last_fail="")
-    d["log"].append("테스트 결함으로 N1 로 되돌림: " + " ".join(a[1:]))
+    """조정자가 모듈을 다시 연다(새 차수 · 테스트 결함). 잠금 태그를 지우고 R(대조)부터 돌게 한다.
+
+    잠금 태그가 가리키던 판을 base 로 남긴다: G1 이 그 판 대비 지운 시험이 대조 표의 "지움"에 다 있는지 본다.
+    --lock 이면 그 차수를 동작 잠금 모드로 둔다(G1 이 "지금 구현에서 모두 통과"를 본다).
+    """
+    m = a[0]
+    d = mod(st, m)
+    lock = "--lock" in a[1:]
+    reason = " ".join(x for x in a[1:] if x != "--lock")
+    c, base = run(["git", "rev-parse", "-q", "--verify", f"refs/tags/red/{m}^{{commit}}"])
+    _, head = run(["git", "rev-parse", "HEAD"])
+    run(["git", "tag", "-d", f"red/{m}"])
+    d.update(stage="todo", fails=0, last_fail="", escalate_model=False, reconcile=True,
+             mode="lock" if lock else "red", reopen_at=head.strip())
+    if c == 0:
+        d["base"] = base.strip()
+    else:
+        d.pop("base", None)
+    d["log"].append("다시 엶 (R 대조부터" + (", 동작 잠금" if lock else "") + "): " + reason)
     save(st)
-    print(f"{a[0]}: {LABEL['todo']} (N1 부터 다시)")
+    print(f"{m}: {LABEL['todo']} (R 대조부터 다시{' · 동작 잠금' if lock else ''}) — pipeline.py start R {m}")
 
 
 def cmd_amend(st, a):

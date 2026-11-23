@@ -2,6 +2,7 @@
 # 사람이 읽는 설명은 docs/dev/pipeline.md.
 
 max_same_failure = 3   # 같은 실패가 이만큼 되풀이되면 멈추고 사람에게 넘긴다
+escalate_model_at = 2  # 같은 실패가 이만큼이면 그 노드를 한 등급 위 모델로 다시 맡긴다 (QMIT 결정 3)
 max_review_rounds = 2  # AI 검토에서 되돌아가는 횟수 한도
 
 # 그래프 밖의 일(원본 조사)이 쓰는 곳. 노드의 범위 검사에서 빼지만, 노드는 여기를 고치지 않는다(프롬프트 규칙).
@@ -49,7 +50,14 @@ needs = ["store"]
 [modules.backup]
 needs = ["store", "secrets"]
 
-# 노드. writes: 그 노드가 고칠 수 있는 곳({dir}은 모듈 폴더마다 펼쳐진다). gate: 끝났다고 인정하는 검사.
+# 노드. writes: 그 노드가 고칠 수 있는 곳({dir}은 모듈 폴더마다, {module}은 모듈 이름으로 펼쳐진다). gate: 끝났다고 인정하는 검사.
+# R(대조)은 reopen 한 모듈만 N1 앞에 돈다(처음 짓는 모듈은 R 없이 N1). QMIT 결정 1.
+[nodes.R]
+name = "대조 (reconcile)"
+prompt = "docs/dev/prompts/r-reconcile.md"
+writes = ["docs/dev/modules/{module}.md"]
+gate = "GR"
+
 [nodes.N1]
 name = "테스트 작성 (red)"
 prompt = "docs/dev/prompts/n1-test.md"
