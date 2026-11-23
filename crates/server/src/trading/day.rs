@@ -116,8 +116,7 @@ impl Trading {
 
     /// 하루 시작: 남기고, 그날 시작 평가액을 새로 잡고, 하루 한도 멈춤을 쉬는 중으로 푼다.
     async fn day_start(&self, date: NaiveDate, now: DateTime<Utc>) -> Result<(), TradingError> {
-        let books = self.books(now).await?;
-        self.reset_day_start(&books, date)?;
+        self.books_for_day_start(now, date).await?;
         self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
             .await?;
         // 세션이 시작되면 손절 · 청산의 물러서기를 비워 곧바로 다시 낸다(10b 보강 2 1번 다).

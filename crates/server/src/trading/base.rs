@@ -11,8 +11,8 @@ use pi_exec::Executor;
 use pi_gate::Publisher;
 use pi_market::{Clock, Currency, Market, MarketCalendar, Quote, StalePolicy};
 use pi_paper::{
-    Broker, InitialCash, LimitFillPrice, MarketRules, MaxFill, PaperConfig, ProceedsUsable,
-    RoundingMode, UnverifiedRules,
+    InitialCash, LimitFillPrice, MarketRules, MaxFill, PaperConfig, ProceedsUsable, RoundingMode,
+    UnverifiedRules,
 };
 use pi_rules::{Book, Position, RulesConfig};
 use pi_store::{Store, StoreError, TeamCause, TeamChange, TeamState, UnixMillis};
@@ -338,18 +338,38 @@ impl Trading {
     /// 통화별 장부를 모의계좌에서 셈한다. 평가에는 그 종목의 마지막 시세(없으면 평균 단가)를 쓰고,
     /// 최고 평가액을 올린다. 그날 시작 평가액이 아직 없으면 지금 평가액이다. 기준이 바뀌면 저장소에 남긴다.
     pub(super) async fn books(&self, now: DateTime<Utc>) -> Result<Vec<Book>, TradingError> {
-        let paper = self.executor.broker();
-        let holdings = Broker::holdings(paper, None, now)
-            .await
-            .map_err(exec_text)?;
+        self.count_books(now, None)
+    }
+
+    /// 하루 시작의 장부: 셈하고 그날 시작 평가액을 **같은 `marks` 잠금 안에서** 새로 잡는다.
+    /// 다른 `books()` 호출이 사이에 끼어 그날 시작 평가액이 어긋나지 않는다(13차 1번).
+    pub(super) async fn books_for_day_start(
+        &self,
+        now: DateTime<Utc>,
+        today: NaiveDate,
+    ) -> Result<Vec<Book>, TradingError> {
+        self.count_books(now, Some(today))
+    }
+
+    /// `books`의 몸통. 모의계좌 장부는 `marks` 잠금을 잡기 전에 한 번에 읽는다(보유와 현금이 섞이지 않는다).
+    fn count_books(
+        &self,
+        now: DateTime<Utc>,
+        reset_day: Option<NaiveDate>,
+    ) -> Result<Vec<Book>, TradingError> {
+        let snapshot = self.executor.broker().account_snapshot(now);
         let quotes = lock(&self.quotes).clone();
         let today = self.date_of(now);
         let mut marks = lock(&self.marks);
         let mut changed = false;
         let mut books = Vec::with_capacity(CURRENCIES.len());
         for currency in &CURRENCIES {
-            let cash = paper.cash(currency, now);
-            let positions: Vec<Position> = holdings
+            let cash = match currency {
+                Currency::Usd => &snapshot.usd,
+                _ => &snapshot.krw,
+            };
+            let positions: Vec<Position> = snapshot
+                .holdings
                 .iter()
                 .filter(|h| &h.currency == currency)
                 .map(|h| Position {
@@ -378,6 +398,12 @@ impl Trading {
             });
         }
         marks.last.clone_from(&books);
+        if let Some(day) = reset_day {
+            changed |= marks.reset_day(&books, day);
+            for book in &mut books {
+                book.day_start_equity = book.equity;
+            }
+        }
         let payload = changed.then(|| marks.take_payload());
         drop(marks);
         if let Some(payload) = payload {
@@ -391,23 +417,6 @@ impl Trading {
         self.store
             .append_at(KIND_LOSS_BASIS, payload, millis(self.clock.now()))?;
         Ok(())
-    }
-
-    /// 그날 시작 평가액을 지금 장부의 평가액으로 새로 잡는다(보유 종목이 있으면 바로 저장소에 남긴다).
-    pub(super) fn reset_day_start(
-        &self,
-        books: &[Book],
-        today: NaiveDate,
-    ) -> Result<(), TradingError> {
-        let payload = {
-            let mut marks = lock(&self.marks);
-            let now = marks.reset_day(books, today);
-            now.then(|| marks.take_payload())
-        };
-        match payload {
-            Some(payload) => self.save_basis(&payload),
-            None => Ok(()),
-        }
     }
 
     /// 마지막으로 셈한 장부.
