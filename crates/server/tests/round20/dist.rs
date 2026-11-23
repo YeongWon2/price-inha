@@ -1,5 +1,6 @@
 //! 빌드 결과(dist)의 모든 파일이 경로로 닿고, 묶음은 Vite 빌드가 만든 해시 이름이며,
 //! 서비스 워커 · manifest는 해시 없는 고정 이름이고, three는 npm에서 와 라이선스 글이 함께 있다.
+//! 12차 1번 · 4번: 폰 manifest 모양 · 아이콘(PNG 192 · 512) · three 없음을 dist에서 본다(다른 크레이트 폴더를 읽지 않는다).
 
 use price_inha::KEYS_PAGE_PATH;
 
@@ -120,19 +121,106 @@ fn 화면_묶음은_vite가_만든_해시_이름이고_소스_경로를_부르�
     }
 }
 
+/// PNG 시그니처(8바이트).
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// PNG면 첫 덩어리 IHDR의 너비 · 높이를 돌려준다(아니면 `None`).
+fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 24 || bytes[..8] != PNG_SIGNATURE || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
+    Some((width, height))
+}
+
+fn dist_phone(name: &str) -> Vec<u8> {
+    std::fs::read(dist_dir().join("phone").join(name))
+        .unwrap_or_else(|error| panic!("dist/phone/{name}이 있어야 한다: {error}"))
+}
+
+// 검증: D1 D11 V10
+#[test]
+fn 폰_아이콘은_192와_512_크기의_png다() {
+    // 검사기 자체가 PNG가 아닌 것 · 짧은 것을 거르는지 먼저 본다.
+    assert_eq!(png_size(b"GIF89a not a png at all......"), None);
+    assert_eq!(png_size(&PNG_SIGNATURE), None);
+    for (name, side) in [("icon-192.png", 192), ("icon-512.png", 512)] {
+        let bytes = dist_phone(name);
+        assert_eq!(
+            png_size(&bytes),
+            Some((side, side)),
+            "dist/phone/{name}은 {side}x{side} PNG다"
+        );
+    }
+}
+
+// 검증: D1 D11 V10
+#[test]
+fn 폰_manifest는_설치할_수_있는_모양이고_아이콘이_묶음_안에_있다() {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&dist_phone("manifest.webmanifest")).expect("manifest는 JSON이다");
+    for key in ["name", "id", "scope", "start_url"] {
+        assert!(
+            manifest[key].as_str().is_some_and(|v| !v.trim().is_empty()),
+            "manifest의 {key}가 비어 있지 않다"
+        );
+    }
+    assert_eq!(manifest["display"], "standalone");
+    let icons = manifest["icons"].as_array().expect("manifest의 icons 목록");
+    let sizes: Vec<&str> = icons.iter().filter_map(|i| i["sizes"].as_str()).collect();
+    assert!(
+        sizes.contains(&"192x192") && sizes.contains(&"512x512"),
+        "192 · 512 아이콘: {sizes:?}"
+    );
+    for icon in icons {
+        let src = icon["src"].as_str().expect("아이콘 src");
+        assert!(!src.contains("://"), "아이콘은 바깥 주소가 아니다: {src}");
+        let rel = src
+            .trim_start_matches("/phone/")
+            .trim_start_matches("./")
+            .trim_start_matches('/');
+        assert!(
+            dist_dir().join("phone").join(rel).is_file(),
+            "아이콘 {src}가 폰 묶음(dist/phone) 안에 있다"
+        );
+    }
+}
+
+// 검증: V10 V12
+#[test]
+fn 폰_묶음에는_three가_없고_바깥_주소도_부르지_않는다() {
+    let mut texts = vec![("phone 묶음".to_owned(), built_page("phone/index.html"))];
+    for name in ["sw.js", "manifest.webmanifest"] {
+        let body = String::from_utf8(dist_phone(name)).expect("글 파일");
+        texts.push((format!("dist/phone/{name}"), body));
+    }
+    for (what, body) in texts {
+        let lower = body.to_lowercase();
+        assert!(!lower.contains("three"), "{what}에 three가 있다(결정 26)");
+        assert!(
+            !lower.contains("http://") && !lower.contains("https://"),
+            "{what}가 바깥 주소를 부른다"
+        );
+    }
+}
+
 // 검증: D1 D11
 #[test]
 fn 서비스_워커와_manifest와_아이콘은_해시_없는_고정_이름이고_범위가_그대로다() {
-    let original = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../notify/web/phone");
     for name in ["manifest.webmanifest", "icon-192.png", "icon-512.png"] {
-        let built = std::fs::read(dist_dir().join("phone").join(name))
-            .unwrap_or_else(|error| panic!("dist/phone/{name}이 있어야 한다: {error}"));
-        let before = std::fs::read(original.join(name)).expect("옛 폰 파일");
-        assert_eq!(
-            built, before,
-            "dist/phone/{name}은 지금 것과 같다(범위 · 아이콘 그대로)"
+        assert!(
+            dist_dir().join("phone").join(name).is_file(),
+            "dist/phone/{name}(해시 없음)"
         );
     }
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&dist_phone("manifest.webmanifest")).expect("manifest는 JSON이다");
+    assert_eq!(
+        manifest["scope"], "./",
+        "manifest 범위는 그대로(./ = /phone/)"
+    );
+    assert_eq!(manifest["start_url"], "./", "시작 주소는 그대로");
     assert!(
         dist_dir().join("phone/sw.js").is_file(),
         "dist/phone/sw.js(해시 없음)"
