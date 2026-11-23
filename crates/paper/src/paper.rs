@@ -468,16 +468,11 @@ impl PaperBroker {
     /// 하나만 잡으므로 교착이 없고, 그 사이에 체결이 끼어 섞인 장부가 나오지 않는다.
     /// 기존 [`crate::Broker::holdings`] · [`PaperBroker::cash`]는 그대로다.
     pub fn account_snapshot(&self, now: DateTime<Utc>) -> AccountSnapshot {
-        let _ = now;
-        let zero = CashBalance {
-            available: Decimal::ZERO,
-            held: Decimal::ZERO,
-            unsettled: Decimal::ZERO,
-        };
+        let book = self.settled(now);
         AccountSnapshot {
-            holdings: Vec::new(),
-            krw: zero.clone(),
-            usd: zero,
+            holdings: book.ledger.holding_views(None),
+            krw: book.ledger.balance(CashCode::Krw),
+            usd: book.ledger.balance(CashCode::Usd),
         }
     }
 
