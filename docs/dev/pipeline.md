@@ -63,6 +63,10 @@ N0 계획 ─→ N1 테스트 작성(red) ─→ G1 red 확인 ─→ N2 구현(
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 
+**영향 범위** (QMIT 결정 6): `scripts/verify.sh --affected [--base <ref>]`는 `scripts/affected.py`가 고른 모듈만 돈다. 기준(기본 `origin/main`, 없으면 `HEAD~1`)과 작업 트리(커밋 안 된 것 포함)의 차이에서 바뀐 `crates/<모듈>/`과 그 크레이트에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존), 바뀐 지시서 `docs/dev/modules/<모듈>.md`의 모듈을 고른다. 그래프가 못 따라가는 변경(루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `.cargo/` · `.github/`, 그 밖에 모르는 곳)은 전체를 돈다. 문서만 바뀌었으면 "바뀐 코드 없음"으로 0이다. CI는 PR에서 `--affected --base origin/<대상 브랜치>`, main push · 밤(매일 03:00 KST) · 손으로 돌릴 때 전체를 돈다.
+
+**로컬 pre-push 관문** (QMIT 결정 4): `.githooks/pre-push`가 push되는 범위(원격 sha 기준, 새 브랜치면 `origin/main`)로 `verify.sh --affected`를 돌리고 실패하면 push를 막는다. 저장소마다 한 번 `git config core.hooksPath .githooks`로 켠다(꺼져 있으면 `verify.sh`가 참고 줄로 알린다). 관문을 건너뛰는 push는 하지 않는다.
+
 어긴 곳은 `✗ [규칙 번호] 파일:줄`과 **왜** · **고치기**가 함께 찍힌다. 구현 에이전트는 그 안내대로 고치고 다시 돌린다.
 규칙이 틀렸다고 보면 코드를 우회하지 말고 멈춰서 알린다. 규칙(`architecture.toml`, `Cargo.toml`의 lints, 검사 스크립트)은 조정자가 사용자 확인 뒤에만 고친다.
 AI 검토에서 기계로 잡을 수 있는 종류의 문제가 나오면, 고치는 것과 함께 그 검사를 여기에 더한다.

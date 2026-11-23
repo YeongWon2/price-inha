@@ -2,6 +2,7 @@
 # G2 기계 검사. 0으로 끝나야 "끝났다"고 말할 수 있다. docs/dev/pipeline.md 5장.
 #   scripts/verify.sh            전체
 #   scripts/verify.sh <모듈>...  그 모듈만 (다른 모듈이 아직 red일 때)
+#   scripts/verify.sh --affected [--base <ref>]  바뀐 모듈과 그것에 기대는 모듈만 (scripts/affected.py)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib.sh
@@ -12,6 +13,20 @@ run() { # run <이름> <명령...>
   local name="$1"; shift
   if out=$("$@" 2>&1); then ok "$name"; else bad "$name"; printf '%s\n' "$out" | tail -60; fi
 }
+
+picked=0 # 모듈을 사람이 골랐는가(그때만 red 태그 없음을 실패로 본다)
+if [ "${1:-}" = "--affected" ]; then
+  shift
+  PY=$(find_python)
+  [ -n "$PY" ] || { echo "✗ --affected: Python 3.11 이상이 없다"; exit 2; }
+  aff=$("$PY" scripts/affected.py "$@") || exit 2
+  case "$aff" in
+    ALL) set -- ;;
+    "") echo "범위: 바뀐 코드 없음 (영향 범위) — 검사할 모듈이 없다"; exit 0 ;;
+    # shellcheck disable=SC2086
+    *) echo "영향 범위: $aff"; set -- $aff ;;
+  esac
+elif [ "$#" -gt 0 ]; then picked=1; fi
 
 if [ "$#" -gt 0 ]; then
   mods="$*"; pkgs=""; only=""; srcdirs=""
@@ -31,6 +46,10 @@ if [ "${PI_SELFTEST:-0}" != "1" ]; then
   now=$(rules_hash)
   if [ "$(cat .pipeline/selftest.ok 2>/dev/null)" = "$now" ]; then ok "0 검사기 자체 시험 (지금 규칙으로 통과함)"
   else bad "0 검사기 자체 시험이 없거나 낡았다 — 고치기: python3.14 scripts/selftest.py 를 돌려 통과시킨다"; fi
+  # 참고(실패 아님): 로컬 pre-push 관문(QMIT 결정 4)이 켜져 있는가
+  if [ -z "${CI:-}" ] && [ "$(git config core.hooksPath 2>/dev/null)" != ".githooks" ]; then
+    echo "- 참고: pre-push 관문이 꺼져 있다 — 켜기: git config core.hooksPath .githooks"
+  fi
 fi
 
 # shellcheck disable=SC2086
@@ -65,7 +84,7 @@ for m in $mods; do
       bad "4 잠긴 뒤 새 테스트 파일: $m — 고치기: 그 파일을 지운다. 더 볼 것은 src 안의 단위 테스트로 쓴다"
       git ls-files -o --exclude-standard -- $(module_test_dirs "$m")
     else ok "4 잠긴 테스트 그대로: $m"; fi
-  elif [ "$#" -gt 0 ]; then
+  elif [ "$picked" -eq 1 ]; then
     bad "4 red 태그 없음: $m — 고치기: G1(scripts/red.sh $m)을 통과시키고 잠근 뒤에 구현한다"
   else
     printf -- '- 4 %s: red 태그 없음 (아직 G1 전)\n' "$m"

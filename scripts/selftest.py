@@ -268,6 +268,22 @@ def main():
              lambda: sh(["git", "tag", "-d", "red/ai"], fx), verify + ["ai"], "✗ 4 red 태그 없음: ai")
         sh(["git", "tag", "-f", "red/ai"], fx)
 
+        # --- 영향 범위 (QMIT 결정 6, scripts/affected.py)
+        aff = f"{py} scripts/affected.py --base HEAD"
+
+        def dep_then_touch():
+            add_dep(fx, "crates/ai", 'pi-secrets = { path = "../secrets" }')
+            sh(["git", "commit", "-qam", "ai 가 secrets 에 기댐"], fx)
+            append(fx, "crates/secrets/src/lib.rs", "// 고침")
+        case(fx, "영향 범위: 크레이트 하나를 고치면 그 크레이트와 기대는 크레이트", dep_then_touch,
+             ["bash", "-c", f'test "$({aff})" = "secrets ai" && echo 맞음'], "맞음", should_fail=False)
+        case(fx, "영향 범위: scripts 를 고치면 전체",
+             lambda: append(fx, "scripts/lib.sh", "# 고침"),
+             ["bash", "-c", f'test "$({aff})" = "ALL" && echo 맞음'], "맞음", should_fail=False)
+        case(fx, "영향 범위: 문서만 고치면 검사할 모듈이 없다",
+             lambda: append(fx, "docs/dev/roadmap.md", "고침"),
+             verify + ["--affected", "--base", "HEAD"], "바뀐 코드 없음", should_fail=False)
+
         # --- G1 (red 확인)
         red = ["bash", "scripts/red.sh"]
         case(fx, "G1: 테스트가 이미 통과하면 red 가 아니라고 한다", None, red + ["store"], "이미 통과함")
