@@ -356,3 +356,17 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 - secrets: `store.rs:118` 주석("다시 등록하면 고쳐진다")은 UTF-8 깨짐에는 맞지 않음.
 - approval: `unhandled_due`가 닫힌 요청을 매번 모두 읽음(몇 달 뒤 비용), `Blocked.reason` 길이 상한.
 - store → knowledge: 모델별 조각 벡터 조회 API, 그 뒤 `hybrid_search`. 벡터 점수 식은 원본(OpenClaw) 조사를 더 한 뒤.
+
+## 11차 Vite 이전 (2026-11-23, 결정 1 · 결정 1 자리 조정)
+
+화면을 손으로 쓴 HTML/JS에서 Vite + TypeScript 다중 페이지로 옮긴다. **동작과 경로는 지금 그대로** — 이 차수는 옮기기이고, 새 화면은 사무실 승인 카드(10c 14번) 하나뿐이다.
+
+1. **프로젝트**: `crates/server/web/`가 Vite 프로젝트다(`package.json` · `package-lock.json` · `tsconfig.json` · `vite.config.ts` · `src/` · 페이지 HTML). `node_modules/`는 커밋하지 않고, 빌드 결과 `crates/server/web/dist/`는 커밋한다. `package.json`에 스크립트 `typecheck`(`tsc --noEmit`) · `test`(`vitest run`) · `build`(`vite build`)를 둔다(verify.sh 3w가 부른다). 의존은 판을 고정한다: `vite` · `typescript` · `vitest` · `three`(지금 vendor와 같은 계열) · 화면 시험에 DOM이 필요하면 `jsdom` 하나. 그 밖의 의존은 더하지 않는다(더해야 하면 멈추고 묻는다). 빌드는 같은 소스에서 늘 같은 결과(이름의 해시는 내용 해시)여야 한다.
+2. **페이지(옮길 것)**: 설정(`crates/server/web/index.html` → `/`), 키(`keys.html` → `/keys`), 사무실(`crates/office/web/office/*` → `/office/`), 폰(`crates/notify/web/phone/*` → `/phone/`, `sw.js` · `manifest.webmanifest` · 아이콘 포함. 서비스 워커는 해시 없는 고정 이름 · 지금과 같은 범위). 지금 화면의 JS를 TS로 옮기되 **하는 일 · 보내는 요청 · 화면 글은 같게**. 키 칸 규칙(password · new-password · spellcheck=false · 성공하면 비움 · 값을 다시 보이지 않음)과 바깥 CDN 없음, 브라우저 저장소에 비밀 없음은 그대로. `three`는 npm에서, 라이선스 글은 dist에 함께 둔다.
+3. **내주기**: server가 `dist`를 실행 파일에 넣어(빌드 스크립트로 파일 표를 만들거나 `include_bytes!` 표 — 바깥 의존을 더하지 않는다) 지금과 같은 경로 · 같은 머리(CSP · 내용 형식 · 캐시)로 내준다. 해시 붙은 파일은 오래 캐시해도 되고, HTML · `sw.js` · manifest는 지금처럼. server는 더는 `pi_office::web_assets()` · `pi_notify::phone_asset(s)`와 `crates/server/web/*.html` 직접 include를 쓰지 않는다. (office · notify 크레이트 안의 옛 `web/` · `web_assets`를 지우는 것은 그 모듈의 다음 차수 — 이 차수는 server만 고친다.)
+4. **사무실 승인 카드** (10c 14번 화면): 사무실 페이지가 `office.approval` 이벤트(번호 · 가린 요약 · 지문 앞 6자 · 상태)로 카드를 그리고, 승인/거절은 폰과 같은 `/api/approvals/{id}/approve|reject` 경로 · 같은 지문 대조로 보낸다. 상태가 pending이 아니게 되면 카드를 닫는다. 요약은 글(textContent)로만 넣는다(HTML로 넣지 않는다).
+5. **시험**: 화면 시험은 `crates/server/tests/web/*.test.ts`(vitest)에 둔다 — 승인 카드 그리기 · 닫기 · 요약이 HTML로 해석되지 않음, 키 칸 규칙, 화면이 부르는 경로 목록 같은 순수 논리. Rust 쪽은 실행 파일(또는 `App`)로 각 페이지 경로가 200 · 맞는 내용 형식 · CSP를 주는지, dist의 모든 파일이 경로로 닿는지, 옛 페이지 경로가 그대로인지. **잠긴 옛 시험이 HTML 글자를 직접 보는 경우**(예: round18 `screens.rs`) 그 내용이 JS 번들로 옮겨 가 깨지면, N1이 같은 뜻을 dist 안에서 찾도록만 고치고 고친 시험마다 까닭을 보고한다(뜻을 바꾸지 않는다).
+6. 이 차수에서 하지 않는 것: 화면 모양 새로 그리기, React 같은 틀, office · notify 크레이트 고치기.
+
+### 원본 동작 근거 (11차)
+원본에 없음(우리 고유) — 화면 빌드 방식 바꾸기. 사무실 화면의 동작은 앞 차수의 DeskRPG 조사(`docs/research/` 사무실 문서)를 그대로 따른다(옮기기만).
