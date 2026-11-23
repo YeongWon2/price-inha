@@ -59,7 +59,7 @@ gate = "G1"
 [nodes.N2]
 name = "구현 (green)"
 prompt = "docs/dev/prompts/n2-impl.md"
-writes = ["{dir}/src/**", "{dir}/web/**", "{dir}/Cargo.toml", "Cargo.lock"]
+writes = ["{dir}/src/**", "{dir}/web/**", "{dir}/build.rs", "{dir}/Cargo.toml", "Cargo.lock"]
 gate = "G2"
 
 [nodes.N3]
