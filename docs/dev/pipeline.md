@@ -165,3 +165,7 @@ fn 확인에_실패한_키는_저장하지_않는다() { ... }
 
 - 규칙(`architecture.toml`), 검사 스크립트, 그래프, 루트 `Cargo.toml` · `clippy.toml`을 고치면 자체 시험을 다시 돌려야 한다. `verify.sh`의 0번 검사가 규칙의 지문이 마지막 자체 시험 때와 같은지 본다.
 - `architecture.toml`에 금지 모양을 더하면 `selftest.py`의 표본에도 "어긴 코드 한 줄"을 더해야 한다. 없으면 자체 시험이 실패한다.
+
+## 10. 밤 CI: 변이 시험 · 커버리지 — 보고만, 판정 아님
+
+`.github/workflows/nightly.yml`(매일 04:00 KST · 손으로 실행 가능)이 게이트 자체를 잰다(QMIT 결정 7). 변이 시험은 `cargo-mutants`로 돈 · 안전 핵심 크레이트(`pi-rules` · `pi-paper` · `pi-exec` · `pi-gate`)를 `--in-diff` 없이 전체 돌려 시험이 일부러 넣은 버그를 잡는지(caught · missed)를 본다. 커버리지는 `cargo-llvm-cov`로 워크스페이스 전체 줄 커버리지를 크레이트별 표로 낸다. 결과는 job summary와 artifact로만 남기고 **성공 · 실패 판정에는 넣지 않는다**(두 job 모두 `continue-on-error`). 환경에 따라 흔들리는 측정은 판정에서 뺀다. 끝났다는 기준은 여전히 `scripts/verify.sh`뿐이다. 놓친 변이가 보이면 해당 모듈을 다시 열 때(reopen) 시험을 보강하는 근거로 쓴다. 도구 판은 발행 14일 넘은 것만 고정한다(공급망 규칙 8 · 9): cargo-mutants 27.1.0, cargo-llvm-cov 0.9.1.
