@@ -61,8 +61,26 @@ fn blocked_word(blocked: &Blocked) -> &'static str {
 }
 
 impl Trading {
-    /// 승인 답 하나를 처리한다([`super::APPROVAL_ANSWER_PATH`]).
+    /// 승인 답 하나를 처리한다([`super::APPROVAL_ANSWER_PATH`]). 답이 나면(모르는 번호 · 이미 닫힌 것은
+    /// 빼고) 답 자리에 알린다(10c 14번, 사무실 승인 카드).
     pub(crate) async fn answer(
+        &self,
+        number: &str,
+        shown: &str,
+        answer: &str,
+    ) -> Result<Answered, TradingError> {
+        let answered = self.answer_once(number, shown, answer).await?;
+        let untouched = [
+            reject_word(RejectReason::NotFound),
+            reject_word(RejectReason::AlreadyResolved),
+        ];
+        if !answered.reason.is_some_and(|r| untouched.contains(&r)) {
+            self.announce_answered(&ApprovalNumber::new(number));
+        }
+        Ok(answered)
+    }
+
+    async fn answer_once(
         &self,
         number: &str,
         shown: &str,

@@ -24,6 +24,8 @@ pub(super) struct Gathered {
     /// 자료 이상 신호다. 키가 없어 묻지 못한 것(`DataError::NoKey`)은 세지 않는다.
     pub(super) asked: u32,
     pub(super) failed: u32,
+    /// (10차 10c 12번) 받은 공시들(바깥 자료로 색인한다).
+    pub(super) disclosures: Vec<Fact>,
 }
 
 impl Gathered {
@@ -203,6 +205,7 @@ pub(super) async fn gather(
         facts: Vec::new(),
         asked: 0,
         failed: 0,
+        disclosures: Vec::new(),
     };
     for request in requests(wiring, symbol, today) {
         let (kind, fetched) = match request {
@@ -243,6 +246,9 @@ pub(super) async fn gather(
                 gathered
                     .facts
                     .extend(saved.iter().map(|fact| (fact.id, fact.known_at)));
+                if kind == FactKind::Disclosure {
+                    gathered.disclosures.extend(facts.iter().cloned());
+                }
                 let known = facts.iter().map(|f| f.known_at).max().unwrap_or(now);
                 let source = &facts[0].source;
                 gathered.items.push(DataItem {

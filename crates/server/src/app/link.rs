@@ -1,27 +1,33 @@
 //! (W5 3차) 검색 · 백업 · 사무실 · 폰을 앱에 잇는다([`crate::Reach`]).
 
+use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use axum::Router;
+use pi_approval::ApprovalNumber;
 use pi_gate::{GateServer, LockAlert};
 use pi_knowledge::Knowledge;
 use pi_market::Clock;
 use pi_notify::NoticeKind;
+use pi_office::EventSink;
 use pi_secrets::SecretStore;
-use pi_store::Store;
+use pi_store::{ApprovalStatus, Store};
+use serde_json::json;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::App;
 use crate::feed::StaleHook;
 use crate::reach::{
-    Linked, LockNotices, OfficeDesk, Phone, backup_routes, daily_summary, office_routes,
-    phone_routes,
+    Linked, LockNotices, OfficeDesk, Phone, Semantic, backup_routes, daily_summary, office_routes,
+    phone_routes, semantic_routes,
 };
 use crate::team::CrewLinks;
-use crate::trading::Hooks;
-use crate::{AppError, Crew, Launch, Reach, Settings, Trading, Wiring};
+use crate::trading::{Hooks, approval_status_word};
+use crate::{
+    AppError, Crew, KIND_OFFICE_APPROVAL, Launch, Reach, SecretsRedactor, Settings, Trading, Wiring,
+};
 
 /// 사무실이 팀 상태를 다시 보는 간격.
 const OFFICE_SYNC: Duration = Duration::from_millis(100);
@@ -71,12 +77,53 @@ pub(super) fn session_parts(
     )
 }
 
-/// 승인 요청이 생기면 폰에 알리고 보낸 결과를 승인 모듈에 남긴다(V10 · P20).
+/// (10c 14번) 사무실 승인 카드 이벤트([`KIND_OFFICE_APPROVAL`])를 낸다: 번호 · 가린 내용(폰 카드와 같은 것) ·
+/// 지문 앞 6자 · 지금 결과. 전체 지문은 싣지 않는다. `answered`면 아직 기다리는 것은 내지 않는다.
+async fn office_card(linked: &Linked, trading: &Trading, number: &ApprovalNumber, answered: bool) {
+    let view = match trading.approval_view(number.as_str()) {
+        Ok(Some(view)) => view,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, "승인 요청을 읽지 못해 사무실 카드를 내지 못했습니다");
+            return;
+        }
+    };
+    if answered && view.status == ApprovalStatus::Pending {
+        return;
+    }
+    let card = json!({
+        "number": view.number.as_str(),
+        "summary": linked.secrets.redact(&view.reason),
+        "short_code": view.short_code,
+        "status": approval_status_word(view.status),
+    });
+    if let Err(error) = EventSink::publish(linked.sink.as_ref(), KIND_OFFICE_APPROVAL, card).await {
+        tracing::warn!(%error, "사무실 승인 카드를 내지 못했습니다");
+    }
+}
+
+/// (10c 14번) 승인 요청에 답이 나면 같은 번호의 사무실 승인 카드로 결과를 낸다.
+fn answered_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading::AnsweredHook {
+    let linked = Arc::clone(linked);
+    Box::new(move |number| {
+        let (linked, trading) = (Arc::clone(&linked), trading.clone());
+        tokio::spawn(async move {
+            if let Some(trading) = trading.upgrade() {
+                office_card(&linked, &trading, &number, true).await;
+            }
+        });
+    })
+}
+
+/// 승인 요청이 생기면 사무실에 카드를 내고(10c 14번), 폰에 알리고 보낸 결과를 승인 모듈에 남긴다(V10 · P20).
 fn approval_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading::ApprovalHook {
     let linked = Arc::clone(linked);
     Box::new(move |number, summary| {
         let (linked, trading) = (Arc::clone(&linked), trading.clone());
         tokio::spawn(async move {
+            if let Some(trading) = trading.upgrade() {
+                office_card(&linked, &trading, &number, false).await;
+            }
             let link = format!("/phone/#/approvals/{}", number.as_str());
             let title = "승인이 필요해요";
             // 구독이 하나도 없으면 "갔다"가 아니다(P20: 승인 경로가 막혔으면 답이 없어도 사지 않는다).
@@ -164,21 +211,71 @@ pub(super) fn attach(
     gate: &GateServer,
     trading: &Arc<Trading>,
     crew: Option<&Arc<Crew>>,
-    knowledge: &Arc<Knowledge>,
+    memory: &Memory,
 ) {
     linked.sink.attach(gate.publisher());
     if let Some(crew) = crew {
         crew.link(CrewLinks {
-            knowledge: Arc::clone(knowledge),
+            knowledge: Arc::clone(&memory.knowledge),
             office: Some(Arc::clone(&linked.office)),
+            semantic: Some(Arc::clone(&memory.semantic)),
         });
     }
     trading.hook(Hooks {
         approval: approval_hook(linked, Arc::downgrade(trading)),
+        answered: answered_hook(linked, Arc::downgrade(trading)),
         closed: close_hook(linked, Arc::downgrade(trading), crew.map(Arc::downgrade)),
         data_halt: data_halt_hook(linked),
         stuck_stop: stuck_stop_hook(linked),
     });
+}
+
+/// 지식 검색 창구(임베딩 없음)와 (10c 13번) 뜻 검색 설정.
+pub(super) struct Memory {
+    pub(super) knowledge: Arc<Knowledge>,
+    pub(super) semantic: Arc<Semantic>,
+}
+
+/// 지식 검색 창구와 뜻 검색 설정을 연다(남긴 설정을 읽기만 한다, 아무것도 묻지 않는다).
+pub(super) fn open_memory(
+    home: &Path,
+    store: &Store,
+    secrets: &Arc<SecretStore>,
+    crew: Option<&Arc<Crew>>,
+) -> Memory {
+    let knowledge = Knowledge::new(store.clone(), pi_knowledge::SearchConfig::default());
+    let redactor = Arc::new(SecretsRedactor::new(Arc::clone(secrets)));
+    let discussing = crew.map(|crew| crew.discussing()).unwrap_or_default();
+    Memory {
+        knowledge: Arc::new(knowledge),
+        semantic: Arc::new(Semantic::open(home, store.clone(), redactor, discussing)),
+    }
+}
+
+/// 세션 경로에 뜻 검색 설정 화면([`crate::SETUP_SEMANTIC_PATH`])을 더한다.
+pub(super) fn with_semantic(extra: Option<Router>, semantic: &Arc<Semantic>) -> Option<Router> {
+    let routes = semantic_routes(Arc::clone(semantic));
+    Some(match extra {
+        Some(extra) => extra.merge(routes),
+        None => routes,
+    })
+}
+
+/// 뜻 검색 다시 만들기를 뒤에서 돌린다(걸음 간격 · 한 걸음 조각 수는 팀 조립 값, 팀이 없으면 기본값).
+pub(super) fn spawn_semantic(
+    semantic: &Arc<Semantic>,
+    crew: Option<&Arc<Crew>>,
+    clock: &Arc<dyn Clock>,
+    stop: &watch::Sender<bool>,
+) -> JoinHandle<()> {
+    let pace = crew.map_or(
+        (
+            crate::DEFAULT_REEMBED_INTERVAL,
+            crate::DEFAULT_REEMBED_BATCH,
+        ),
+        |crew| crew.reembed_pace(),
+    );
+    semantic.spawn(Arc::clone(clock), pace, stop.subscribe())
 }
 
 /// 늦은 종목 알림을 이상 알림으로(V11).

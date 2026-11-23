@@ -25,6 +25,7 @@ mod guard;
 mod http;
 mod link;
 mod news;
+mod notes;
 mod poll;
 mod quota;
 mod review;
@@ -250,9 +251,21 @@ pub struct Crew {
     scan_turn: tokio::sync::Mutex<()>,
     /// (W5 3차) 지식 검색 · 사무실(3차 조립이 붙인다).
     links: std::sync::OnceLock<CrewLinks>,
+    /// (10c 13번) 지금 논의 중인 수. 뜻 검색 다시 만들기는 이것이 0일 때만 걷는다.
+    discussing: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Crew {
+    /// (10c 13번) 논의 중인 수(뜻 검색 다시 만들기가 논의 중에는 쉰다).
+    pub(crate) fn discussing(&self) -> Arc<std::sync::atomic::AtomicUsize> {
+        Arc::clone(&self.discussing)
+    }
+
+    /// (10c 13번) 뜻 검색 다시 만들기의 걸음 간격과 한 걸음 조각 수.
+    pub(crate) fn reembed_pace(&self) -> (std::time::Duration, usize) {
+        (self.wiring.reembed_interval, self.wiring.reembed_batch)
+    }
+
     /// 시연 모드의 가짜 AI. 시연 모드가 아니면 `None`.
     pub fn demo_ai(&self) -> Option<Arc<DemoAi>> {
         self.demo.clone()
@@ -306,8 +319,10 @@ impl Crew {
     /// 시각은 [`crate::Wiring::clock`]이다. 입력:
     ///
     /// - `{"mode": "keyword", "query": 글, "max"?: 수}`: 키워드 검색(명시 검색, 두 글자 낱말도 찾는다).
-    /// - `{"mode": "condition", "symbol"?: 종목, "max_pnl"?: 십진수 글자, "min_pnl"?: 십진수 글자, "max"?: 수}`:
-    ///   팔린 매매(손익 = 판 금액 − 산 금액)에서 조건으로 찾는다. 기록 키는 매매 번호 글자다.
+    /// - `{"mode": "condition", "symbol"?: 종목, "max_pnl"?: 십진수 글자, "min_pnl"?: 십진수 글자, "max"?: 수,
+    ///   "from"?: "YYYY-MM-DD", "to"?: "YYYY-MM-DD", "mistake"?: 실수 글자}`: 팔린 매매(손익 = 판 금액 − 산 금액)에서
+    ///   조건으로 찾는다. 기록 키는 매매 번호 글자다. (10c 12번) 날짜는 닫힌 시각의 그 시장 달력 날짜(국내는 한국
+    ///   시각)이고 양끝을 넣는다. 실수는 복기 기록의 실수 글자(`late_stop` 등)가 똑같은 매매만이다.
     /// - `{"mode": "semantic", "query": 글}`: 뜻 검색. 임베딩이 없어 결과는 비고 쓸 수 없음(`no_embedder`)이다.
     ///
     /// 모드가 없거나 모르는 모드 · 빈 질의 · 읽을 수 없는 값이면 [`TeamError::Knowledge`]. 바깥 요청은 없다(V23).

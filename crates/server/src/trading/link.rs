@@ -13,6 +13,8 @@ use crate::TradingError;
 
 /// 승인 요청이 생겼을 때 부른다(승인 번호, 사람이 읽는 요약). 오래 붙잡지 않는다.
 pub(crate) type ApprovalHook = Box<dyn Fn(ApprovalNumber, String) + Send + Sync>;
+/// (10c 14번) 승인 요청에 답이 났을 때(승인 · 거절 · 기한 지남) 부른다(승인 번호). 오래 붙잡지 않는다.
+pub(crate) type AnsweredHook = Box<dyn Fn(ApprovalNumber) + Send + Sync>;
 /// 하루 마감을 남긴 뒤 부른다(시장 날짜). 오래 붙잡지 않는다.
 pub(crate) type CloseHook = Box<dyn Fn(NaiveDate) + Send + Sync>;
 
@@ -25,6 +27,7 @@ pub(crate) type StuckStopHook = Box<dyn Fn(String, String) + Send + Sync>;
 /// 주문 길이 알리는 자리.
 pub(crate) struct Hooks {
     pub(crate) approval: ApprovalHook,
+    pub(crate) answered: AnsweredHook,
     pub(crate) closed: CloseHook,
     pub(crate) data_halt: DataHaltHook,
     pub(crate) stuck_stop: StuckStopHook,
@@ -70,6 +73,12 @@ impl Trading {
     pub(super) fn announce_approval(&self, number: &ApprovalNumber, summary: &str) {
         if let Some(hooks) = self.hooks.get() {
             (hooks.approval)(number.clone(), summary.to_string());
+        }
+    }
+
+    pub(super) fn announce_answered(&self, number: &ApprovalNumber) {
+        if let Some(hooks) = self.hooks.get() {
+            (hooks.answered)(number.clone());
         }
     }
 

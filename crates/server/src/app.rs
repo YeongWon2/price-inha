@@ -163,6 +163,22 @@ pub struct App {
     linked: Option<Arc<crate::reach::Linked>>,
     /// (W5 3차) 사무실이 팀 상태를 따라가는 일.
     office_sync: Option<JoinHandle<()>>,
+    /// (10c 13번) 뜻 검색 임베딩 다시 만들기(꺼져 있으면 아무것도 묻지 않는다).
+    reembed: JoinHandle<()>,
+}
+
+/// 팀이 있으면 깨우기 엔진을 띄운다.
+async fn crew_trigger(
+    crew: Option<&Arc<Crew>>,
+    clock: &Arc<dyn Clock>,
+    stop: &watch::Sender<bool>,
+) -> Result<Option<JoinHandle<()>>, AppError> {
+    match crew {
+        Some(crew) => Ok(Some(
+            spawn_trigger(crew, Arc::clone(clock), stop.subscribe()).await?,
+        )),
+        None => Ok(None),
+    }
 }
 
 /// 투자 팀을 잇는다(`team`이 없으면 잇지 않는다).
@@ -283,12 +299,10 @@ impl App {
         };
         let trading = Trading::open(parts).await?;
         let crew = open_crew(launch.team, &store, &wiring, &trading, &desk, &secrets)?;
-        let knowledge = Arc::new(pi_knowledge::Knowledge::new(
-            store.clone(),
-            Default::default(),
-        ));
         let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
+        let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());
         let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);
+        let extra = link::with_semantic(extra, &memory.semantic);
         let protected = session_routes(&trading, crew.as_ref(), extra);
         let gate = open_gate(
             &settings, &wiring, &store, &secrets, &desk, protected, alert,
@@ -296,22 +310,18 @@ impl App {
         .await?;
         trading.attach(gate.publisher());
         if let Some(linked) = &linked {
-            link::attach(linked, &gate, &trading, crew.as_ref(), &knowledge);
+            link::attach(linked, &gate, &trading, crew.as_ref(), &memory);
         }
         let ai_check = check_cli_briefly(&desk).await;
         // 띄운 그때 이미 그 날 세션 안이면 하루 시작을 바로 남긴다.
         trading.tick().await;
         let (stop, stopping) = watch::channel(false);
         let days = trading.spawn_days(stop.subscribe());
-        let trigger = match &crew {
-            Some(crew) => {
-                Some(spawn_trigger(crew, Arc::clone(&wiring.clock), stop.subscribe()).await?)
-            }
-            None => None,
-        };
+        let trigger = crew_trigger(crew.as_ref(), &wiring.clock, &stop).await?;
         let office_sync = linked
             .as_ref()
             .map(|l| link::spawn_office_sync(l, store.clone(), stop.subscribe()));
+        let reembed = link::spawn_semantic(&memory.semantic, crew.as_ref(), &wiring.clock, &stop);
         let stale = linked.as_ref().map(link::stale_hook);
         let feeding = (&trading, stale);
         let feed = spawn_feed(&settings, wiring, secrets, &gate, &desk, feeding, stopping);
@@ -326,9 +336,10 @@ impl App {
             days,
             crew,
             trigger,
-            knowledge,
+            knowledge: memory.knowledge,
             linked,
             office_sync,
+            reembed,
         })
     }
 
@@ -391,6 +402,7 @@ impl App {
         if let Some(sync) = self.office_sync {
             let _ = sync.await;
         }
+        let _ = self.reembed.await;
         drop(self.linked);
         drop(self.crew);
         // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),

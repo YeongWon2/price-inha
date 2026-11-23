@@ -59,7 +59,8 @@ impl Trading {
         for due in self.approvals.unhandled_due().map_err(exec_text)? {
             let handling = self.handle_due(&due).await;
             match self.approvals.record_due_handling(&due.number, handling) {
-                Ok(()) | Err(pi_approval::Error::AlreadyHandled) => {}
+                Ok(()) => self.announce_answered(&due.number),
+                Err(pi_approval::Error::AlreadyHandled) => {}
                 Err(error) => {
                     tracing::warn!(%error, "답 없음 처리 기록을 남기지 못했습니다");
                 }

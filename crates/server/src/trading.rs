@@ -53,7 +53,7 @@ pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use chosen::CHOOSE_TEMPLATE_NOTICE;
 pub(crate) use http::routes;
 pub(crate) use link::{
-    ApprovalHook, CloseHook, DataHaltHook, Hooks, StuckStopHook, approval_status_word,
+    AnsweredHook, ApprovalHook, CloseHook, DataHaltHook, Hooks, StuckStopHook, approval_status_word,
 };
 pub(crate) use templates::change_of;
 

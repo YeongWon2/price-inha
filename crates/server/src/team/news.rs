@@ -50,6 +50,8 @@ pub(super) struct NewsGathered {
     pub(super) dropped: usize,
     /// 물었는데 받지 못했나(자료 이상 신호).
     pub(super) failed: bool,
+    /// (10차 10c 12번) 남은 기사들(바깥 자료로 색인한다).
+    pub(super) articles: Vec<NewsItem>,
 }
 
 /// 뉴스 공급자 등록부와 하루 상한.
@@ -185,6 +187,7 @@ impl NewsDesk {
             facts: saved.iter().map(|fact| (fact.id, fact.known_at)).collect(),
             dropped,
             failed: false,
+            articles: items,
         }))
     }
 }
@@ -195,6 +198,7 @@ fn empty(item: DataItem, failed: bool) -> NewsGathered {
         facts: Vec::new(),
         dropped: 0,
         failed,
+        articles: Vec::new(),
     }
 }
 

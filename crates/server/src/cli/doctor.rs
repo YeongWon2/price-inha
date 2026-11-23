@@ -13,8 +13,10 @@ use crate::cli::service::Service;
 use crate::{DB_FILE, Settings};
 
 mod host;
+mod ollama;
 
 use host::{check_access_key, check_address, check_backup, check_service};
+use ollama::check_ollama;
 
 /// 진단 항목. 이 순서대로 본다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,6 +157,7 @@ pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
             check_access_key(settings, has_access_key),
             check_service(home, service),
             check_backup(home),
+            check_ollama(home),
         ],
     }
 }

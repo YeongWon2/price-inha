@@ -7,19 +7,19 @@ use chrono::NaiveDate;
 use pi_agent::{DataItem, Role, TimeLimits};
 use pi_ai::Redactor;
 use pi_journal::ReviewRecord;
-use pi_knowledge::{
-    Condition, Knowledge, RecordText, SearchOutput, SearchRequest, TradeCatalog, TradeRecord,
-};
+use pi_knowledge::{Condition, Knowledge, RecordText, SearchOutput, SearchRequest};
 use pi_office::{Activity, Agent, Office};
 use pi_store::{KnowledgeKind, KnowledgeSource, Trade, TradeId, UnixMillis};
 use rust_decimal::Decimal;
 use serde_json::Value;
 
 use super::demo_ai::CHAT_HEAD;
+use super::notes::{Records, date_of_input};
 use super::review::mistake_word;
 use super::talk::MEMBERS;
 use super::{Crew, TeamError};
 use crate::RECALL_SOURCE_PREFIX;
+use crate::reach::Semantic;
 
 /// 자동 회상으로 꺼내는 지난 기록의 가장 많은 수.
 const RECALL_MAX: usize = 3;
@@ -28,6 +28,8 @@ const RECALL_MAX: usize = 3;
 pub(crate) struct CrewLinks {
     pub(crate) knowledge: Arc<Knowledge>,
     pub(crate) office: Option<Arc<Office>>,
+    /// (10c 13번) 뜻 검색 설정. 켜져 있으면 뜻 검색은 임베딩을 건 지식 창구로 한다.
+    pub(crate) semantic: Option<Arc<Semantic>>,
 }
 
 /// 담당 → 사무실의 담당.
@@ -56,15 +58,6 @@ pub(crate) fn role_of(agent: Agent) -> Role {
 
 fn refused(why: &str) -> TeamError {
     TeamError::Knowledge(why.to_string())
-}
-
-/// 조건 검색에 넘길 매매 요약들.
-struct Records(Vec<TradeRecord>);
-
-impl TradeCatalog for Records {
-    fn trades(&self) -> Vec<TradeRecord> {
-        self.0.clone()
-    }
 }
 
 fn text_of<'a>(input: &'a Value, name: &str) -> Option<&'a str> {
@@ -140,7 +133,7 @@ impl Crew {
                 };
                 match links
                     .knowledge
-                    .recall_by_condition(&condition, &Records(records))
+                    .recall_by_condition(&condition, &Records::plain(records))
                 {
                     Ok(found) => hits.extend(found.results),
                     Err(error) => tracing::warn!(%error, "지난 매매를 조건으로 찾지 못했다"),
@@ -203,14 +196,26 @@ impl Crew {
                 ),
             ),
         ];
-        for (kind, text) in texts {
-            let record = RecordText {
+        let mut records: Vec<RecordText> = texts
+            .into_iter()
+            .map(|(kind, text)| RecordText {
                 kind,
                 source: KnowledgeSource::Team,
                 record_ref: id.clone(),
-                text: self.redactor.redact(&text),
+                text,
                 at: record.at,
-            };
+            })
+            .collect();
+        // (10c 12번) 실수가 있으면 실수 기록(종류 mistake · 등급 team · 기록 키 = 매매 번호). 없으면 만들지 않는다.
+        records.extend(RecordText::mistakes(
+            &id,
+            &trade.symbol,
+            &mistakes,
+            &record.note,
+            record.at,
+        ));
+        for mut record in records {
+            record.text = self.redactor.redact(&record.text);
             if let Err(error) = links.knowledge.index(record) {
                 tracing::warn!(%error, "기록을 색인하지 못했다");
             }
@@ -238,16 +243,23 @@ impl Crew {
                     max_pnl: decimal_of(input, "max_pnl")?,
                     min_pnl: decimal_of(input, "min_pnl")?,
                     max: max_of(input),
+                    mistake: text_of(input, "mistake").map(str::to_string),
                     ..Condition::default()
                 };
-                let records = Records(self.trading.sold_records().await?);
+                // 날짜는 그 시장 달력의 날짜라 시각 경계를 짓지 않고 매매의 시장 날짜로 먼저 거른다.
+                let (from, to) = (date_of_input(input, "from")?, date_of_input(input, "to")?);
+                let mut records = self.catalog().await?;
+                self.within_dates(&mut records, from, to);
                 knowledge
                     .search_by_condition(&condition, &records)
                     .map_err(failed)
             }
             Some("semantic") => {
                 let query = text_of(input, "query").ok_or_else(|| refused("질의가 비었다"))?;
-                knowledge
+                let embedded = links.semantic.as_ref().and_then(|s| s.knowledge());
+                embedded
+                    .as_ref()
+                    .unwrap_or(knowledge)
                     .semantic_search(query, self.now_ms())
                     .await
                     .map_err(failed)

@@ -1,5 +1,7 @@
 //! 매매 논의(T9 · T10): 새 공시 보기와 종목 하나의 논의.
 
+use std::sync::atomic::Ordering;
+
 use pi_agent::{DiscussionLimits, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
 use pi_market::Symbol;
@@ -103,6 +105,7 @@ impl Crew {
             gathered.asked += 1;
             gathered.failed += u32::from(news.failed);
         }
+        self.index_external(&gathered, news.as_ref());
         self.trading.note_data(!gathered.all_failed());
         let price = self
             .trading
@@ -121,9 +124,11 @@ impl Crew {
             consensus_required: self.wiring.consensus_required,
             limits: DiscussionLimits::default(),
         };
+        self.discussing.fetch_add(1, Ordering::SeqCst);
         self.at_table(true).await;
         let result = self.team.discuss(request).await;
         self.at_table(false).await;
+        self.discussing.fetch_sub(1, Ordering::SeqCst);
         if let Some(news) = news.filter(|news| news.dropped > 0) {
             self.log_dropped(&request_room(trade.id), news.dropped);
         }

@@ -175,6 +175,7 @@ impl Crew {
             review_turn: tokio::sync::Mutex::new(()),
             scan_turn: tokio::sync::Mutex::new(()),
             links: std::sync::OnceLock::new(),
+            discussing: Arc::default(),
         });
         let _ = crew.tools.crew.set(Arc::downgrade(&crew));
         Ok(crew)
