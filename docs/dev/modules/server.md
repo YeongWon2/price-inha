@@ -378,3 +378,21 @@ gate 9차(T17)가 만든 `GateServer::access_keys()`(`AccessKeys`)를 조립한�
 
 ### 원본 동작 근거 (11차)
 원본에 없음(우리 고유) — 화면 빌드 방식 바꾸기. 사무실 화면의 동작은 앞 차수의 DeskRPG 조사(`docs/research/` 사무실 문서)를 그대로 따른다(옮기기만).
+
+## 12차 옛 화면 시험 옮기기 (2026-11-24, office · notify 옛 화면 정리와 함께)
+
+office · notify 크레이트의 옛 화면 시험을 지우면서 화면 쪽 동작을 보는 시험이 빠진다. 같은 뜻을 server 화면 시험으로 옮긴다(동작은 이미 `crates/server/web`에 있다 — 옮기기만, 동작을 새로 만들지 않는다). notify의 `web/` 폴더는 이 차수가 끝난 뒤에 지운다.
+
+1. **다른 크레이트 파일을 읽지 않는다**: round20 `dist.rs`의 서비스 워커 · manifest · 아이콘 시험이 `../notify/web/phone`의 파일과 바이트를 비교한다. notify 폴더를 지우면 깨지므로, 비교 대신 manifest 모양(아래 4)과 아이콘이 PNG이고 192 · 512 크기인지로 본다. server 시험은 다른 크레이트 폴더를 읽지 않는다.
+2. **사무실 지도** (`public/office/office-map.json`, 옛 office `web_assets` 시험): 여섯 담당 모두 책상과 침대가 있고 둘은 다른 칸, 책상끼리 · 침대끼리 겹치지 않음, 방 이름이 서로 다름, 모르는 담당 없음 · 정확히 여섯, 논의 탁자 자리 6개 이상 · 서로 겹치지 않고 책상 · 침대와 다른 칸.
+3. **응답 목록 정리** (C5, 옛 `web_prune`): 화면이 밀려난 줄을 버릴 때 끝난 응답(complete · failed)은 응답 표에서도 지우고, 오는 중인 응답은 남긴다. 시험하기 쉽게 `office/main.ts`의 정리 함수를 따로 모듈로 뺄 수 있다(동작 같게).
+4. **폰** (옛 notify `phone` 시험):
+   - 앱이 푸시를 구독한다(`pushManager.subscribe`, `applicationServerKey`, `userVisibleOnly: true`).
+   - 서비스 워커가 푸시 본문 JSON의 title · body로 `showNotification`을 부르고, 알림을 누르면 폰 화면을 연다.
+   - manifest: name · id · scope · start_url이 비어 있지 않음, `display: standalone`, 192 · 512 아이콘, 아이콘 src가 묶음 안.
+   - 폰 승인 카드 모양(`data-card="approval"`, 승인 · 거절 단추, 코드 칸 `maxlength=6` · `inputmode=numeric`, `data-approval-id`, `data-fingerprint`)과 결정 4번 방식(코드 칸 `readonly`, `one-time-code` · `pattern` 없음, 6자리 입력을 강제하지 않고 칸 값을 읽지 않음, 지문 앞 6자리를 보이고 카드의 지문을 그대로 보냄).
+   - 폰 화면 요소: 알림 목록 `id="notice-list"`, "3D 사무실" 단추 `data-action="open-office"`, viewport 메타.
+   - 하루 정리가 한 구역(`id="daily-summary"`) 안에 한 일 · 손익 · 복기(`data-part` done · pnl · review).
+   - 폰 묶음에 three가 없다(결정 26).
+5. 옛 시험이 쓰던 검증 번호(notify V10 · V11 · V12, office C5 등)를 옮긴 시험에 `// 검증:`으로 단다(뜻이 맞는 것만).
+6. 이 차수는 시험이 주다: 지금 화면이 이미 그렇게 동작하면 시험이 처음부터 통과할 수 있다(red는 1번의 다른 크레이트 읽기 · 3번 정리 함수 분리 같은 곳에서 생긴다). 시험이 실패하면 화면이 옛 동작과 다르다는 뜻이니 N2가 옛 동작으로 맞춘다.
