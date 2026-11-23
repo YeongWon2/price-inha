@@ -1,6 +1,6 @@
 //! 화면 빌드 결과(`web/dist`, Vite)를 실행 파일에 넣는 파일 표를 만든다(server 11차 3번).
 //!
-//! `web/dist` 아래 모든 파일을 (상대 경로, `include_bytes!`) 표로 적어 `$OUT_DIR/web_dist.rs`에 쓴다.
+//! `web/dist` 아래 모든 파일(이름이 `.`으로 시작하는 파일 · 폴더는 빼고)을 (상대 경로, `include_bytes!`) 표로 적어 `$OUT_DIR/web_dist.rs`에 쓴다.
 //! 바깥 의존을 더하지 않는다. dist가 바뀌면 다시 돈다(`rerun-if-changed`가 폴더면 그 안 전체를 본다).
 //! dist는 커밋한다 — 없으면 `npm --prefix crates/server/web run build`로 만든다.
 
@@ -19,7 +19,12 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> std::io
         ))
     })?;
     for entry in entries {
-        let path = entry?.path();
+        let entry = entry?;
+        // 숨은 파일 · 폴더(`.DS_Store` 등)는 화면 빌드 결과가 아니다 — 넣지 않는다.
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
         if path.is_dir() {
             collect(root, &path, out)?;
             continue;

@@ -4,7 +4,7 @@ var CODE_LENGTH = 6;
 function parse(payload) {
 	if (typeof payload !== "object" || payload === null) return null;
 	const p = payload;
-	if (typeof p.number !== "number" || !Number.isInteger(p.number)) return null;
+	if (typeof p.number !== "string" || p.number === "") return null;
 	if (typeof p.summary !== "string" || typeof p.short_code !== "string" || typeof p.status !== "string") return null;
 	return {
 		number: p.number,
@@ -14,7 +14,7 @@ function parse(payload) {
 	};
 }
 function findCard(root, number) {
-	for (const card of root.querySelectorAll("[data-approval]")) if (card.dataset.approval === String(number)) return card;
+	for (const card of root.querySelectorAll("[data-approval]")) if (card.dataset.approval === number) return card;
 	return null;
 }
 function part(card, name) {
@@ -39,7 +39,7 @@ function verbButton(root, number, verb, fetcher) {
 function newCard(root, number, fetcher) {
 	const card = document.createElement("article");
 	card.className = "approval-card";
-	card.dataset.approval = String(number);
+	card.dataset.approval = number;
 	const title = document.createElement("h2");
 	title.textContent = "승인이 필요해요";
 	const code = document.createElement("p");

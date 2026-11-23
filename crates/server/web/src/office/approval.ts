@@ -1,5 +1,5 @@
 // 사무실 승인 카드(server 10c 14번 · 11차 4번). `office.approval` 이벤트
-// `{number, summary(가린 요약), short_code(지문 앞 6자), status}`로 카드를 그리고,
+// `{number(승인 번호 글자 — 서버 ApprovalNumber), summary(가린 요약), short_code(지문 앞 6자), status}`로 카드를 그리고,
 // 승인 · 거절은 폰과 같은 경로(/api/approvals/{id}/approve · reject) · 같은 지문 대조로 보낸다.
 //
 // 카드 모양(시험이 보는 약속):
@@ -14,7 +14,8 @@ export const KIND_OFFICE_APPROVAL = "office.approval";
 
 /** 이벤트 몸통. */
 export interface OfficeApproval {
-  number: number;
+  /** 승인 번호(서버 `ApprovalNumber`, hex 글자). */
+  number: string;
   summary: string;
   short_code: string;
   status: string;
@@ -32,16 +33,16 @@ const CODE_LENGTH = 6;
 function parse(payload: unknown): OfficeApproval | null {
   if (typeof payload !== "object" || payload === null) return null;
   const p = payload as Record<string, unknown>;
-  if (typeof p.number !== "number" || !Number.isInteger(p.number)) return null;
+  if (typeof p.number !== "string" || p.number === "") return null;
   if (typeof p.summary !== "string" || typeof p.short_code !== "string" || typeof p.status !== "string") {
     return null;
   }
   return { number: p.number, summary: p.summary, short_code: p.short_code, status: p.status };
 }
 
-function findCard(root: HTMLElement, number: number): HTMLElement | null {
+function findCard(root: HTMLElement, number: string): HTMLElement | null {
   for (const card of root.querySelectorAll<HTMLElement>("[data-approval]")) {
-    if (card.dataset.approval === String(number)) return card;
+    if (card.dataset.approval === number) return card;
   }
   return null;
 }
@@ -57,7 +58,7 @@ function textPart(tag: string, name: string, className = ""): HTMLElement {
   return element;
 }
 
-function verbButton(root: HTMLElement, number: number, verb: Verb, fetcher: FetchLike): HTMLButtonElement {
+function verbButton(root: HTMLElement, number: string, verb: Verb, fetcher: FetchLike): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.verb = verb;
@@ -68,10 +69,10 @@ function verbButton(root: HTMLElement, number: number, verb: Verb, fetcher: Fetc
   return button;
 }
 
-function newCard(root: HTMLElement, number: number, fetcher: FetchLike): HTMLElement {
+function newCard(root: HTMLElement, number: string, fetcher: FetchLike): HTMLElement {
   const card = document.createElement("article");
   card.className = "approval-card";
-  card.dataset.approval = String(number);
+  card.dataset.approval = number;
   const title = document.createElement("h2");
   title.textContent = "승인이 필요해요";
   const code = document.createElement("p");
@@ -117,7 +118,7 @@ function say(card: HTMLElement | null, text: string): void {
  */
 export async function decideApproval(
   root: HTMLElement,
-  number: number,
+  number: string,
   verb: Verb,
   fetcher: FetchLike,
 ): Promise<DecideOutcome> {
