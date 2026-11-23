@@ -159,6 +159,7 @@ min_age_days = 14
 # 14일이 지나면 그 줄은 지워도 된다(기준 판에 들어간 뒤에는 검사하지 않는다).
 security_fixes = [
   { crate = "url", version = "2.5.9", advisory = "RUSTSEC-2026-0592", reason = "url 2.5.8 의 보안 권고를 고친 판(결정 9, 사용자 결정 2026-11-24)" },
+  { crate = "form_urlencoded", version = "1.2.3", advisory = "RUSTSEC-2026-0592", reason = "url 2.5.9 가 요구하는 짝 판(같은 릴리스, 결정 9 — 조정자, 사용자 '알아서 추천대로')" },
 ]
 
 # 코드에 있으면 안 되는 모양. scope: 검사할 폴더(glob), except: 빼는 폴더.
