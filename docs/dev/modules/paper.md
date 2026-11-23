@@ -167,3 +167,12 @@ N3가 `account_snapshot`을 일부러 잠금을 나눈 변이로 바꿔 보니 `
 |---|---|---|
 | `crates/paper/tests/round9.rs::account_snapshot_never_mixes_holdings_and_cash_while_fills_happen` | 고침 | 지시서 9차 보강(읽는 스레드 · 체결 수 늘림, 뜻 그대로) |
 | 그 밖의 paper 시험 | 유지 | 보강과 무관 |
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/paper/tests/round9.rs::account_snapshot_never_mixes_holdings_and_cash_while_fills_happen` | 고침 | 지시서 9차 보강(읽는 스레드 · 체결 수 늘림, 뜻 그대로) |
+| 그 밖의 paper 시험 | 유지 | 보강과 무관 |
+
+(R, 다시 연 뒤 확정 — 위 초안 표와 같다. GR은 다시 연 뒤에 더해진 표를 본다.)
