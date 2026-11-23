@@ -2,7 +2,9 @@
 //! `forget_pending_sell`로 지운다. 증권사는 가짜(`PaperBroker`)이고 시각은 테스트가 정한다.
 
 use pi_exec::{Error, SellPurpose};
-use pi_paper::{Fault, OrderGroup, OrderId, OrderStatus, Side};
+use pi_paper::{
+    Broker, Fault, OrderGroup, OrderId, OrderRequest, OrderStatus, OrderType, Side, UnfilledTimeout,
+};
 use pi_store::{TradeId, TradeState};
 
 use crate::common::{Bench, config};
@@ -35,6 +37,34 @@ async fn fail_sell(bench: &Bench, id: TradeId, purpose: SellPurpose, quantity: &
     assert!(matches!(result, Err(Error::AnomalyStop(_))));
 }
 
+/// 그 매매에 열린 익절(지정가 80,000원)을 증권사에 직접 낸다. 실행기가 기다리는 대기는 건드리지 않는다
+/// (실행기의 `sell`은 성공하면 같은 매매의 대기를 지우므로, 대기와 열린 매도가 함께 있는 틈을 이렇게 만든다).
+/// 실행기의 키 모양(`pi-exec-<매매>-sell-…`)으로 이 매매의 열린 매도로 보이게 한다.
+async fn open_beside(bench: &Bench, id: TradeId, quantity: &str) -> OrderId {
+    let pending_key = bench.exec.pending_sell_key(id).unwrap();
+    let permit = bench.permit(id, Side::Sell, quantity, "80000");
+    let order = permit.approved().clone();
+    let request = OrderRequest {
+        client_order_id: Some(format!("{pending_key}-open")),
+        market: order.market,
+        symbol: order.symbol.clone(),
+        side: Side::Sell,
+        order_type: OrderType::Limit,
+        quantity: order.quantity,
+        price: order.price,
+        account_kind: order.account_kind,
+        timeout: UnfilledTimeout::SCALP,
+        confirm_high_value: true,
+        permit: Some(permit),
+    };
+    let broker: &dyn Broker = bench.exec.broker();
+    broker
+        .place_order(request, bench.now())
+        .await
+        .unwrap()
+        .order_id
+}
+
 /// 다시 낼 때가 되도록 시각을 옮긴다.
 fn make_due(bench: &Bench, id: TradeId) {
     let due = bench
@@ -53,11 +83,7 @@ async fn retry_over_the_open_sell_cap_of_the_same_trade_is_too_large_and_keeps_t
     let bench = Bench::new().await;
     let id = bench.holding().await;
     fail_sell(&bench, id, SellPurpose::TeamExit, "10", "71000").await;
-    let take_profit = bench
-        .exec
-        .sell(bench.sell(id, SellPurpose::TakeProfit, "6", "80000"))
-        .await
-        .unwrap();
+    let take_profit = open_beside(&bench, id, "6").await;
     let before = bench.exec.pending_sells();
     let key = bench.exec.pending_sell_key(id).unwrap();
     make_due(&bench, id);
@@ -82,11 +108,7 @@ async fn refused_retry_does_not_call_the_broker_even_when_it_would_fail() {
     let bench = Bench::new().await;
     let id = bench.holding().await;
     fail_sell(&bench, id, SellPurpose::TeamExit, "10", "71000").await;
-    bench
-        .exec
-        .sell(bench.sell(id, SellPurpose::TakeProfit, "6", "80000"))
-        .await
-        .unwrap();
+    open_beside(&bench, id, "6").await;
     let before = bench.exec.pending_sells();
     make_due(&bench, id);
     bench.exec.broker().set_fault(Some(Fault::RejectOrders));
@@ -109,11 +131,7 @@ async fn retry_within_the_open_sell_cap_goes_out_as_before() {
     let id = bench.holding().await;
     fail_sell(&bench, id, SellPurpose::TeamExit, "4", "71000").await;
     let key = bench.exec.pending_sell_key(id).unwrap();
-    let take_profit = bench
-        .exec
-        .sell(bench.sell(id, SellPurpose::TakeProfit, "6", "80000"))
-        .await
-        .unwrap();
+    let take_profit = open_beside(&bench, id, "6").await;
     make_due(&bench, id);
 
     let sent = bench
