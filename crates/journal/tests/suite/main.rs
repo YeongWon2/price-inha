@@ -5,6 +5,7 @@ mod common;
 mod day;
 mod fourth;
 mod improve;
+mod memo;
 mod review;
 mod risk;
 mod third;

@@ -6,12 +6,18 @@ mod basis;
 mod day;
 pub mod error;
 mod improve;
+mod memo;
 mod review;
 
 pub use basis::{missing_fields, plain_summary};
 pub use day::{Day, DayFacts, DaySummary, TradeLine};
 pub use error::Error;
 pub use improve::{Improvement, RuleOutcome, increases_risk};
+pub use memo::{
+    ClosePrices, LessonInput, LessonWriter, MemoBrief, OTHER_SYMBOL_LESSONS, Redactor,
+    SAME_SYMBOL_MEMOS, SETTLE_AFTER_TRADING_DAYS, SettlePorts, TradingCalendar,
+    UNSETTLEABLE_AFTER_TRADING_DAYS,
+};
 pub use review::{Mistake, ReviewRecord};
 
 use std::collections::HashSet;
