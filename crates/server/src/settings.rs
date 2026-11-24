@@ -49,6 +49,8 @@ pub const DEFAULT_REGISTER_WINDOW: Duration = Duration::from_secs(60);
 pub const ENV_SYMBOLS_ATTEMPTS: &str = "PRICE_INHA_SYMBOLS_ATTEMPTS";
 /// 종목 등록 시도를 세는 시간 환경 변수(밀리초). (4차)
 pub const ENV_SYMBOLS_WINDOW_MS: &str = "PRICE_INHA_SYMBOLS_WINDOW_MS";
+/// (17차 4번) 하루 AI 호출 상한 환경 변수(정수, 인자는 `--ai-daily-limit <수>`). 비우면 상한 없음이다.
+pub const ENV_AI_DAILY_LIMIT: &str = "PRICE_INHA_AI_DAILY_LIMIT";
 /// 종목 등록 시도 횟수의 기본값([`DEFAULT_SYMBOLS_WINDOW`] 동안). (4차)
 pub const DEFAULT_SYMBOLS_ATTEMPTS: u32 = 10;
 /// 종목 등록 시도를 세는 시간의 기본값. (4차)
@@ -121,6 +123,9 @@ pub struct Settings {
     /// (9차 보강 3) `--log-file <경로>`: 기록을 표준 오류 대신 이 파일에 덧붙여 쓴다(가리기는 그대로 거친다.
     /// 폴더가 없으면 만든다). 주지 않으면 `None`(표준 오류). Windows 예약 작업 정의가 이 인자를 싣는다.
     pub log_file: Option<PathBuf>,
+    /// (17차 4번) 하루 AI 호출 상한. 없으면 상한 없음(기본). 0은 받지 않는다([`SettingsError::InvalidValue`]).
+    /// [`crate::TeamWiring::ai_daily_limit`]으로 이어진다.
+    pub ai_daily_limit: Option<u32>,
 }
 
 impl Settings {
@@ -199,6 +204,7 @@ impl Settings {
             user_home: user_home.map(Path::to_path_buf),
             cli_env: crate::cli_base_env(env),
             log_file: log_file(given.log_file.as_deref())?,
+            ai_daily_limit: None,
         })
     }
 

@@ -52,6 +52,38 @@ async fn stale_stop(bench: &Bench) -> TradeId {
     trade
 }
 
+/// 청산 대기가 낡은 상태를 만든다(손절 대신 사용자 승인 청산 길: 지정가 [`PROFIT_PRICE`]로 5주). 다른 것은
+/// [`stale_stop`]과 같다. 남은 수량은 3주다.
+async fn stale_liquidation(bench: &Bench) -> TradeId {
+    bench.ready().await;
+    let trade = bench.holding(HYNIX).await;
+    let now = bench.now();
+    let placed = bench
+        .place(order(trade, HYNIX, Purpose::TakeProfit, PROFIT_PRICE, now))
+        .await;
+    assert!(
+        matches!(placed, Placed::Ordered(_)),
+        "익절을 열어 둔다: {placed:?}"
+    );
+
+    bench.trading().paper().set_fault(Some(Fault::RejectOrders));
+    let at = bench.now();
+    // 증권사가 받지 않아 실패한다(오류로 돌아와도 대기는 남는다).
+    let _failed = bench
+        .trading()
+        .place(order(trade, HYNIX, Purpose::Liquidation, PROFIT_PRICE, at))
+        .await;
+    let pending = bench.pending_sells(trade);
+    assert_eq!(pending.len(), 1, "청산이 막혀 기다린다: {pending:?}");
+    assert_eq!(pending[0]["order"]["quantity"], json!("5"));
+    assert_eq!(pending[0]["order"]["order_type"], json!("limit"));
+
+    bench.trading().paper().set_fault(None);
+    bench.quote(HYNIX, PROFIT_PRICE, plus(bench.now(), 1)).await;
+    assert_eq!(bench.trade_state(trade), TradeState::Holding);
+    trade
+}
+
 /// 그 매매의 방에 남은 줄 가운데 `needle`이 든 것의 수.
 fn room_lines(bench: &Bench, trade: TradeId, needle: &str) -> usize {
     let room = format!("{TRADE_ROOM_PREFIX}{}", trade.0);
@@ -142,5 +174,64 @@ async fn 남은_수량이_0이_된_낡은_손절_대기는_새로_내지_않고_
         "새 주문은 나가지 않는다(익절 하나뿐): {sells:?}"
     );
     assert_eq!(sells[0].order_type, OrderType::Limit);
+    bench.close().await;
+}
+
+// 검증: E30 E34 F4
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 새로_내는_주문이_나가지_못하면_낡은_대기는_남고_방에_새로_냈다는_줄이_없다() {
+    let bench = Plan::demo().max_fill(2).start(kst(monday(), 10, 0)).await;
+    let trade = stale_stop(&bench).await;
+
+    // 새로 낼 때 증권사가 받지 않는다(규칙에 막힌 것과 같이 "나가지 못함"). 지우고 낸 줄을 먼저 남기면 안 된다.
+    bench.trading().paper().set_fault(Some(Fault::RejectOrders));
+    bench.advance(120).await;
+    assert!(
+        !bench.pending_sells(trade).is_empty(),
+        "나가지 못했으니 대기는 그대로 남는다"
+    );
+    assert_eq!(
+        room_lines(&bench, trade, "남은 수량"),
+        0,
+        "나가기 전에는 새로 냈다는 줄을 남기지 않는다"
+    );
+    assert!(
+        bench
+            .sells(HYNIX)
+            .await
+            .iter()
+            .all(|sell| sell.order_type == OrderType::Limit),
+        "새 주문(시장가)은 나가지 못했다"
+    );
+    bench.close().await;
+}
+
+// 검증: E30 E34
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 지정가_청산_대기가_낡으면_지정가_같은_값으로_남은_수량만큼_새로_나간다() {
+    let bench = Plan::demo().max_fill(2).start(kst(monday(), 10, 0)).await;
+    let trade = stale_liquidation(&bench).await;
+
+    until_cleared(&bench, trade, "낡은 청산 대기는 새로 나가고 지워져야 한다").await;
+    let sells = bench.sells(HYNIX).await;
+    assert!(
+        sells.iter().all(|sell| sell.order_type == OrderType::Limit),
+        "청산은 처음 주문 모양(지정가)을 지킨다 — 시장가가 나가면 안 된다: {sells:?}"
+    );
+    let fresh: Vec<_> = sells
+        .iter()
+        .filter(|sell| sell.quantity == d("3"))
+        .collect();
+    assert_eq!(fresh.len(), 1, "남은 3주의 새 청산 하나: {sells:?}");
+    assert_eq!(
+        fresh[0].price,
+        Some(d(&PROFIT_PRICE.to_string())),
+        "같은 가격(호가 단위에 맞춘)이다"
+    );
+    assert_eq!(
+        room_lines(&bench, trade, "남은 수량"),
+        1,
+        "나간 뒤 방에 한 줄"
+    );
     bench.close().await;
 }

@@ -42,6 +42,19 @@ impl Drop for DiscussingGuard {
     }
 }
 
+impl DiscussingGuard {
+    /// (17차 5번) [`DiscussingGuard::enter`]에 더해, 버려질 때(끝 · panic · 취소) `release`를 한 번 부른다.
+    /// 논의 도중 취소돼도 사무실 자리 표시(논의 탁자 → 자리로 돌아가기)가 내려가게 하는 자리다.
+    /// 쓰는 쪽(`Crew::discuss_symbol`)에 이어 붙이면 `cfg(test)`를 뗀다.
+    #[cfg(test)]
+    pub(super) fn enter_with(
+        _count: &Arc<AtomicUsize>,
+        _release: Box<dyn FnOnce() + Send>,
+    ) -> Self {
+        todo!("17차 5번: 버려질 때 release를 한 번 부른다")
+    }
+}
+
 /// 그 매매의 논의 방 이름.
 fn request_room(trade: TradeId) -> String {
     format!("{TRADE_ROOM_PREFIX}{}", trade.0)
@@ -315,5 +328,73 @@ mod tests {
             0,
             "취소로 버려져도 수가 돌아온다"
         );
+    }
+
+    // 17차 5번: N2가 약하게 하면 안 되는 시험들이다(끝 · panic · 취소 모두에서 자리 표시를 내리는 일이 정확히 한 번 불린다).
+    fn releasing() -> (Arc<AtomicUsize>, Arc<AtomicUsize>, DiscussingGuard) {
+        let count = count();
+        let released = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&released);
+        let guard = DiscussingGuard::enter_with(
+            &count,
+            Box::new(move || {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        (count, released, guard)
+    }
+
+    #[test]
+    fn 자리_표시_정리는_가드가_버려질_때_한_번_불리고_수도_함께_준다() {
+        let (count, released, guard) = releasing();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            0,
+            "버려지기 전에는 부르지 않는다"
+        );
+        drop(guard);
+        assert_eq!(released.load(Ordering::SeqCst), 1, "끝나면 한 번 부른다");
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 가드를_쥔_채_panic해도_자리_표시_정리가_불린다() {
+        let (count, released, guard) = releasing();
+        let outcome = catch_unwind(AssertUnwindSafe(move || {
+            let _guard = guard;
+            panic!("논의 도중 panic");
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            1,
+            "panic으로 풀려도 한 번 부른다"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn 가드를_쥔_채_기다리던_작업을_취소해도_자리_표시_정리가_불린다() {
+        let (count, released, guard) = releasing();
+        let task = tokio::spawn(async move {
+            let _guard = guard;
+            // 끝나지 않는 논의(AI 답을 영영 기다린다).
+            std::future::pending::<()>().await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            0,
+            "논의 중에는 부르지 않는다"
+        );
+        task.abort();
+        let _cancelled = task.await;
+        assert_eq!(
+            released.load(Ordering::SeqCst),
+            1,
+            "취소로 버려져도 한 번 부른다"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 }

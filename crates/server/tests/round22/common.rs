@@ -767,6 +767,11 @@ impl Plan {
         }
     }
 
+    /// 자료(공시 · 뉴스)를 가져오는 간격(새 공시가 scout를 깨운다).
+    pub fn polling(self, poll: Duration) -> Plan {
+        Plan { poll, ..self }
+    }
+
     /// 하루 AI 호출 상한(16차 3번).
     pub fn ai_limit(self, limit: u32) -> Plan {
         Plan {

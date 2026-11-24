@@ -4,9 +4,13 @@
 //!
 //! 논의가 열렸는지는 시연용 가짜 AI가 받은 글의 수로 본다(논의가 열리면 AI가 불린다).
 
-use price_inha::NOTICES_PATH;
+use std::time::{Duration, Instant};
 
-use crate::common::{Bench, HYNIX, Plan, STOP, WATCHED, get, kst, monday, plus, tuesday};
+use price_inha::{ENV_AI_DAILY_LIMIT, NOTICES_PATH, Settings, SettingsError};
+
+use crate::common::{
+    Bench, HYNIX, Plan, STEP, STOP, WATCHED, get, kst, monday, plus, settle, tuesday,
+};
 
 /// 상한에 닿았을 때의 알림 글(지시서 글자 그대로).
 const CAPPED: &str = "오늘 AI 호출 상한에 닿아 논의를 쉽니다";
@@ -130,4 +134,117 @@ async fn 상한에_닿아도_손절은_그대로_나간다() {
         "손절은 AI를 부르지 않으므로 상한과 무관하게 나간다: {held:?}"
     );
     bench.close().await;
+}
+
+/// 새 공시를 하나 더하고 20초씩 가며(가장 길게 [`STEP`]) 가짜 AI가 받은 글이 `from`보다 늘 때까지 기다린다.
+/// 늘었으면 참, 그 시간 안에 안 늘었으면 거짓.
+async fn woke_ai(bench: &Bench, receipt: &str, from: usize) -> bool {
+    bench.data.disclose(WATCHED, receipt);
+    let deadline = Instant::now() + STEP;
+    while calls(bench) <= from {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        bench.advance(20).await;
+    }
+    true
+}
+
+/// 17차 4번 시험 모양: 자료를 1초마다 가져오고 장이 열려 있어 새 공시가 scout를 깨운다.
+fn waking_plan() -> Plan {
+    Plan::demo().polling(Duration::from_secs(1))
+}
+
+// 검증: E30 E34 N5
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 상한이_없으면_새_공시가_scout_깨우기로_ai를_부른다() {
+    let bench = waking_plan().start(kst(monday(), 10, 0)).await;
+    bench.ready().await;
+    bench.advance(40).await;
+    let before = calls(&bench);
+    assert!(
+        woke_ai(&bench, "20261116000901", before).await,
+        "상한이 없으면 새 공시로 scout가 깨어 AI를 부른다(시험이 깨우기 길을 열었는지의 대조)"
+    );
+    bench.close().await;
+}
+
+// 검증: E30 E34 N5
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 상한_2를_채운_뒤에는_scout_깨우기도_ai를_부르지_않고_알림이_한_번_간다() {
+    let bench = waking_plan().ai_limit(2).start(kst(monday(), 10, 0)).await;
+    bench.ready().await;
+    bench.advance(40).await;
+    discuss(&bench, "첫째").await;
+    discuss(&bench, "둘째").await;
+    settle().await;
+    let used = calls(&bench);
+    assert!(used > 0, "두 논의가 AI를 불렀다");
+
+    assert!(
+        !woke_ai(&bench, "20261116000902", used).await,
+        "상한에 닿았으니 새 공시가 와도 scout 깨우기 턴은 AI를 부르지 않는다"
+    );
+    assert_eq!(calls(&bench), used, "가짜 AI가 받은 글이 늘지 않았다");
+    assert_eq!(
+        capped_notices(&bench).await.len(),
+        1,
+        "상한 알림은 그날 한 번이다(깨우기가 더해 알리지 않는다)"
+    );
+
+    // 한국 시각 자정이 지나면 다시 깨운다.
+    bench.set(kst(tuesday(), 0, 10));
+    bench.advance(40).await;
+    assert!(
+        woke_ai(&bench, "20261116000903", calls(&bench)).await,
+        "다음 날은 새로 세서 깨우기가 다시 AI를 부른다"
+    );
+    bench.close().await;
+}
+
+// 검증: E30 N5
+#[test]
+fn 설정에_하루_ai_호출_상한을_적으면_그_값이_쓰이고_비우면_상한이_없다() {
+    let args = |extra: &[&str]| -> Vec<String> {
+        let mut list = vec!["--home", "/tmp/pi-ai-cap-settings", "--demo"];
+        list.extend_from_slice(extra);
+        list.iter().map(|text| (*text).to_string()).collect()
+    };
+    let none = |_name: &str| -> Option<String> { None };
+
+    let empty = Settings::parse(&args(&[]), &none, None).expect("설정을 읽어야 한다");
+    assert_eq!(empty.ai_daily_limit, None, "비우면 상한 없음(기본)");
+
+    let by_arg = Settings::parse(&args(&["--ai-daily-limit", "7"]), &none, None).unwrap();
+    assert_eq!(by_arg.ai_daily_limit, Some(7), "인자로 적은 값");
+
+    let env = |name: &str| (name == ENV_AI_DAILY_LIMIT).then(|| "12".to_string());
+    let by_env = Settings::parse(&args(&[]), &env, None).unwrap();
+    assert_eq!(by_env.ai_daily_limit, Some(12), "환경 변수로 적은 값");
+
+    let both = Settings::parse(&args(&["--ai-daily-limit", "3"]), &env, None).unwrap();
+    assert_eq!(both.ai_daily_limit, Some(3), "인자가 환경 변수보다 앞선다");
+}
+
+// 검증: E30 N5
+#[test]
+fn 하루_ai_호출_상한이_정수가_아니거나_0이면_받지_않는다() {
+    let none = |_name: &str| -> Option<String> { None };
+    for bad in ["0", "-1", "많이", "1.5"] {
+        let args: Vec<String> = ["--home", "/tmp/pi-ai-cap-settings", "--ai-daily-limit", bad]
+            .iter()
+            .map(|text| (*text).to_string())
+            .collect();
+        let outcome = Settings::parse(&args, &none, None);
+        assert!(
+            matches!(
+                outcome,
+                Err(SettingsError::InvalidValue {
+                    name: "--ai-daily-limit"
+                })
+            ),
+            "{bad:?}는 받지 않는다: {:?}",
+            outcome.map(|_| ())
+        );
+    }
 }
