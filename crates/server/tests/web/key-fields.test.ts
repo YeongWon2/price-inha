@@ -95,8 +95,6 @@ describe("키 칸", () => {
         "eval(",
         "new Function(",
       ]) {
-        // 결정 21 (31차): 알림음 켜짐 · 꺼짐 한 값만 이 한 파일이 브라우저에 둔다. 다른 금지는 이 파일에도 그대로다.
-        if (banned === "localStorage" && name.endsWith("/web/src/ui/sound-pref.ts")) continue;
         expect(text.includes(banned), `${name}: ${banned}`).toBe(false);
       }
     }

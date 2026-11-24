@@ -38,6 +38,8 @@ export const API = {
   // 시장 · 담당 모델은 설정 상태([`API.setup`])의 `market` · `models` 칸에서 읽는다.
   setupSemantic: "/api/setup/semantic",
   setupDoctor: "/api/setup/doctor",
+  // 알림음 켜기 · 끄기(31차 고침, 결정 22): 읽기 `GET` · 바꾸기 `POST` `{"enabled": bool}` — 서버가 둔다.
+  setupSound: "/api/setup/sound",
   accessKey: "/api/access/key",
   accessUnlock: "/api/access/unlock",
   accessLog: "/api/access/log",
@@ -108,6 +110,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     // server 31차 1번 (다) · (라): 뜻 검색 설정 · 진단.
     API.setupSemantic,
     API.setupDoctor,
+    // 31차 고침(결정 22): 알림음 설정.
+    API.setupSound,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],

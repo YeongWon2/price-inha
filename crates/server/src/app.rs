@@ -13,6 +13,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::desk::Desk;
+use crate::setup_doctor::SetupView;
 use crate::team::{CrewParts, spawn_trigger};
 use crate::trading::{TradingParts, default_wiring};
 use crate::{AppError, CLI_COMMON_LOCATIONS, Crew, Settings, Trading, Upstreams};
@@ -348,6 +349,7 @@ impl App {
         };
         let trading = Trading::open(parts).await?;
         let team = team_with_limit(launch.team, &settings, &desk);
+        let models = crate::setup_doctor::models_of(team.as_ref());
         let crew = open_crew(
             team,
             (&store, demo.offline, demo.ai_pause),
@@ -362,10 +364,14 @@ impl App {
         let extra = link::with_semantic(extra, &memory.semantic);
         let extra = link::with_looks(extra, &settings.home, &store, &wiring.clock);
         let protected = session_routes(&trading, crew.as_ref(), extra);
-        let gate = open_gate(
-            &settings, &wiring, &store, &secrets, &desk, protected, alert,
-        )
-        .await?;
+        let parts = (store.clone(), linked.clone());
+        let view = Arc::new(SetupView::new(
+            Arc::clone(&desk),
+            settings.market,
+            models,
+            parts,
+        ));
+        let gate = open_gate(&settings, &wiring, &store, &secrets, view, protected, alert).await?;
         trading.attach(gate.publisher());
         if let Some(linked) = &linked {
             link::attach(linked, &gate, &trading, crew.as_ref(), &memory);

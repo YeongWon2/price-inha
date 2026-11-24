@@ -40,6 +40,8 @@ describe("화면이 부르는 경로", () => {
         // 31차 1번 (다) · (라): 설정 화면은 뜻 검색 설정 · 진단 경로를 더 부른다.
         "/api/setup/semantic",
         "/api/setup/doctor",
+        // 31차 고침(결정 22): 알림음 설정을 서버에서 읽고 쓴다.
+        "/api/setup/sound",
       ]),
     );
     expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));

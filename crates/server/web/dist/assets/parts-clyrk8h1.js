@@ -79,6 +79,17 @@ function table(columns, rows) {
 	}
 	return node;
 }
+/** 입력 칸: `label[for=id]`과 그 `input#id`(종류를 안 주면 `text`)를 담은 묶음. */
+function field(label, id, type = "text") {
+	const node = make("div", "ui-field");
+	const caption = make("label", "ui-field-label", label);
+	caption.htmlFor = id;
+	const input = make("input", "ui-input");
+	input.id = id;
+	input.type = type;
+	node.append(caption, input);
+	return node;
+}
 /** 빈 상태 줄(`role="status"`, 예: "준비 중"). */
 function emptyState(text) {
 	const node = make("p", "ui-empty", text);
@@ -98,4 +109,4 @@ function errorLine(text) {
 	node.setAttribute("role", "alert");
 	return node;
 }
-export { errorLine as a, LOAD_FAILED as c, emptyState as i, call as l, button as n, loading as o, card as r, table as s, badge as t, el as u };
+export { errorLine as a, table as c, el as d, emptyState as i, LOAD_FAILED as l, button as n, field as o, card as r, loading as s, badge as t, call as u };

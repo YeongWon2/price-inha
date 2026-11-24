@@ -1,12 +1,12 @@
 // 설정 화면 보강(server 31차 1번 · R18-4 · R16-4 · C32 · V78)을 jsdom에 띄운다(가짜 fetch): 시장 줄과 "다시 켜야 한다"
 // 안내, 담당 모델 줄(보기만), 뜻 검색 카드(상태 읽기 → 켜기 · 끄기 → POST 모양 · 기다리는 동안의 표시 · 서버 오류를
 // 그대로 보임), 진단 표(상태 배지 · 할 일 줄 · 빈 할 일), 되살리기 안내(명령 글자가 보이고 실행 단추는 없다),
-// 알림음 설정(기본 켜짐 · 끄면 기기에 남고 다시 열어도 유지 · 저장소를 못 써도 화면이 죽지 않음), 읽기 실패의 오류 줄,
+// 알림음 설정(31차 고침 · 결정 22: 서버에서 읽은 값을 보임 · 바꾸면 POST 뒤 서버 답으로 맞춤 · 실패면 되돌리고 오류 줄 ·
+// 기다리는 동안 잠김 · 읽기 실패면 켜짐 · 브라우저 저장소에 남기지 않음), 읽기 실패의 오류 줄,
 // 경로 표, 설정 화면이 3D에 닿지 않음.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SCREEN_PATHS } from "../../web/src/paths";
 import { LOAD_FAILED } from "../../web/src/ui/call";
-import { SOUND_OFF, SOUND_PREF_KEY } from "../../web/src/ui/sound-pref";
 import {
   AGENT_LABELS,
   DIAG_LABELS,
@@ -76,7 +76,7 @@ interface Call {
   body: unknown;
 }
 
-/** 가짜 서버: 설정 상태 · 뜻 검색 · 진단 · 백업을 들고 답한다. 뜻 검색 바꾸기는 정해 둔 답을 낸다. */
+/** 가짜 서버: 설정 상태 · 뜻 검색 · 진단 · 백업 · 알림음을 들고 답한다. 뜻 검색 · 알림음 바꾸기는 정해 둔 답을 낸다. */
 class FakeServer {
   calls: Call[] = [];
   fail = new Set<string>();
@@ -84,6 +84,10 @@ class FakeServer {
   backup: unknown = { repo: null, recipient: null, configured: false };
   /** 뜻 검색 `POST`의 답. 없으면 받은 값을 그대로 저장하고 200. */
   semanticReply: ((body: SemanticSettings) => Promise<Response> | Response) | null = null;
+  /** 서버가 둔 알림음 설정(기본 켜짐). */
+  sound = true;
+  /** 알림음 `POST`의 답. 없으면 받은 값을 그대로 저장하고 200. */
+  soundReply: ((body: { enabled: boolean }) => Promise<Response> | Response) | null = null;
 
   constructor(
     public status: Record<string, unknown>,
@@ -103,11 +107,18 @@ class FakeServer {
       this.semantic = body as SemanticSettings;
       return json(200, this.semantic);
     }
+    if (method === "POST" && path === "/api/setup/sound") {
+      const sent = body as { enabled: boolean };
+      if (this.soundReply) return this.soundReply(sent);
+      this.sound = sent.enabled;
+      return json(200, { enabled: this.sound });
+    }
     if (method !== "GET") return json(404, { error: "not_found" });
     if (path === "/api/setup") return json(200, this.status);
     if (path === "/api/setup/semantic") return json(200, this.semantic);
     if (path === "/api/setup/doctor") return json(200, this.diagnosis);
     if (path === "/api/setup/backup") return json(200, this.backup);
+    if (path === "/api/setup/sound") return json(200, { enabled: this.sound });
     return json(404, { error: "not_found" });
   });
 
@@ -365,43 +376,99 @@ describe("설정 보강 · 되살리기 안내", () => {
 });
 
 describe("설정 보강 · 알림음", () => {
-  it("기본은 켜짐이고, 끄면 기기에 남아 다시 열어도 꺼짐이다", async () => {
+  /** 알림음 `POST`들의 몸통. */
+  const soundPosts = (): unknown[] =>
+    server.calls.filter((call) => call.method === "POST" && call.path === "/api/setup/sound").map((call) => call.body);
+
+  it("서버에서 읽은 값을 보인다: 기본은 켜짐, 서버가 꺼짐이면 꺼짐", async () => {
     // 검증: V78 R18-4
-    localStorage.clear();
     let root = await open();
+    expect(server.count("GET", "/api/setup/sound")).toBeGreaterThan(0);
     const box = pick<HTMLInputElement>(root, '[data-role="sound"] input#sound-on');
     expect(box.type).toBe("checkbox");
     expect(box.checked, "기본은 켜짐").toBe(true);
-    box.click();
-    await settle();
-    expect(localStorage.getItem(SOUND_PREF_KEY)).toBe(SOUND_OFF);
-    expect(server.calls.filter((call) => call.method === "POST").length, "서버에 보내지 않는다").toBe(0);
-    root = await open();
-    expect(pick<HTMLInputElement>(root, "input#sound-on").checked, "다시 열어도 꺼짐").toBe(false);
+    root = await open((fake) => {
+      fake.sound = false;
+    });
+    expect(pick<HTMLInputElement>(root, '[data-role="sound"] input#sound-on').checked, "서버가 꺼짐이면 꺼짐").toBe(false);
   });
 
-  it("저장소를 쓸 수 없는 브라우저에서도 화면이 그려지고 켜짐으로 보이며, 눌러도 죽지 않는다", async () => {
-    // 검증: V78 E57
-    vi.stubGlobal("localStorage", {
-      getItem(): string | null {
-        throw new DOMException("막힘", "SecurityError");
-      },
-      setItem(): void {
-        throw new DOMException("막힘", "SecurityError");
-      },
-      removeItem(): void {},
-      clear(): void {},
-      key(): string | null {
-        return null;
-      },
-      length: 0,
-    });
+  it("끄면 POST {enabled:false}를 보내고 꺼짐으로 남으며, 다시 열어도 서버 값대로 꺼짐이고 브라우저 저장소에는 없다", async () => {
+    // 검증: V78 R18-4 V46 N8
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
     const root = await open();
     const box = pick<HTMLInputElement>(root, "input#sound-on");
-    expect(box.checked).toBe(true);
-    expect(() => box.click()).not.toThrow();
+    box.click();
     await settle();
+    expect(soundPosts()).toEqual([{ enabled: false }]);
+    expect(server.sound, "서버에 남았다").toBe(false);
+    expect(pick<HTMLInputElement>(root, "input#sound-on").checked).toBe(false);
+    expect(root.querySelector('[data-role="sound"] [role="alert"]'), "오류 줄 없음").toBeNull();
+    const kept = server.sound;
+    const again = await open((fake) => {
+      fake.sound = kept;
+    });
+    expect(pick<HTMLInputElement>(again, "input#sound-on").checked, "다시 열어도 꺼짐").toBe(false);
+    expect(setItem.mock.calls.length, "브라우저 저장소에 쓰지 않는다").toBe(0);
+  });
+
+  it("서버가 보낸 값과 다르게 답하면 서버의 답으로 맞춘다", async () => {
+    // 검증: V78
+    const root = await open((fake) => {
+      fake.soundReply = () => json(200, { enabled: true });
+    });
+    pick<HTMLInputElement>(root, "input#sound-on").click();
+    await settle();
+    expect(soundPosts()).toEqual([{ enabled: false }]);
+    expect(pick<HTMLInputElement>(root, "input#sound-on").checked, "서버 답(켜짐)으로 맞춘다").toBe(true);
+  });
+
+  it("바꾸기가 실패하면(서버 오류 · 연결 실패) 칸을 되돌리고 알림음 자리에 오류 줄을 보인다", async () => {
+    // 검증: V78 E57
+    for (const failure of [
+      () => json(500, { error: "internal" }),
+      () => Promise.reject(new TypeError("연결 끊김")),
+    ]) {
+      const root = await open((fake) => {
+        fake.soundReply = failure;
+      });
+      const box = pick<HTMLInputElement>(root, "input#sound-on");
+      expect(() => box.click()).not.toThrow();
+      await settle();
+      expect(soundPosts().length).toBe(1);
+      expect(pick<HTMLInputElement>(root, "input#sound-on").checked, "되돌려 켜짐").toBe(true);
+      expect(text(root, '[data-role="sound"] [role="alert"]').length, "오류 줄").toBeGreaterThan(0);
+      expect(root.querySelector('[data-role="diagnosis"]'), "다른 자리는 그대로").not.toBeNull();
+    }
+  });
+
+  it("보내고 답을 기다리는 동안 칸이 잠겨 다시 보내지 않고, 답이 오면 풀리며 답대로 보인다", async () => {
+    // 검증: V78 R18-4
+    let answer: (reply: Response) => void = () => {};
+    const root = await open((fake) => {
+      fake.soundReply = () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        });
+    });
+    pick<HTMLInputElement>(root, "input#sound-on").click();
+    await settle();
+    expect(pick<HTMLInputElement>(root, "input#sound-on").disabled, "기다리는 동안 잠김").toBe(true);
+    pick<HTMLInputElement>(root, "input#sound-on").click();
+    await settle();
+    expect(soundPosts().length, "기다리는 동안 다시 보내지 않는다").toBe(1);
+    answer(json(200, { enabled: false }));
+    await settle();
+    expect(pick<HTMLInputElement>(root, "input#sound-on").disabled, "답이 오면 풀림").toBe(false);
+    expect(pick<HTMLInputElement>(root, "input#sound-on").checked).toBe(false);
+  });
+
+  it("알림음 설정을 못 읽어도 화면이 그려지고 켜짐으로 보인다", async () => {
+    // 검증: V78 E57
+    const root = await open((fake) => fake.fail.add("/api/setup/sound"));
+    expect(pick<HTMLInputElement>(root, "input#sound-on").checked, "기본 켜짐").toBe(true);
     expect(root.querySelector('[data-role="diagnosis"]')).not.toBeNull();
+    expect(text(root, '[data-role="market"]')).toContain("국내");
   });
 });
 

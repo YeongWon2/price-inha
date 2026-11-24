@@ -20,9 +20,13 @@
 //   `data-tone` [`DIAG_TONES`]) · 무엇을 봤나 · 할 일 `[data-role="todo"]`(`null`이면 [`NO_TODO`]).
 // - `restore`: 백업 상태 `[data-role="backup-state"]`("백업 켜짐" · "백업 꺼짐"), 명령 `code`([`RESTORE_COMMAND`]로
 //   시작한다)와 [`RESTORE_NOTE`]. 되살리기를 실행하는 단추는 없다.
-// - `sound`: 체크 칸 `#sound-on`(이름 [`SOUND_LABEL`]) — `ui/sound-pref.ts`로 읽고 남긴다(기본 켜짐).
+// - `sound`: 체크 칸 `#sound-on`(이름 [`SOUND_LABEL`]) — `ui/sound-pref.ts`로 서버(`API.setupSound`)에서 읽고 쓴다
+//   (기본 켜짐, 31차 고침 · 결정 22). [`soundSetting`] 참고.
 //
 // 읽기 실패: 그 경로를 쓰는 자리만 오류 줄(`role="alert"`, `LOAD_FAILED`)을 보이고 다른 자리는 그대로 그린다.
+import { API } from "../paths";
+import { LOAD_FAILED, call, el } from "../ui/call";
+import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
 import type { BadgeTone } from "../ui/parts";
 
 /** 진단 상태(서버 `DIAG_*`). */
@@ -117,37 +121,219 @@ export const RESTORE_NOTE =
 /** 알림음 칸 이름. */
 export const SOUND_LABEL = "승인 알림음 (이 기기에만 남습니다)";
 
+/** 되살린 폴더로 다시 켜는 명령. */
+const RESTART_COMMAND = "price-inha run --home <되살린 폴더>";
+
+/** 되살리기 명령 전체(파일 · 폴더 자리는 사람이 채운다). */
+const RESTORE_USAGE = `${RESTORE_COMMAND} <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>`;
+
+/** 객체면 그대로, 아니면 빈 객체. */
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+/** 자리 하나(공통 카드)에 `data-role`을 단다. */
+function block(role: string, title: string, ...body: Node[]): HTMLElement {
+  const node = card(title, ...body);
+  node.dataset.role = role;
+  node.classList.add("setup-extra");
+  return node;
+}
+
+/** 읽기에 실패한 자리. */
+function failedBlock(role: string, title: string): HTMLElement {
+  return block(role, title, errorLine(LOAD_FAILED));
+}
+
 /** 설정 상태 몸통으로 시장 줄을 그린다(`data-role="market"`). */
 export function marketLine(status: unknown): HTMLElement {
-  throw new Error("todo");
+  const market = String(record(status).market ?? "");
+  const name = MARKET_LABELS[market] ?? market;
+  return block("market", "시장", el("p", "setup-extra-value", `${name} (${market})`), el("p", "hint", MARKET_RESTART_NOTE));
+}
+
+/** 설정 상태의 `models`에서 담당 · 모델 글자가 있는 줄만. */
+function modelRows(status: unknown): ModelRow[] {
+  const models = record(status).models;
+  if (!Array.isArray(models)) return [];
+  return models
+    .map(record)
+    .filter((row) => typeof row.agent === "string" && typeof row.model === "string")
+    .map((row) => ({ agent: row.agent as string, model: row.model as string }));
 }
 
 /** 설정 상태 몸통으로 담당 모델 줄을 그린다(`data-role="models"`). */
 export function modelsLine(status: unknown): HTMLElement {
-  throw new Error("todo");
+  const rows = modelRows(status);
+  if (rows.length === 0) return block("models", "담당 모델", emptyState(MODELS_NONE), el("p", "hint", MODELS_NOTE));
+  const list = el("ul", "setup-extra-list");
+  for (const row of rows) {
+    const item = el("li", "setup-extra-row");
+    item.dataset.agent = row.agent;
+    item.append(el("span", "setup-extra-name", AGENT_LABELS[row.agent] ?? row.agent), el("code", "setup-extra-code", row.model));
+    list.append(item);
+  }
+  return block("models", "담당 모델", list, el("p", "hint", MODELS_NOTE));
+}
+
+/** 진단 상태 글자면 그대로, 아니면 알림. */
+function diagStatus(value: unknown): DiagStatus {
+  return value === "ok" || value === "warn" || value === "fail" ? value : "info";
+}
+
+/** 진단 답의 항목들(모양이 맞지 않는 칸은 글자로 바꾼다). */
+function diagnosisItems(reply: unknown): DiagnosisItem[] {
+  const items = record(reply).items;
+  if (!Array.isArray(items)) return [];
+  return items.map(record).map((item) => ({
+    key: String(item.key ?? ""),
+    label: String(item.label ?? ""),
+    status: diagStatus(item.status),
+    detail: String(item.detail ?? ""),
+    todo: typeof item.todo === "string" ? item.todo : null,
+  }));
 }
 
 /** 진단 답으로 진단 표를 그린다(`data-role="diagnosis"`). */
 export function diagnosisTable(reply: unknown): HTMLElement {
-  throw new Error("todo");
+  const items = diagnosisItems(reply);
+  const rows = items.map((item) => [item.label, "", item.detail, item.todo ?? NO_TODO]);
+  const grid = table(["항목", "상태", "본 것", "할 일"], rows);
+  const lines = grid.tBodies[0]?.rows ?? [];
+  items.forEach((item, index) => {
+    const tr = lines[index];
+    if (!tr) return;
+    tr.dataset.key = item.key;
+    tr.cells[1]?.append(badge(DIAG_LABELS[item.status], DIAG_TONES[item.status]));
+    tr.cells[3]?.setAttribute("data-role", "todo");
+  });
+  const wrap = el("div", "setup-extra-wrap");
+  wrap.append(grid);
+  return block("diagnosis", "진단", wrap, el("p", "hint", "실행 중인 서버가 아는 것만 봅니다. 더 자세히는 서버를 끈 뒤 price-inha doctor 를 실행합니다."));
 }
 
 /** 백업 설정 답(`{"repo", "recipient", "configured"}`)으로 되살리기 안내를 그린다(`data-role="restore"`). */
 export function restoreGuide(backup: unknown): HTMLElement {
-  throw new Error("todo");
+  const on = record(backup).configured === true;
+  const state = el("p", "setup-extra-value", on ? "백업 켜짐" : "백업 꺼짐");
+  state.dataset.role = "backup-state";
+  const usage = el("pre", "setup-extra-command");
+  usage.append(el("code", "", RESTORE_USAGE));
+  const restart = el("pre", "setup-extra-command");
+  restart.append(el("code", "", RESTART_COMMAND));
+  return block("restore", "되살리기", state, el("p", "hint", RESTORE_NOTE), usage, restart);
+}
+
+/** 답이 뜻 검색 설정 모양이면 그 값. */
+function semanticOf(value: unknown): SemanticSettings | null {
+  const body = record(value);
+  if (typeof body.enabled !== "boolean" || typeof body.base_url !== "string" || typeof body.model !== "string") return null;
+  return { enabled: body.enabled, base_url: body.base_url, model: body.model };
+}
+
+/** 뜻 검색 바꾸기 실패 까닭 → 화면 글. */
+function semanticError(body: unknown): string {
+  const reason = record(body).error;
+  if (typeof reason !== "string" || reason === "") return LOAD_FAILED;
+  return SEMANTIC_ERRORS[reason] ?? reason;
+}
+
+/** 칸 묶음 안의 입력 칸. */
+function inputOf(holder: HTMLElement): HTMLInputElement {
+  return holder.querySelector("input") as HTMLInputElement;
 }
 
 /** 뜻 검색 카드를 그린다(`data-role="semantic"`). 단추를 누르면 바꾸기를 보낸다. */
 export function semanticCard(initial: SemanticSettings): HTMLElement {
-  throw new Error("todo");
+  let current = initial;
+  let busy = false;
+  const state = el("p", "setup-extra-value");
+  state.dataset.role = "semantic-state";
+  const urlField = field("Ollama 주소", "semantic-url", "url");
+  const modelField = field("임베딩 모델", "semantic-model");
+  inputOf(urlField).value = current.base_url;
+  inputOf(modelField).value = current.model;
+  const toggle = button("", "accent");
+  toggle.dataset.action = "semantic-toggle";
+  const message = el("div", "setup-extra-message");
+  message.setAttribute("aria-live", "polite");
+  const paint = (): void => {
+    state.textContent = current.enabled ? "켜짐" : "꺼짐";
+    toggle.textContent = current.enabled ? "끄기" : "켜기";
+  };
+  toggle.addEventListener("click", () => {
+    if (busy) return;
+    busy = true;
+    toggle.disabled = true;
+    message.replaceChildren(loading(SEMANTIC_SAVING));
+    const body = { enabled: !current.enabled, base_url: inputOf(urlField).value, model: inputOf(modelField).value };
+    void call("POST", API.setupSemantic, body)
+      .then((reply) => {
+        const next = reply.ok ? semanticOf(reply.body) : null;
+        if (!next) return message.replaceChildren(errorLine(semanticError(reply.body)));
+        current = next;
+        inputOf(urlField).value = next.base_url;
+        inputOf(modelField).value = next.model;
+        paint();
+        message.replaceChildren(...(next.enabled ? [el("p", "hint", SEMANTIC_REBUILD_NOTE)] : []));
+      })
+      .catch(() => message.replaceChildren(errorLine(LOAD_FAILED)))
+      .finally(() => {
+        busy = false;
+        toggle.disabled = false;
+      });
+  });
+  paint();
+  return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), toggle, message);
 }
 
-/** 알림음 설정을 그린다(`data-role="sound"`). */
+/**
+ * 알림음 설정을 그린다(`data-role="sound"`, 31차 고침 · 결정 22). 체크 칸 `#sound-on`은 서버에서 읽은 값
+ * (`ui/sound-pref.ts`, 읽기 실패면 켜짐)을 보인다. 바꾸면 `POST API.setupSound`를 보내고, 기다리는 동안 칸을 잠그며,
+ * 서버의 답으로 맞춘다. 실패면 칸을 되돌리고 이 자리에 오류 줄(`role="alert"`)을 보인다. 브라우저에 남기지 않는다.
+ */
 export function soundSetting(): HTMLElement {
   throw new Error("todo");
 }
 
+/** 경로 하나를 읽는다. 실패(상태 · 연결)면 `null`. */
+async function read(url: string): Promise<unknown> {
+  try {
+    const reply = await call("GET", url);
+    return reply.ok ? reply.body : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 자리를 새것으로 바꾼다. */
+function swap(slot: HTMLElement, next: HTMLElement): HTMLElement {
+  slot.replaceWith(next);
+  return next;
+}
+
 /** 자리 하나에 보강 묶음 모두를 읽어 그린다. 읽기가 실패해도 던지지 않는다. */
 export async function mountSetupExtras(root: HTMLElement): Promise<void> {
-  throw new Error("todo");
+  const titles: Record<string, string> = { market: "시장", models: "담당 모델", semantic: "뜻 검색", diagnosis: "진단", restore: "되살리기" };
+  const slots: Record<string, HTMLElement> = {};
+  for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
+  root.replaceChildren(...Object.values(slots), soundSetting());
+  const status = read(API.setup).then((body) => {
+    swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
+    swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
+  });
+  const semantic = read(API.setupSemantic).then((body) => {
+    const settings = semanticOf(body);
+    swap(slots.semantic, settings === null ? failedBlock("semantic", titles.semantic) : semanticCard(settings));
+  });
+  const doctor = read(API.setupDoctor).then((body) => {
+    swap(slots.diagnosis, body === null ? failedBlock("diagnosis", titles.diagnosis) : diagnosisTable(body));
+  });
+  const backup = read(API.setupBackup).then((body) => {
+    const guide = swap(slots.restore, restoreGuide(body ?? {}));
+    // 백업 상태를 못 읽어도 명령 안내는 그대로 보인다.
+    const state = guide.querySelector('[data-role="backup-state"]');
+    if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
+  });
+  await Promise.allSettled([status, semantic, doctor, backup]);
 }

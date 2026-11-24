@@ -20,6 +20,7 @@ mod settings;
 mod setup;
 mod setup_doctor;
 mod setup_http;
+mod setup_sound;
 mod slots;
 mod team;
 mod trading;
@@ -89,6 +90,7 @@ pub use setup::{
 pub use setup_doctor::{
     DIAG_FAIL, DIAG_INFO, DIAG_OK, DIAG_WARN, DIAGNOSIS_ITEMS, SETUP_DOCTOR_PATH,
 };
+pub use setup_sound::SETUP_SOUND_PATH;
 pub use slots::{
     KEY_BACKUP_GITHUB_TOKEN, KEY_DART, KEY_ECOS, KEY_FRED, KEY_SLOTS, SETUP_PROVIDERS_PATH,
     SETUP_SLOTS_PATH,

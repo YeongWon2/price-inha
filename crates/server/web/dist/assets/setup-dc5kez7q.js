@@ -1,5 +1,6 @@
-import { n as API, t as mountMenu } from "./menu-oac4dwby.js";
+import { n as API, t as mountMenu } from "./menu-myjmdctv.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
+import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, o as field, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -36,6 +37,308 @@ function aiLimitRequest(limit) {
 		path: API.setupAi,
 		body: { [AI_LIMIT_KEY]: limit }
 	};
+}
+// src/ui/sound-pref.ts
+/** 웹 저장소의 키 하나. 값은 [`SOUND_ON`] · [`SOUND_OFF`]. */
+var SOUND_PREF_KEY = "price-inha.sound";
+/** 알림음이 켜져 있나. 남긴 값이 [`SOUND_OFF`]일 때만 꺼짐이고, 없거나 읽지 못하면 켜짐이다. */
+function soundEnabled() {
+	try {
+		return globalThis.localStorage.getItem(SOUND_PREF_KEY) !== "off";
+	} catch {
+		return true;
+	}
+}
+/** 알림음 켜기 · 끄기를 이 기기에 남긴다. 남겼으면 `true`, 저장소를 쓸 수 없으면 `false`(던지지 않는다). */
+function setSoundEnabled(on) {
+	try {
+		globalThis.localStorage.setItem(SOUND_PREF_KEY, on ? "on" : "off");
+		return true;
+	} catch {
+		return false;
+	}
+}
+// src/setup/extras.ts
+/** 시장 글자 → 화면 이름. */
+var MARKET_LABELS = {
+	kr: "국내",
+	us: "미국"
+};
+/** 시장 줄의 안내. */
+var MARKET_RESTART_NOTE = "시장은 켤 때 정합니다. 바꾸려면 --market 인자를 바꿔 서버를 다시 켜야 합니다.";
+/** 담당 id → 화면 이름. */
+var AGENT_LABELS = {
+	scout: "뉴스 · 공시 · 시세",
+	strategy: "전략",
+	risk: "리스크",
+	review: "복기",
+	trader: "매매",
+	leader: "팀장"
+};
+/** 모델 줄의 안내(보기만). */
+var MODELS_NOTE = "담당 모델은 지금 보기만 합니다. 바꾸는 길은 아직 없습니다.";
+/** 모델 목록이 비었을 때(팀을 잇지 않은 서버). */
+var MODELS_NONE = "팀이 이어져 있지 않아 쓰는 모델이 없습니다.";
+/** 뜻 검색 주소 안내. */
+var SEMANTIC_LOOPBACK_NOTE = "Ollama 주소는 같은 컴퓨터(127.0.0.1 · localhost)만 됩니다.";
+/** 뜻 검색을 바꾸는 동안의 줄. */
+var SEMANTIC_SAVING = "저장하는 중";
+/** 뜻 검색을 켠 뒤의 안내(다시 만들기는 한가할 때 서버가 한다). */
+var SEMANTIC_REBUILD_NOTE = "켜졌습니다. 기존 기록의 뜻 색인은 한가할 때 조금씩 다시 만듭니다.";
+/** 뜻 검색 바꾸기 실패 까닭 → 화면 글. */
+var SEMANTIC_ERRORS = {
+	loopback_only: "Ollama 주소는 같은 컴퓨터(127.0.0.1 · localhost)만 됩니다. 주소를 확인하세요.",
+	invalid_input: "주소와 모델 이름을 모두 적어 주세요.",
+	local_only: "뜻 검색 설정은 이 컴퓨터에서만 바꿀 수 있습니다."
+};
+/** 진단 상태 → 배지 글. */
+var DIAG_LABELS = {
+	ok: "정상",
+	warn: "살펴볼 것",
+	fail: "문제",
+	info: "알림"
+};
+/** 진단 상태 → 배지 색. */
+var DIAG_TONES = {
+	ok: "success",
+	warn: "warning",
+	fail: "danger",
+	info: "neutral"
+};
+/** 되살리기 명령(앞부분). */
+var RESTORE_COMMAND = "price-inha restore";
+/** 되살리기 안내. */
+var RESTORE_NOTE = "되살리기는 이 화면에서 하지 않습니다. 서버를 끈 뒤 터미널에서 아래 명령으로 빈 폴더에 되살리고, 그 폴더로 다시 켭니다.";
+/** 알림음 칸 이름. */
+var SOUND_LABEL = "승인 알림음 (이 기기에만 남습니다)";
+/** 알림음을 이 기기에 남기지 못했을 때의 글. */
+var SOUND_NOT_SAVED = "이 브라우저에는 알림음 설정을 남길 수 없습니다(이번 화면에서만 적용).";
+/** 되살린 폴더로 다시 켜는 명령. */
+var RESTART_COMMAND = "price-inha run --home <되살린 폴더>";
+/** 되살리기 명령 전체(파일 · 폴더 자리는 사람이 채운다). */
+var RESTORE_USAGE = `${RESTORE_COMMAND} <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>`;
+/** 객체면 그대로, 아니면 빈 객체. */
+function record(value) {
+	return value !== null && typeof value === "object" ? value : {};
+}
+/** 자리 하나(공통 카드)에 `data-role`을 단다. */
+function block(role, title, ...body) {
+	const node = card(title, ...body);
+	node.dataset.role = role;
+	node.classList.add("setup-extra");
+	return node;
+}
+/** 읽기에 실패한 자리. */
+function failedBlock(role, title) {
+	return block(role, title, errorLine(LOAD_FAILED));
+}
+/** 설정 상태 몸통으로 시장 줄을 그린다(`data-role="market"`). */
+function marketLine(status) {
+	const market = String(record(status).market ?? "");
+	const name = MARKET_LABELS[market] ?? market;
+	return block("market", "시장", el("p", "setup-extra-value", `${name} (${market})`), el("p", "hint", MARKET_RESTART_NOTE));
+}
+/** 설정 상태의 `models`에서 담당 · 모델 글자가 있는 줄만. */
+function modelRows(status) {
+	const models = record(status).models;
+	if (!Array.isArray(models)) return [];
+	return models.map(record).filter((row) => typeof row.agent === "string" && typeof row.model === "string").map((row) => ({
+		agent: row.agent,
+		model: row.model
+	}));
+}
+/** 설정 상태 몸통으로 담당 모델 줄을 그린다(`data-role="models"`). */
+function modelsLine(status) {
+	const rows = modelRows(status);
+	if (rows.length === 0) return block("models", "담당 모델", emptyState(MODELS_NONE), el("p", "hint", MODELS_NOTE));
+	const list = el("ul", "setup-extra-list");
+	for (const row of rows) {
+		const item = el("li", "setup-extra-row");
+		item.dataset.agent = row.agent;
+		item.append(el("span", "setup-extra-name", AGENT_LABELS[row.agent] ?? row.agent), el("code", "setup-extra-code", row.model));
+		list.append(item);
+	}
+	return block("models", "담당 모델", list, el("p", "hint", MODELS_NOTE));
+}
+/** 진단 상태 글자면 그대로, 아니면 알림. */
+function diagStatus(value) {
+	return value === "ok" || value === "warn" || value === "fail" ? value : "info";
+}
+/** 진단 답의 항목들(모양이 맞지 않는 칸은 글자로 바꾼다). */
+function diagnosisItems(reply) {
+	const items = record(reply).items;
+	if (!Array.isArray(items)) return [];
+	return items.map(record).map((item) => ({
+		key: String(item.key ?? ""),
+		label: String(item.label ?? ""),
+		status: diagStatus(item.status),
+		detail: String(item.detail ?? ""),
+		todo: typeof item.todo === "string" ? item.todo : null
+	}));
+}
+/** 진단 답으로 진단 표를 그린다(`data-role="diagnosis"`). */
+function diagnosisTable(reply) {
+	const items = diagnosisItems(reply);
+	const rows = items.map((item) => [
+		item.label,
+		"",
+		item.detail,
+		item.todo ?? "할 일 없음"
+	]);
+	const grid = table([
+		"항목",
+		"상태",
+		"본 것",
+		"할 일"
+	], rows);
+	const lines = grid.tBodies[0]?.rows ?? [];
+	items.forEach((item, index) => {
+		const tr = lines[index];
+		if (!tr) return;
+		tr.dataset.key = item.key;
+		tr.cells[1]?.append(badge(DIAG_LABELS[item.status], DIAG_TONES[item.status]));
+		tr.cells[3]?.setAttribute("data-role", "todo");
+	});
+	const wrap = el("div", "setup-extra-wrap");
+	wrap.append(grid);
+	return block("diagnosis", "진단", wrap, el("p", "hint", "실행 중인 서버가 아는 것만 봅니다. 더 자세히는 서버를 끈 뒤 price-inha doctor 를 실행합니다."));
+}
+/** 백업 설정 답(`{"repo", "recipient", "configured"}`)으로 되살리기 안내를 그린다(`data-role="restore"`). */
+function restoreGuide(backup) {
+	const on = record(backup).configured === true;
+	const state = el("p", "setup-extra-value", on ? "백업 켜짐" : "백업 꺼짐");
+	state.dataset.role = "backup-state";
+	const usage = el("pre", "setup-extra-command");
+	usage.append(el("code", "", RESTORE_USAGE));
+	const restart = el("pre", "setup-extra-command");
+	restart.append(el("code", "", RESTART_COMMAND));
+	return block("restore", "되살리기", state, el("p", "hint", RESTORE_NOTE), usage, restart);
+}
+/** 답이 뜻 검색 설정 모양이면 그 값. */
+function semanticOf(value) {
+	const body = record(value);
+	if (typeof body.enabled !== "boolean" || typeof body.base_url !== "string" || typeof body.model !== "string") return null;
+	return {
+		enabled: body.enabled,
+		base_url: body.base_url,
+		model: body.model
+	};
+}
+/** 뜻 검색 바꾸기 실패 까닭 → 화면 글. */
+function semanticError(body) {
+	const reason = record(body).error;
+	if (typeof reason !== "string" || reason === "") return LOAD_FAILED;
+	return SEMANTIC_ERRORS[reason] ?? reason;
+}
+/** 칸 묶음 안의 입력 칸. */
+function inputOf(holder) {
+	return holder.querySelector("input");
+}
+/** 뜻 검색 카드를 그린다(`data-role="semantic"`). 단추를 누르면 바꾸기를 보낸다. */
+function semanticCard(initial) {
+	let current = initial;
+	let busy = false;
+	const state = el("p", "setup-extra-value");
+	state.dataset.role = "semantic-state";
+	const urlField = field("Ollama 주소", "semantic-url", "url");
+	const modelField = field("임베딩 모델", "semantic-model");
+	inputOf(urlField).value = current.base_url;
+	inputOf(modelField).value = current.model;
+	const toggle = button("", "accent");
+	toggle.dataset.action = "semantic-toggle";
+	const message = el("div", "setup-extra-message");
+	message.setAttribute("aria-live", "polite");
+	const paint = () => {
+		state.textContent = current.enabled ? "켜짐" : "꺼짐";
+		toggle.textContent = current.enabled ? "끄기" : "켜기";
+	};
+	toggle.addEventListener("click", () => {
+		if (busy) return;
+		busy = true;
+		toggle.disabled = true;
+		message.replaceChildren(loading(SEMANTIC_SAVING));
+		const body = {
+			enabled: !current.enabled,
+			base_url: inputOf(urlField).value,
+			model: inputOf(modelField).value
+		};
+		call("POST", API.setupSemantic, body).then((reply) => {
+			const next = reply.ok ? semanticOf(reply.body) : null;
+			if (!next) return message.replaceChildren(errorLine(semanticError(reply.body)));
+			current = next;
+			inputOf(urlField).value = next.base_url;
+			inputOf(modelField).value = next.model;
+			paint();
+			message.replaceChildren(...next.enabled ? [el("p", "hint", SEMANTIC_REBUILD_NOTE)] : []);
+		}).catch(() => message.replaceChildren(errorLine(LOAD_FAILED))).finally(() => {
+			busy = false;
+			toggle.disabled = false;
+		});
+	});
+	paint();
+	return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), toggle, message);
+}
+/** 알림음 설정을 그린다(`data-role="sound"`). */
+function soundSetting() {
+	const holder = field(SOUND_LABEL, "sound-on", "checkbox");
+	holder.classList.add("setup-extra-check");
+	const box = inputOf(holder);
+	box.checked = soundEnabled();
+	const message = el("div", "setup-extra-message");
+	message.setAttribute("aria-live", "polite");
+	box.addEventListener("change", () => {
+		const saved = setSoundEnabled(box.checked);
+		message.replaceChildren(...saved ? [] : [el("p", "hint", SOUND_NOT_SAVED)]);
+	});
+	return block("sound", "알림음", holder, message);
+}
+/** 경로 하나를 읽는다. 실패(상태 · 연결)면 `null`. */
+async function read(url) {
+	try {
+		const reply = await call("GET", url);
+		return reply.ok ? reply.body : null;
+	} catch {
+		return null;
+	}
+}
+/** 자리를 새것으로 바꾼다. */
+function swap(slot, next) {
+	slot.replaceWith(next);
+	return next;
+}
+/** 자리 하나에 보강 묶음 모두를 읽어 그린다. 읽기가 실패해도 던지지 않는다. */
+async function mountSetupExtras(root) {
+	const titles = {
+		market: "시장",
+		models: "담당 모델",
+		semantic: "뜻 검색",
+		diagnosis: "진단",
+		restore: "되살리기"
+	};
+	const slots = {};
+	for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
+	root.replaceChildren(...Object.values(slots), soundSetting());
+	const status = read(API.setup).then((body) => {
+		swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
+		swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
+	});
+	const semantic = read(API.setupSemantic).then((body) => {
+		const settings = semanticOf(body);
+		swap(slots.semantic, settings === null ? failedBlock("semantic", titles.semantic) : semanticCard(settings));
+	});
+	const doctor = read(API.setupDoctor).then((body) => {
+		swap(slots.diagnosis, body === null ? failedBlock("diagnosis", titles.diagnosis) : diagnosisTable(body));
+	});
+	const backup = read(API.setupBackup).then((body) => {
+		const state = swap(slots.restore, restoreGuide(body ?? {})).querySelector("[data-role=\"backup-state\"]");
+		if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
+	});
+	await Promise.allSettled([
+		status,
+		semantic,
+		doctor,
+		backup
+	]);
 }
 // src/setup/main.ts
 mountMenu(document.getElementById("menu"), "setup");
@@ -802,6 +1105,13 @@ function openSocket() {
 		onClose();
 	};
 }
+var extrasMounted = false;
+function mountExtrasOnce() {
+	var root = document.getElementById("setup-extras");
+	if (extrasMounted || !root) return;
+	extrasMounted = true;
+	mountSetupExtras(root);
+}
 function start() {
 	fetch(SESSION_PATH, {
 		method: "POST",
@@ -810,6 +1120,7 @@ function start() {
 	}).then(function(reply) {
 		if (!reply.ok) throw new Error("session");
 		loadSetup();
+		mountExtrasOnce();
 		openSocket();
 	}).catch(function() {
 		setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");

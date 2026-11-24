@@ -1,32 +1,4 @@
 /*
- * 관리 화면 틀의 쪽 모양(server 26차 4번): 바탕 · 본문 폭 · 제목 · 이끄는 글. 토큰(var(--…))만 쓴다.
- */
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-md);
-  line-height: 1.55;
-}
-.admin {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) calc(var(--space-5) * 2);
-  display: grid;
-  gap: var(--space-4);
-}
-.admin h1 {
-  margin: 0;
-  font-size: var(--font-size-xl);
-  font-weight: 700;
-  letter-spacing: -.01em;
-}
-.admin p { margin-block: 0; }
-.admin .admin-lead { margin-top: calc(var(--space-2) * -1); color: var(--text-muted); }
-/*
  * 공통 부품 모양(server 26차 2번): 카드 · 표 · 단추 · 배지 · 입력 칸 · 빈 상태 · 불러오는 중 · 오류 줄.
  * 토큰(var(--…))만 쓴다.
  */

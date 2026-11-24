@@ -17,6 +17,7 @@ use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
 use crate::feed::{Feed, Pace, Registered, Source, StaleHook};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
+use crate::setup_doctor::SetupView;
 use crate::{
     AiChoice, AppError, BrokerKeys, Crew, KeyVerifier, SecretsRedactor, Settings, Trading,
     load_ai_choice, page, setup_http,
@@ -133,7 +134,7 @@ pub(super) async fn open_gate(
     wiring: &Wiring,
     store: &Store,
     secrets: &Arc<SecretStore>,
-    desk: &Arc<Desk>,
+    view: Arc<SetupView>,
     protected: axum::Router,
     lock_alert: Option<Arc<dyn pi_gate::LockAlert>>,
 ) -> Result<GateServer, AppError> {
@@ -147,11 +148,11 @@ pub(super) async fn open_gate(
         .redactor(Arc::new(SecretsRedactor::new(Arc::clone(secrets))))
         .public_routes(page::routes())
         .public_routes(crate::reach::asset_routes())
-        .protected_routes(setup_http::status_routes(Arc::clone(desk)))
+        .protected_routes(setup_http::status_routes(Arc::clone(&view)))
         .protected_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
-        .local_routes(setup_http::register_routes(Arc::clone(desk)))
+        .local_routes(setup_http::register_routes(Arc::clone(view.desk())))
         // (7차) 접속 키 발급 · 잠금 풀기는 그 컴퓨터에서만, 접속 기록 보기는 세션이면.
         .local_routes(access_http::local_routes(Arc::clone(&access)))
         .protected_routes(access_http::session_routes(

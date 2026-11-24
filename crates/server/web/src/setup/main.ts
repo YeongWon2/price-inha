@@ -6,6 +6,7 @@ import "./setup.css";
 import { API } from "../paths";
 import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
 import { aiLimitRequest, formatAiLimit, parseAiLimit, readAiLimit } from "./ai-limit";
+import { mountSetupExtras } from "./extras";
 
 // 공통 메뉴(server 26차 3번): 화면 맨 위 자리에 단다.
 mountMenu(document.getElementById("menu"), "setup");
@@ -783,12 +784,22 @@ function byId(id: string): HTMLInputElement {
     socket.onerror = function () { try { socket.close(); } catch (error) { /* 이미 닫힘 */ } onClose(); };
   }
 
+  // (server 31차 1번) 설정 화면 보강 묶음: 세션을 처음 얻은 뒤 한 번 단다(읽기 실패는 그 자리에만 보인다).
+  var extrasMounted = false;
+  function mountExtrasOnce() {
+    var root = document.getElementById("setup-extras");
+    if (extrasMounted || !root) { return; }
+    extrasMounted = true;
+    void mountSetupExtras(root);
+  }
+
   // 세션을 얻고(서버를 다시 켜면 세션이 사라지므로 이을 때마다 얻는다) 실시간 연결을 연다.
   function start() {
     fetch(SESSION_PATH, { method: "POST", credentials: "same-origin", cache: "no-store" })
       .then(function (reply: Data) {
         if (!reply.ok) { throw new Error("session"); }
         loadSetup();
+        mountExtrasOnce();
         openSocket();
       })
       .catch(function () {

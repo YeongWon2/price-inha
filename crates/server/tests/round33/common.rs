@@ -283,6 +283,21 @@ impl Bench {
             register_keys(dir.path()).await;
         }
         save_watchlist(dir.path(), &[Symbol::new(WATCHED)]).unwrap();
+        Bench::launch(dir).await
+    }
+
+    /// 끄고, 같은 보관 폴더로 다시 띄운다(시계 · 가짜 서버 · 상대 주소는 새로).
+    pub async fn restart(self) -> Bench {
+        let Bench { _dir: dir, app, .. } = self;
+        tokio::time::timeout(STEP, app.shutdown())
+            .await
+            .expect("시간 안에 꺼져야 한다")
+            .expect("끄기가 성공해야 한다");
+        Bench::launch(dir).await
+    }
+
+    /// 그 보관 폴더로 시연 모드 실행 파일 조립을 띄운다.
+    async fn launch(dir: TempDir) -> Bench {
         let clock = TestClock::at(sunday_afternoon());
         let outside = Outside::start().await;
         let remote = Arc::new(AtomicBool::new(false));
@@ -439,7 +454,7 @@ fn cookie_of(reply: &reqwest::Response) -> String {
 }
 
 /// 같은 출처에서 세션을 받아 `Cookie` 헤더 글자를 돌려준다.
-async fn login(addr: SocketAddr) -> String {
+pub async fn login(addr: SocketAddr) -> String {
     let origin = origin_of(addr);
     let reply = reqwest::Client::new()
         .post(format!("{origin}{}", pi_gate::SESSION_PATH))
@@ -462,6 +477,20 @@ pub async fn get_with(addr: SocketAddr, path: &str, cookie: &str) -> Reply {
 /// 세션 없이 읽는다.
 pub async fn get_anonymous(addr: SocketAddr, path: &str) -> Reply {
     send(reqwest::Client::new().get(format!("{}{path}", origin_of(addr)))).await
+}
+
+/// 같은 출처(`Origin`)에서 JSON 글자 `body`를 `POST`한다. `cookie`가 없으면 세션 없이 보낸다.
+pub async fn post_with(addr: SocketAddr, path: &str, cookie: Option<&str>, body: &str) -> Reply {
+    let origin = origin_of(addr);
+    let mut request = reqwest::Client::new()
+        .post(format!("{origin}{path}"))
+        .header("Origin", &origin)
+        .header("Content-Type", "application/json")
+        .body(body.to_string());
+    if let Some(cookie) = cookie {
+        request = request.header("Cookie", cookie);
+    }
+    send(request).await
 }
 
 /// 세션을 받아 읽는다.
