@@ -184,3 +184,9 @@ N3가 `account_snapshot`을 일부러 잠금을 나눈 변이로 바꿔 보니 `
 
 - 원본 동작 근거: 원본에 없음 — 스펙 E21 · E22 · E33, 결정 14.
 - 시험으로 확인할 것: `approve` · `approve_for_trade`는 `granted()`가 거짓, `approve_granted_for_trade`는 참이고 `trade()`가 그 번호, 모의계좌가 세 표시 모두로 주문을 받는다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/paper/tests/` 전체 | 유지 | 10차는 표시에 표를 더하기만 한다 — 지금 두 함수는 `granted == false`로 그대로 |
