@@ -180,3 +180,12 @@ C9 E10 E11 E18 E20 E21 E23 E24 E31 E33 E34 N6 V17 V24 V25 V26 P1 P2 P3 P4 P5 P6 
 
 - 원본 동작 근거: 원본에 없음 — 스펙 E21 · E22 · E33, 결정 14.
 - 시험으로 확인할 것: 한도 100만 · 수수료 0.015%에서 수량 × 값이 한도와 같으면 승인대기(전엔 통과), 수수료까지 한도 안이면 통과 / 답 없음 줄임 수량이 수수료를 넣어 한도 이하 / 승인 증표로 지난 주문의 표시는 `granted`, 아니면 아님 / 4번 속성 시험.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/rules/tests/round4/reduce.rs::an_unanswered_buy_is_cut_down_to_the_auto_order_limit` | 고침 | 지시서 4차 2번: 20주 × 5만 = 한도와 같으면 수수료로 넘는다 — 19주로(뜻: 한도 안 가장 큰 수량) |
+| `crates/rules/tests/round4/reduce.rs` 나머지 · `suite/check_flow.rs` · `suite/second_round.rs` · `round4/team_exit.rs` | 고침 | 지시서 4차 1 · 2번: **수량 × 값이 한도와 같거나 수수료를 더하면 한도를 넘는 사례만** 기대(통과 → 승인대기, 줄인 수량)를 바꾼다. 그 밖의 단언(`amount()`가 수량 × 값인 것 등)은 그대로 — N1은 바꾼 사례를 보고에 적는다 |
+| `crates/rules/tests/suite/trade_permit.rs` | 유지 | 표시가 매매에 묶이는 것은 그대로, 승인 표 · 증표는 새 시험 |
+| 그 밖의 rules 시험 | 유지 | 4차와 무관 |
