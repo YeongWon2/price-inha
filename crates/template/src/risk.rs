@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 
 use crate::caps::{Change, adjust};
 use crate::error::OverCap;
-use crate::params::{AtrStop, Cooldown, LossStreakStop, MaxHolding, PctRange, RiskParams};
+use crate::params::{AtrBar, AtrStop, Cooldown, LossStreakStop, MaxHolding, PctRange, RiskParams};
 use crate::promotion::PromotionCriteria;
 
 /// 위험을 키울 수 있는 칸. 순서는 지시서 9차 (b) 4 표의 순서이며 [`widened_fields`] 가 이 순서로 준다.
@@ -186,12 +186,22 @@ fn fixed_stop_widened(before: Option<PctRange>, after: Option<PctRange>) -> bool
     }
 }
 
-/// ATR 손절이 넓어졌는가: 없어졌거나 배수가 커졌다.
+/// ATR 손절이 넓어졌는가: 없어졌거나, 배수가 커졌거나, 봉 단위가 길어졌다(분봉 → 일봉).
+///
+/// 같은 배수라도 일봉 ATR은 분봉 ATR보다 훨씬 크므로 봉 단위가 길어지면 배수가 줄어도 넓힘으로 본다(11차).
 fn atr_stop_widened(before: Option<AtrStop>, after: Option<AtrStop>) -> bool {
     match (before, after) {
         (Some(_), None) => true,
-        (Some(b), Some(a)) => a.multiple > b.multiple,
+        (Some(b), Some(a)) => a.multiple > b.multiple || bar_rank(a.bar) > bar_rank(b.bar),
         _ => false,
+    }
+}
+
+/// 봉 단위의 길이 순서: 분봉 < 일봉.
+fn bar_rank(bar: AtrBar) -> u8 {
+    match bar {
+        AtrBar::Minute => 0,
+        AtrBar::Day => 1,
     }
 }
 
@@ -230,6 +240,12 @@ fn promotion_loosened(before: &PromotionCriteria, after: &PromotionCriteria) -> 
 }
 
 /// 위험을 키우는 변경인가 = `!widened_fields(before, after).is_empty()`.
+///
+/// 넓힘으로 보는 것([`RiskField`] 칸마다): 1회 위험 · 일일 손실 · 최대 낙폭 · 종목 · 확신 종목 · 업종 비중 ·
+/// 자동 주문 한도 · 최대 동시 보유 수 · 일일 최대 매매 횟수의 상향, 최소 현금의 감소, 연속 손실 정지의 해제 ·
+/// 정지까지 손실 횟수 증가 · 쉬는 기간 단축, 고정 손절의 사라짐 · 끝 넓힘, ATR 손절의 사라짐 · 배수 증가 ·
+/// 봉 단위 길어짐(분봉 → 일봉), 논리 손절 · 마감 전 청산 끄기, 최대 보유 기간 늘림, 추격 폭 넓힘 · 없앰,
+/// 승격 기준 느슨하게. journal의 개선안 판정도 이 함수를 그대로 쓴다.
 pub fn increases_risk(before: &RiskParams, after: &RiskParams) -> bool {
     !widened_fields(before, after).is_empty()
 }
