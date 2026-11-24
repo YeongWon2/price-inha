@@ -977,3 +977,20 @@ N1이 알아냈다: 알림음 설정(1번 (바))은 `localStorage`를 쓰는데,
 | 사무실 대화 · 승인 · 말풍선 · 회의 시험(`office-chat-lines` · `office-approval*` · `office-speech` · `office-caption` · `office-team-feed` · `office-smalltalk` · `office-bubble-place` · `office-trim`) | 유지 | 1:1 대화를 여는 길이 하나 더 생길 뿐 지금 동작은 그대로 |
 | Rust의 사무실 시험(office API · 이벤트 · 스냅샷) | 유지 | 내 캐릭터 API는 새 경로다. 지금 경로의 모양은 그대로 |
 | 그 밖의 server 시험 | 유지 | 32차와 무관 |
+
+## 33차 멘션 · 전체 공지 · 담당 부르기 (2026-11-25 조정자, 결정 17 — 사용자 "채팅에서 멘션 가능하게" · "팀방에서는 전체 공지사항을 전달할 수 있게")
+
+근거: `docs/product/stock-team/additions.md` R5-6~8 · R17 · F10 대안 4a~4e · 7a · F11 · C18 · C19 · C20 · E43~E48 · N10 · V58~V60 · V71~V74 · T27(차수 표 14번).
+office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_mentions`) · 팀 방 글(`post_team`) · 답 잇기(`complete_with_relay`) · 공지(`post_notice`, `office.notice` · `office.notice_ack`) · 부르기 단계(`summon` — called → waiting → returning → idle, 10초 · 30초). store에는 공지 · 확인(`notices` · `notice_acks`)이 있다(store 19차). agent에는 공지를 논의에 넘기는 길(`with_notices`)이 있다(agent 11차). **server가 이것들을 API와 화면에 잇지 않았다** — 이 차수가 잇는다.
+
+1. **멘션해서 말하기**(C18): `POST /api/office/chat`이 `{"room": "team", "text", "sourceMessageId"}`를 받는다(`agent`를 주면 지금처럼 그 담당 하나 — 그대로). 글 속 `@[이름]`으로 멘션된 담당만 답한다(여럿이면 차례로). 성공 `{"responders": [...], "responses": [...]}`. 멘션이 없으면 아무도 답하지 않고 `{"responders": [], "hint": "no_mention"}`(4b). 멘션한 이름이 담당 가운데 없으면 보낸 사람에게만 "지목한 상대가 이 방에 없어 아무도 답하지 않았습니다."(4d · E43). 하루 AI 상한 · 논의 중 등 기존 거절은 그대로다(E44는 설계서대로).
+2. **멘션 걸어오기**: 멘션된 담당은 답을 쓰기 시작하는 순간 `office.summon`(`reason: "mention"`, `phase: "called"`)으로 내 곁으로 온다. 사용자가 팀 방을 보는 동안 곁에 남고, 다른 방으로 바꾸면(화면이 `POST /api/office/summon/view {"room"}`로 알림) 바로 돌아간다. 1:1 대화는 열리지 않는다(답은 채팅 패널과 머리 위 말풍선).
+3. **전체 공지**(C19 · F11): `POST /api/office/notice` `{"text", "sourceMessageId"}` → `{"notice", "acks": [{"agent","state"}]}`. 담당 여섯이 차례로 짧게 확인 답을 한다(`office.chat`에 `"notice": 번호`, 담당별 `office.notice_ack`). `GET /api/office/notices?limit=`로 지난 공지와 확인 상태를 읽는다. 공지는 그 뒤 열리는 논의에 자료로 넘어간다(결정 19: 논의를 열기 전까지 보낸 공지만 — 보낸 시각이 판단 시각보다 늦지 않게). 같은 `sourceMessageId`를 다시 보내면 한 번만 처리한다. 실패는 E45 · E46대로(하루 상한이면 `"limit"` 상태로 남고 공지 자체는 저장된다).
+4. **담당 부르기**(C20): `POST /api/office/summon {"agent"}` → `{"agent","phase":"called"}`. 화면이 걸어오기를 그리고 도착하면 `POST /api/office/summon/arrived`로 알린다(→ waiting). 대화가 10초 없으면 돌아간다(returning → idle). 30초 안에 도착 알림이 없으면 자리로(N10). 모르는 담당 400 `unknown_agent`, 회의 중 409 `meeting_reserved`(E47), E48은 설계서대로. 시간은 office 크레이트의 시계로 재고 server는 주기적으로 그 시계를 굴린다(깨우기 엔진과 따로, 가볍게).
+5. **화면 — 멘션 칩**: 팀 방 글 칸에서 `@`를 치면 담당 목록이 뜨고(방향키 · Enter · 누르기로 고름, Esc로 닫음) 고르면 `@이름` 칩이 글에 들어간다. 보낼 때 `@[이름]`으로 바뀌어 간다(이름 속 `\` `[` `]`는 `\`로 가림). 칩은 한 번의 지우기로 통째로 지워진다. 한글 조합 중에도 깨지지 않는다. 멘션 없이 보내면 "@로 담당을 부르거나 공지로 보내세요" 안내(4b2).
+6. **화면 — 공지**: 팀 방에 "공지" 단추. 누르면 글 칸이 공지 모드가 되고(표시가 보인다) 보내면 공지로 간다. 공지는 채팅에 다른 모양(공지 띠)으로 보이고 그 아래 담당별 확인(✓ 답함 · 기다림 · 상한 · 실패)이 붙는다. 사무실에 들어오면 지난 공지를 읽어 채운다.
+7. **화면 — 부르기**: 담당 목록(담당 탭 · 외형 목록)에 "부르기" 단추. 누르면 그 담당이 자리에서 내 곁 빈 칸까지 걸어오고(32차 길 찾기) 나를 보고 선다. 도착하면 1:1 대화가 열린다(4c4). 멘션으로 온 담당은 대화를 열지 않는다. 회의 중이면 "회의 중이라 부를 수 없습니다" 안내(E47). `office.summon` 이벤트로 단계가 바뀌면 그대로 그린다(다른 화면에서 불러도 보인다).
+8. 관문은 사무실의 다른 쓰기와 같다(세션 · 원격 401 · Origin). 글은 저장 · 이벤트 전에 가린다(기존 가림 규칙 그대로).
+
+- 원본 동작 근거: `docs/research/metaverse-office-refs.md` F · H 4 · 5(부르기 상태 기계 · 멘션 걸어오기 · 10초 복귀 · 방 바꾸면 복귀 — 원본과 같게), `docs/research/deskrpg.md` 10절(멘션 글 모양 `@[이름]` · 가림 · 멘션 없으면 아무도 답하지 않음 · 없는 상대 안내 글). 공지는 원본에 없음 — additions.md R17 · F11, 결정 17 · 19.
+- 시험으로 확인할 것(V58~V60 · V71~V74): Rust(가짜 AI) — 멘션된 담당만 답함 · 여럿이면 차례 · 멘션 없으면 `no_mention` · 없는 이름 안내 · `agent`를 주면 지금처럼 / 멘션 답 시작에 `office.summon` called(mention) · 방 바꾸면 returning / 공지: 저장 · 여섯 확인 · `office.notice` · `office.notice_ack` · `notices` 읽기 · 같은 sourceMessageId 한 번 · 상한이면 limit 상태 · 공지가 다음 논의 자료에 들어감(판단 뒤에 보낸 공지는 안 들어감) / 부르기: called → arrived → waiting → 10초 뒤 returning · 30초 도착 없음 → idle · 회의 중 409 · 모르는 담당 400 / 관문 401 · 가짜 서버 밖 요청 0건. 화면(vitest) — 멘션 칩: `@` 목록 · 고르기 · 칩 통째 지우기 · 보낼 글 모양과 가림 · 조합 중 / 멘션 없음 안내 / 공지 모드 · 공지 띠 · 확인 상태 그리기 · 지난 공지 채우기 / 부르기 단추 → 요청 · 단계별 그리기 정보(걸어올 칸은 32차 `besideCell`) · 도착 알림 · 회의 중 안내 / 방 바꿈 알림 / 경로 표.
