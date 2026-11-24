@@ -33,9 +33,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// 27차 3번 · 28차 2번: 템플릿 · 규칙 화면에는 내용이 생긴다(template-screen.test.ts · rules-screen.test.ts) —
-// "준비 중" 틀 단언은 나머지 둘(계좌 · 히스토리)에만.
-const FRAMES = ADMIN.filter(([screen]) => screen !== "templates" && screen !== "rules");
+// 27차 3번 · 28차 2번 · 29차 2번: 템플릿 · 규칙 · 히스토리 화면에는 내용이 생긴다(template-screen.test.ts ·
+// rules-screen.test.ts · history-screen.test.ts) — "준비 중" 틀 단언은 나머지 하나(계좌)에만.
+const FRAMES = ADMIN.filter(([screen]) => screen !== "templates" && screen !== "rules" && screen !== "history");
 
 describe("관리 화면 틀", () => {
   for (const [screen, label, href] of FRAMES) {

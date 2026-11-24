@@ -175,7 +175,94 @@ pub const APPROVAL_DECIDE_PATH: &str = "/api/approvals/{id}/{verb}";
 /// "orders": 그날 체결된 주문 수, "pnl_krw": 그날 시작 평가액에서 지금까지의 손익(십진수 글자),
 /// "reviews": 그날 남긴 복기 수, "backup_at": 마지막 백업 성공 시각(유닉스 밀리초) | null}`.
 /// 날짜는 시장 달력의 오늘이다. 백업이 있으면 `done`에 "백업 완료"와 그 시각이 들어간다.
+///
+/// (29차 1번 · C30 · V84) `GET ?date=YYYY-MM-DD`로 그 시장 날짜의 하루 정리를 읽는다.
+///
+/// - 날짜가 없거나 시장 달력의 오늘과 같으면 지금과 같은 응답이다(한 글자도 다르지 않다).
+/// - 다른 날짜면 같은 모양이고 `date`는 준 날짜, `orders` · `reviews` · `done` · `review`는 그 날짜의 것이다
+///   (`orders`: 그 날짜에 낸 주문 가운데 다 체결된 수, `reviews`: 그 날짜에 남긴 복기 수).
+///   그날 시작 평가액은 남아 있지 않으므로 `pnl_krw`는 `null`이고 `pnl`은 그날 손익 기록이 없다는 글이다.
+///   `backup_at`은 날짜와 상관없이 마지막 백업 성공 시각이다.
+/// - 날짜 글자가 `YYYY-MM-DD` 모양의 있는 날짜가 아니면 400 `{"error": "invalid_input"}`.
+/// - 세션이 있어야 열린다(원격은 세션 없이 401).
 pub const DAILY_SUMMARY_PATH: &str = "/api/daily-summary";
+
+/// (29차 1번 · C30 · V83) 히스토리 화면의 매매 목록. `GET ?before=&max=&state=` → 200
+///
+/// ```text
+/// {
+///   "trades": [{"id": 매매 번호, "symbol", "account": "paper" | "live",
+///               "state": 매매 상태 글자, "created_at": 유닉스 밀리초, "updated_at": 유닉스 밀리초,
+///               "decided_at": 유닉스 밀리초 | null}],
+///   "next": 다음 쪽의 before 값 | null
+/// }
+/// ```
+///
+/// - 번호가 큰 것(최근)부터다(`pi_store::Store::trade_page`). `before`가 있으면 그 번호보다 작은 매매만.
+/// - `max`는 한 쪽의 줄 수: 없으면 [`HISTORY_DEFAULT_MAX`], [`pi_store::HISTORY_PAGE_MAX`](100)보다 크면 100으로
+///   줄인다. 1 이상의 정수가 아니면 400 `{"error": "invalid_input"}`.
+/// - `next`는 이 쪽 다음에 매매가 더 있을 때만 이 쪽 마지막 줄의 번호이고, 더 없으면 `null`이다. 그 값을
+///   `before`로 주면 다음 쪽이 겹침 · 빠짐 없이 이어진다.
+/// - `state`는 매매 상태 글자(`discussing` · `judged` · `awaiting_approval` · `blocked` · `ordered` · `holding` ·
+///   `sold` · `reviewed`)이고 그 상태인 매매만 낸다. 다른 글자면 400 `{"error": "invalid_input"}`.
+/// - `before`가 1 이상의 정수가 아니면 400 `{"error": "invalid_input"}`. 빈 저장소면 빈 목록 · `next` `null`.
+/// - 세션이 있어야 열린다(원격은 세션 없이 401).
+pub const TRADES_PATH: &str = "/api/trades";
+
+/// 매매 목록 · 승인 기록의 `max`가 없을 때 한 쪽의 줄 수.
+pub const HISTORY_DEFAULT_MAX: usize = 20;
+
+/// (29차 1번 · C30 · V83 · F7-7) 매매 하나. `GET /api/trades/{id}` → 200
+///
+/// ```text
+/// {
+///   "id", "symbol", "account", "state", "created_at", "updated_at", "decided_at"   (목록의 줄과 같다),
+///   "states": [{"state": 바뀐 상태 글자, "from": 바뀌기 전 상태 글자 | null, "at": 유닉스 밀리초}],
+///   "side": "buy" | "sell" | null,
+///   "quantity": 수량 | null,
+///   "facts": [근거 자료 이름],
+///   "currency": "KRW" | "USD",
+///   "basis": {
+///     "hypothesis": 글 | null, "trigger": 글 | null,
+///     "entry": 십진수 글자 | null, "stop": 십진수 글자 | null, "target": 십진수 글자 | null,
+///     "expected_value": 십진수 글자 | null,
+///     "scores": [{"role": 담당, "score": 점수, "reason": 글}],
+///     "consensus_score": 점수 | null,
+///     "sources": [{"name": 자료 이름, "known_at": 유닉스 밀리초}]
+///   },
+///   "summary": 쉬운 말 요약
+/// }
+/// ```
+///
+/// - `states`는 `pi_store::Store::trade_flow`의 상태 바뀜 줄 그대로다(시각 순서, 만든 줄의 `from`은 `null`).
+///   `side` · `quantity` · `facts`도 그 흐름의 계획 방향 · 수량 · 붙은 자료 이름(처음 붙인 순서)이다.
+/// - `basis`는 매매의 근거(`pi_store::Trade`의 근거 · 담당 점수 · 합의 점수 · 판단에 쓴 자료)다. 금액은 저장소의
+///   통화 최소 단위를 그 시장 통화(`currency`, 설정의 시장)의 십진수 글자로 바꾼 것이다(원화는 그대로, 달러는
+///   센트 → 달러). 판단 전이면 빈 칸은 `null` · 빈 목록이다. 글은 가린 것이다.
+/// - `summary`는 [`crate::TRADE_BASIS_PATH`]의 `summary`와 같은 글이다(화면은 근거를 따로 부르지 않는다).
+/// - 없는 번호면 404 `{"error": "not_found"}`, 번호가 정수가 아니면 400.
+/// - 세션이 있어야 열린다(원격은 세션 없이 401).
+pub const TRADE_PATH: &str = "/api/trades/{id}";
+
+/// (29차 1번 · C30 · V84) 승인 요청 기록. `GET ?before=&max=&status=` → 200
+///
+/// ```text
+/// {
+///   "approvals": [{"id": 줄 번호, "number": 승인 번호, "summary": 가린 사유 글,
+///                  "status": "pending" | "approved" | "rejected" | "no_answer" | "expired",
+///                  "created_at": 유닉스 밀리초, "resolved_at": 유닉스 밀리초 | null,
+///                  "consumed_at": 유닉스 밀리초 | null}],
+///   "next": 다음 쪽의 before 값 | null
+/// }
+/// ```
+///
+/// - 줄 번호가 큰 것(최근)부터다(`pi_store::Store::approval_page`). `before` · `max` · `next`의 뜻과 400 규칙은
+///   [`TRADES_PATH`]와 같다(커서는 줄 번호 `id`다).
+/// - `summary`는 승인 카드([`APPROVAL_PATH`])의 `summary`와 같은 글(요청 사유를 가린 것)이다. 비밀 값은 오지 않는다.
+/// - `status`가 위 다섯 글자가 아니면 400 `{"error": "invalid_input"}`.
+/// - `GET /api/approvals/{id}`(승인 카드) · `POST /api/approvals/answer` · `/api/approvals/{id}/{verb}`는 그대로다.
+/// - 세션이 있어야 열린다(원격은 세션 없이 401).
+pub const APPROVAL_LOG_PATH: &str = "/api/approvals";
 
 /// 담당이 쓰는 지식 검색 도구의 이름(T16).
 pub const KNOWLEDGE_TOOL: &str = "knowledge_search";

@@ -54,10 +54,14 @@ describe("화면이 부르는 경로", () => {
     expect(sorted(SCREEN_PATHS.phone)).toEqual(
       sorted(["/api/push/key", "/api/push/subscribe", "/api/notices", "/api/daily-summary", ...APPROVALS]),
     );
-    // 26차 4번: 관리 화면 둘(틀만)은 세션 경로만 부른다.
-    for (const screen of ["account", "history"] as const) {
+    // 26차 4번: 관리 화면 하나(계좌, 틀만)는 세션 경로만 부른다.
+    for (const screen of ["account"] as const) {
       expect(sorted(SCREEN_PATHS[screen]), screen).toEqual(["/api/session"]);
     }
+    // 29차 2번: 히스토리 화면은 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록 경로를 부른다.
+    expect(sorted(SCREEN_PATHS.history)).toEqual(
+      sorted(["/api/session", "/api/trades", "/api/trades/{id}", "/api/daily-summary", "/api/approvals"]),
+    );
     // 28차 2번: 규칙 화면은 규칙 읽기 · 개선안 목록 · 개선안 답하기 경로를 부른다.
     expect(sorted(SCREEN_PATHS.rules)).toEqual(
       sorted(["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer"]),

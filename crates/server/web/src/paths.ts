@@ -55,7 +55,16 @@ export const API = {
   rules: "/api/rules",
   proposals: "/api/proposals",
   proposalAnswer: "/api/proposals/answer",
+  // 히스토리 화면(server 29차): 매매 목록 `GET ?before=&max=&state=` · 승인 요청 기록 `GET ?before=&max=&status=`.
+  // 매매 하나는 [`tradePath`], 하루 정리는 [`API.dailySummary`]`?date=`.
+  trades: "/api/trades",
+  approvalLog: "/api/approvals",
 } as const;
+
+/** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
+export function tradePath(id: number | string): string {
+  return API.trades + "/" + encodeURIComponent(String(id));
+}
 
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
 export function templateStopPath(id: number | string): string {
@@ -106,7 +115,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   ],
   // 규칙 화면(server 28차 2번): 규칙 읽기 · 개선안 목록 · 개선안 답하기(번호 · 지문을 그대로 보낸다).
   rules: [API.session, API.rules, API.proposals, API.proposalAnswer],
-  history: [API.session],
+  // 히스토리 화면(server 29차 2번): 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록.
+  history: [API.session, API.trades, "/api/trades/{id}", API.dailySummary, API.approvalLog],
 };
 
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
