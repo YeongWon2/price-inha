@@ -648,11 +648,11 @@ fn 사무실_외형은_저장소_스냅샷에_들어가서_백업_되살리기�
 // 검증: D6 V36
 #[test]
 fn 스키마_버전은_10이고_새_저장소는_10으로_만들어진다() {
-    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(SCHEMA_VERSION, 11);
     let (_dir, path, store) = temp_store();
-    assert_eq!(store.info().unwrap().schema_version, 10);
+    assert_eq!(store.info().unwrap().schema_version, 11);
     drop(store);
-    assert_eq!(raw_user_version(&path), 10);
+    assert_eq!(raw_user_version(&path), 11);
 }
 
 // 검증: D6 V36 M4
@@ -662,7 +662,7 @@ fn 옛_판_9_파일을_열면_10으로_올라가고_개선안은_복기_출처�
     assert_eq!(raw_user_version(&path), 9);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 10);
+    assert_eq!(store.info().unwrap().schema_version, 11);
 
     // 있던 개선안은 그대로 읽히고 출처는 복기다.
     let proposals = store.proposals_in_state(ProposalState::Proposed).unwrap();
@@ -692,7 +692,7 @@ fn 옛_판_9_파일을_열면_10으로_올라가고_개선안은_복기_출처�
     drop(store);
 
     // 다시 열어도 같다.
-    assert_eq!(raw_user_version(&path), 10);
+    assert_eq!(raw_user_version(&path), 11);
     let again = Store::open(&path).unwrap();
     assert_eq!(again.office_looks().unwrap().len(), 1);
     assert_eq!(

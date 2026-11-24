@@ -627,8 +627,8 @@ fn 조회는_저장소를_바꾸지_않고_표와_판_번호도_그대로다() {
 
     assert_eq!(first, again);
     assert_eq!(store.info().unwrap(), before);
-    assert_eq!(before.schema_version, 10);
-    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(before.schema_version, 11);
+    assert_eq!(SCHEMA_VERSION, 11);
 
     // 다시 열어도 같은 목록이다.
     drop(store);

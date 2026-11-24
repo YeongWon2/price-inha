@@ -167,11 +167,11 @@ fn snapped() -> (
 // 검증: D10 M7
 #[test]
 fn 스키마_버전은_7이고_번들_sqlite에서_fts5_trigram이_켜져_있다() {
-    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(SCHEMA_VERSION, 11);
     let (_dir, path, store) = temp_store();
-    assert_eq!(store.info().unwrap().schema_version, 10);
+    assert_eq!(store.info().unwrap().schema_version, 11);
     drop(store);
-    assert_eq!(count(&path, "PRAGMA user_version"), 10);
+    assert_eq!(count(&path, "PRAGMA user_version"), 11);
     let mem = rusqlite::Connection::open_in_memory().unwrap();
     mem.execute_batch(
         "CREATE VIRTUAL TABLE probe USING fts5(body, tokenize='trigram');

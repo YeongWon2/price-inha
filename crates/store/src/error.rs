@@ -2,7 +2,9 @@
 
 use crate::approval::{ApprovalId, ApprovalStatus};
 use crate::fact::FactId;
+use crate::memo::DecisionMemoId;
 use crate::model::{Amount, RationaleField, TeamState, TradeId, TradeState, UnixMillis};
+use crate::notice::NoticeId;
 use crate::proposal::{ProposalId, ProposalState};
 use crate::receipt::TriggerReceiptKey;
 use crate::room::RoomActorKind;
@@ -303,6 +305,46 @@ pub enum StoreError {
         /// 지금 판.
         revision: u32,
     },
+    /// 내 캐릭터 값이 규칙에 맞지 않는다(이름 0자 · 51자 이상, 빈 외형). 아무것도 바꾸지 않았다. (19차)
+    #[error("내 캐릭터 값이 맞지 않다: {0}")]
+    InvalidPlayer(String),
+    /// 담당 의견 · 팀장 요약이 규칙에 맞지 않는다. 판단도 의견도 남기지 않았다. (19차)
+    #[error("담당 의견이 맞지 않다: {0}")]
+    InvalidOpinion(String),
+    /// 공지 · 공지 확인 값이 규칙에 맞지 않는다(글 0자 · 501자 이상, 기다림으로 답하기). (19차)
+    #[error("공지 값이 맞지 않다: {0}")]
+    InvalidNotice(String),
+    /// 그 번호의 공지가 없다. (19차)
+    #[error("공지를 찾을 수 없다: {0:?}")]
+    NoticeNotFound(NoticeId),
+    /// 그 공지에 그 담당의 확인 줄이 없다. (19차)
+    #[error("공지 {notice:?}에 담당 {role}의 확인이 없다")]
+    NoticeAckNotFound {
+        /// 공지 번호.
+        notice: NoticeId,
+        /// 담당 이름.
+        role: String,
+    },
+    /// 그 담당의 공지 확인은 이미 기다림에서 바뀌었다(한 번만 바뀐다). (19차)
+    #[error("공지 {notice:?}에 담당 {role}의 확인은 이미 바뀌었다")]
+    NoticeAckLocked {
+        /// 공지 번호.
+        notice: NoticeId,
+        /// 담당 이름.
+        role: String,
+    },
+    /// 그 매매의 결정 메모가 이미 있다(매매마다 하나). (19차)
+    #[error("매매 {0:?}의 결정 메모가 이미 있다")]
+    DecisionMemoExists(TradeId),
+    /// 그 번호의 결정 메모가 없다. (19차)
+    #[error("결정 메모를 찾을 수 없다: {0:?}")]
+    DecisionMemoNotFound(DecisionMemoId),
+    /// 결정 메모가 이미 정산 대기에서 바뀌었다(한 번만 바뀐다). (19차)
+    #[error("결정 메모 {0:?}는 이미 정산 대기가 아니다")]
+    DecisionMemoLocked(DecisionMemoId),
+    /// 결정 메모 값이 규칙에 맞지 않는다(빈 교훈 등). (19차)
+    #[error("결정 메모 값이 맞지 않다: {0}")]
+    InvalidDecisionMemo(String),
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

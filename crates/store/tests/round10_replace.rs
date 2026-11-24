@@ -17,9 +17,11 @@ use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
 use pi_store::{
-    AccountKind, ApprovalStatus, ApprovalUse, FactValue, Judgment, MessageRole, NewApprovalRequest,
-    NewFact, NewMessage, NewProposal, NewRoomEvent, NewTemplate, NewTrade, NewUserProposal,
-    Rationale, RoomActorKind, Store, TradeId, TradeSide, TriggerReceiptKey, TriggerReceiptStatus,
+    AccountKind, ApprovalStatus, ApprovalUse, Conviction, FactValue, Judgment, MessageRole,
+    NewApprovalRequest, NewDecisionMemo, NewFact, NewMessage, NewNotice, NewProposal, NewRoomEvent,
+    NewTemplate, NewTrade, NewUserProposal, NoticeAckStatus, Rationale, RoleOpinion, RoleScore,
+    RoomActorKind, Stance, Store, TradeId, TradeSide, TradeSummary, TriggerReceiptKey,
+    TriggerReceiptStatus,
 };
 use rusqlite::types::Value as SqlValue;
 use serde_json::json;
@@ -27,7 +29,7 @@ use serde_json::json;
 // ───────────── 도우미 ─────────────
 
 /// 보호한다고 적은 표. 지우기를 막는 표는 모두 여기 있어야 한다(아래 테스트가 스키마에서 확인한다).
-const PROTECTED: [&str; 25] = [
+const PROTECTED: [&str; 30] = [
     "team_history",
     "events",
     "access_log",
@@ -53,6 +55,11 @@ const PROTECTED: [&str; 25] = [
     "trade_state_changes",
     "proposal_sources",
     "user_revisions",
+    "role_opinions",
+    "trade_summaries",
+    "notices",
+    "notice_acks",
+    "decision_memos",
 ];
 
 const VERBS: [&str; 2] = ["INSERT OR REPLACE INTO", "REPLACE INTO"];
@@ -235,6 +242,56 @@ fn fill(store: &Store) -> TradeId {
         .unwrap();
     store
         .apply_cooled_user_proposal(user.id, &json!({ "스타일": "스윙", "R%": "1.5" }), t(75))
+        .unwrap();
+
+    // 담당 의견 · 팀장 요약 · 공지 · 공지 확인 · 결정 메모 표에 줄을 만든다(판 11).
+    let opined = new_trade(store);
+    store
+        .judge_trade_with_opinions(
+            opined,
+            Judgment {
+                decided_at: t(80),
+                rationale: Rationale::default(),
+                sources: Vec::new(),
+                scores: vec![RoleScore {
+                    role: AGENT.to_string(),
+                    score: 30,
+                    reason: "거래량 증가".to_string(),
+                }],
+                consensus_score: 60,
+            },
+            TradeSide::Buy,
+            &[RoleOpinion {
+                role: AGENT.to_string(),
+                stance: Some(Stance::Bullish),
+                conviction: Some(Conviction::Medium),
+                reason: "거래량 증가".to_string(),
+                horizon_days: Some(5),
+                abstained: false,
+            }],
+            &TradeSummary {
+                summary: "거래량이 늘었다. 사기로 한다.".to_string(),
+                reversal: "거래량이 줄면 뒤집힌다".to_string(),
+            },
+        )
+        .unwrap();
+    let notice = store
+        .create_notice(NewNotice {
+            text: "내일은 쉰다".to_string(),
+            roles: vec![AGENT.to_string()],
+            at: t(81),
+        })
+        .unwrap();
+    store
+        .answer_notice(notice.id, AGENT, NoticeAckStatus::Answered, "알겠다", t(82))
+        .unwrap();
+    store
+        .create_decision_memo(NewDecisionMemo {
+            trade: opined,
+            date: "2026-11-24".to_string(),
+            side: TradeSide::Buy,
+            at: t(83),
+        })
         .unwrap();
     judged
 }

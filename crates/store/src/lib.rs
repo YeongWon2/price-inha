@@ -20,9 +20,13 @@ mod history;
 mod keep;
 mod knowledge;
 mod log;
+mod memo;
 mod model;
+mod notice;
 mod office;
+mod opinion;
 mod plan;
+mod player;
 mod proposal;
 mod push;
 mod receipt;
@@ -48,13 +52,17 @@ pub use knowledge::{
     ChunkEmbedding, ChunkId, KnowledgeChunk, KnowledgeHit, KnowledgeKind, KnowledgeQuery,
     KnowledgeSource, NewKnowledgeRecord,
 };
+pub use memo::{DecisionMemo, DecisionMemoId, DecisionMemoState, MemoSettlement, NewDecisionMemo};
 pub use model::{
     AccessRecord, AccountKind, Amount, Approval, BlockKind, BlockReason, Event, EventRange,
     Judgment, NewAccess, NewTrade, Rationale, RationaleField, RoleScore, SourceRef, StoreInfo,
     TeamCause, TeamChange, TeamState, TeamStateRecord, TimedEvent, Trade, TradeId, TradeState,
     UnixMillis,
 };
+pub use notice::{NOTICE_TEXT_MAX_CHARS, NewNotice, Notice, NoticeAck, NoticeAckStatus, NoticeId};
+pub use opinion::{Conviction, RoleOpinion, Stance, TradeOpinions, TradeSummary};
 pub use plan::{TradeSide, TradeStateChange};
+pub use player::{Facing, PLAYER_DEFAULT_NAME, PLAYER_NAME_MAX_CHARS, Player, PlayerSpot};
 pub use proposal::{
     NewProposal, NewUserProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalSource,
     ProposalState,
