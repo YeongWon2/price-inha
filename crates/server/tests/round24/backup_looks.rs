@@ -1,8 +1,6 @@
-//! 21차 6번(뒤): 외형 저장(`office-looks.json`)이 백업에 들어간다. 가짜 GitHub에 올라온 묶음을 우리 age 키로 풀어
-//! 외형 파일이 들어 있고 고른 외형이 그 안에 있는지 본다. 실제 GitHub는 부르지 않는다.
-//!
-//! 지금 백업 묶음에는 저장소 스냅샷 한 파일뿐이다 — 들어가게 하려면 backup 모듈의 묶음 만들기를 넓혀야 한다
-//! (server만으로는 안 된다: 조정자에게 알린다).
+//! 21차 6번(뒤): 고른 외형이 백업에 들어간다. 가짜 GitHub에 올라온 묶음을 우리 age 키로 풀어
+//! 고른 외형이 묶음 안(저장소 스냅샷 등)에 있는지 본다. 실제 GitHub는 부르지 않는다.
+//! (조정자: 외형은 저장소에 둔다 — 묶음의 파일 이름에 기대지 않는다.)
 
 use price_inha::{OFFICE_LOOK_PATH, OFFICE_LOOKS_PATH};
 use serde_json::json;
@@ -43,18 +41,13 @@ async fn 백업을_풀어_보면_고른_외형이_들어_있다() {
     let bytes = github.file(&report.remote_path);
     let bundle = pi_backup::open(&bytes, &age.identity).expect("우리 키로 풀린다");
     pi_backup::verify(&bundle).expect("온전한 묶음");
-    let looks = bundle
-        .files
-        .iter()
-        .find(|file| file.path == "office-looks.json")
-        .unwrap_or_else(|| {
-            let names: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
-            panic!("백업에 외형 파일이 있다: 지금 든 파일 {names:?}")
-        });
-    let text = String::from_utf8_lossy(&looks.bytes);
+    let names: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
     assert!(
-        text.contains(&shown),
-        "고른 외형({shown})이 백업의 외형 파일에 있다: {text}"
+        bundle
+            .files
+            .iter()
+            .any(|file| String::from_utf8_lossy(&file.bytes).contains(&shown)),
+        "고른 외형({shown})이 백업 묶음 안에 있다: 지금 든 파일 {names:?}"
     );
     bench.close().await;
 }
