@@ -10,8 +10,10 @@ use crate::chat::{ChatResponse, ChatStatus, Room};
 use crate::error::Error;
 use crate::place::{Activity, Agent, AgentView, TeamState, Work, place_of};
 use crate::port::{Clock, EventSink};
-use crate::summon::SummonPhase;
+use crate::summon::{SummonPhase, SummonReason};
 use crate::{CHAT_QUEUE_MAX, EVENT_AGENT, EVENT_CHAT};
+
+mod summon_flow;
 
 /// 끝난 응답을 [`Office::response`]로 다시 볼 수 있게 남겨 두는 개수.
 /// 원본 DeskRPG 응답 추적기의 "끝난 것은 최근 100개"와 같다(`office-deep.md` 5-1 · 9-3).
@@ -57,6 +59,20 @@ struct State {
     /// 끝난 응답 번호(끝난 순서). 오래된 것부터 지운다.
     finished: VecDeque<String>,
     next_id: u64,
+    /// 부르기 단계(메모리에만 둔다).
+    phase: [SummonPhase; 6],
+    /// 왜 왔는가. 단계가 `Idle`이면 `None`.
+    reason: [Option<SummonReason>; 6],
+    /// 단계가 마지막으로 바뀐 시각.
+    phase_at: [UnixMillis; 6],
+    /// 곁에서 기다리는 담당과 마지막으로 대화한 시각(도착 때 시작한다).
+    last_talk: [UnixMillis; 6],
+    /// 일 상태가 마지막으로 바뀐 시각(N15).
+    work_since: [UnixMillis; 6],
+    /// 밖의 소식이나 오래된 일 풀기가 정한 일 상태. 응답이 바뀌면 걷힌다.
+    work_override: [Option<Work>; 6],
+    /// 이미 반영한 일 소식의 시각. 이보다 크지 않은 늦은 소식은 버린다(E55).
+    work_floor: [Option<UnixMillis>; 6],
 }
 
 impl State {
@@ -79,14 +95,20 @@ impl State {
         }
     }
 
+    /// 보이는 일 상태: 밖의 소식 · 풀기가 정한 것이 있으면 그것, 없으면 응답에서 나온 것.
+    fn effective_work(&self, agent: Agent) -> Work {
+        self.work_override[agent.index()].unwrap_or_else(|| self.work_of(agent))
+    }
+
     fn desired(&self, agent: Agent) -> AgentView {
+        let i = agent.index();
         AgentView {
             agent,
-            place: place_of(self.team, self.activity[agent.index()]),
-            work: self.work_of(agent),
-            phase: SummonPhase::Idle,
-            reason: None,
-            phase_at: UnixMillis(0),
+            place: place_of(self.team, self.activity[i]),
+            work: self.effective_work(agent),
+            phase: self.phase[i],
+            reason: self.reason[i],
+            phase_at: self.phase_at[i],
         }
     }
 
@@ -131,6 +153,13 @@ impl Office {
             last_failed: [false; 6],
             finished: VecDeque::new(),
             next_id: 1,
+            phase: [SummonPhase::Idle; 6],
+            reason: [None; 6],
+            phase_at: [UnixMillis(0); 6],
+            last_talk: [UnixMillis(0); 6],
+            work_since: [UnixMillis(id_prefix); 6],
+            work_override: [None; 6],
+            work_floor: [None; 6],
         };
         Office {
             sink,
@@ -179,7 +208,12 @@ impl Office {
     /// 응답 객체를 이벤트로 낸 뒤에 상태에 반영한다. `turn`을 쥔 채로 부른다.
     async fn publish_response(&self, response: &ChatResponse) -> Result<(), Error> {
         self.publish(EVENT_CHAT, response.to_json()).await?;
+        let now = self.clock.now();
         let mut state = self.state();
+        // 응답이 바뀌었다: 일 상태가 실제로 바뀐 것이므로 시각을 새로 세고 밖의 소식 · 풀기는 걷는다.
+        let i = response.agent.index();
+        state.work_since[i] = now;
+        state.work_override[i] = None;
         if response.status.is_terminal() {
             state.finish(response.clone());
         } else {
@@ -338,74 +372,6 @@ impl Office {
             reason.to_owned()
         });
         self.finish(response).await
-    }
-
-    /// 담당을 부른다(C20 · 결정 17). 자리의 담당은 `Called`(까닭 `Call`)로 들어가고 `office.agent`를 하나 낸다.
-    ///
-    /// - 담당이 미팅룸에서 논의 중이면(`place`가 `Meeting`) [`Error::MeetingReserved`]이고 아무것도 바뀌지 않는다.
-    /// - 이미 `Called` · `Waiting`이면 그대로다(이벤트 없음). 일하는 중이어도 부를 수 있다.
-    /// - 돌려주는 것은 부른 뒤의 단계다.
-    pub async fn summon(&self, agent: Agent) -> Result<SummonPhase, Error> {
-        let _ = agent;
-        todo!()
-    }
-
-    /// 화면이 "도착했다"를 알린다. `Called`면 `Waiting`으로 간다. 그 밖의 단계에서는 아무것도 하지 않는다.
-    /// 돌려주는 것은 알린 뒤의 단계다.
-    pub async fn summon_arrived(&self, agent: Agent) -> Result<SummonPhase, Error> {
-        let _ = agent;
-        todo!()
-    }
-
-    /// 화면이 "자리로 돌아왔다"를 알린다. `Returning`이면 `Idle`로 간다. 그 밖의 단계에서는 아무것도 하지 않는다.
-    /// 돌려주는 것은 알린 뒤의 단계다.
-    pub async fn summon_returned(&self, agent: Agent) -> Result<SummonPhase, Error> {
-        let _ = agent;
-        todo!()
-    }
-
-    /// 곁에서 기다리는 담당과 대화가 있었다(말을 걸었거나 답이 갔다). `Waiting`이면 10초를 다시 센다.
-    /// 이벤트는 내지 않는다.
-    pub fn note_conversation(&self, agent: Agent) {
-        let _ = agent;
-        todo!()
-    }
-
-    /// 팀 방에서 멘션된 담당의 답 턴이 시작됐다(원본: 턴 시작과 동시에 이동). `Called`(까닭 `Mention`)로 들어간다.
-    /// 논의 중이면 [`Error::MeetingReserved`](답은 채팅에만 간다). 이미 불려 온 담당이면 그대로.
-    pub async fn mention_turn_started(&self, agent: Agent) -> Result<SummonPhase, Error> {
-        let _ = agent;
-        todo!()
-    }
-
-    /// 사용자가 방을 떠났다(화면이 알린다). 팀 방을 떠나면 멘션으로 온 담당(`Called` · `Waiting`)이
-    /// `Returning`으로 간다. 부름으로 온 담당은 그대로다. 바뀐 담당마다 이벤트를 내고 번호들을 돌려준다.
-    pub async fn user_left_room(&self, room: Room) -> Result<Vec<u64>, Error> {
-        let _ = room;
-        todo!()
-    }
-
-    /// 시계가 흘렀다. 넣어 준 시계로 지금을 읽어 때가 된 일을 한다. 바뀐 담당마다 이벤트를 내고 번호들을 돌려준다.
-    ///
-    /// - 부름으로 `Waiting`인 담당이 마지막 대화(없으면 도착) 뒤 10초 이상 조용하면 `Returning`.
-    ///   멘션으로 온 담당은 방을 보는 동안 남으므로 이 시간으로는 돌아가지 않는다.
-    /// - `Called`인 담당이 부른 뒤 30초 이상 도착 알림이 없으면 `Returning`을 거쳐 자리(`Idle`)로 되돌린다.
-    /// - `thinking` · `queued` 일이 마지막으로 바뀐 뒤 300초 이상 그대로면 한가(`idle`)로 풀고 이벤트를 낸다.
-    pub async fn tick(&self) -> Result<Vec<u64>, Error> {
-        todo!()
-    }
-
-    /// 담당의 일 상태 소식이 밖에서 늦게 왔다(N15 · E55). `at`은 그 소식의 시각이다.
-    /// 이미 반영한 것(오래된 일 풀기 포함)의 시각보다 크지 않으면 버리고 `Ok(None)`.
-    /// 반영하면 모습이 바뀌었을 때 낸 이벤트 번호를 돌려준다.
-    pub async fn report_work(
-        &self,
-        agent: Agent,
-        work: Work,
-        at: UnixMillis,
-    ) -> Result<Option<u64>, Error> {
-        let _ = (agent, work, at);
-        todo!()
     }
 
     /// 응답 하나.
