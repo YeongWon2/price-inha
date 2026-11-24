@@ -38,9 +38,11 @@ impl Executor {
     ///
     /// 1. 준비됨(E16) → [`Error::NotReady`]. 계좌 종류(E25: 템플릿 · 매매 · 표시가 증권사와 같음)
     ///    → [`Error::AccountKindMismatch`].
-    /// 2. 표시(E33): 종목이 매매와 같고, 방향이 사기이고, 이 매매에 묶임 → [`Error::PermitMismatch`].
-    /// 3. 매매 상태가 승인대기 → 아니면 [`Error::NotAwaitingApproval`].
-    /// 4. 승인 기록 → 하나라도 아니면 [`Error::UnansweredMismatch`]:
+    /// 2. 승인 표시(`CheckPermit::granted()`)면 → [`Error::GrantedPermit`](10차). 줄임 길은 `reduce_within_limit`의
+    ///    표시만 받는다.
+    /// 3. 표시(E33): 종목이 매매와 같고, 방향이 사기이고, 이 매매에 묶임 → [`Error::PermitMismatch`].
+    /// 4. 매매 상태가 승인대기 → 아니면 [`Error::NotAwaitingApproval`].
+    /// 5. 승인 기록 → 하나라도 아니면 [`Error::UnansweredMismatch`]:
     ///    - 그 번호의 기록이 있고, 결과가 답 없음이고, 소비되지 않았다.
     ///    - 처리 기록이 없는 닫힌 요청 목록에 있고 할 일이 "줄여서 낸다"다(사는 요청 · 알림이 감 ·
     ///      신호 유효 시간 안 · 처리 기록 없음).
@@ -49,8 +51,8 @@ impl Executor {
     ///    - `0 < 표시 수량 ≤ 요청 수량`.
     ///    - `표시 수량 × 표시 지정가 ≤ 요청 수량 × 요청 값`(답 없는 주문이 사용자가 본 요청보다
     ///      커지지 않는다).
-    /// 5. 저장소의 매매 수량이 있으면 표시 수량이 그것 이하 → 아니면 [`Error::PermitMismatch`].
-    /// 6. 매매를 주문됨으로 **저장** → `place_order`. 큰 금액 확인 표시는 붙이지 않는다.
+    /// 6. 저장소의 매매 수량이 있으면 표시 수량이 그것 이하 → 아니면 [`Error::PermitMismatch`].
+    /// 7. 매매를 주문됨으로 **저장** → `place_order`. 큰 금액 확인 표시는 붙이지 않는다.
     ///
     /// 증권사가 받지 않으면 [`Executor::submit`]과 같다: 매매를 막힘(미체결 취소, 이유 남김)으로
     /// 옮기고 받지 않음 · 응답 없음은 [`Error::AnomalyStop`](E13), 그 밖은 [`Error::Rejected`].

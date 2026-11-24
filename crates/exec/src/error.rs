@@ -52,6 +52,12 @@ pub enum Error {
     #[error("그 승인 번호는 이 매매의 답 없는 사기(줄여서 낼 것)가 아니다")]
     UnansweredMismatch,
 
+    /// 답 없음 줄임 길([`crate::Executor::submit_reduced`])에 승인 표시(`CheckPermit::granted() == true`,
+    /// 10차 · 결정 14)가 왔다. 줄임 길은 `reduce_within_limit`이 낸 표시(`granted() == false`)만 받는다.
+    /// 승인 표시로 요청 전량이 나가는 길을 막는다. 매매 · 저장은 그대로이고 주문을 내지 않는다.
+    #[error("답 없음 줄임 길은 승인 표시를 받지 않는다")]
+    GrantedPermit,
+
     /// 그 매매에 손절 · 청산이 다시 내기를 기다리고 있어(E30 · E34), 익절 · 팀장 팔기를 받지 않는다(8차).
     /// 기다리는 손절 · 청산(목적 · 횟수 · 시각 · 키)은 그대로이고 주문을 내지 않는다. 손절 · 청산은
     /// [`crate::Executor::retry_sell`]이나 새 손절 · 청산 `sell`로 낸다.

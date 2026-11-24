@@ -1,7 +1,7 @@
 //! 6차: 답 없는 사기를 줄여 내기(E22 · FN2 3b3). 알림이 갔는데 답이 없어 닫힌 사는 요청만, 요청한
 //! 수량 · 금액 안에서, 한 번만 낸다. 실행기는 부르는 쪽의 말을 믿지 않고 저장소의 승인 기록과 대조한다.
 
-mod desk;
+pub(crate) mod desk;
 
 use pi_approval::{
     ApprovalNumber, Decision, DueAction, DueHandling, Notice, OrderSubject, Side as AskSide,
