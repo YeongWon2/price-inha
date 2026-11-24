@@ -57,21 +57,26 @@ impl Record {
     }
 }
 
-/// 요약(JSON)에 넣을 내용.
-pub(crate) fn summary(
+/// 요약(JSON)에 넣을 내용. `extra`는 보여 주기용 칸(5차: 투표 수 · 한도 기록)으로, 지문과
+/// 상관없고 읽을 때([`decode`])는 쓰지 않는다.
+pub(crate) fn summary_with(
     number: &ApprovalNumber,
     subject: &Subject,
     reason: &str,
-    wait_until: Option<UnixMillis>,
-    expires_at: Option<UnixMillis>,
+    (wait_until, expires_at): (Option<UnixMillis>, Option<UnixMillis>),
+    extra: serde_json::Map<String, Value>,
 ) -> Value {
-    json!({
+    let mut body = json!({
         "number": number.as_str(),
         "subject": subject_json(subject),
         "reason": reason,
         "wait_until": wait_until.map(|t| t.0),
         "expires_at": expires_at.map(|t| t.0),
-    })
+    });
+    if let Some(map) = body.as_object_mut() {
+        map.extend(extra);
+    }
+    body
 }
 
 /// 저장소 한 줄을 푼다. 이 크레이트가 만든 줄이 아니면 `None`.
@@ -381,7 +386,13 @@ mod tests {
         let row = ApprovalRequest {
             id: ApprovalId(1),
             fingerprint: "f".to_string(),
-            summary: summary(&number, &subject, "왜", Some(UnixMillis(5)), None),
+            summary: summary_with(
+                &number,
+                &subject,
+                "왜",
+                (Some(UnixMillis(5)), None),
+                serde_json::Map::new(),
+            ),
             status: ApprovalStatus::Pending,
             created_at: UnixMillis(0),
             expires_at: NEVER,

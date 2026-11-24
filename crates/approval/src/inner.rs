@@ -3,6 +3,7 @@
 use std::sync::MutexGuard;
 
 use pi_store::{DenyReason, NewApprovalRequest, StoreError, TeamState, UnixMillis};
+use serde_json::{Map, Value};
 
 use crate::approvals::{ApprovalNumber, Approvals, Ask, Notice, Requested, lock};
 use crate::error::{Error, RejectReason};
@@ -72,6 +73,7 @@ impl Approvals {
         ask: Ask,
         fp: Fingerprint,
         now: UnixMillis,
+        extra: Map<String, Value>,
     ) -> Result<Requested, Error> {
         let mut memo = self.memo()?;
         let mut number = ApprovalNumber::random();
@@ -95,7 +97,13 @@ impl Approvals {
         };
         let created = self.store.create_approval(NewApprovalRequest {
             fingerprint: fp.as_str().to_string(),
-            summary: record::summary(&number, &ask.subject, &ask.reason, wait_until, expires_at),
+            summary: record::summary_with(
+                &number,
+                &ask.subject,
+                &ask.reason,
+                (wait_until, expires_at),
+                extra,
+            ),
             created_at: now,
             expires_at: expires_at.unwrap_or(NEVER),
         })?;

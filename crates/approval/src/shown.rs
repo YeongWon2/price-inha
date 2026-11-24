@@ -7,8 +7,9 @@
 //! 한도 적용 기록은 부르는 쪽(server)이 rules의 `LimitClamp`를 [`ClampNote`]로 옮겨 넘긴다
 //! (이 크레이트는 rules에 기대지 않는다).
 
-use pi_store::TradeId;
+use pi_store::{Store, TradeId};
 use rust_decimal::Decimal;
+use serde_json::{Map, Value, json};
 
 use crate::approvals::{Approvals, Ask, Requested};
 use crate::error::Error;
@@ -45,7 +46,48 @@ impl Approvals {
     /// - 지문 · 기다릴 시간 · 만료 · 합치기 규칙은 [`Approvals::request`]와 같다. 같은 요청이 기다리는
     ///   중이라 합쳐지면 처음 만든 요청의 summary가 그대로다.
     /// - `extras.trade`가 없는 매매 번호면 저장소 오류([`Error::Store`])이고 요청은 만들지 않는다.
-    pub fn request_with_extras(&self, _ask: Ask, _extras: ShownExtras) -> Result<Requested, Error> {
-        todo!()
+    pub fn request_with_extras(&self, ask: Ask, extras: ShownExtras) -> Result<Requested, Error> {
+        self.request_shown(ask, |_| shown_fields(&self.store, &extras))
     }
+}
+
+/// summary에 더할 칸을 만든다.
+fn shown_fields(store: &Store, extras: &ShownExtras) -> Result<Map<String, Value>, Error> {
+    let mut fields = Map::new();
+    if let Some(trade) = extras.trade {
+        let opinions = store.trade_opinions(trade)?.opinions;
+        if !opinions.is_empty() {
+            fields.insert("votes".to_string(), count_votes(&opinions));
+        }
+    }
+    if !extras.clamps.is_empty() {
+        let notes: Vec<Value> = extras
+            .clamps
+            .iter()
+            .map(|c| {
+                json!({
+                    "limit": c.limit,
+                    "before": c.before.normalize().to_string(),
+                    "after": c.after.normalize().to_string(),
+                })
+            })
+            .collect();
+        fields.insert("clamps".to_string(), Value::Array(notes));
+    }
+    Ok(fields)
+}
+
+/// 담당 의견에서 강세 · 약세 · 중립 · 기권 수를 센다. 기권은 중립과 따로 센다.
+fn count_votes(opinions: &[pi_store::RoleOpinion]) -> Value {
+    use pi_store::Stance;
+    let (mut bull, mut bear, mut neutral, mut abstain) = (0u64, 0u64, 0u64, 0u64);
+    for opinion in opinions {
+        match (opinion.abstained, opinion.stance) {
+            (true, _) | (false, None) => abstain += 1,
+            (false, Some(Stance::Bullish)) => bull += 1,
+            (false, Some(Stance::Bearish)) => bear += 1,
+            (false, Some(Stance::Neutral)) => neutral += 1,
+        }
+    }
+    json!({"bull": bull, "bear": bear, "neutral": neutral, "abstain": abstain})
 }

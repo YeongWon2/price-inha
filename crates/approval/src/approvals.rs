@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use pi_store::{ApprovalStatus, Store, StoreError, UnixMillis};
+use serde_json::{Map, Value};
 
 use crate::error::{Error, RejectReason};
 use crate::record::{self, Memo};
@@ -221,8 +222,22 @@ impl Approvals {
     ///   기다릴 시간(`wait_until`)이 지난 기다림(지금 ≥ `wait_until`)에는 합치지 않고 새로 만든다.
     /// - 주문의 `wait_until`은 지금 + 신호 종류별 기다릴 시간, `expires_at`은 `signal_valid_until`이다.
     pub fn request(&self, ask: Ask) -> Result<Requested, Error> {
+        self.request_shown(ask, |_| Ok(Map::new()))
+    }
+
+    /// 요청 만들기의 한 길. `shown`이 summary에 덧붙일 칸을 만든다(주문 대상일 때만 부르고,
+    /// 대상 검사를 통과한 뒤 부른다). 실패하면 요청은 만들지 않는다.
+    pub(crate) fn request_shown(
+        &self,
+        ask: Ask,
+        shown: impl FnOnce(&Ask) -> Result<Map<String, Value>, Error>,
+    ) -> Result<Requested, Error> {
         let now = self.clock.now();
         self.check_subject(&ask.subject, now)?;
+        let extra = match ask.subject {
+            Subject::Order(_) => shown(&ask)?,
+            _ => Map::new(),
+        };
         let _turn = lock(&self.requesting);
         let fp = fingerprint(&ask.subject);
         let merged = record::pending_records(&self.store)?.into_iter().find(|r| {
@@ -233,7 +248,7 @@ impl Approvals {
         });
         match merged {
             Some(found) => self.merge(found, now),
-            None => self.create(ask, fp, now),
+            None => self.create(ask, fp, now, extra),
         }
     }
 
