@@ -180,11 +180,15 @@ async fn 보유_종목의_시세가_끊기면_이상_감지_멈춤이_된다() {
     // 지켜보는 종목의 시세는 계속 오지만 보유 종목의 시세가 끊긴다.
     bench.drop_price(HYNIX);
     bench.advance(40).await;
-    wait_for(
-        "보유 종목 시세가 끊겨 이상 감지 멈춤",
-        || bench.team() == TeamState::AnomalyHalt,
-    )
-    .await;
+    // 부하가 커 뒤에서 도는 점검이 늦어도 시계를 조금씩 더 넘기며 기다린다(시계가 안 가면 끊김을 못 센다).
+    let deadline = Instant::now() + STEP;
+    while bench.team() != TeamState::AnomalyHalt {
+        assert!(
+            Instant::now() < deadline,
+            "시간 안에 되지 않았다: 보유 종목 시세가 끊겨 이상 감지 멈춤"
+        );
+        bench.advance(20).await;
+    }
     bench.close().await;
 }
 

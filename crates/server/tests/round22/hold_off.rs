@@ -69,13 +69,15 @@ async fn three_waits(
         .trading()
         .place(order(profit, NAVER, Purpose::TakeProfit, TARGET, at))
         .await;
-    bench.quote(HYUNDAI, stop_price, plus(bench.now(), 1)).await;
+    // 팀장 팔기 · 익절 대기는 손절 시세를 넣기 전에 확인한다: 그 시세가 최대 손실로 전체 정지를 만들면 팀장 팔기
+    // 대기는 뒤에서 도는 일이 지우므로, 시세 뒤에 보면 지워졌는지가 순서에 달린다(시험 순서를 결정적으로).
     assert_eq!(
         purposes(bench, leader_exit),
         ["team_exit"],
         "팀장 팔기 대기"
     );
     assert_eq!(purposes(bench, profit), ["take_profit"], "익절 대기");
+    bench.quote(HYUNDAI, stop_price, plus(bench.now(), 1)).await;
     assert_eq!(purposes(bench, stop), ["stop_loss"], "손절 대기");
     (leader_exit, profit, stop)
 }

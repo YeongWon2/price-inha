@@ -39,8 +39,10 @@ async fn stale_stop(bench: &Bench) -> TradeId {
     assert_eq!(pending[0]["purpose"], json!("stop_loss"));
     assert_eq!(pending[0]["order"]["quantity"], json!("5"));
 
-    bench.trading().paper().set_fault(None);
+    // 시세를 넣는 동안 뒤에서 도는 다시 내기가 끼어 새로 내지 않게(시험 순서를 결정적으로) 증권사가 새 주문을
+    // 받지 않는 채로 익절을 체결시키고, 그 뒤에 푼다. 시계는 시세를 넣을 때만 가므로 푼 뒤에는 다음 걸음까지 안 돈다.
     bench.quote(HYNIX, PROFIT_PRICE, plus(bench.now(), 1)).await;
+    bench.trading().paper().set_fault(None);
     assert_eq!(bench.trade_state(trade), TradeState::Holding);
     let open_sell = bench.sells(HYNIX).await;
     assert_eq!(open_sell.len(), 1, "열려 있던 익절 하나: {open_sell:?}");
@@ -78,8 +80,10 @@ async fn stale_liquidation(bench: &Bench) -> TradeId {
     assert_eq!(pending[0]["order"]["quantity"], json!("5"));
     assert_eq!(pending[0]["order"]["order_type"], json!("limit"));
 
-    bench.trading().paper().set_fault(None);
+    // 시세를 넣는 동안 뒤에서 도는 다시 내기가 끼어 새로 내지 않게(시험 순서를 결정적으로) 증권사가 새 주문을
+    // 받지 않는 채로 익절을 체결시키고, 그 뒤에 푼다. 시계는 시세를 넣을 때만 가므로 푼 뒤에는 다음 걸음까지 안 돈다.
     bench.quote(HYNIX, PROFIT_PRICE, plus(bench.now(), 1)).await;
+    bench.trading().paper().set_fault(None);
     assert_eq!(bench.trade_state(trade), TradeState::Holding);
     trade
 }
@@ -158,13 +162,16 @@ async fn 남은_수량이_0이_된_낡은_손절_대기는_새로_내지_않고_
     let bench = Plan::demo().max_fill(2).start(kst(monday(), 10, 0)).await;
     let trade = stale_stop(&bench).await;
 
-    // 열린 익절이 나머지도 다 체결돼 남은 수량이 0이 됐다(팔림).
+    // 열린 익절이 나머지도 다 체결돼 남은 수량이 0이 됐다(팔림). 그동안 뒤에서 도는 다시 내기가 먼저
+    // 새로 내지 않게(시험 순서를 결정적으로) 증권사가 새 주문을 받지 않는 채로 채우고, 단언 뒤에 푼다.
+    bench.trading().paper().set_fault(Some(Fault::RejectOrders));
     for step in 1..=2 {
         bench
             .quote(HYNIX, PROFIT_PRICE, plus(bench.now(), step))
             .await;
     }
     assert_eq!(bench.trade_state(trade), TradeState::Sold);
+    bench.trading().paper().set_fault(None);
 
     until_cleared(&bench, trade, "남은 수량이 0이면 낡은 대기는 지워져야 한다").await;
     let sells = bench.sells(HYNIX).await;
