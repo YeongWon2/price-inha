@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use pi_store::UnixMillis;
+
 use crate::error::SignalError;
 use crate::role::Role;
 
@@ -85,7 +87,19 @@ pub struct CallBudget {
     pub wrap_up_at: u32,
 }
 
-/// 논의 옵션. 기본은 신호 없음 · 예산 없음 · 다시 시도 없음이다.
+/// 판단의 자료 목록(sources)에 공지를 한 줄로 남길 때 쓰는 이름(R17-2).
+pub const NOTICE_SOURCE_NAME: &str = "사용자 공지";
+
+/// 논의 자료로 넘기는 사용자 공지 하나(11차, R17-2). server가 저장소의 공지에서 글자로 만든다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeNote {
+    /// 공지 글(가리기 전).
+    pub text: String,
+    /// 보낸 시각.
+    pub sent_at: UnixMillis,
+}
+
+/// 논의 옵션. 기본은 신호 없음 · 예산 없음 · 다시 시도 없음 · 공지 없음이다.
 #[derive(Clone, Default)]
 pub struct DiscussionOptions {
     pub(crate) budget: Option<CallBudget>,
@@ -110,5 +124,14 @@ impl DiscussionOptions {
     pub fn with_turn_retries(mut self, retries: u32) -> DiscussionOptions {
         self.turn_retries = retries.min(TURN_RETRY_MAX);
         self
+    }
+
+    /// 사용자 공지 글들을 논의 자료로 넘긴다(11차, R17-2).
+    ///
+    /// 담당 브리핑의 자료 뒤에 "사용자 공지" 묶음으로 들어간다(가린 글, 보낸 시각 순서).
+    /// 자료 완전성(E32)에는 들지 않는다. 판단의 자료 목록에는 이름 [`NOTICE_SOURCE_NAME`]과
+    /// 가장 늦은 보낸 시각으로 한 줄 들어간다. 빈 목록이면 넘기지 않은 것과 같다.
+    pub fn with_notices(mut self, notices: Vec<NoticeNote>) -> DiscussionOptions {
+        todo!()
     }
 }

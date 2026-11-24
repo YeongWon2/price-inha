@@ -5,6 +5,7 @@ mod common;
 mod discussion;
 mod judgment;
 mod longroom;
+mod opinions;
 mod order;
 mod principles;
 mod progress;

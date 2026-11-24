@@ -25,8 +25,8 @@ pub use discussion::{
 pub use error::{Error, SignalError, ToolError, TurnFailure};
 pub use ports::{Clock, OrderDraft, SellDraft, Side, Tools};
 pub use progress::{
-    CallBudget, DiscussionOptions, ProgressSignal, ProgressSink, Stage, TURN_RETRY_MAX,
-    WRAP_UP_LINE,
+    CallBudget, DiscussionOptions, NOTICE_SOURCE_NAME, NoticeNote, ProgressSignal, ProgressSink,
+    Stage, TURN_RETRY_MAX, WRAP_UP_LINE,
 };
 pub use role::{
     DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOKENS, Role, RoleConfig, TimeLimits, TurnMode,
