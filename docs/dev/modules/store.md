@@ -226,3 +226,15 @@ M1 M2 M5 C2 E3 M6 V6 D6 E12 E36 M3 M4 V29 V30 C11 V36 D10 M7 V51
 1. **`Store::room_last_seq(room: &str) -> Result<u64, StoreError>`**: 방의 마지막 번호 한 줄 읽기. 이벤트가 없거나 없는 방이면 0. agent가 500줄씩 읽던 것을 대신한다.
 2. **`Store::access_recent(max: usize) -> Result<Vec<AccessRecord>, StoreError>`**: 접속 기록 최근 `max`줄을 새것(큰 번호)부터 준다. `max`가 0이면 빈 목록. server `access_log`가 전체를 읽고 자르던 것을 대신한다.
 기존 `room_events` · `access_log`는 그대로다. 시험 `tests/round14.rs`.
+
+## 15차 작업 (2026-11-24 조정자, server 21차 막힘 — 결정 9 · 14)
+
+server 21차 1번(실전중 템플릿의 위험을 키우는 사용자 변경은 승인 → 냉각 → 다음 거래일 반영)과 6번(고른 외형이 백업에 들어감)을 저장소가 받친다.
+
+1. **사용자 변경 개선안**: `create_user_proposal(NewUserProposal { template, content, at }) -> Proposal` — 근거 매매 없이(최소 근거 수 검사 없음) 제안됨으로 만든다. 늘 `increases_risk = true`. 개선안에 출처를 둔다(`Proposal::source`: 복기 `Review` · 사용자 `User`, 옛 행은 복기). 대상 템플릿 번호를 담는다.
+2. **사용자 변경 반영은 잠금의 예외**: `apply_cooled_user_proposal(id, value, at)` — 냉각중인 사용자 변경 개선안을 반영됨으로 옮기고, **같은 쓰기 안에서** 그 템플릿에 새 리비전(`value`)을 쓴다. 템플릿이 실전중이어도 된다(이 길만 예외 — `revise_template`의 잠금은 그대로). 템플릿이 멈춤이면 거부하고 둘 다 그대로. 복기 개선안은 이 길로 반영할 수 없다.
+3. **사무실 외형**: `office_looks() -> BTreeMap<String, String>`(담당 → 외형 id), `set_office_look(agent, look, at)`. 값 검사는 server가 한다(저장소는 빈 글자만 거부). 저장소 스냅샷에 들어가므로 백업 · 되살리기에 그대로 따라간다.
+4. 스키마를 바꾸면 지금 규칙(스키마 판 · 옛 판 열기)을 따른다.
+
+- 원본 동작 근거: 원본에 없음 — 스펙 R14-1 · E28 · V15, 결정 9 · 13 · 14.
+- 시험으로 확인할 것: 근거 없이 사용자 변경 개선안이 생기고 출처 · 템플릿이 남음 / 승인 → 냉각중 → `apply_cooled_user_proposal`이 실전중 템플릿에 새 리비전을 쓰고 반영됨 · 한 쓰기(중간 실패 없음) / 멈춤 템플릿이면 거부 · 그대로 / 복기 개선안은 이 길로 거부 / `revise_template` 잠금 그대로 / 외형 쓰고 읽기 · 다시 열어도 같음 · 옛 판 DB 열기.
