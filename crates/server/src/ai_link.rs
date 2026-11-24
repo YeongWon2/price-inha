@@ -78,6 +78,17 @@ use crate::{AppError, SetupRefusal};
 /// AI 연결을 고르는 경로(`POST`). 세션 · 같은 출처 · 그 컴퓨터여야 한다.
 pub const SETUP_AI_PATH: &str = "/api/setup/ai";
 
+/// (22차 6번) 하루 AI 호출 상한을 바꾸는 요청 칸. [`SETUP_AI_PATH`]에 `POST` `{"daily_limit": 1 이상 정수 | null}`
+/// (다른 칸 없이 이 칸 하나)을 보내면 AI 연결 고르기는 그대로 두고 상한만 바꾼다. `null`은 상한 없음이다.
+/// 답은 200 `{"ai_daily_limit": 값 | null}`. 0 · 음수 · 정수가 아닌 값이면 400 `{"error": "invalid_input"}`이고
+/// 그대로 둔다. 바꾼 값은 보관 폴더에 남아 다시 켜도 같고, 팀의 하루 상한([`crate::TeamWiring::ai_daily_limit`])이
+/// 따로 주어지지 않았으면 그 값이 상한이다. 세션 · 같은 출처 · 그 컴퓨터여야 한다(AI 연결 고르기와 같다).
+pub const AI_DAILY_LIMIT_KEY: &str = "daily_limit";
+
+/// (22차 6번) 설정 상태(`GET` [`crate::SETUP_PATH`])의 하루 AI 호출 상한 칸 이름. 값은 지금 쓰는 상한(수) 또는
+/// `null`(상한 없음)이다.
+pub const SETUP_AI_DAILY_LIMIT: &str = "ai_daily_limit";
+
 /// 고른 AI 연결을 두는 파일 이름(보관 폴더 안). 비밀이 아니다.
 /// 모양: `{"method": "api_key"}` 또는 `{"method": "cli", "command": "...", "config_dir": "..." | null}`.
 pub const AI_CHOICE_FILE: &str = "ai.json";

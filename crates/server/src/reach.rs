@@ -93,6 +93,20 @@ pub const OFFICE_LOOKS_PATH: &str = "/api/office/looks";
 /// 저장은 서버 쪽이라 서버를 다시 켜도, 다른 기기에서도 같다.
 pub const OFFICE_LOOK_PATH: &str = "/api/office/look";
 
+/// (22차 1번) 사무실 팀 대화의 최근 줄. `GET` → 200 `[{"room", "agent", "text", "at", "topic"}, …]`: 저장된
+/// [`KIND_OFFICE_TALK`] 이벤트 가운데 최근 [`OFFICE_TALK_RECENT`]줄을 시각 순서(오래된 것 먼저)로 준다. 이벤트 내용
+/// 그대로다. 세션이 있어야 열린다(없으면 401).
+pub const OFFICE_TALK_PATH: &str = "/api/office/talk";
+
+/// [`OFFICE_TALK_PATH`]가 주는 최근 줄 수.
+pub const OFFICE_TALK_RECENT: usize = 50;
+
+/// (22차 1번) 저장되는 이벤트 종류(번호 있는 이벤트): 논의 방(`trade-<번호>` · [`crate::DAY_ROOM`])에 담당 글
+/// (`message.member`, 팀장 판단 글 포함)이 쌓이면 1초 안에 하나씩 낸다. 내용 `{"room": 방 이름, "agent": 방 로그
+/// 글의 쓴 쪽 id, "text": 방 로그 글(가린 것, [`OFFICE_TEXT_MAX`]자에서 자름), "at": 방 로그 글의 시각(유닉스
+/// 밀리초), "topic": 종목 코드 | "day"}`. 점수 턴 · 실패 줄(`turn.failed`) · 진행 줄(`room.activity`)은 내지 않는다.
+pub const KIND_OFFICE_TALK: &str = "office.talk";
+
 /// 사무실 글 길이 상한(원본 DeskRPG `npc:chat` 500자).
 pub const OFFICE_TEXT_MAX: usize = 500;
 /// `sourceMessageId` 길이 상한. 원본은 UUID(36자)를 쓴다. 넉넉히 128자로 정했다.
