@@ -81,6 +81,16 @@ pub const OFFICE_PATH: &str = "/api/office";
 ///   답하지 못하면 failed(E6). 무응답 [`CHAT_IDLE_TIMEOUT`] · 전체 [`CHAT_TOTAL_TIMEOUT`]이면 failed다.
 pub const OFFICE_CHAT_PATH: &str = "/api/office/chat";
 
+/// 담당별 외형(20차 4번). `GET` → 200 `{"agents": {담당 id: 외형 id(여섯 모두)}, "available": [원본 외형 id 50개]}`.
+/// 외형 id는 원본 `characters/office/<id>.glb`의 `<id>`다. 처음 값(기본 외형)은 여섯 모두 서로 다르다.
+/// 세션이 있어야 열린다(없으면 401).
+pub const OFFICE_LOOKS_PATH: &str = "/api/office/looks";
+
+/// 담당의 외형 바꾸기(20차 4번). `POST` `{"agent": 담당 id, "look": 외형 id}` → 200 [`OFFICE_LOOKS_PATH`]의 `GET`과
+/// 같은 모양. 모르는 담당 · 목록에 없는 외형이면 400(저장하지 않는다). 세션이 없으면 401, 같은 출처가 아니면 4xx.
+/// 저장은 서버 쪽이라 서버를 다시 켜도, 다른 기기에서도 같다.
+pub const OFFICE_LOOK_PATH: &str = "/api/office/look";
+
 /// 사무실 글 길이 상한(원본 DeskRPG `npc:chat` 500자).
 pub const OFFICE_TEXT_MAX: usize = 500;
 /// `sourceMessageId` 길이 상한. 원본은 UUID(36자)를 쓴다. 넉넉히 128자로 정했다.
