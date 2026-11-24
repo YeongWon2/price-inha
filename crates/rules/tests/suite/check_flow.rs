@@ -263,11 +263,18 @@ fn a_buy_over_the_auto_order_limit_waits_for_approval() {
 // 검증: E21 V25
 #[test]
 fn a_buy_exactly_at_the_auto_order_limit_passes() {
-    // 10,000,000 × 16.5% = 1,650,000 = 주문 금액.
+    // 10,000,000 × 16.5% = 1,650,000 = 수량 × 값. 5차(결정 14)부터 한도와 비교하는 금액은 수수료를
+    // 넣은 1,650,000 + 올림(247.5) = 1,650,248이라 한도를 넘는다 → 승인대기(전에는 통과).
+    // 보이는 금액은 수량 × 값 그대로다. (함수 이름은 잠금 판 그대로 둔다.)
     let mut s = Scenario::kr();
     s.params.auto_order_limit_pct = d("16.5");
-    let passed = expect_pass(s.check(&kr_buy()));
-    assert_eq!(passed.amount(), d("1650000"));
+    match s.check(&kr_buy()) {
+        Outcome::NeedsApproval(pending) => {
+            assert_eq!(pending.amount(), d("1650000"));
+            assert_eq!(pending.limit(), d("1650000"));
+        }
+        other => panic!("수수료를 넣으면 한도를 넘어 승인을 기다려야 한다: {other:?}"),
+    }
 }
 
 // 검증: E21 E34

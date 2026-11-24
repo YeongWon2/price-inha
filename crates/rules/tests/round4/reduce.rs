@@ -30,14 +30,15 @@ fn pending_scenario() -> (Scenario, PendingApproval) {
 // 검증: E22 E21 P12
 #[test]
 fn an_unanswered_buy_is_cut_down_to_the_auto_order_limit() {
-    // floor(1,000,000 ÷ 50,000) = 20주, 금액 20 × 50,000 = 1,000,000 = 한도(이하라 통과).
+    // 5차(결정 14): 한도와 비교하는 금액은 수수료를 넣는다. 20주는 1,000,000 + 150 > 한도라 못 사고,
+    // 19주는 950,000 + 올림(142.5) = 950,143 ≤ 한도. 보이는 금액은 수량 × 값 = 950,000.
     let (s, pending) = pending_scenario();
     let passed = reduce_within_limit(pending, &kr_buy(), &s.ctx()).unwrap();
     assert_eq!(
         passed.order(),
-        &approved(Side::Buy, OrderType::Limit, "20", Some("50000"))
+        &approved(Side::Buy, OrderType::Limit, "19", Some("50000"))
     );
-    assert_eq!(passed.amount(), d("1000000"));
+    assert_eq!(passed.amount(), d("950000"));
     assert!(passed.amount() <= d("1000000"));
     assert!(passed.approval().is_none());
 }
