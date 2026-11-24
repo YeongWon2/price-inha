@@ -3,11 +3,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use pi_market::{
-    Clock, Currency, FakeAdapter, Market, MarketAdapter, MarketCalendar, MarketError, Quote, Symbol,
+    Clock, Currency, FakeAdapter, Market, MarketAdapter, MarketCalendar, MarketError, Quote,
+    Symbol, TradingDay,
 };
 use rust_decimal::Decimal;
 
@@ -89,6 +91,52 @@ pub(crate) fn demo_symbol(market: Market) -> Symbol {
     match market {
         Market::Us => Symbol::new("AAPL"),
         _ => Symbol::new("005930"),
+    }
+}
+
+/// (24차 3번) 시연용 가짜 공시를 내는 간격의 기본값(실행 파일의 `--demo` 조립, 3분).
+pub const DEMO_DISCLOSURE_EVERY: Duration = Duration::from_secs(180);
+
+/// (24차 3번) 시연용 가짜 공시의 제목 · 본문에 반드시 들어가는 말. 실제 출처 주소는 쓰지 않는다.
+pub const DEMO_DISCLOSURE_MARK: &str = "시연";
+
+/// (24차, D14 · N19 · E56) 시연 모드의 조립 값. 기본(`Default`)은 모두 꺼짐이다 — 시연 어댑터의 지금 동작
+/// (달력 없음 · 가짜 공시 없음)이고, 기존 시험이 쓰는 시연 조립([`crate::App::launch_with`] 등)은 이것을 쓴다.
+/// 실행 파일의 `--demo` 조립([`crate::run_assembly`])만 [`DemoWiring::binary`]로 켠다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DemoWiring {
+    /// 시연 달력([`demo_calendar`])을 켠다: 시연 어댑터가 달력을 내고 깨우기 엔진 · 주문 길이 그것을 쓴다.
+    pub calendar: bool,
+    /// 시연용 가짜 공시 간격(시계 기준). `None`이면 내지 않는다. 지켜보는 종목을 돌아가며 한 건씩 낸다.
+    pub disclosure_every: Option<Duration>,
+}
+
+impl DemoWiring {
+    /// 실행 파일의 `--demo` 조립: 시연 달력 켬 · 가짜 공시 [`DEMO_DISCLOSURE_EVERY`]마다.
+    pub fn binary() -> DemoWiring {
+        DemoWiring {
+            calendar: true,
+            disclosure_every: Some(DEMO_DISCLOSURE_EVERY),
+        }
+    }
+}
+
+/// (24차 1번, N19 · C33) 시연 달력: 그 날짜(시장 시간대의 날짜)의 달력.
+///
+/// 매일이 거래일이다(주말 · 공휴일 없음). 정규장은 시장 시간대(국내 한국 시각, 미국 뉴욕 시각)의
+/// 00:05 이상 23:55 미만 하나다. 그래서 자정 앞뒤 10분은 장 밖이다. 앞 · 뒤 거래일은 하루 전 · 하루 뒤다.
+/// 시연 어댑터 안에서만 쓴다(실제 모드는 시장 어댑터 달력만 쓴다, E56).
+pub fn demo_calendar(market: Market, date: NaiveDate) -> MarketCalendar {
+    // 뼈대: 지금 동작(달력 없음 = 휴장)과 같은 빈 달력. 구현은 N19를 따른다.
+    let closed = |date: NaiveDate| TradingDay {
+        date,
+        sessions: Vec::new(),
+    };
+    MarketCalendar {
+        market,
+        today: closed(date),
+        previous_business_day: closed(date.pred_opt().unwrap_or(date)),
+        next_business_day: closed(date.succ_opt().unwrap_or(date)),
     }
 }
 

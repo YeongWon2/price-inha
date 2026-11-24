@@ -33,9 +33,11 @@ const CLI_CHECK_GRACE: std::time::Duration = std::time::Duration::from_millis(80
 
 mod link;
 mod parts;
+mod run;
 
 pub use parts::announce_addr;
 use parts::{check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, spawn_feed};
+pub use run::{RunAssembly, run_assembly};
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";

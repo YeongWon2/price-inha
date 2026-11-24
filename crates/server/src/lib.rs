@@ -35,7 +35,8 @@ pub use ai_link::{
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,
     FEED_LIVE, FEED_NO_BROKER_KEY, FEED_REQUEST_REJECTED, FEED_SETUP_REQUIRED, KIND_FEED_STATUS,
-    KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, Wiring, announce_addr,
+    KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, RunAssembly, Wiring,
+    announce_addr, run_assembly,
 };
 pub use cli::{
     AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem, Command, CommandLine, CommandOutput,
@@ -45,6 +46,7 @@ pub use cli::{
     SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor,
     restore,
 };
+pub use demo::{DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar};
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,

@@ -18,10 +18,10 @@ use std::sync::{Arc, Mutex};
 use pi_secrets::SecretStore;
 use pi_store::UnixMillis;
 use price_inha::{
-    AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, Launch, Reach,
-    RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
-    SettingsError, SystemRunner, TeamWiring, TradingWiring, VERSION, Wiring, access_key,
-    access_key_with, announce_addr, doctor, restore,
+    AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, RedactingWriter,
+    RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings, SettingsError,
+    SystemRunner, VERSION, access_key, access_key_with, announce_addr, doctor, restore,
+    run_assembly,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -402,15 +402,10 @@ async fn run(
     let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
     // 보관소를 열지 못했으면 앱이 다시 열어 보고 그 오류를 알린다.
-    // (W5 2차) 실행 파일은 투자 팀(에이전트 · 자료 · 트리거 · 복기)까지 잇는다.
-    let launch = Launch {
-        trading: TradingWiring::default(),
-        team: Some(TeamWiring::official()),
-        secrets,
-    };
-    // (W5 3차) 사무실 · 폰 알림 · 지식 검색까지 잇는다. 백업은 설정 화면에서 고른 저장소 · 공개키
-    // (보관 폴더의 `backup-settings.json`)로 앱이 켤 때 잇는다. 그래서 여기 `Reach`의 백업 칸은 비워 둔다.
-    let started = App::launch_with(settings, Wiring::default(), launch, Reach::default()).await;
+    // (W5 2차 · 3차 · 24차) 실행 파일의 조립은 라이브러리의 `run_assembly`에 있다(시험도 같은 조립을 쓴다):
+    // 투자 팀 · 사무실 · 폰 알림 · 지식 검색까지 잇고, `--demo`면 시연 달력 · 시연용 가짜 공시를 켠다.
+    let assembly = run_assembly(&settings, secrets);
+    let started = App::launch_run(settings, assembly).await;
     let app = started.map_err(Failure::App)?;
     let mode = if demo {
         " (시연용 가짜 시세)"
