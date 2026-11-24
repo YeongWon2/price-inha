@@ -65,6 +65,13 @@ impl CheckAuthority {
             trade: Some(trade),
         }
     }
+
+    /// 승인 증표로 지난 주문용 표시를 낸다(`granted() == true`). 늘 매매 하나(`trade`)에 묶인다.
+    /// 뼈대: 몸통은 아직 없다.
+    pub fn approve_granted_for_trade(&self, trade: i64, approved: ApprovedOrder) -> CheckPermit {
+        // 뼈대: 아직 승인 표시를 달지 않는다(지금 `approve_for_trade`와 같다).
+        self.approve_for_trade(trade, approved)
+    }
 }
 
 /// 점검 통과 표시. [`CheckAuthority::approve`]로만 만들 수 있다.
@@ -87,6 +94,12 @@ impl CheckPermit {
     /// 이 표시가 묶인 매매 번호([`CheckAuthority::approve_for_trade`]). 묶이지 않았으면 `None`.
     pub fn trade(&self) -> Option<i64> {
         self.trade
+    }
+
+    /// 승인 증표로 낸 표시인가([`CheckAuthority::approve_granted_for_trade`]). 뼈대: 몸통은 아직 없다.
+    pub fn granted(&self) -> bool {
+        // 뼈대: 아직 표시를 담지 않는다.
+        false
     }
 
     /// 이 표시를 낸 권한이 그 표식(계좌)의 짝인가.
