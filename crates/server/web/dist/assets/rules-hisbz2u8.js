@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-banclx3t.js";
+import { n as API, t as mountMenu } from "./menu-mixz7f78.js";
 /* empty css               */
 import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
 import { a as isObject, i as formatValue, n as changeRow, r as fieldLabel, t as capText } from "./fields-j3bgfwvj.js";

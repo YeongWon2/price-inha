@@ -26,11 +26,27 @@ export interface Me extends Spot {
 /** 같은 출처 `fetch`의 모양(시험이 가짜를 넘긴다). */
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+const FACINGS: readonly Facing[] = ["up", "down", "left", "right"];
+
+function isCell(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 /** 내 캐릭터를 읽는다([`API.officeMe`]). 응답이 실패이거나 모양이 틀리면 `null`(던지지 않는다). */
 export async function loadMe(fetcher: Fetcher): Promise<Me | null> {
-  void fetcher;
-  void API;
-  throw new Error("todo");
+  try {
+    const reply = await fetcher(API.officeMe, { credentials: "same-origin" });
+    if (!reply.ok) return null;
+    const body = (await reply.json()) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") return null;
+    const { name, look, x, y, dir } = body;
+    if (typeof name !== "string" || typeof look !== "string") return null;
+    if (!isCell(x) || !isCell(y)) return null;
+    if (typeof dir !== "string" || !(FACINGS as readonly string[]).includes(dir)) return null;
+    return { name, look, x, y, dir: dir as Facing };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -38,9 +54,22 @@ export async function loadMe(fetcher: Fetcher): Promise<Me | null> {
  * `keepalive`). 실패해도 던지지 않고 `false`를 돌려준다.
  */
 export async function postSpot(fetcher: Fetcher, spot: Spot): Promise<boolean> {
-  void fetcher;
-  void spot;
-  throw new Error("todo");
+  try {
+    const reply = await fetcher(API.officeMePosition, {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: spot.x, y: spot.y, dir: spot.dir }),
+    });
+    return reply.ok;
+  } catch {
+    return false;
+  }
+}
+
+function same(a: Spot | null, b: Spot | null): boolean {
+  return a !== null && b !== null && a.x === b.x && a.y === b.y && a.dir === b.dir;
 }
 
 /**
@@ -51,24 +80,41 @@ export async function postSpot(fetcher: Fetcher, spot: Spot): Promise<boolean> {
  * 같은 자리(칸 · 방향이 같음)는 다시 보내지 않는다. 처음 만들 때 `initial`(서버에서 읽은 자리)을 보낸 것으로 본다.
  */
 export class SpotSender {
+  private readonly send: (spot: Spot) => Promise<unknown>;
+  private sent: Spot | null;
+  private sentAt = -Infinity;
+  private pending: Spot | null = null;
+
   constructor(send: (spot: Spot) => Promise<unknown>, initial: Spot | null = null) {
-    void send;
-    void initial;
-    throw new Error("todo");
+    this.send = send;
+    this.sent = initial ? { ...initial } : null;
   }
 
   moved(spot: Spot, now: number): void {
-    void spot;
-    void now;
-    throw new Error("todo");
+    this.pending = same(spot, this.sent) ? null : { x: spot.x, y: spot.y, dir: spot.dir };
+    this.tick(now);
   }
 
   tick(now: number): void {
-    void now;
-    throw new Error("todo");
+    if (this.pending === null || now - this.sentAt < SAVE_INTERVAL_MS) return;
+    this.sentAt = now;
+    this.push();
   }
 
   flush(): void {
-    throw new Error("todo");
+    if (this.pending === null) return;
+    this.push();
+  }
+
+  private push(): void {
+    const spot = this.pending;
+    if (spot === null) return;
+    this.pending = null;
+    this.sent = spot;
+    try {
+      void Promise.resolve(this.send(spot)).catch(() => undefined);
+    } catch {
+      // 보내기가 실패해도 걷기는 그대로다(F10 "실패 시 보장").
+    }
   }
 }

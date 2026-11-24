@@ -1,4 +1,4 @@
-import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-banclx3t.js";
+import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-mixz7f78.js";
 var PENDING = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -975,6 +975,637 @@ function createLookPicker(o) {
 		}
 	};
 }
+// src/office/follow.ts
+/** 한 프레임에 보는 점이 캐릭터 쪽으로 다가가는 몫(원본 0.08). */
+var FOLLOW_LERP = .08;
+/** 따라가기 켜짐 · 꺼짐 상태. 기본 켜짐. */
+var FollowState = class {
+	following = true;
+	listeners = /* @__PURE__ */ new Set();
+	/** 따라가는 중인가. */
+	on() {
+		return this.following;
+	}
+	/** 사용자가 카메라를 손으로 움직였다: 따라가기를 푼다. */
+	touch(kind) {
+		this.set(false);
+	}
+	/** "따라가기" 단추: 다시 켠다. */
+	resume() {
+		this.set(true);
+	}
+	/** 켜짐 · 꺼짐이 바뀔 때 부른다(도구 줄 단추 · 발언자 카메라에 알린다). 끊는 함수를 돌려준다. */
+	onChange(listener) {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+	set(on) {
+		if (on === this.following) return;
+		this.following = on;
+		for (const listener of [...this.listeners]) listener(on);
+	}
+};
+/** 한 프레임의 따라가기: 보는 점을 캐릭터 쪽으로 `factor`만큼 옮긴 새 점. */
+function followStep(target, player, factor = FOLLOW_LERP) {
+	return {
+		x: target.x + (player.x - target.x) * factor,
+		z: target.z + (player.z - target.z) * factor
+	};
+}
+var FACINGS = [
+	"up",
+	"down",
+	"left",
+	"right"
+];
+function isCell(value) {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+/** 내 캐릭터를 읽는다([`API.officeMe`]). 응답이 실패이거나 모양이 틀리면 `null`(던지지 않는다). */
+async function loadMe(fetcher) {
+	try {
+		const reply = await fetcher(API.officeMe, { credentials: "same-origin" });
+		if (!reply.ok) return null;
+		const body = await reply.json();
+		if (!body || typeof body !== "object") return null;
+		const { name, look, x, y, dir } = body;
+		if (typeof name !== "string" || typeof look !== "string") return null;
+		if (!isCell(x) || !isCell(y)) return null;
+		if (typeof dir !== "string" || !FACINGS.includes(dir)) return null;
+		return {
+			name,
+			look,
+			x,
+			y,
+			dir
+		};
+	} catch {
+		return null;
+	}
+}
+/**
+* 자리 하나를 보낸다: `POST` [`API.officeMePosition`] 몸통 `{"x", "y", "dir"}`(JSON, 같은 출처 · 떠날 때도 닿게
+* `keepalive`). 실패해도 던지지 않고 `false`를 돌려준다.
+*/
+async function postSpot(fetcher, spot) {
+	try {
+		return (await fetcher(API.officeMePosition, {
+			method: "POST",
+			credentials: "same-origin",
+			keepalive: true,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				x: spot.x,
+				y: spot.y,
+				dir: spot.dir
+			})
+		})).ok;
+	} catch {
+		return false;
+	}
+}
+function same(a, b) {
+	return a !== null && b !== null && a.x === b.x && a.y === b.y && a.dir === b.dir;
+}
+/**
+* 띄엄띄엄 보내는 것. `send`는 자리를 보내는 함수(보통 `postSpot`)이고 실패(거부 · 던짐)해도 이것은 던지지 않는다.
+* - `moved(spot, now)`: 지금 자리. 마지막으로 보낸 자리와 다르고 마지막으로 보낸 지 [`SAVE_INTERVAL_MS`]가 지났으면 보낸다.
+* - `tick(now)`: 프레임마다 부른다. 보내지 않은 자리가 있고 간격이 지났으면 보낸다(멈춘 뒤 마지막 자리).
+* - `flush()`: 화면을 떠날 때. 보내지 않은 자리가 있으면 간격과 상관없이 곧바로 보낸다.
+* 같은 자리(칸 · 방향이 같음)는 다시 보내지 않는다. 처음 만들 때 `initial`(서버에서 읽은 자리)을 보낸 것으로 본다.
+*/
+var SpotSender = class {
+	send;
+	sent;
+	sentAt = -Infinity;
+	pending = null;
+	constructor(send, initial = null) {
+		this.send = send;
+		this.sent = initial ? { ...initial } : null;
+	}
+	moved(spot, now) {
+		this.pending = same(spot, this.sent) ? null : {
+			x: spot.x,
+			y: spot.y,
+			dir: spot.dir
+		};
+		this.tick(now);
+	}
+	tick(now) {
+		if (this.pending === null || now - this.sentAt < 1e3) return;
+		this.sentAt = now;
+		this.push();
+	}
+	flush() {
+		if (this.pending === null) return;
+		this.push();
+	}
+	push() {
+		const spot = this.pending;
+		if (spot === null) return;
+		this.pending = null;
+		this.sent = spot;
+		try {
+			Promise.resolve(this.send(spot)).catch(() => void 0);
+		} catch {}
+	}
+};
+var ACTOR_RADIUS = .22;
+/** 지도 정의에서 걸을 수 없는 칸의 표를 만든다. */
+function buildGrid(map) {
+	const cols = map.cols;
+	const rows = map.rows;
+	const blocked = new Uint8Array(cols * rows);
+	const mark = (r) => {
+		for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (x >= 0 && y >= 0 && x < cols && y < rows) blocked[y * cols + x] = 1;
+	};
+	for (const w of map.walls || []) mark(w);
+	for (const f of map.furniture || []) if (f.blocks) mark(f);
+	return {
+		cols,
+		rows,
+		walkable(x, y) {
+			return x >= 0 && y >= 0 && x < cols && y < rows && blocked[y * cols + x] === 0;
+		}
+	};
+}
+var Heap = class {
+	items = [];
+	get size() {
+		return this.items.length;
+	}
+	push(node) {
+		const a = this.items;
+		a.push(node);
+		let i = a.length - 1;
+		while (i > 0) {
+			const p = i - 1 >> 1;
+			if (a[p].f <= a[i].f) break;
+			[a[p], a[i]] = [a[i], a[p]];
+			i = p;
+		}
+	}
+	pop() {
+		const a = this.items;
+		const top = a[0];
+		const last = a.pop();
+		if (a.length > 0) {
+			a[0] = last;
+			let i = 0;
+			for (;;) {
+				const l = i * 2 + 1;
+				const r = l + 1;
+				let m = i;
+				if (l < a.length && a[l].f < a[m].f) m = l;
+				if (r < a.length && a[r].f < a[m].f) m = r;
+				if (m === i) break;
+				[a[m], a[i]] = [a[i], a[m]];
+				i = m;
+			}
+		}
+		return top;
+	}
+};
+var STEPS = [
+	[
+		1,
+		0,
+		1
+	],
+	[
+		-1,
+		0,
+		1
+	],
+	[
+		0,
+		1,
+		1
+	],
+	[
+		0,
+		-1,
+		1
+	],
+	[
+		1,
+		1,
+		Math.SQRT2
+	],
+	[
+		1,
+		-1,
+		Math.SQRT2
+	],
+	[
+		-1,
+		1,
+		Math.SQRT2
+	],
+	[
+		-1,
+		-1,
+		Math.SQRT2
+	]
+];
+/**
+* 칸 `from`에서 칸 `to`로 가는 경로(칸 중심 좌표 목록, 실수)를 찾는다. 못 찾으면 null.
+* 출발 칸은 언제나 걸을 수 있는 것으로 친다. 도착 칸이 막혔으면 실패.
+*/
+function findPath(grid, from, to) {
+	if (!grid.walkable(to.x, to.y)) return null;
+	const key = (x, y) => y * grid.cols + x;
+	const h = (x, y) => Math.hypot(to.x - x, to.y - y);
+	const open = new Heap();
+	const best = /* @__PURE__ */ new Map();
+	const parent = /* @__PURE__ */ new Map();
+	const start = key(from.x, from.y);
+	best.set(start, 0);
+	open.push({
+		x: from.x,
+		y: from.y,
+		g: 0,
+		f: h(from.x, from.y)
+	});
+	let expanded = 0;
+	while (open.size > 0) {
+		const cur = open.pop();
+		const ck = key(cur.x, cur.y);
+		if (cur.g > (best.get(ck) ?? Infinity)) continue;
+		if (cur.x === to.x && cur.y === to.y) {
+			const cells = [];
+			let k = ck;
+			while (k !== void 0) {
+				cells.push({
+					x: k % grid.cols,
+					y: Math.floor(k / grid.cols)
+				});
+				k = parent.get(k);
+			}
+			cells.reverse();
+			return smooth(grid, cells.map((c) => ({
+				x: c.x + .5,
+				y: c.y + .5
+			})));
+		}
+		if (++expanded > 4096) return null;
+		for (const [dx, dy, cost] of STEPS) {
+			const nx = cur.x + dx;
+			const ny = cur.y + dy;
+			if (!grid.walkable(nx, ny)) continue;
+			if (dx !== 0 && dy !== 0 && !(grid.walkable(cur.x + dx, cur.y) && grid.walkable(cur.x, cur.y + dy))) continue;
+			const nk = key(nx, ny);
+			const g = cur.g + cost;
+			if (g < (best.get(nk) ?? Infinity)) {
+				best.set(nk, g);
+				parent.set(nk, ck);
+				open.push({
+					x: nx,
+					y: ny,
+					g,
+					f: g + h(nx, ny)
+				});
+			}
+		}
+	}
+	return null;
+}
+/** 두 점 사이를 반지름 0.22칸의 몸이 벽에 닿지 않고 곧게 갈 수 있는가. */
+function clearLine(grid, a, b) {
+	const dist = Math.hypot(b.x - a.x, b.y - a.y);
+	const steps = Math.max(1, Math.ceil(dist / .1));
+	const r = ACTOR_RADIUS;
+	for (let i = 0; i <= steps; i++) {
+		const t = i / steps;
+		const x = a.x + (b.x - a.x) * t;
+		const y = a.y + (b.y - a.y) * t;
+		for (const [ox, oy] of [
+			[-.22, -.22],
+			[r, -.22],
+			[-.22, r],
+			[r, r]
+		]) if (!grid.walkable(Math.floor(x + ox), Math.floor(y + oy))) return false;
+	}
+	return true;
+}
+/** 곧게 갈 수 있는 가장 먼 점으로 건너뛰어 꺾이는 점만 남긴다. */
+function smooth(grid, points) {
+	if (points.length <= 2) return points;
+	const out = [points[0]];
+	let i = 0;
+	while (i < points.length - 1) {
+		let j = points.length - 1;
+		while (j > i + 1 && !clearLine(grid, points[i], points[j])) j--;
+		out.push(points[j]);
+		i = j;
+	}
+	return out;
+}
+// src/office/pathfind.ts
+/** `grid`에 `cells`(담당이 선 칸)를 막힌 칸으로 더한 새 표. `grid`는 바꾸지 않는다. */
+function withBlockers(grid, cells) {
+	const taken = new Set(cells.map((c) => `${c.x},${c.y}`));
+	return {
+		cols: grid.cols,
+		rows: grid.rows,
+		walkable(x, y) {
+			return grid.walkable(x, y) && !taken.has(`${x},${y}`);
+		}
+	};
+}
+/** 실수 자리 → 그 칸(정수, 내림). */
+function cellOf(pos) {
+	return {
+		x: Math.floor(pos.x),
+		y: Math.floor(pos.y)
+	};
+}
+/**
+* 칸 `from`에서 칸 `to`까지의 길(칸 가운데 점, 마지막은 `to`의 가운데). 막힌 칸을 피해 돌아가고, 길이 없거나
+* `to`가 막혔으면 `null`(움직이지 않는다 — E40). 같은 칸이면 빈 길.
+*/
+function pathTo(grid, from, to) {
+	if (!grid.walkable(to.x, to.y)) return null;
+	if (from.x === to.x && from.y === to.y) return [];
+	const points = findPath(grid, from, to);
+	if (points === null) return null;
+	return points.slice(1);
+}
+/** 길의 길이(칸): 출발 칸 가운데에서 점들을 이은 거리. */
+function lengthOf(from, path) {
+	let total = 0;
+	let here = {
+		x: from.x + .5,
+		y: from.y + .5
+	};
+	for (const p of path) {
+		total += Math.hypot(p.x - here.x, p.y - here.y);
+		here = p;
+	}
+	return total;
+}
+/** 네 이웃(위 · 아래 · 왼쪽 · 오른쪽). */
+var NEIGHBORS = [
+	{
+		x: 0,
+		y: -1
+	},
+	{
+		x: 0,
+		y: 1
+	},
+	{
+		x: -1,
+		y: 0
+	},
+	{
+		x: 1,
+		y: 0
+	}
+];
+/**
+* 담당(칸 `agent`) 옆 빈 칸: 네 이웃(위 · 아래 · 왼쪽 · 오른쪽) 가운데 걸을 수 있고 `from`에서 길이 있는 칸 중
+* 길이 가장 짧은 칸. 없으면 `null`.
+*/
+function besideCell(grid, from, agent) {
+	let best = null;
+	for (const d of NEIGHBORS) {
+		const cell = {
+			x: agent.x + d.x,
+			y: agent.y + d.y
+		};
+		if (!grid.walkable(cell.x, cell.y)) continue;
+		const path = pathTo(grid, from, cell);
+		if (path === null) continue;
+		const length = lengthOf(from, path);
+		if (best === null || length < best.length) best = {
+			cell,
+			length
+		};
+	}
+	return best === null ? null : best.cell;
+}
+/** 입구 칸: 입구 가운데 열, 입구 줄 바로 안쪽(한 줄 위). 지도에 입구가 없으면 지도 아래 가운데의 한 줄 위. */
+function entranceCell(map) {
+	const e = map.entrance;
+	if (e) return {
+		x: Math.floor((e.fromCol + e.toCol) / 2),
+		y: e.row - 1
+	};
+	return {
+		x: Math.floor(map.cols / 2),
+		y: map.rows - 2
+	};
+}
+/**
+* 처음 서는 칸(M8): 저장된 칸이 걸을 수 있으면 그 칸, 아니면(없거나 막혔으면) 입구, 입구도 막혔으면 입구에서
+* 가장 가까운 걸을 수 있는 칸.
+*/
+function startCell(grid, saved, entrance) {
+	if (saved && grid.walkable(saved.x, saved.y)) return {
+		x: saved.x,
+		y: saved.y
+	};
+	if (grid.walkable(entrance.x, entrance.y)) return {
+		x: entrance.x,
+		y: entrance.y
+	};
+	const reach = grid.cols + grid.rows;
+	for (let ring = 1; ring <= reach; ring += 1) {
+		let best = null;
+		let bestDist = Infinity;
+		for (let dx = -ring; dx <= ring; dx += 1) {
+			const rest = ring - Math.abs(dx);
+			for (const dy of rest === 0 ? [0] : [-rest, rest]) {
+				const x = entrance.x + dx;
+				const y = entrance.y + dy;
+				if (!grid.walkable(x, y)) continue;
+				const dist = Math.hypot(dx, dy);
+				if (dist < bestDist) {
+					best = {
+						x,
+						y
+					};
+					bestDist = dist;
+				}
+			}
+		}
+		if (best) return best;
+	}
+	return {
+		x: entrance.x,
+		y: entrance.y
+	};
+}
+/** "누구와 대화?" 목록의 제목. */
+var WHO_TO_TALK = "누구와 대화?";
+/** 두 자리의 곧은 거리(칸). */
+function distance(a, b) {
+	return Math.hypot(a.x - b.x, a.y - b.y);
+}
+/** `player`에서 [`TALK_RADIUS`] 안의 담당 id, 가까운 순(같으면 id 글자 순). */
+function nearbyAgents(player, agents) {
+	return agents.map((a) => ({
+		agent: a.agent,
+		d: distance(player, a)
+	})).filter((a) => a.d < 2).sort((a, b) => a.d - b.d || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0)).map((a) => a.agent);
+}
+/** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
+function objectParticle(name) {
+	const code = name.trim().slice(-1).charCodeAt(0);
+	if (!(code >= 44032 && code <= 55203)) return "을(를)";
+	return (code - 44032) % 28 === 0 ? "를" : "을";
+}
+/** 안내 글: `{이름}{을/를} 클릭하거나 /를 눌러 대화`. */
+function talkHint(name) {
+	return `${name}${objectParticle(name)} 클릭하거나 /를 눌러 대화`;
+}
+/** 가까운 담당(가까운 순) → `/`의 할 일: 없으면 none, 하나면 open, 둘 이상이면 choose(가까운 순 그대로). */
+function slashAction(near) {
+	if (near.length === 0) return { kind: "none" };
+	if (near.length === 1) return {
+		kind: "open",
+		agent: near[0]
+	};
+	return {
+		kind: "choose",
+		agents: [...near]
+	};
+}
+/** 대화 중인 담당에게서 멀어졌는가(거리가 [`TALK_RADIUS`] 이상이면 닫는다 — 기본 흐름 7). */
+function tooFar(player, agent) {
+	return distance(player, agent) >= 2;
+}
+/**
+* 담당 누르기. `grid`는 담당이 선 칸이 막힌 표(`withBlockers`), `player`는 실수 자리, `agent`는 그 담당이 선 칸(정수).
+* 거리는 `player`에서 그 칸 가운데(+0.5)까지다. 걸어갈 칸은 `besideCell`(내 칸에서 길이 가장 짧은 이웃 칸).
+*/
+function agentClick(grid, player, agent) {
+	if (distance(player, {
+		x: agent.x + .5,
+		y: agent.y + .5
+	}) < 2) return { kind: "open" };
+	const to = besideCell(grid, cellOf(player), agent);
+	return to === null ? { kind: "none" } : {
+		kind: "walk",
+		to
+	};
+}
+// src/office/toolbar.ts
+/** 도구 줄(순서대로): id와 단추 글. */
+var TOOLS = [
+	{
+		id: "overview",
+		label: "전체 보기"
+	},
+	{
+		id: "rotate-left",
+		label: "왼쪽 돌리기"
+	},
+	{
+		id: "rotate-right",
+		label: "오른쪽 돌리기"
+	},
+	{
+		id: "perspective",
+		label: "입체"
+	},
+	{
+		id: "top",
+		label: "위에서"
+	},
+	{
+		id: "follow",
+		label: "따라가기"
+	},
+	{
+		id: "zoom-in",
+		label: "+"
+	},
+	{
+		id: "zoom-out",
+		label: "−"
+	}
+];
+/** 조작 안내 글. */
+var CONTROLS_HINT = "방향키 이동 · / 대화 · 끌기 화면 이동";
+/**
+* `root` 안에 도구 줄을 단다: [`TOOLS`] 순서의 `<button type="button" data-tool="{id}">{label}</button>` 8개.
+* 단추를 누르면 `onTool(id)`. "따라가기" 단추는 `aria-pressed`로 켜짐을 보인다(처음 `following`).
+*/
+function mountToolbar(root, onTool, following = true) {
+	const doc = root.ownerDocument;
+	const bar = doc.createElement("div");
+	bar.className = "toolbar";
+	bar.setAttribute("role", "toolbar");
+	bar.setAttribute("aria-label", "카메라");
+	let follow = null;
+	for (const tool of TOOLS) {
+		const button = doc.createElement("button");
+		button.type = "button";
+		button.dataset.tool = tool.id;
+		button.textContent = tool.label;
+		button.addEventListener("click", () => onTool(tool.id));
+		if (tool.id === "follow") follow = button;
+		bar.appendChild(button);
+	}
+	const setFollowing = (on) => {
+		follow?.setAttribute("aria-pressed", on ? "true" : "false");
+	};
+	setFollowing(following);
+	root.appendChild(bar);
+	return {
+		element: bar,
+		setFollowing
+	};
+}
+/** `root` 안에 조작 안내(`id="controls-hint"`, 글 [`CONTROLS_HINT`])를 달고 그 요소를 돌려준다. */
+function mountControlsHint(root) {
+	const hint = root.ownerDocument.createElement("div");
+	hint.id = "controls-hint";
+	hint.textContent = CONTROLS_HINT;
+	root.appendChild(hint);
+	return hint;
+}
+/**
+* "누구와 대화?" 목록(3a)을 `root` 안에 그린다(있던 목록은 바꾼다): 제목 "누구와 대화?"와 담당마다 단추 하나
+* (넘긴 순서 = 가까운 순, `data-agent="{id}"`, 글은 이름). 단추를 누르면 `onPick(id)`. 목록 요소를 돌려준다.
+*/
+function showChooser(root, agents, onPick) {
+	const doc = root.ownerDocument;
+	for (const old of root.querySelectorAll(".chooser")) old.remove();
+	const list = doc.createElement("div");
+	list.className = "chooser";
+	list.setAttribute("role", "dialog");
+	list.setAttribute("aria-label", WHO_TO_TALK);
+	const title = doc.createElement("div");
+	title.className = "chooser-title";
+	title.textContent = WHO_TO_TALK;
+	list.appendChild(title);
+	for (const agent of agents) {
+		const button = doc.createElement("button");
+		button.type = "button";
+		button.dataset.agent = agent.id;
+		button.textContent = agent.name;
+		button.addEventListener("click", () => onPick(agent.id));
+		list.appendChild(button);
+	}
+	root.appendChild(list);
+	return list;
+}
+/**
+* 화면 아래 안내(말 걸기 안내 글)를 보이거나(`text`) 숨긴다(`null`). `el.hidden`과 `textContent`만 바꾼다.
+*/
+function setHint(el, text) {
+	if (text === null) {
+		el.hidden = true;
+		return;
+	}
+	if (el.textContent !== text) el.textContent = text;
+	el.hidden = false;
+}
 /** 발언자 샷으로 가는 전환 시간(밀리초, ease-in-out). */
 var SPEAKER_TRANSITION_MS = 1200;
 /** 탁자 샷으로 가는 전환 시간(밀리초, ease-in-out). */
@@ -1013,6 +1644,8 @@ function speakerOrbit(table, spot) {
 */
 var SpeakerCamera = class {
 	on = true;
+	/** (32차 6번) 카메라가 내 캐릭터를 따라가는 중(기본 켜짐). 켜져 있으면 끼어들지 않는다. */
+	follow = true;
 	gathered = false;
 	/** 사용자가 손으로 움직여 이 논의 동안 꺼졌다. */
 	handOff = false;
@@ -1029,6 +1662,20 @@ var SpeakerCamera = class {
 	setEnabled(on, now) {
 		this.on = on;
 		if (!on) this.reset();
+	}
+	/**
+	* (32차 6번) 카메라가 내 캐릭터를 따라가는 중인가. 기본 켜짐(사무실의 따라가기 기본값과 같다).
+	*/
+	following() {
+		return this.follow;
+	}
+	/**
+	* (32차 6번) 따라가기 켜짐 · 꺼짐을 알린다. 켜져 있으면 목표를 내지 않고 논의 글에도 움직이지 않는다(내 캐릭터가
+	* 우선 — 지금 샷이 있으면 곧바로 손을 뗀다). 꺼지면 다음 논의 글부터 지금처럼 돈다. 단추(`enabled`)는 그대로다.
+	*/
+	setFollowing(on, now) {
+		this.follow = on;
+		if (on) this.reset();
 	}
 	/** 담당들이 미팅룸에 모여 있는가. `false`면 논의가 끝난 것이다(손 조작으로 꺼진 것도 풀린다). */
 	gather(gathered, now) {
@@ -1089,7 +1736,7 @@ var SpeakerCamera = class {
 		};
 	}
 	active() {
-		return this.on && this.gathered && !this.handOff;
+		return this.on && !this.follow && this.gathered && !this.handOff;
 	}
 	reset() {
 		this.shot = null;
@@ -1285,12 +1932,17 @@ var state = {
 	connected: false,
 	view: null,
 	looks: { ...DEFAULT_LOOKS },
-	looksLoaded: false
+	looksLoaded: false,
+	me: null,
+	meLoaded: false
 };
 /** (22차) 팀의 대화: 말풍선 판 · 최근 말 · 팀 탭의 논의 줄. */
 var chatter = new Chatter();
 /** (23차 7번 (나)) 회의 발언자 카메라(기본 켜짐). */
 var speaker = new SpeakerCamera();
+/** (32차 6번) 카메라 따라가기(기본 켜짐). 켜져 있으면 발언자 카메라가 끼어들지 않는다. */
+var follow = new FollowState();
+var toolbar = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 var replayUntil = 0;
 function renderLight() {
@@ -1335,7 +1987,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-cxjaru7h.js");
+		const { webglAvailable, createScene } = await import("./scene3d-bchis3sm.js");
 		return {
 			webglAvailable,
 			createScene
@@ -1352,14 +2004,29 @@ async function show3d() {
 		looks: state.looks,
 		onPick: (id) => selectConversation(id),
 		onLost: () => showLight("lost"),
-		onFollow: (following) => {
-			$("recenter").hidden = following;
+		follow,
+		player: {
+			stage: $("stage"),
+			me: state.me,
+			hooks: {
+				openChat: (id) => selectConversation(id),
+				closeChat: (id) => {
+					if (state.conversation === id) selectConversation(ROOM_TEAM);
+				},
+				conversation: () => state.conversation,
+				fetcher: (input, init) => fetch(input, init),
+				onSpot: (spot) => {
+					if (state.me) state.me = {
+						...state.me,
+						...spot
+					};
+				}
+			}
 		},
 		speech: chatter.board,
 		speaker
 	});
 	state.view = scene;
-	$("recenter").hidden = true;
 	for (const [id, view] of state.agents) scene.setAgent(id, view, { snap: true });
 }
 function applyAgent(view, snap) {
@@ -1751,6 +2418,13 @@ async function start() {
 			cache: "no-store"
 		})).ok) throw new Error("session");
 		if (!state.looksLoaded) await loadLooks();
+		if (!state.meLoaded) {
+			state.me = await loadMe((input, init) => fetch(input, {
+				...init,
+				cache: "no-store"
+			}));
+			state.meLoaded = state.me !== null;
+		}
 		if (state.lastSeq === null) await loadSnapshot();
 		openSocket();
 	} catch {
@@ -1772,6 +2446,16 @@ function wireAutoCamera() {
 	});
 	paint();
 	button.hidden = false;
+}
+/** (32차 6번) 카메라 도구 줄 8개 · 오른쪽 아래 조작 안내. 따라가기 켜짐을 단추와 발언자 카메라에 알린다. */
+function wireCameraTools() {
+	const stage = $("stage");
+	toolbar = mountToolbar(stage, (id) => state.view?.tool(id), follow.on());
+	mountControlsHint(stage);
+	follow.onChange((on) => {
+		speaker.setFollowing(on, Date.now());
+		toolbar?.setFollowing(on);
+	});
 }
 async function main() {
 	mountMenu(document.getElementById("menu"), "office");
@@ -1813,9 +2497,7 @@ async function main() {
 	} catch {
 		showLight("lost");
 	}
-	$("recenter").addEventListener("click", () => {
-		state.view?.recenter();
-	});
+	wireCameraTools();
 	wireAutoCamera();
 	setInterval(renderCaption, CAPTION_TICK_MS);
 	let lightSaid = "";
@@ -1841,4 +2523,4 @@ async function main() {
 	});
 }
 main();
-export { LANE_AREA_RATIO as a, bubbleWhere as c, overlap as d, LOOKS as i, bubbleWidth as l, speakerOrbit as n, bubbleCandidates as o, DEFAULT_LOOKS as r, bubbleText as s, easeInOut as t, insideScreen as u };
+export { bubbleWidth as A, followStep as C, bubbleCandidates as D, LANE_AREA_RATIO as E, overlap as M, bubbleText as O, FOLLOW_LERP as S, LOOKS as T, buildGrid as _, agentClick as a, SpotSender as b, slashAction as c, cellOf as d, entranceCell as f, ACTOR_RADIUS as g, withBlockers as h, showChooser as i, insideScreen as j, bubbleWhere as k, talkHint as l, startCell as m, speakerOrbit as n, distance as o, pathTo as p, setHint as r, nearbyAgents as s, easeInOut as t, tooFar as u, clearLine as v, DEFAULT_LOOKS as w, postSpot as x, findPath as y };

@@ -17,33 +17,41 @@ export interface Flat {
 
 /** 따라가기 켜짐 · 꺼짐 상태. 기본 켜짐. */
 export class FollowState {
+  private following = true;
+  private listeners = new Set<(on: boolean) => void>();
+
   /** 따라가는 중인가. */
   on(): boolean {
-    throw new Error("todo");
+    return this.following;
   }
 
   /** 사용자가 카메라를 손으로 움직였다: 따라가기를 푼다. */
   touch(kind: CameraTouch): void {
     void kind;
-    throw new Error("todo");
+    this.set(false);
   }
 
   /** "따라가기" 단추: 다시 켠다. */
   resume(): void {
-    throw new Error("todo");
+    this.set(true);
   }
 
   /** 켜짐 · 꺼짐이 바뀔 때 부른다(도구 줄 단추 · 발언자 카메라에 알린다). 끊는 함수를 돌려준다. */
   onChange(listener: (on: boolean) => void): () => void {
-    void listener;
-    throw new Error("todo");
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private set(on: boolean): void {
+    if (on === this.following) return;
+    this.following = on;
+    for (const listener of [...this.listeners]) listener(on);
   }
 }
 
 /** 한 프레임의 따라가기: 보는 점을 캐릭터 쪽으로 `factor`만큼 옮긴 새 점. */
 export function followStep(target: Flat, player: Flat, factor: number = FOLLOW_LERP): Flat {
-  void target;
-  void player;
-  void factor;
-  throw new Error("todo");
+  return { x: target.x + (player.x - target.x) * factor, z: target.z + (player.z - target.z) * factor };
 }

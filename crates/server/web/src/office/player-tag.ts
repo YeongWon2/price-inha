@@ -10,8 +10,9 @@ export const MY_TAG_CLASS = "me";
 
 /** 이름표 요소: `<div class="tag">`(내 것이면 `class="tag me"`), 글은 이름, `title`도 이름. */
 export function makeNameTag(doc: Document, name: string, mine: boolean): HTMLElement {
-  void doc;
-  void name;
-  void mine;
-  throw new Error("todo");
+  const tag = doc.createElement("div");
+  tag.className = mine ? `tag ${MY_TAG_CLASS}` : "tag";
+  tag.textContent = name;
+  tag.title = name;
+  return tag;
 }

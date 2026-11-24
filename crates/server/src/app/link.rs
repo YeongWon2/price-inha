@@ -20,8 +20,8 @@ use tokio::task::JoinHandle;
 use super::App;
 use crate::feed::StaleHook;
 use crate::reach::{
-    Linked, LockNotices, Looks, OfficeDesk, Phone, Semantic, backup_routes, daily_summary,
-    looks_routes, office_routes, phone_routes, semantic_routes, talk_routes,
+    Linked, LockNotices, Looks, Me, OfficeDesk, Phone, Semantic, backup_routes, daily_summary,
+    looks_routes, me_routes, office_routes, phone_routes, semantic_routes, talk_routes,
 };
 use crate::team::CrewLinks;
 use crate::trading::{Hooks, PROPOSAL_UNAVAILABLE, ProposalHook, approval_status_word, rejected};
@@ -283,6 +283,7 @@ pub(super) fn open_memory(
 
 /// 세션 경로에 뜻 검색 설정 화면([`crate::SETUP_SEMANTIC_PATH`])을 더한다.
 /// (20차 4번) 담당 외형 경로를 더한다. 사무실 잇기가 없어도(시연 · 2차 조립) 단다 — (21차 6번) 저장소에 남긴다.
+/// (32차 1번) 내 캐릭터 경로도 같은 자리에 단다(같은 관문 · 같은 저장소).
 pub(super) fn with_looks(
     extra: Option<Router>,
     home: &Path,
@@ -293,7 +294,11 @@ pub(super) fn with_looks(
         home,
         store.clone(),
         Arc::clone(clock),
-    )));
+    )))
+    .merge(me_routes(Arc::new(Me::new(
+        store.clone(),
+        Arc::clone(clock),
+    ))));
     Some(match extra {
         Some(extra) => extra.merge(routes),
         None => routes,

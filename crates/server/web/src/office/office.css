@@ -92,9 +92,27 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .look span { color: var(--text-muted); font-size: 12px; }
 .look[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .look:disabled { opacity: .6; cursor: wait; }
-#recenter { position: absolute; right: 12px; bottom: 12px; z-index: 6; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
-#recenter[hidden] { display: none; }
+/* 32차 3번: 내 이름표 — 담당과 같은 이름표에 원본 DeskRPG의 내 이름표 색(녹색 바탕 · 흰 글자). */
+.tag.me { background: #4e745b; color: #fff; border-color: #3f5f4a; }
+/* 32차 6번: 카메라 도구 줄(위 오른쪽) · 조작 안내(아래 오른쪽, 포인터 무시 — 원본 자리). */
+.toolbar { position: absolute; right: 12px; top: 12px; z-index: 6; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px;
+  max-width: calc(100% - 24px); }
+.toolbar button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+.toolbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#controls-hint { position: absolute; right: 24px; bottom: 20px; z-index: 5; color: #344b3c; font-size: 11px; pointer-events: none;
+  padding: 3px 8px; border-radius: 4px; background: #fcfcf4c8; }
+/* 32차 7번: 말 걸기 안내(아래 가운데, 자막 위) · "누구와 대화?" 목록. */
+.talk-hint { position: absolute; left: 50%; bottom: 52px; z-index: 6; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
+  background: #4e745bee; color: #fff; font-size: 13px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.talk-hint[hidden] { display: none; }
+.chooser { position: absolute; left: 50%; bottom: 92px; z-index: 7; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px;
+  min-width: 160px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .2); }
+.chooser-title { font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 0 4px 2px; }
+.chooser button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.chooser button:hover, .chooser button:focus-visible { border-color: var(--accent); }
 
 /* 23차 2 · 5번: 머리 위 말풍선 · 말풍선 줄(원본 DeskRPG 수치). 글은 "이름 · 글" 한 줄 글자, 꼬리 없음. 다크 모드에서도 원본 색 고정. */
 .bubble { position: absolute; left: 0; top: 0; max-width: 190px; padding: 7px 11px; border: 1px solid #cdd7c7;

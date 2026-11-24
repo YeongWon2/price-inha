@@ -6,29 +6,33 @@ export const DRAG_THRESHOLD_PX = 5;
 
 /** 포인터 하나의 누르기/끌기 판정. 누른 뒤 가장 멀리 간 거리로 가른다(돌아와도 끌기다). */
 export class PointerGesture {
+  private start: { x: number; y: number } | null = null;
+  private far = 0;
+
   /** 눌렀다(화면 px). */
   down(x: number, y: number): void {
-    void x;
-    void y;
-    throw new Error("todo");
+    this.start = { x, y };
+    this.far = 0;
   }
 
   /** 움직였다. */
   move(x: number, y: number): void {
-    void x;
-    void y;
-    throw new Error("todo");
+    if (!this.start) return;
+    this.far = Math.max(this.far, Math.hypot(x - this.start.x, y - this.start.y));
   }
 
   /** 뗐다: 누르기면 `"tap"`, 끌기면 `"drag"`, 누르지 않았으면 `null`. */
   up(x: number, y: number): "tap" | "drag" | null {
-    void x;
-    void y;
-    throw new Error("todo");
+    if (!this.start) return null;
+    this.move(x, y);
+    const kind = this.far >= DRAG_THRESHOLD_PX ? "drag" : "tap";
+    this.start = null;
+    this.far = 0;
+    return kind;
   }
 
   /** 지금 누른 채 끌고 있는가(문턱을 넘었는가). */
   dragging(): boolean {
-    throw new Error("todo");
+    return this.start !== null && this.far >= DRAG_THRESHOLD_PX;
   }
 }

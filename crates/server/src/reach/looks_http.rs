@@ -93,7 +93,7 @@ fn default_look(agent: Agent) -> &'static str {
     }
 }
 
-fn known_look(look: &str) -> Option<&'static str> {
+pub(super) fn known_look(look: &str) -> Option<&'static str> {
     LOOK_IDS.iter().copied().find(|id| *id == look)
 }
 

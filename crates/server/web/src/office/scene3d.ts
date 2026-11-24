@@ -10,6 +10,10 @@
 //   ease-in-out으로 따라간다. 목표가 없으면 평소의 따라 비추기 카메라로 돌아간다. 손으로 움직이면 그 논의 동안 끈다.
 //   (25차 1번, 결정 18) 발언자 샷은 돌지 않는다: 탁자 샷의 방위각 · 고도 그대로, 중심만 발언자 쪽으로 절반 · 거리
 //   0.8배(speakerOrbit). 여섯 담당이 계속 화면 안에 있다.
+// - (32차) 내 캐릭터(player-scene.ts): 카메라는 기본으로 내 캐릭터를 따라간다(follow.ts — 원본 0.08/프레임).
+//   끌기(화면 이동) · 오른쪽 끌기(돌리기) · 확대 · 도구 줄의 돌리기 · 각도 · 전체 보기에 풀리고 "따라가기"나 바닥
+//   누르기에 다시 켜진다. 따라가는 동안 발언자 카메라는 끼어들지 않는다. 원본처럼 왼쪽 끌기는 화면 이동, 오른쪽 ·
+//   Shift 끌기는 돌리기다(docs/research/metaverse-office-refs.md B절).
 
 import * as THREE from "three";
 import { buildFloor, type Floor } from "./architecture";
@@ -22,6 +26,10 @@ import { createActors } from "./actors3d";
 import { createBubbleLayer } from "./bubbles3d";
 import { actorPriority, layoutOffice } from "./layout";
 import { easeInOut, speakerOrbit, type CameraGoal, type SpeakerCamera } from "./speaker-camera";
+import { FOLLOW_LERP, followStep, type CameraTouch, type FollowState } from "./follow";
+import { createPlayerScene, type PlayerScene, type PlayerSceneOptions } from "./player-scene";
+import type { ToolId } from "./toolbar";
+import { PointerGesture } from "./gesture";
 import type { SpeechBoard } from "./speech";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
@@ -46,8 +54,10 @@ export interface AgentLook { place: string; work: string }
 export interface Scene {
   setAgent(id: string, view: AgentLook, options?: { snap?: boolean }): void;
   setLook(id: string, look: string): void;
-  /** 처음 화면으로: 다시 따라 비춘다. */
-  recenter(): void;
+  /** (32차 6번) 카메라 도구 줄의 단추. */
+  tool(id: ToolId): void;
+  /** (32차) 내 캐릭터의 외형을 바꾼다. */
+  setPlayerLook(look: string): void;
   dispose(): void;
 }
 
@@ -60,8 +70,10 @@ export interface SceneOptions {
   looks: Record<string, string>;
   onPick?: (id: string) => void;
   onLost?: () => void;
-  /** 따라 비추기가 켜지거나(사용자 조작 없음) 꺼질 때. */
-  onFollow?: (following: boolean) => void;
+  /** (32차 6번) 카메라 따라가기 상태(있으면 내 캐릭터를 따라간다). */
+  follow?: FollowState;
+  /** (32차) 내 캐릭터(있으면 그린다): 사무실 층 · 서버에서 읽은 나 · 대화 여닫기. */
+  player?: Pick<PlayerSceneOptions, "stage" | "me" | "hooks">;
   /** (22차 3번) 머리 위 말풍선 판(있으면 말풍선 층을 그린다 — 지나가며 잡담 포함). */
   speech?: SpeechBoard;
   /** (23차 7번 (나)) 회의 발언자 카메라(있으면 미팅룸에 모였을 때 목표를 따라간다). */
@@ -73,11 +85,16 @@ const MIN_POLAR = 0.15;
 const MAX_POLAR = 0.46 * Math.PI;
 // 내려다보는 각(연직에서 약 54도): 쓰는 공간의 앞뒤(미팅룸 ~ 라운지)를 담으면서 캐릭터 키가 잘 보이게.
 const START_POLAR = 0.95;
-const PRESS_SLOP_PX = 5;
 const MAX_PIXEL_RATIO = 1.75;
 const MIN_PIXEL_RATIO = 0.75;
 // 담당이 이만큼 이상 미팅룸에 있으면 "모였다"(framing.ts 따라 비추기와 같은 수).
 const GATHERED = 3;
+// (32차 6번) 도구 줄: 돌리기 ±45도 · 확대 ×0.8 / 축소 ×1.25(원본 수치), 위에서 보기의 각.
+const ROTATE_STEP = Math.PI / 4;
+const ZOOM_IN_STEP = 0.8;
+const ZOOM_OUT_STEP = 1.25;
+// 내 캐릭터를 따라갈 때의 처음 거리: 전체 보기 거리의 이만큼(사람 키가 잘 보이게).
+const FOLLOW_DISTANCE = 0.5;
 
 /** 카메라 궤도 값: 보는 점(tx, ty, tz)에서 거리 · 연직에서 잰 각 · 둘레 각. */
 interface Orbit { radius: number; polar: number; theta: number; tx: number; ty: number; tz: number }
@@ -141,7 +158,7 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
   });
 }
 
-export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech, speaker }: SceneOptions): Scene {
+export function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
   host.appendChild(renderer.domElement);
@@ -157,9 +174,17 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
   const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
+  const player: PlayerScene | null = playerOptions
+    ? createPlayerScene({
+      ...playerOptions, scene, labels, map, names,
+      agents: () => actors.walkers().map((w) => ({ id: w.id, x: w.x, z: w.z })),
+    })
+    : null;
+  /** 내 캐릭터를 따라가는 중인가(내 캐릭터가 있고 따라가기가 켜져 있음). */
+  const following = () => Boolean(player && follow?.on());
 
   // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음에는 쓰는 자리 모두(framing.ts), 다수가 미팅룸 · 쉼 자리로
-  // 옮기면 그쪽을 비춘다. 사용자가 끌기 · 확대를 하면 따라가지 않는다(recenter로 다시 켠다).
+  // 옮기면 그쪽을 비춘다. 사용자가 끌기 · 확대를 하면 따라가지 않는다("전체 보기"로 다시 켠다).
   let focus: Focus = "all";
   const want: Orbit = { radius: 30, polar: START_POLAR, theta: 0, tx: 0, ty: 0, tz: 0 };
   const cur = { ...want };
@@ -173,10 +198,25 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     const view = v ?? fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV);
     Object.assign(want, { radius: view.distance, polar: START_POLAR, theta: 0, tx: view.tx, ty: 0, tz: view.tz });
   }
+  /** 손으로 움직였는지(자동 비추기를 멈춘다). */
   function setFollowing(on: boolean): void {
-    if (userMoved === !on) { return; }
     userMoved = !on;
-    onFollow?.(on);
+  }
+  /** 내 캐릭터를 따라갈 때 원하는 값: 보는 점은 캐릭터, 거리는 처음엔 전체 보기의 절반. */
+  function followView(snap: boolean): void {
+    if (!player) { return; }
+    const p = player.pos();
+    if (snap) { Object.assign(want, { radius: framed * FOLLOW_DISTANCE, polar: START_POLAR, theta: 0 }); }
+    want.tx = p.x;
+    want.tz = p.y;
+  }
+  /** 사용자가 카메라를 손으로 움직였다: 따라가기를 풀고 발언자 카메라는 그 논의 동안 끈다. */
+  function touched(kind: CameraTouch): void {
+    tween = null;
+    speaker?.manual(Date.now());
+    follow?.touch(kind);
+    setFollowing(false);
+    clampWant();
   }
   function clampWant(): void {
     want.radius = clampDistance(want.radius, framed);
@@ -235,7 +275,16 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     return true;
   }
   function updateCamera(dt: number, wall: number): void {
-    if (!driveSpeaker(wall)) {
+    if (following() && player) {
+      // 원본: 매 프레임 (캐릭터 - 보는 점) × 0.08. 60fps 기준 같은 몫이 되게 프레임 시간으로 맞춘다.
+      const p = player.pos();
+      const k = 1 - Math.pow(1 - FOLLOW_LERP, Math.min(dt, 0.2) * 60);
+      const next = followStep({ x: cur.tx, z: cur.tz }, { x: p.x, z: p.y }, k);
+      cur.tx = want.tx = next.x;
+      cur.tz = want.tz = next.z;
+      tween = null;
+    }
+    if (following() || !driveSpeaker(wall)) {
       const a = 1 - Math.exp(-12 * dt);
       for (const key of Object.keys(want) as (keyof Orbit)[]) { cur[key] += (want[key] - cur[key]) * a; }
     }
@@ -251,12 +300,15 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    if (!userMoved) { reframe(); } else { framed = fitView(focusBounds(map, "all"), START_POLAR, w / h, FOV).distance; }
+    if (!userMoved && !following()) { reframe(); } else { framed = fitView(focusBounds(map, "all"), START_POLAR, w / h, FOV).distance; }
   }
   const observer = new ResizeObserver(resize);
   observer.observe(host);
   resize();
+  if (following()) { followView(true); }
   Object.assign(cur, want);
+  // 따라가기가 다시 켜지면 그 자리에서 캐릭터 쪽으로 다가간다. 꺼지면(전체 보기 등) 지금 보이는 자리에 둔다.
+  const stopFollow = follow?.onChange((on) => { if (on) { setFollowing(true); followView(false); } });
 
   const controls = wireControls(canvas, host, {
     pan(dx: number, dy: number) {
@@ -269,14 +321,20 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     rotate(dx: number, dy: number) { want.theta -= dx * 0.006; want.polar -= dy * 0.005; },
     zoom(factor: number) { want.radius *= factor; },
     twist(angle: number) { want.theta -= angle; },
-    moved() {
-      // 손으로 움직이면 발언자 카메라는 그 논의 동안 꺼지고, 지금 보이는 자리에서 사용자 조작을 잇는다.
-      tween = null;
-      speaker?.manual(Date.now());
-      setFollowing(false);
-      clampWant();
+    moved(kind: CameraTouch) {
+      // 손으로 움직이면 따라가기가 풀리고 발언자 카메라는 그 논의 동안 꺼지며, 지금 보이는 자리에서 사용자 조작을 잇는다.
+      touched(kind);
     },
-    pick(x: number, y: number) { const id = actors.pick(x, y, camera, canvas); if (id) { onPick?.(id); } },
+    pick(x: number, y: number) {
+      const id = actors.pick(x, y, camera, canvas);
+      if (id) {
+        if (player) { player.tapAgent(id); } else { onPick?.(id); }
+        return;
+      }
+      const cell = player ? floorCell(x, y) : null;
+      // 원본: 바닥을 누르면 그리로 걷고 카메라가 다시 따라간다.
+      if (cell && player?.tapFloor(cell)) { follow?.resume(); }
+    },
   });
 
   const onContextLost = (e: Event) => { e.preventDefault(); onLost?.(); };
@@ -330,11 +388,13 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     const wall = Date.now();
     if (bubbles) { actors.pause((id) => bubbles.paused(id, wall)); }
     actors.update(dt, (now - clock0) / 1000, now);
+    player?.step(dt, (now - clock0) / 1000, wall);
     updateCamera(dt, wall);
     renderer.render(scene, camera);
     const width = host.clientWidth;
     const height = host.clientHeight;
     placeRoomTags(width, height);
+    player?.placeTag(camera, width, height);
     // (23차) 이름표 · 말풍선 · 말풍선 줄을 layout.ts로 한 번에 놓는다.
     const spots = actors.spots(camera, width, height);
     if (bubbles) {
@@ -355,6 +415,8 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     cancelAnimationFrame(raf);
     observer.disconnect();
     controls.dispose();
+    stopFollow?.();
+    player?.dispose();
     document.removeEventListener("visibilitychange", onVisibility);
     canvas.removeEventListener("webglcontextlost", onContextLost);
     actors.dispose();
@@ -380,14 +442,45 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     const next = focusOf(actors.places());
     if (next === focus) { return; }
     focus = next;
-    if (!userMoved) { reframe(); }
+    if (!userMoved && !following()) { reframe(); }
   }
-  function recenter(): void {
-    setFollowing(true);
-    reframe();
+  /** 화면 점 → 바닥(y 0)의 칸. 바닥에 닿지 않거나 지도 밖이면 `null`. */
+  const floorRay = new THREE.Raycaster();
+  const floorNdc = new THREE.Vector2();
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const floorHit = new THREE.Vector3();
+  function floorCell(clientX: number, clientY: number): Point | null {
+    const rect = canvas.getBoundingClientRect();
+    floorNdc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    floorRay.setFromCamera(floorNdc, camera);
+    if (!floorRay.ray.intersectPlane(floorPlane, floorHit)) { return null; }
+    const cell = { x: Math.floor(floorHit.x), y: Math.floor(floorHit.z) };
+    return cell.x >= 0 && cell.y >= 0 && cell.x < map.cols && cell.y < map.rows ? cell : null;
+  }
+  /** (32차 6번) 도구 줄: 전체 보기 · 돌리기 · 각도 · 따라가기 · 확대 · 축소. */
+  function tool(id: ToolId): void {
+    switch (id) {
+      case "overview":
+        follow?.touch("overview");
+        tween = null;
+        setFollowing(true);
+        focus = "all";
+        reframe();
+        return;
+      case "rotate-left": want.theta += ROTATE_STEP; touched("rotate"); return;
+      case "rotate-right": want.theta -= ROTATE_STEP; touched("rotate"); return;
+      case "perspective": want.polar = START_POLAR; touched("angle"); return;
+      case "top": want.polar = MIN_POLAR; touched("angle"); return;
+      case "zoom-in": want.radius *= ZOOM_IN_STEP; touched("zoom"); return;
+      case "zoom-out": want.radius *= ZOOM_OUT_STEP; touched("zoom"); return;
+      case "follow": follow?.resume(); return;
+    }
   }
 
-  return { setAgent, setLook: actors.setLook, recenter, dispose };
+  return {
+    setAgent, setLook: actors.setLook, tool, dispose,
+    setPlayerLook: (look: string) => player?.setLook(look),
+  };
 }
 
 /** 누르기 · 끌기 · 바퀴 · 두 손가락. */
@@ -396,13 +489,15 @@ interface ControlHandlers {
   rotate(dx: number, dy: number): void;
   zoom(factor: number): void;
   twist(angle: number): void;
-  moved(): void;
+  moved(kind: CameraTouch): void;
   pick(clientX: number, clientY: number): void;
 }
 
 function wireControls(canvas: HTMLElement, host: HTMLElement, h: ControlHandlers): { dispose(): void } {
   const pointers = new Map<number, Point>();
-  let press: { x: number; y: number; pan: boolean; dragging: boolean } | null = null;
+  // 누르기 · 끌기는 gesture.ts(원본 5px 문턱)로 가른다.
+  let press: { turn: boolean } | null = null;
+  const gesture = new PointerGesture();
   let pinch: { dist: number; angle: number; mx: number; my: number } | null = null;
   const pair = () => {
     const [p1, p2] = [...pointers.values()];
@@ -412,7 +507,8 @@ function wireControls(canvas: HTMLElement, host: HTMLElement, h: ControlHandlers
     try { canvas.setPointerCapture?.(e.pointerId); } catch { /* 이미 끝난 누름 */ }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 1) {
-      press = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey, dragging: false };
+      press = { turn: e.button === 2 || e.shiftKey };
+      gesture.down(e.clientX, e.clientY);
     } else {
       press = null;
       pinch = pair();
@@ -433,25 +529,29 @@ function wireControls(canvas: HTMLElement, host: HTMLElement, h: ControlHandlers
         h.pan(now.mx - pinch.mx, now.my - pinch.my);
       }
       pinch = now;
-      h.moved();
+      h.moved("zoom");
       return;
     }
     if (!press) { return; }
-    if (!press.dragging && Math.hypot(e.clientX - press.x, e.clientY - press.y) < PRESS_SLOP_PX) { return; }
-    press.dragging = true;
-    if (press.pan) { h.pan(dx, dy); } else { h.rotate(dx, dy); }
-    h.moved();
+    gesture.move(e.clientX, e.clientY);
+    if (!gesture.dragging()) { return; }
+    // 원본: 왼쪽 끌기 = 화면 이동, 오른쪽 · Shift 끌기 = 돌리기.
+    if (press.turn) { h.rotate(dx, dy); } else { h.pan(dx, dy); }
+    h.moved(press.turn ? "rotate" : "drag");
   }
   function onUp(e: PointerEvent): void {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) { pinch = null; }
-    if (press && !press.dragging && pointers.size === 0 && !press.pan && e.button === 0) { h.pick(e.clientX, e.clientY); }
+    if (press && pointers.size === 0) {
+      const kind = gesture.up(e.clientX, e.clientY);
+      if (kind === "tap" && !press.turn && e.button === 0) { h.pick(e.clientX, e.clientY); }
+    }
     if (pointers.size === 0) { press = null; }
   }
   function onWheel(e: WheelEvent): void {
     e.preventDefault();
     h.zoom(Math.exp(e.deltaY * 0.001));
-    h.moved();
+    h.moved("zoom");
   }
   const onContext = (e: Event) => e.preventDefault();
   canvas.addEventListener("pointerdown", onDown);

@@ -4,6 +4,7 @@
 // `/`: 후보 하나면 바로 열고, 둘 이상이면 "누구와 대화?" 목록, 없으면 아무 일 없다(E42). 장면 없이 시험하는 순수 모듈.
 
 import type { Grid, Point } from "./nav";
+import { besideCell, cellOf } from "./pathfind";
 
 /** 말 걸 수 있는 거리(칸). 이보다 **가까우면**(엄격히 작으면) 안이다. */
 export const TALK_RADIUS = 2;
@@ -20,28 +21,29 @@ export interface AgentSpot {
 
 /** 두 자리의 곧은 거리(칸). */
 export function distance(a: Point, b: Point): number {
-  void a;
-  void b;
-  throw new Error("todo");
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 /** `player`에서 [`TALK_RADIUS`] 안의 담당 id, 가까운 순(같으면 id 글자 순). */
 export function nearbyAgents(player: Point, agents: readonly AgentSpot[]): string[] {
-  void player;
-  void agents;
-  throw new Error("todo");
+  return agents
+    .map((a) => ({ agent: a.agent, d: distance(player, a) }))
+    .filter((a) => a.d < TALK_RADIUS)
+    .sort((a, b) => a.d - b.d || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0))
+    .map((a) => a.agent);
 }
 
 /** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
 export function objectParticle(name: string): string {
-  void name;
-  throw new Error("todo");
+  const last = name.trim().slice(-1);
+  const code = last.charCodeAt(0);
+  if (!(code >= 0xac00 && code <= 0xd7a3)) return "을(를)";
+  return (code - 0xac00) % 28 === 0 ? "를" : "을";
 }
 
 /** 안내 글: `{이름}{을/를} 클릭하거나 /를 눌러 대화`. */
 export function talkHint(name: string): string {
-  void name;
-  throw new Error("todo");
+  return `${name}${objectParticle(name)} 클릭하거나 /를 눌러 대화`;
 }
 
 /** `/`를 눌렀을 때 할 일. */
@@ -49,15 +51,14 @@ export type SlashAction = { kind: "none" } | { kind: "open"; agent: string } | {
 
 /** 가까운 담당(가까운 순) → `/`의 할 일: 없으면 none, 하나면 open, 둘 이상이면 choose(가까운 순 그대로). */
 export function slashAction(near: readonly string[]): SlashAction {
-  void near;
-  throw new Error("todo");
+  if (near.length === 0) return { kind: "none" };
+  if (near.length === 1) return { kind: "open", agent: near[0] };
+  return { kind: "choose", agents: [...near] };
 }
 
 /** 대화 중인 담당에게서 멀어졌는가(거리가 [`TALK_RADIUS`] 이상이면 닫는다 — 기본 흐름 7). */
 export function tooFar(player: Point, agent: Point): boolean {
-  void player;
-  void agent;
-  throw new Error("todo");
+  return distance(player, agent) >= TALK_RADIUS;
 }
 
 /** 담당을 눌렀을 때 할 일(2b): 2칸 안이면 open, 멀면 그 담당 옆 빈 칸으로 walk(도착하면 연다), 갈 수 없으면 none. */
@@ -68,8 +69,7 @@ export type AgentClick = { kind: "open" } | { kind: "walk"; to: Point } | { kind
  * 거리는 `player`에서 그 칸 가운데(+0.5)까지다. 걸어갈 칸은 `besideCell`(내 칸에서 길이 가장 짧은 이웃 칸).
  */
 export function agentClick(grid: Grid, player: Point, agent: Point): AgentClick {
-  void grid;
-  void player;
-  void agent;
-  throw new Error("todo");
+  if (distance(player, { x: agent.x + 0.5, y: agent.y + 0.5 }) < TALK_RADIUS) return { kind: "open" };
+  const to = besideCell(grid, cellOf(player), agent);
+  return to === null ? { kind: "none" } : { kind: "walk", to };
 }

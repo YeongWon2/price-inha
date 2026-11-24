@@ -2,6 +2,8 @@
 // 도구 줄 8개: 전체 보기 · 왼쪽 돌리기 · 오른쪽 돌리기 · 입체 · 위에서 · 따라가기 · + · −(이 순서).
 // 오른쪽 아래 조작 안내: "방향키 이동 · / 대화 · 끌기 화면 이동".
 
+import { WHO_TO_TALK } from "./nearby";
+
 /** 도구 줄 단추 id. */
 export type ToolId = "overview" | "rotate-left" | "rotate-right" | "perspective" | "top" | "follow" | "zoom-in" | "zoom-out";
 
@@ -33,16 +35,36 @@ export interface Toolbar {
  * 단추를 누르면 `onTool(id)`. "따라가기" 단추는 `aria-pressed`로 켜짐을 보인다(처음 `following`).
  */
 export function mountToolbar(root: HTMLElement, onTool: (id: ToolId) => void, following = true): Toolbar {
-  void root;
-  void onTool;
-  void following;
-  throw new Error("todo");
+  const doc = root.ownerDocument;
+  const bar = doc.createElement("div");
+  bar.className = "toolbar";
+  bar.setAttribute("role", "toolbar");
+  bar.setAttribute("aria-label", "카메라");
+  let follow: HTMLButtonElement | null = null;
+  for (const tool of TOOLS) {
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.dataset.tool = tool.id;
+    button.textContent = tool.label;
+    button.addEventListener("click", () => onTool(tool.id));
+    if (tool.id === "follow") follow = button;
+    bar.appendChild(button);
+  }
+  const setFollowing = (on: boolean): void => {
+    follow?.setAttribute("aria-pressed", on ? "true" : "false");
+  };
+  setFollowing(following);
+  root.appendChild(bar);
+  return { element: bar, setFollowing };
 }
 
 /** `root` 안에 조작 안내(`id="controls-hint"`, 글 [`CONTROLS_HINT`])를 달고 그 요소를 돌려준다. */
 export function mountControlsHint(root: HTMLElement): HTMLElement {
-  void root;
-  throw new Error("todo");
+  const hint = root.ownerDocument.createElement("div");
+  hint.id = "controls-hint";
+  hint.textContent = CONTROLS_HINT;
+  root.appendChild(hint);
+  return hint;
 }
 
 /**
@@ -54,17 +76,36 @@ export function showChooser(
   agents: readonly { id: string; name: string }[],
   onPick: (id: string) => void,
 ): HTMLElement {
-  void root;
-  void agents;
-  void onPick;
-  throw new Error("todo");
+  const doc = root.ownerDocument;
+  for (const old of root.querySelectorAll(".chooser")) old.remove();
+  const list = doc.createElement("div");
+  list.className = "chooser";
+  list.setAttribute("role", "dialog");
+  list.setAttribute("aria-label", WHO_TO_TALK);
+  const title = doc.createElement("div");
+  title.className = "chooser-title";
+  title.textContent = WHO_TO_TALK;
+  list.appendChild(title);
+  for (const agent of agents) {
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.dataset.agent = agent.id;
+    button.textContent = agent.name;
+    button.addEventListener("click", () => onPick(agent.id));
+    list.appendChild(button);
+  }
+  root.appendChild(list);
+  return list;
 }
 
 /**
  * 화면 아래 안내(말 걸기 안내 글)를 보이거나(`text`) 숨긴다(`null`). `el.hidden`과 `textContent`만 바꾼다.
  */
 export function setHint(el: HTMLElement, text: string | null): void {
-  void el;
-  void text;
-  throw new Error("todo");
+  if (text === null) {
+    el.hidden = true;
+    return;
+  }
+  if (el.textContent !== text) el.textContent = text;
+  el.hidden = false;
 }

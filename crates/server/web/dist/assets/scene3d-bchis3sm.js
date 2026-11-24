@@ -1,4 +1,4 @@
-import { c as bubbleWhere, d as overlap, i as LOOKS, l as bubbleWidth, n as speakerOrbit, o as bubbleCandidates, r as DEFAULT_LOOKS, s as bubbleText, t as easeInOut, u as insideScreen } from "./office-b3oq8hn9.js";
+import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gcc8lkkr.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40013,197 +40013,6 @@ function fitView(b, polar, aspect, fov, centered = false) {
 	}
 	return best;
 }
-var ACTOR_RADIUS = .22;
-/** 지도 정의에서 걸을 수 없는 칸의 표를 만든다. */
-function buildGrid(map) {
-	const cols = map.cols;
-	const rows = map.rows;
-	const blocked = new Uint8Array(cols * rows);
-	const mark = (r) => {
-		for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (x >= 0 && y >= 0 && x < cols && y < rows) blocked[y * cols + x] = 1;
-	};
-	for (const w of map.walls || []) mark(w);
-	for (const f of map.furniture || []) if (f.blocks) mark(f);
-	return {
-		cols,
-		rows,
-		walkable(x, y) {
-			return x >= 0 && y >= 0 && x < cols && y < rows && blocked[y * cols + x] === 0;
-		}
-	};
-}
-var Heap = class {
-	items = [];
-	get size() {
-		return this.items.length;
-	}
-	push(node) {
-		const a = this.items;
-		a.push(node);
-		let i = a.length - 1;
-		while (i > 0) {
-			const p = i - 1 >> 1;
-			if (a[p].f <= a[i].f) break;
-			[a[p], a[i]] = [a[i], a[p]];
-			i = p;
-		}
-	}
-	pop() {
-		const a = this.items;
-		const top = a[0];
-		const last = a.pop();
-		if (a.length > 0) {
-			a[0] = last;
-			let i = 0;
-			for (;;) {
-				const l = i * 2 + 1;
-				const r = l + 1;
-				let m = i;
-				if (l < a.length && a[l].f < a[m].f) m = l;
-				if (r < a.length && a[r].f < a[m].f) m = r;
-				if (m === i) break;
-				[a[m], a[i]] = [a[i], a[m]];
-				i = m;
-			}
-		}
-		return top;
-	}
-};
-var STEPS = [
-	[
-		1,
-		0,
-		1
-	],
-	[
-		-1,
-		0,
-		1
-	],
-	[
-		0,
-		1,
-		1
-	],
-	[
-		0,
-		-1,
-		1
-	],
-	[
-		1,
-		1,
-		Math.SQRT2
-	],
-	[
-		1,
-		-1,
-		Math.SQRT2
-	],
-	[
-		-1,
-		1,
-		Math.SQRT2
-	],
-	[
-		-1,
-		-1,
-		Math.SQRT2
-	]
-];
-/**
-* 칸 `from`에서 칸 `to`로 가는 경로(칸 중심 좌표 목록, 실수)를 찾는다. 못 찾으면 null.
-* 출발 칸은 언제나 걸을 수 있는 것으로 친다. 도착 칸이 막혔으면 실패.
-*/
-function findPath(grid, from, to) {
-	if (!grid.walkable(to.x, to.y)) return null;
-	const key = (x, y) => y * grid.cols + x;
-	const h = (x, y) => Math.hypot(to.x - x, to.y - y);
-	const open = new Heap();
-	const best = /* @__PURE__ */ new Map();
-	const parent = /* @__PURE__ */ new Map();
-	const start = key(from.x, from.y);
-	best.set(start, 0);
-	open.push({
-		x: from.x,
-		y: from.y,
-		g: 0,
-		f: h(from.x, from.y)
-	});
-	let expanded = 0;
-	while (open.size > 0) {
-		const cur = open.pop();
-		const ck = key(cur.x, cur.y);
-		if (cur.g > (best.get(ck) ?? Infinity)) continue;
-		if (cur.x === to.x && cur.y === to.y) {
-			const cells = [];
-			let k = ck;
-			while (k !== void 0) {
-				cells.push({
-					x: k % grid.cols,
-					y: Math.floor(k / grid.cols)
-				});
-				k = parent.get(k);
-			}
-			cells.reverse();
-			return smooth(grid, cells.map((c) => ({
-				x: c.x + .5,
-				y: c.y + .5
-			})));
-		}
-		if (++expanded > 4096) return null;
-		for (const [dx, dy, cost] of STEPS) {
-			const nx = cur.x + dx;
-			const ny = cur.y + dy;
-			if (!grid.walkable(nx, ny)) continue;
-			if (dx !== 0 && dy !== 0 && !(grid.walkable(cur.x + dx, cur.y) && grid.walkable(cur.x, cur.y + dy))) continue;
-			const nk = key(nx, ny);
-			const g = cur.g + cost;
-			if (g < (best.get(nk) ?? Infinity)) {
-				best.set(nk, g);
-				parent.set(nk, ck);
-				open.push({
-					x: nx,
-					y: ny,
-					g,
-					f: g + h(nx, ny)
-				});
-			}
-		}
-	}
-	return null;
-}
-/** 두 점 사이를 반지름 0.22칸의 몸이 벽에 닿지 않고 곧게 갈 수 있는가. */
-function clearLine(grid, a, b) {
-	const dist = Math.hypot(b.x - a.x, b.y - a.y);
-	const steps = Math.max(1, Math.ceil(dist / .1));
-	const r = ACTOR_RADIUS;
-	for (let i = 0; i <= steps; i++) {
-		const t = i / steps;
-		const x = a.x + (b.x - a.x) * t;
-		const y = a.y + (b.y - a.y) * t;
-		for (const [ox, oy] of [
-			[-.22, -.22],
-			[r, -.22],
-			[-.22, r],
-			[r, r]
-		]) if (!grid.walkable(Math.floor(x + ox), Math.floor(y + oy))) return false;
-	}
-	return true;
-}
-/** 곧게 갈 수 있는 가장 먼 점으로 건너뛰어 꺾이는 점만 남긴다. */
-function smooth(grid, points) {
-	if (points.length <= 2) return points;
-	const out = [points[0]];
-	let i = 0;
-	while (i < points.length - 1) {
-		let j = points.length - 1;
-		while (j > i + 1 && !clearLine(grid, points[i], points[j])) j--;
-		out.push(points[j]);
-		i = j;
-	}
-	return out;
-}
 // src/office/actor.ts
 /** 외형 GLB가 놓인 같은 출처 경로(앞부분). 바깥 주소는 없다. */
 var LOOK_DIR = "/office/deskrpg/characters/office/";
@@ -40519,7 +40328,7 @@ function measureHeight(obj) {
 function headHeight(height, sitting) {
 	return height * (sitting ? ORIGIN_HEAD_SIT : ORIGIN_HEAD_STAND) / ORIGIN_HEIGHT;
 }
-function angleDiff(a, b) {
+function angleDiff$1(a, b) {
 	let d = a - b;
 	while (d > Math.PI) d -= Math.PI * 2;
 	while (d < -Math.PI) d += Math.PI * 2;
@@ -40721,7 +40530,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			actor.x += dx / dist * move;
 			actor.y += dy / dist * move;
 			budget -= move;
-			actor.yaw += angleDiff(Math.atan2(dx, dy), actor.yaw) * (1 - Math.exp(-14 * Math.min(dt, .1)));
+			actor.yaw += angleDiff$1(Math.atan2(dx, dy), actor.yaw) * (1 - Math.exp(-14 * Math.min(dt, .1)));
 		}
 		if (actor.path && actor.path.length === 0) placeAt(actor, actor.target);
 	}
@@ -41192,15 +41001,632 @@ function createBubbleLayer(labels, board, names) {
 		}
 	};
 }
+// src/office/player.ts
+/** 캐릭터를 움직이는 키: 방향키 넷뿐이다(WASD는 움직이지 않는다 — 결정 17, 원본 그대로). */
+var ARROW_KEYS = [
+	"ArrowUp",
+	"ArrowDown",
+	"ArrowLeft",
+	"ArrowRight"
+];
+/** 걷는 빠르기(칸/초). 원본 `PLAYER_SPEED` 120px/s ÷ 칸 32px. */
+var PLAYER_SPEED = 3.75;
+/** 방향키 이동이 진행 방향으로 미리 보는 거리(칸, 원본 12px ÷ 32px). */
+var PROBE_AHEAD = .375;
+/** 아무것도 눌리지 않음. */
+var NO_KEYS = {
+	up: false,
+	down: false,
+	left: false,
+	right: false
+};
+/** 방향키 → 방향 이름. */
+var KEY_DIR = {
+	ArrowUp: "up",
+	ArrowDown: "down",
+	ArrowLeft: "left",
+	ArrowRight: "right"
+};
+function isArrow(key) {
+	return ARROW_KEYS.includes(key);
+}
+/**
+* 눌린 방향키의 상태. `press` · `release`는 방향키일 때만 바꾸고 바꿨는지(방향키였는지)를 돌려준다.
+* `clear`는 모두 놓은 것으로 본다(창이 초점을 잃을 때 — E41).
+*/
+var ArrowState = class {
+	state = { ...NO_KEYS };
+	press(key) {
+		if (!isArrow(key)) return false;
+		this.state[KEY_DIR[key]] = true;
+		return true;
+	}
+	release(key) {
+		if (!isArrow(key)) return false;
+		this.state[KEY_DIR[key]] = false;
+		return true;
+	}
+	clear() {
+		this.state = { ...NO_KEYS };
+	}
+	/** 지금 눌린 방향(새 객체). */
+	held() {
+		return { ...this.state };
+	}
+	/** 하나라도 눌려 있는가. */
+	any() {
+		return this.state.up || this.state.down || this.state.left || this.state.right;
+	}
+};
+/**
+* 눌린 방향 → 이동 방향(길이 1 또는 0). 한 축만이면 그 축 ±1, 두 축이면 각 축 ±√½(대각선도 같은 빠르기).
+* 맞선 두 키(왼쪽 + 오른쪽)는 그 축이 0이다.
+*/
+function moveVector(held) {
+	const x = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+	const y = (held.down ? 1 : 0) - (held.up ? 1 : 0);
+	if (x !== 0 && y !== 0) return {
+		x: x * Math.SQRT1_2,
+		y: y * Math.SQRT1_2
+	};
+	return {
+		x,
+		y
+	};
+}
+/** 이동 방향 → 바라보는 방향(큰 축 기준). 움직이지 않으면 `current` 그대로. */
+function facingOf(move, current) {
+	if (move.x === 0 && move.y === 0) return current;
+	if (Math.abs(move.x) > Math.abs(move.y)) return move.x > 0 ? "right" : "left";
+	return move.y > 0 ? "down" : "up";
+}
+/** 몸통(반지름 [`ACTOR_RADIUS`])의 네 귀퉁이가 모두 걸을 수 있는 칸에 있는가. */
+function bodyFits(grid, x, y) {
+	const r = ACTOR_RADIUS;
+	for (const [ox, oy] of [
+		[-r, -r],
+		[r, -r],
+		[-r, r],
+		[r, r]
+	]) if (!grid.walkable(Math.floor(x + ox), Math.floor(y + oy))) return false;
+	return true;
+}
+/**
+* 방향키로 한 프레임 걷는다: `pos`에서 `moveVector(held) × PLAYER_SPEED × dtSeconds`만큼. 가려는 곳(진행 방향 앞
+* [`PROBE_AHEAD`] · 몸통 반지름)이 `grid`에서 걸을 수 없으면 그 프레임은 움직이지 않는다(E40). 새 자리를 돌려준다.
+*/
+function stepArrows(grid, pos, held, dtSeconds) {
+	const move = moveVector(held);
+	if (move.x === 0 && move.y === 0) return pos;
+	const dist = PLAYER_SPEED * dtSeconds;
+	const next = {
+		x: pos.x + move.x * dist,
+		y: pos.y + move.y * dist
+	};
+	const probe = {
+		x: pos.x + move.x * PROBE_AHEAD,
+		y: pos.y + move.y * PROBE_AHEAD
+	};
+	if (!grid.walkable(Math.floor(probe.x), Math.floor(probe.y))) return pos;
+	if (!bodyFits(grid, next.x, next.y)) return pos;
+	return next;
+}
+/**
+* 길(칸 가운데 점 목록)을 따라 `PLAYER_SPEED × dtSeconds`만큼 걷는다. 지난 점은 빼고 남은 길을 돌려준다
+* (끝까지 왔으면 `rest`가 비고 `pos`는 마지막 점).
+*/
+function stepPath(pos, path, dtSeconds) {
+	let here = pos;
+	let budget = PLAYER_SPEED * dtSeconds;
+	const rest = [...path];
+	while (rest.length > 0 && budget > 0) {
+		const goal = rest[0];
+		const gap = Math.hypot(goal.x - here.x, goal.y - here.y);
+		if (gap <= budget) {
+			here = {
+				x: goal.x,
+				y: goal.y
+			};
+			budget -= gap;
+			rest.shift();
+		} else {
+			const k = budget / gap;
+			here = {
+				x: here.x + (goal.x - here.x) * k,
+				y: here.y + (goal.y - here.y) * k
+			};
+			budget = 0;
+		}
+	}
+	return {
+		pos: here,
+		rest
+	};
+}
+/**
+* 내 캐릭터의 걷기 상태: 자리 · 바라보는 방향 · 따라가는 길.
+* - `walkTo(cell)`: 그 칸까지 길을 찾아(막힌 칸을 피해) 따라가기 시작한다. 길이 없으면 `false`이고 움직이지 않는다.
+* - `step(held, dt)`: 방향키가 하나라도 눌려 있으면 길을 버리고 방향키로 걷는다. 아니면 남은 길을 따라 걷는다.
+*/
+var PlayerWalker = class {
+	grid;
+	here;
+	face;
+	path = [];
+	constructor(grid, start, facing = "down") {
+		this.grid = grid;
+		this.here = {
+			x: start.x,
+			y: start.y
+		};
+		this.face = facing;
+	}
+	pos() {
+		return {
+			x: this.here.x,
+			y: this.here.y
+		};
+	}
+	facing() {
+		return this.face;
+	}
+	/** 지금 있는 칸(정수). */
+	cell() {
+		return cellOf(this.here);
+	}
+	/** 길을 따라가는 중인가. */
+	following() {
+		return this.path.length > 0;
+	}
+	walkTo(cell) {
+		const from = this.cell();
+		const path = pathTo(this.grid, from, cell);
+		if (path === null) return false;
+		const middle = {
+			x: from.x + .5,
+			y: from.y + .5
+		};
+		const off = Math.hypot(this.here.x - middle.x, this.here.y - middle.y) > 1e-6;
+		this.path = off ? [middle, ...path] : path;
+		return this.path.length > 0 || from.x === cell.x && from.y === cell.y;
+	}
+	/** 걷지 않는 칸 표를 바꾼다(담당이 움직여 막힌 칸이 바뀔 때). */
+	setGrid(grid) {
+		this.grid = grid;
+	}
+	step(held, dtSeconds) {
+		const move = moveVector(held);
+		if (move.x !== 0 || move.y !== 0) {
+			this.path = [];
+			this.face = facingOf(move, this.face);
+			this.here = stepArrows(this.grid, this.here, held, dtSeconds);
+			return;
+		}
+		if (this.path.length === 0) return;
+		const before = this.here;
+		const next = stepPath(this.here, this.path, dtSeconds);
+		this.here = next.pos;
+		this.path = next.rest;
+		this.face = facingOf({
+			x: next.pos.x - before.x,
+			y: next.pos.y - before.y
+		}, this.face);
+	}
+};
+/** 이름표 요소: `<div class="tag">`(내 것이면 `class="tag me"`), 글은 이름, `title`도 이름. */
+function makeNameTag(doc, name, mine) {
+	const tag = doc.createElement("div");
+	tag.className = mine ? `tag me` : "tag";
+	tag.textContent = name;
+	tag.title = name;
+	return tag;
+}
+// src/office/player3d.ts
+/** 코드 인형 색을 고르는 id(담당 id가 아니면 회색). */
+var DOLL_ID = "me";
+/** 화면 가장자리 여백(px). */
+var SCREEN_MARGIN = 8;
+function angleDiff(a, b) {
+	let d = a - b;
+	while (d > Math.PI) d -= Math.PI * 2;
+	while (d < -Math.PI) d += Math.PI * 2;
+	return d;
+}
+function createPlayerBody(scene, labels, name, look) {
+	const root = new Group();
+	root.userData.player = true;
+	scene.add(root);
+	let doll = makeDoll(root, DOLL_ID);
+	let body = null;
+	let wanted = "";
+	let disposed = false;
+	let yaw = null;
+	const tag = makeNameTag(document, name, true);
+	labels.appendChild(tag);
+	let tagSize = null;
+	const projected = new Vector3();
+	function dropBody() {
+		if (!body) return;
+		body.mixer.stopAllAction();
+		body.mixer.uncacheRoot(body.model);
+		body.model.parent?.remove(body.model);
+		body = null;
+	}
+	function setLook(next) {
+		if (next === wanted) return;
+		wanted = next;
+		makeActor(next, loadLook).then((made) => {
+			if (disposed || wanted !== next) return;
+			dropBody();
+			if (made.kind === "doll") {
+				if (!doll) doll = makeDoll(root, DOLL_ID);
+				return;
+			}
+			const model = instance(made.model.scene, true);
+			const mixer = new AnimationMixer(model);
+			const actions = /* @__PURE__ */ new Map();
+			for (const clip of made.model.animations ?? []) actions.set(String(clip.name).toLowerCase(), mixer.clipAction(clip));
+			root.add(model);
+			if (doll) {
+				removeDoll(doll);
+				doll = null;
+			}
+			body = {
+				model,
+				mixer,
+				actions,
+				current: null
+			};
+		});
+	}
+	setLook(look);
+	function animate(clip, dt) {
+		if (!body) return;
+		const next = body.actions.get(clip) ?? body.actions.get("idle");
+		if (next && next !== body.current) {
+			next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).play();
+			if (body.current) next.crossFadeFrom(body.current, CROSSFADE_SECONDS, false);
+			body.current = next;
+		}
+		body.mixer.update(dt);
+	}
+	return {
+		update(pos, facing, walking, dt, t) {
+			const goal = facingYaw(facing);
+			yaw = yaw === null ? goal : yaw + angleDiff(goal, yaw) * (1 - Math.exp(-14 * Math.min(dt, .1)));
+			root.position.set(pos.x, 0, pos.y);
+			root.rotation.set(0, yaw, 0);
+			const clip = clipName(walking, false);
+			animate(clip, dt);
+			if (doll) poseDoll(doll, clip, "idle", t);
+		},
+		placeTag(camera, width, height) {
+			projected.set(root.position.x, 0, root.position.z).project(camera);
+			if (!(projected.z < 1 && Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1)) {
+				tag.style.display = "none";
+				return;
+			}
+			tag.style.display = "";
+			if (!tagSize) tagSize = {
+				width: tag.offsetWidth,
+				height: tag.offsetHeight
+			};
+			const footX = (projected.x + 1) / 2 * width;
+			const footY = (1 - projected.y) / 2 * height;
+			const maxX = Math.max(SCREEN_MARGIN, width - SCREEN_MARGIN - tagSize.width);
+			const x = Math.min(maxX, Math.max(SCREEN_MARGIN, footX - tagSize.width / 2));
+			tag.style.transform = `translate(${Math.round(x)}px, ${Math.round(footY + 10)}px)`;
+		},
+		setLook,
+		setName(next) {
+			if (tag.textContent === next) return;
+			tag.textContent = next;
+			tag.title = next;
+			tagSize = null;
+		},
+		dispose() {
+			disposed = true;
+			dropBody();
+			if (doll) {
+				removeDoll(doll);
+				doll = null;
+			}
+			root.parent?.remove(root);
+			tag.remove();
+		}
+	};
+}
+// src/office/player-keys.ts
+var TYPING_TAGS = /* @__PURE__ */ new Set([
+	"INPUT",
+	"TEXTAREA",
+	"SELECT"
+]);
+/**
+* 글을 쓰는 칸(INPUT · TEXTAREA · SELECT · 글 고치기 칸)인가. 글 고치기 칸은 `contenteditable` 속성이 있고
+* `"false"`가 아닌 요소다(`isContentEditable`이 없는 환경도 있어 속성으로도 본다). 요소가 아니면 `false`.
+*/
+function isTypingTarget(target) {
+	if (!target || typeof target.tagName !== "string") return false;
+	const el = target;
+	if (TYPING_TAGS.has(el.tagName.toUpperCase())) return true;
+	if (el.isContentEditable) return true;
+	const attr = typeof el.getAttribute === "function" ? el.getAttribute("contenteditable") : null;
+	return attr !== null && attr.toLowerCase() !== "false";
+}
+/** 글 칸 몫인가(글 칸 초점 · 한글 조합 중). */
+function forText(event) {
+	return event.isComposing === true || event.keyCode === 229 || isTypingTarget(event.target);
+}
+/** 캐릭터를 움직일 방향키. 방향키가 아니거나(WASD 포함) 글 칸 초점 · 한글 조합 중이면 `null`. */
+function arrowOf(event) {
+	if (!ARROW_KEYS.includes(event.key)) return null;
+	if (forText(event)) return null;
+	return event.key;
+}
+/** `/`가 "말 걸기"인가(글 칸 초점 · 조합 중이면 글자다). */
+function isTalkKey(event) {
+	return event.key === "/" && !forText(event);
+}
+/**
+* 기본 동작(화면 스크롤)을 막을 키인가: 사무실 층에 초점이 있을 때(`floorFocused`)의 방향키 · `/`만.
+* 글 칸 초점 · 조합 중이면 막지 않는다.
+*/
+function preventsDefault(event, floorFocused) {
+	if (!floorFocused) return false;
+	return arrowOf(event) !== null || isTalkKey(event);
+}
+// src/office/player-scene.ts
+/** 한 프레임 걷기의 가장 긴 시간(초, 원본 키 이동 `min(delta, 100ms)`). */
+var MAX_STEP_SECONDS = .1;
+/** 이만큼 넘게 움직였으면 걷는 모습. */
+var MOVED_EPSILON = 1e-4;
+var DEFAULT_LOOK = "office-jun";
+var DEFAULT_NAME = "나";
+function createPlayerScene(options) {
+	const { scene, labels, stage, map, names, me, hooks } = options;
+	const base = buildGrid(map);
+	const doc = stage.ownerDocument;
+	const saved = me ? {
+		x: me.x,
+		y: me.y
+	} : null;
+	const start = startCell(base, saved, entranceCell(map));
+	const walker = new PlayerWalker(base, {
+		x: start.x + .5,
+		y: start.y + .5
+	}, me?.dir ?? "up");
+	const body = createPlayerBody(scene, labels, me?.name ?? DEFAULT_NAME, me?.look ?? DEFAULT_LOOK);
+	const arrows = new ArrowState();
+	const sender = new SpotSender((spot) => postSpot(hooks.fetcher, spot), me ? {
+		x: me.x,
+		y: me.y,
+		dir: me.dir
+	} : null);
+	const hint = doc.createElement("div");
+	hint.className = "talk-hint";
+	hint.setAttribute("role", "status");
+	hint.setAttribute("aria-live", "polite");
+	hint.hidden = true;
+	stage.appendChild(hint);
+	let chooser = null;
+	let chooserFor = "";
+	/** 걸어가서 닿으면 대화를 열 담당. */
+	let openOnArrival = null;
+	/** 다가가 연 대화(멀어지면 닫는다). */
+	let talkingTo = null;
+	let near = [];
+	let lastSpot = "";
+	const nameOf = (id) => names[id] ?? id;
+	function agentCells() {
+		const mine = walker.cell();
+		return options.agents().map((a) => cellOf({
+			x: a.x,
+			y: a.z
+		})).filter((c) => c.x !== mine.x || c.y !== mine.y);
+	}
+	function agentAt(id) {
+		return options.agents().find((a) => a.id === id);
+	}
+	function open(id) {
+		closeChooser();
+		openOnArrival = null;
+		talkingTo = id;
+		hooks.openChat(id);
+	}
+	function closeChooser() {
+		chooser?.remove();
+		chooser = null;
+		chooserFor = "";
+	}
+	function slash() {
+		const action = slashAction(near);
+		if (action.kind === "open") {
+			open(action.agent);
+			return;
+		}
+		if (action.kind === "choose") {
+			chooser = showChooser(stage, action.agents.map((id) => ({
+				id,
+				name: nameOf(id)
+			})), (id) => open(id));
+			chooserFor = action.agents.join();
+			chooser.querySelector("button[data-agent]")?.focus();
+		}
+	}
+	function floorFocused() {
+		const active = doc.activeElement;
+		return !active || active === doc.body || stage.contains(active);
+	}
+	const onKeyDown = (event) => {
+		if (event.key === "Escape" && chooser) {
+			closeChooser();
+			return;
+		}
+		const arrow = arrowOf(event);
+		if (arrow) arrows.press(arrow);
+		if (preventsDefault(event, floorFocused())) event.preventDefault();
+		if (isTalkKey(event) && !event.repeat) slash();
+	};
+	const onKeyUp = (event) => {
+		arrows.release(event.key);
+	};
+	const onBlur = () => {
+		arrows.clear();
+	};
+	const onFocusIn = (event) => {
+		if (isTypingTarget(event.target)) arrows.clear();
+	};
+	const onLeave = () => {
+		sender.flush();
+	};
+	const onHidden = () => {
+		if (doc.visibilityState === "hidden") sender.flush();
+	};
+	const view = doc.defaultView ?? window;
+	view.addEventListener("keydown", onKeyDown);
+	view.addEventListener("keyup", onKeyUp);
+	view.addEventListener("blur", onBlur);
+	view.addEventListener("pagehide", onLeave);
+	doc.addEventListener("focusin", onFocusIn);
+	doc.addEventListener("visibilitychange", onHidden);
+	function step(dt, t, wall) {
+		const blocked = withBlockers(base, agentCells());
+		walker.setGrid(blocked);
+		if (arrows.any()) openOnArrival = null;
+		const before = walker.pos();
+		const wasFollowing = walker.following();
+		walker.step(arrows.held(), Math.min(dt, MAX_STEP_SECONDS));
+		const pos = walker.pos();
+		const walking = Math.hypot(pos.x - before.x, pos.y - before.y) > MOVED_EPSILON;
+		body.update(pos, walker.facing(), walking, dt, t);
+		const agents = options.agents();
+		near = nearbyAgents(pos, agents.map((a) => ({
+			agent: a.id,
+			x: a.x,
+			y: a.z
+		})));
+		if (openOnArrival && wasFollowing && !walker.following()) {
+			const target = agentAt(openOnArrival);
+			const id = openOnArrival;
+			openOnArrival = null;
+			if (target && distance(pos, {
+				x: target.x,
+				y: target.z
+			}) < 2) open(id);
+		}
+		if (talkingTo && hooks.conversation() !== talkingTo) talkingTo = null;
+		if (talkingTo) {
+			const target = agentAt(talkingTo);
+			if (!target || tooFar(pos, {
+				x: target.x,
+				y: target.z
+			})) {
+				hooks.closeChat(talkingTo);
+				talkingTo = null;
+			}
+		}
+		setHint(hint, near.length > 0 ? talkHint(nameOf(near[0])) : null);
+		if (chooser && near.join() !== chooserFor) closeChooser();
+		const cell = walker.cell();
+		const spot = {
+			x: cell.x,
+			y: cell.y,
+			dir: walker.facing()
+		};
+		const key = `${spot.x},${spot.y},${spot.dir}`;
+		if (key !== lastSpot) {
+			lastSpot = key;
+			hooks.onSpot?.(spot);
+		}
+		sender.moved(spot, wall);
+	}
+	return {
+		pos: () => walker.pos(),
+		step,
+		placeTag: (camera, width, height) => body.placeTag(camera, width, height),
+		tapAgent(id) {
+			const target = agentAt(id);
+			if (!target) return;
+			const cell = cellOf({
+				x: target.x,
+				y: target.z
+			});
+			const others = agentCells();
+			const blocked = withBlockers(base, others.some((c) => c.x === cell.x && c.y === cell.y) ? others : [...others, cell]);
+			const click = agentClick(blocked, walker.pos(), cell);
+			if (click.kind === "open") {
+				open(id);
+				return;
+			}
+			if (click.kind === "walk") {
+				walker.setGrid(blocked);
+				if (walker.walkTo(click.to)) openOnArrival = id;
+			}
+		},
+		tapFloor(cell) {
+			walker.setGrid(withBlockers(base, agentCells()));
+			openOnArrival = null;
+			return walker.walkTo(cell);
+		},
+		setLook: (look) => body.setLook(look),
+		dispose() {
+			sender.flush();
+			view.removeEventListener("keydown", onKeyDown);
+			view.removeEventListener("keyup", onKeyUp);
+			view.removeEventListener("blur", onBlur);
+			view.removeEventListener("pagehide", onLeave);
+			doc.removeEventListener("focusin", onFocusIn);
+			doc.removeEventListener("visibilitychange", onHidden);
+			closeChooser();
+			hint.remove();
+			body.dispose();
+		}
+	};
+}
+/** 포인터 하나의 누르기/끌기 판정. 누른 뒤 가장 멀리 간 거리로 가른다(돌아와도 끌기다). */
+var PointerGesture = class {
+	start = null;
+	far = 0;
+	/** 눌렀다(화면 px). */
+	down(x, y) {
+		this.start = {
+			x,
+			y
+		};
+		this.far = 0;
+	}
+	/** 움직였다. */
+	move(x, y) {
+		if (!this.start) return;
+		this.far = Math.max(this.far, Math.hypot(x - this.start.x, y - this.start.y));
+	}
+	/** 뗐다: 누르기면 `"tap"`, 끌기면 `"drag"`, 누르지 않았으면 `null`. */
+	up(x, y) {
+		if (!this.start) return null;
+		this.move(x, y);
+		const kind = this.far >= 5 ? "drag" : "tap";
+		this.start = null;
+		this.far = 0;
+		return kind;
+	}
+	/** 지금 누른 채 끌고 있는가(문턱을 넘었는가). */
+	dragging() {
+		return this.start !== null && this.far >= 5;
+	}
+};
 // src/office/scene3d.ts
 var FOV = 38;
 var MIN_POLAR = .15;
 var MAX_POLAR = .46 * Math.PI;
 var START_POLAR = .95;
-var PRESS_SLOP_PX = 5;
 var MAX_PIXEL_RATIO = 1.75;
 var MIN_PIXEL_RATIO = .75;
 var GATHERED = 3;
+var ROTATE_STEP = Math.PI / 4;
+var ZOOM_IN_STEP = .8;
+var ZOOM_OUT_STEP = 1.25;
+var FOLLOW_DISTANCE = .5;
 function angleTo(from, to) {
 	let d = to - from;
 	while (d > Math.PI) d -= Math.PI * 2;
@@ -41268,7 +41694,7 @@ function roomTags(labels, map) {
 		};
 	});
 }
-function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech, speaker }) {
+function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
 	host.appendChild(renderer.domElement);
@@ -41291,6 +41717,20 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		grid: buildGrid(map)
 	});
 	const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
+	const player = playerOptions ? createPlayerScene({
+		...playerOptions,
+		scene,
+		labels,
+		map,
+		names,
+		agents: () => actors.walkers().map((w) => ({
+			id: w.id,
+			x: w.x,
+			z: w.z
+		}))
+	}) : null;
+	/** 내 캐릭터를 따라가는 중인가(내 캐릭터가 있고 따라가기가 켜져 있음). */
+	const following = () => Boolean(player && follow?.on());
 	let focus = "all";
 	const want = {
 		radius: 30,
@@ -41319,10 +41759,29 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 			tz: view.tz
 		});
 	}
+	/** 손으로 움직였는지(자동 비추기를 멈춘다). */
 	function setFollowing(on) {
-		if (userMoved === !on) return;
 		userMoved = !on;
-		onFollow?.(on);
+	}
+	/** 내 캐릭터를 따라갈 때 원하는 값: 보는 점은 캐릭터, 거리는 처음엔 전체 보기의 절반. */
+	function followView(snap) {
+		if (!player) return;
+		const p = player.pos();
+		if (snap) Object.assign(want, {
+			radius: framed * FOLLOW_DISTANCE,
+			polar: START_POLAR,
+			theta: 0
+		});
+		want.tx = p.x;
+		want.tz = p.y;
+	}
+	/** 사용자가 카메라를 손으로 움직였다: 따라가기를 풀고 발언자 카메라는 그 논의 동안 끈다. */
+	function touched(kind) {
+		tween = null;
+		speaker?.manual(Date.now());
+		follow?.touch(kind);
+		setFollowing(false);
+		clampWant();
 	}
 	function clampWant() {
 		want.radius = clampDistance(want.radius, framed);
@@ -41395,7 +41854,21 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		return true;
 	}
 	function updateCamera(dt, wall) {
-		if (!driveSpeaker(wall)) {
+		if (following() && player) {
+			const p = player.pos();
+			const k = 1 - Math.pow(1 - FOLLOW_LERP, Math.min(dt, .2) * 60);
+			const next = followStep({
+				x: cur.tx,
+				z: cur.tz
+			}, {
+				x: p.x,
+				z: p.y
+			}, k);
+			cur.tx = want.tx = next.x;
+			cur.tz = want.tz = next.z;
+			tween = null;
+		}
+		if (following() || !driveSpeaker(wall)) {
 			const a = 1 - Math.exp(-12 * dt);
 			for (const key of Object.keys(want)) cur[key] += (want[key] - cur[key]) * a;
 		}
@@ -41410,13 +41883,20 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		renderer.setSize(w, h, false);
 		camera.aspect = w / h;
 		camera.updateProjectionMatrix();
-		if (!userMoved) reframe();
+		if (!userMoved && !following()) reframe();
 		else framed = fitView(focusBounds(map, "all"), START_POLAR, w / h, FOV).distance;
 	}
 	const observer = new ResizeObserver(resize);
 	observer.observe(host);
 	resize();
+	if (following()) followView(true);
 	Object.assign(cur, want);
+	const stopFollow = follow?.onChange((on) => {
+		if (on) {
+			setFollowing(true);
+			followView(false);
+		}
+	});
 	const controls = wireControls(canvas, host, {
 		pan(dx, dy) {
 			const scale = cur.radius / (host.clientHeight || 1) * .75;
@@ -41435,15 +41915,18 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		twist(angle) {
 			want.theta -= angle;
 		},
-		moved() {
-			tween = null;
-			speaker?.manual(Date.now());
-			setFollowing(false);
-			clampWant();
+		moved(kind) {
+			touched(kind);
 		},
 		pick(x, y) {
 			const id = actors.pick(x, y, camera, canvas);
-			if (id) onPick?.(id);
+			if (id) {
+				if (player) player.tapAgent(id);
+				else onPick?.(id);
+				return;
+			}
+			const cell = player ? floorCell(x, y) : null;
+			if (cell && player?.tapFloor(cell)) follow?.resume();
 		}
 	});
 	const onContextLost = (e) => {
@@ -41501,11 +41984,13 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		const wall = Date.now();
 		if (bubbles) actors.pause((id) => bubbles.paused(id, wall));
 		actors.update(dt, (now - clock0) / 1e3, now);
+		player?.step(dt, (now - clock0) / 1e3, wall);
 		updateCamera(dt, wall);
 		renderer.render(scene, camera);
 		const width = host.clientWidth;
 		const height = host.clientHeight;
 		placeRoomTags(width, height);
+		player?.placeTag(camera, width, height);
 		const spots = actors.spots(camera, width, height);
 		if (bubbles) bubbles.update(wall, spots, actors.walkers(), actors.canSee, width, height, actors.placeTag);
 		else {
@@ -41532,6 +42017,8 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		cancelAnimationFrame(raf);
 		observer.disconnect();
 		controls.dispose();
+		stopFollow?.();
+		player?.dispose();
 		document.removeEventListener("visibilitychange", onVisibility);
 		canvas.removeEventListener("webglcontextlost", onContextLost);
 		actors.dispose();
@@ -41559,22 +42046,75 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		const next = focusOf(actors.places());
 		if (next === focus) return;
 		focus = next;
-		if (!userMoved) reframe();
+		if (!userMoved && !following()) reframe();
 	}
-	function recenter() {
-		setFollowing(true);
-		reframe();
+	/** 화면 점 → 바닥(y 0)의 칸. 바닥에 닿지 않거나 지도 밖이면 `null`. */
+	const floorRay = new Raycaster();
+	const floorNdc = new Vector2();
+	const floorPlane = new Plane(new Vector3(0, 1, 0), 0);
+	const floorHit = new Vector3();
+	function floorCell(clientX, clientY) {
+		const rect = canvas.getBoundingClientRect();
+		floorNdc.set((clientX - rect.left) / rect.width * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+		floorRay.setFromCamera(floorNdc, camera);
+		if (!floorRay.ray.intersectPlane(floorPlane, floorHit)) return null;
+		const cell = {
+			x: Math.floor(floorHit.x),
+			y: Math.floor(floorHit.z)
+		};
+		return cell.x >= 0 && cell.y >= 0 && cell.x < map.cols && cell.y < map.rows ? cell : null;
+	}
+	/** (32차 6번) 도구 줄: 전체 보기 · 돌리기 · 각도 · 따라가기 · 확대 · 축소. */
+	function tool(id) {
+		switch (id) {
+			case "overview":
+				follow?.touch("overview");
+				tween = null;
+				setFollowing(true);
+				focus = "all";
+				reframe();
+				return;
+			case "rotate-left":
+				want.theta += ROTATE_STEP;
+				touched("rotate");
+				return;
+			case "rotate-right":
+				want.theta -= ROTATE_STEP;
+				touched("rotate");
+				return;
+			case "perspective":
+				want.polar = START_POLAR;
+				touched("angle");
+				return;
+			case "top":
+				want.polar = MIN_POLAR;
+				touched("angle");
+				return;
+			case "zoom-in":
+				want.radius *= ZOOM_IN_STEP;
+				touched("zoom");
+				return;
+			case "zoom-out":
+				want.radius *= ZOOM_OUT_STEP;
+				touched("zoom");
+				return;
+			case "follow":
+				follow?.resume();
+				return;
+		}
 	}
 	return {
 		setAgent,
 		setLook: actors.setLook,
-		recenter,
-		dispose
+		tool,
+		dispose,
+		setPlayerLook: (look) => player?.setLook(look)
 	};
 }
 function wireControls(canvas, host, h) {
 	const pointers = /* @__PURE__ */ new Map();
 	let press = null;
+	const gesture = new PointerGesture();
 	let pinch = null;
 	const pair = () => {
 		const [p1, p2] = [...pointers.values()];
@@ -41593,13 +42133,10 @@ function wireControls(canvas, host, h) {
 			x: e.clientX,
 			y: e.clientY
 		});
-		if (pointers.size === 1) press = {
-			x: e.clientX,
-			y: e.clientY,
-			pan: e.button === 2 || e.shiftKey,
-			dragging: false
-		};
-		else {
+		if (pointers.size === 1) {
+			press = { turn: e.button === 2 || e.shiftKey };
+			gesture.down(e.clientX, e.clientY);
+		} else {
 			press = null;
 			pinch = pair();
 		}
@@ -41619,26 +42156,28 @@ function wireControls(canvas, host, h) {
 				h.pan(now.mx - pinch.mx, now.my - pinch.my);
 			}
 			pinch = now;
-			h.moved();
+			h.moved("zoom");
 			return;
 		}
 		if (!press) return;
-		if (!press.dragging && Math.hypot(e.clientX - press.x, e.clientY - press.y) < PRESS_SLOP_PX) return;
-		press.dragging = true;
-		if (press.pan) h.pan(dx, dy);
-		else h.rotate(dx, dy);
-		h.moved();
+		gesture.move(e.clientX, e.clientY);
+		if (!gesture.dragging()) return;
+		if (press.turn) h.rotate(dx, dy);
+		else h.pan(dx, dy);
+		h.moved(press.turn ? "rotate" : "drag");
 	}
 	function onUp(e) {
 		pointers.delete(e.pointerId);
 		if (pointers.size < 2) pinch = null;
-		if (press && !press.dragging && pointers.size === 0 && !press.pan && e.button === 0) h.pick(e.clientX, e.clientY);
+		if (press && pointers.size === 0) {
+			if (gesture.up(e.clientX, e.clientY) === "tap" && !press.turn && e.button === 0) h.pick(e.clientX, e.clientY);
+		}
 		if (pointers.size === 0) press = null;
 	}
 	function onWheel(e) {
 		e.preventDefault();
 		h.zoom(Math.exp(e.deltaY * .001));
-		h.moved();
+		h.moved("zoom");
 	}
 	const onContext = (e) => e.preventDefault();
 	canvas.addEventListener("pointerdown", onDown);

@@ -8,6 +8,7 @@
 // - WS   이벤트 `office.approval`        승인 카드(10c 14번): 폰과 같은 길 · 같은 지문 대조로 승인 · 거절.
 // - GET  /api/office/looks · POST /api/office/look   담당 외형(20차 4번): 처음에 읽어 외형을 정하고, 고르면 바꾼다.
 // - 스냅샷의 `talk` 칸 · WS 이벤트 `office.talk`   팀의 대화(22차): 팀 탭 · 머리 위 말풍선 · 가벼운 화면의 최근 말.
+// - GET  /api/office/me · POST /api/office/me/position   내 캐릭터(32차): 저장된 자리에서 시작, 자리는 띄엄띄엄 남긴다.
 // 스냅샷과 말하기 길은 조립(price-inha)이 Office에 잇는다. 없으면 이벤트만으로 그린다.
 import { mountMenu } from "../ui/menu";
 import "./office.css";
@@ -18,6 +19,9 @@ import { chatLineElement } from "./chat-view";
 import { Chatter, KIND_OFFICE_TALK, readTalk } from "./chatter";
 import { createLookPicker } from "./look-picker";
 import { DEFAULT_LOOKS } from "./looks";
+import { FollowState } from "./follow";
+import { loadMe, type Me } from "./player-sync";
+import { mountControlsHint, mountToolbar, type Toolbar } from "./toolbar";
 import type { OfficeMap, Scene } from "./scene3d";
 import { SpeakerCamera } from "./speaker-camera";
 import { SPEECH_LIFE_MS } from "./speech";
@@ -76,11 +80,16 @@ const state = {
   view: null as Scene | null,                  // 3D 장면(있으면)
   looks: { ...DEFAULT_LOOKS } as Record<string, string>, // 담당 → 외형 id(서버가 정본)
   looksLoaded: false,
+  me: null as Me | null,                      // (32차) 내 캐릭터(서버가 정본, 없으면 기본 · 입구)
+  meLoaded: false,
 };
 /** (22차) 팀의 대화: 말풍선 판 · 최근 말 · 팀 탭의 논의 줄. */
 const chatter = new Chatter();
 /** (23차 7번 (나)) 회의 발언자 카메라(기본 켜짐). */
 const speaker = new SpeakerCamera();
+/** (32차 6번) 카메라 따라가기(기본 켜짐). 켜져 있으면 발언자 카메라가 끼어들지 않는다. */
+const follow = new FollowState();
+let toolbar: Toolbar | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -140,12 +149,22 @@ async function show3d(): Promise<void> {
     looks: state.looks,
     onPick: (id: string) => selectConversation(id),
     onLost: () => showLight("lost"),
-    onFollow: (following: boolean) => { $("recenter").hidden = following; },
+    follow,
+    player: {
+      stage: $("stage"),
+      me: state.me,
+      hooks: {
+        openChat: (id: string) => selectConversation(id),
+        closeChat: (id: string) => { if (state.conversation === id) { selectConversation(ROOM_TEAM); } },
+        conversation: () => state.conversation,
+        fetcher: (input, init) => fetch(input, init),
+        onSpot: (spot) => { if (state.me) { state.me = { ...state.me, ...spot }; } },
+      },
+    },
     speech: chatter.board,
     speaker,
   });
   state.view = scene;
-  $("recenter").hidden = true;
   for (const [id, view] of state.agents) { scene.setAgent(id, view, { snap: true }); }
 }
 
@@ -500,6 +519,10 @@ async function start(): Promise<void> {
     if (!reply.ok) { throw new Error("session"); }
     // 처음 이을 때만 스냅샷을 받는다. 그 뒤에는 마지막 번호부터 이어 받는다.
     if (!state.looksLoaded) { await loadLooks(); }
+    if (!state.meLoaded) {
+      state.me = await loadMe((input, init) => fetch(input, { ...init, cache: "no-store" }));
+      state.meLoaded = state.me !== null;
+    }
     if (state.lastSeq === null) { await loadSnapshot(); }
     openSocket();
   } catch {
@@ -519,6 +542,17 @@ function wireAutoCamera(): void {
   button.addEventListener("click", () => { speaker.setEnabled(!speaker.enabled(), Date.now()); paint(); });
   paint();
   button.hidden = false;
+}
+
+/** (32차 6번) 카메라 도구 줄 8개 · 오른쪽 아래 조작 안내. 따라가기 켜짐을 단추와 발언자 카메라에 알린다. */
+function wireCameraTools(): void {
+  const stage = $("stage");
+  toolbar = mountToolbar(stage, (id) => state.view?.tool(id), follow.on());
+  mountControlsHint(stage);
+  follow.onChange((on) => {
+    speaker.setFollowing(on, Date.now());
+    toolbar?.setFollowing(on);
+  });
 }
 
 // ---------- 시작 ----------
@@ -567,7 +601,7 @@ async function main(): Promise<void> {
       showLight("lost");
     }
   }
-  $("recenter").addEventListener("click", () => { state.view?.recenter(); });
+  wireCameraTools();
   wireAutoCamera();
   setInterval(renderCaption, CAPTION_TICK_MS);
   // (22차 5번) 가벼운 화면의 최근 말은 12초가 지나면 내린다.

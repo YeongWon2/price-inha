@@ -75,6 +75,8 @@ export interface CameraGoal {
  */
 export class SpeakerCamera {
   private on = true;
+  /** (32차 6번) 카메라가 내 캐릭터를 따라가는 중(기본 켜짐). 켜져 있으면 끼어들지 않는다. */
+  private follow = true;
   private gathered = false;
   /** 사용자가 손으로 움직여 이 논의 동안 꺼졌다. */
   private handOff = false;
@@ -100,7 +102,7 @@ export class SpeakerCamera {
    * (32차 6번) 카메라가 내 캐릭터를 따라가는 중인가. 기본 켜짐(사무실의 따라가기 기본값과 같다).
    */
   following(): boolean {
-    throw new Error("todo");
+    return this.follow;
   }
 
   /**
@@ -108,9 +110,9 @@ export class SpeakerCamera {
    * 우선 — 지금 샷이 있으면 곧바로 손을 뗀다). 꺼지면 다음 논의 글부터 지금처럼 돈다. 단추(`enabled`)는 그대로다.
    */
   setFollowing(on: boolean, now: number): void {
-    void on;
     void now;
-    throw new Error("todo");
+    this.follow = on;
+    if (on) this.reset();
   }
 
   /** 담당들이 미팅룸에 모여 있는가. `false`면 논의가 끝난 것이다(손 조작으로 꺼진 것도 풀린다). */
@@ -163,7 +165,7 @@ export class SpeakerCamera {
   }
 
   private active(): boolean {
-    return this.on && this.gathered && !this.handOff;
+    return this.on && !this.follow && this.gathered && !this.handOff;
   }
 
   private reset(): void {

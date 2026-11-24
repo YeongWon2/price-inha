@@ -56,5 +56,8 @@ export default defineConfig({
     // 화면 시험은 잠금이 덮는 crates/server/tests/web/ 에 둔다.
     include: ["../tests/web/**/*.test.ts"],
     environment: "jsdom",
+    // (32차) 시험이 사무실 CSS를 `?raw`로 읽는다(내 이름표 색). vitest는 CSS 처리를 끄면 `?raw`도 빈 글로 바꾸므로
+    // 사무실 CSS만 처리해 글이 그대로 오게 한다(다른 CSS는 지금처럼 끈다).
+    css: { include: [/\/office\/office\.css(\?|$)/] },
   },
 });

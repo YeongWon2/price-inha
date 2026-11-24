@@ -32,6 +32,8 @@ var API = {
 	officeChat: "/api/office/chat",
 	officeLooks: "/api/office/looks",
 	officeLook: "/api/office/look",
+	officeMe: "/api/office/me",
+	officeMePosition: "/api/office/me/position",
 	pushKey: "/api/push/key",
 	pushSubscribe: "/api/push/subscribe",
 	notices: "/api/notices",
@@ -76,6 +78,8 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.officeChat,
 	API.officeLooks,
 	API.officeLook,
+	API.officeMe,
+	API.officeMePosition,
 	API.socket,
 	...APPROVALS
 ], [
