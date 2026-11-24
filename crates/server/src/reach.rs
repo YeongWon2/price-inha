@@ -112,6 +112,19 @@ pub const KIND_OFFICE_TALK: &str = "office.talk";
 
 /// 사무실 글 길이 상한(원본 DeskRPG `npc:chat` 500자).
 pub const OFFICE_TEXT_MAX: usize = 500;
+
+/// (25차 2번) 팀장(`leader`)의 판단 글(방 로그 원문)을 [`KIND_OFFICE_TALK`]의 `text`로 낼 사람이 읽는 문장.
+/// 방 로그의 원문은 바꾸지 않는다. 문장도 가린 뒤 [`OFFICE_TEXT_MAX`]자에서 자른다.
+///
+/// - 하루 판단(`plan` 칸이 있는 JSON): `trade` → "오늘은 운용합니다.", `rest` → "오늘은 쉽니다 — {이유}".
+/// - 종목 판단(`decision` 칸이 있는 JSON): `buy` → "사기로 정했습니다 — 진입 {진입} · 손절 {손절} · 목표 {목표}.
+///   {가설}", `sell` → "팔기로 정했습니다 — …"(같은 모양), `watch` → "지켜보기로 했습니다 — {이유}".
+///   금액은 저장소 금액(통화의 최소 단위)을 그 시장(`market`)의 돈 모양으로 쓴다: 국내는 원 단위에 세 자리마다
+///   쉼표(`71,100`), 미국은 센트 ÷ 100의 소수 둘째 자리(`187.20`).
+/// - JSON으로 읽히지 않는 글(판단 모양이 아닌 글)은 `None` — 부르는 쪽이 원문을 그대로 쓴다.
+pub fn leader_sentence(text: &str, market: pi_market::Market) -> Option<String> {
+    todo!()
+}
 /// `sourceMessageId` 길이 상한. 원본은 UUID(36자)를 쓴다. 넉넉히 128자로 정했다.
 pub const OFFICE_SOURCE_ID_MAX: usize = 128;
 /// 같은 기기가 글을 보내는 가장 짧은 간격(원본 2초).

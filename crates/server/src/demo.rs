@@ -107,6 +107,10 @@ pub(crate) fn demo_symbol(market: Market) -> Symbol {
 /// (24차 3번) 시연용 가짜 공시를 내는 간격의 기본값(실행 파일의 `--demo` 조립, 3분).
 pub const DEMO_DISCLOSURE_EVERY: Duration = Duration::from_secs(180);
 
+/// (25차 3번) 실행 파일의 `--demo` 조립에서 시연용 가짜 AI가 답마다 두는 뜸의 기본값(2.5초).
+/// [`crate::RunAssembly::demo_ai_pause`]가 이 값으로 시작하고 시험은 그 칸을 줄인다.
+pub const DEMO_AI_PAUSE: Duration = Duration::from_millis(2_500);
+
 /// (24차 3번) 시연용 가짜 공시의 제목 · 본문에 반드시 들어가는 말. 실제 출처 주소는 쓰지 않는다.
 pub const DEMO_DISCLOSURE_MARK: &str = "시연";
 

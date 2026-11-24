@@ -2,6 +2,7 @@
 //! 바깥 주소 · 가짜 공시 간격만 바꿔 띄운다.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use pi_market::Market;
 use pi_secrets::SecretStore;
@@ -21,6 +22,10 @@ pub struct RunAssembly {
     pub reach: Reach,
     /// (24차) 시연 모드의 조립 값. `settings.demo`면 [`DemoWiring::binary`], 아니면 꺼짐(`Default`).
     pub demo: DemoWiring,
+    /// (25차 3번) 시연용 가짜 AI가 답마다 두는 뜸. `settings.demo`면 [`crate::DEMO_AI_PAUSE`], 아니면
+    /// `Duration::ZERO`. 시연 모드로 띄우면 팀의 가짜 AI가 [`crate::DemoAi::with_pause`]로 이 값을 쓴다.
+    /// 시험은 이 칸만 줄인다([`DemoWiring`]은 그대로).
+    pub demo_ai_pause: Duration,
 }
 
 /// 실행 파일 `run`의 조립: 실제 주소 · 실제 시계([`Wiring::default`]), 기본 주문 길, 공식 투자 팀
@@ -41,6 +46,8 @@ pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> R
         },
         reach: Reach::default(),
         demo,
+        // 뼈대(25차 N1): 아직 뜸을 두지 않는다(옛 값).
+        demo_ai_pause: Duration::ZERO,
     }
 }
 

@@ -46,7 +46,9 @@ pub use cli::{
     SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor,
     restore,
 };
-pub use demo::{DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar};
+pub use demo::{
+    DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,
+};
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
@@ -62,7 +64,7 @@ pub use reach::{
     OFFICE_TEXT_MAX, OFFICE_TOO_FAST, OFFICE_TOO_LONG, PHONE_ASSETS_PREFIX, PUSH_KEY_PATH,
     PUSH_SUBSCRIBE_PATH, PUSH_TIMEOUT, RECALL_SOURCE_PREFIX, Reach, SEMANTIC_LOOPBACK_ONLY,
     SEMANTIC_SETTINGS_FILE, SETUP_BACKUP_PATH, SETUP_SEMANTIC_PATH, SUBSCRIBE_REFUSED,
-    restore_backup,
+    leader_sentence, restore_backup,
 };
 pub use settings::{
     DEFAULT_CALENDAR_RETRY, DEFAULT_QUOTE_INTERVAL, DEFAULT_REGISTER_ATTEMPTS,

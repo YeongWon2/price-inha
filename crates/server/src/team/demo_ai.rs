@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_agent::Role;
@@ -58,6 +59,18 @@ impl DemoAi {
     /// 기본 답으로 만든다.
     pub fn new() -> DemoAi {
         DemoAi::default()
+    }
+
+    /// (25차 3번) 답마다 `pause`만큼 뜸을 두는 가짜 AI. 뜸은 실제 시간(벽시계)으로 기다린다 — 담당들이
+    /// 미팅룸에서 차례로 말하는 모습이 사람에게 보이게 하는 것이다. 실행 파일의 `--demo` 조립만 쓴다
+    /// ([`crate::RunAssembly::demo_ai_pause`]). [`DemoAi::new`]는 뜸이 없다(`Duration::ZERO`).
+    pub fn with_pause(pause: Duration) -> DemoAi {
+        todo!()
+    }
+
+    /// (25차 3번) 답마다 두는 뜸. [`DemoAi::new`]는 `Duration::ZERO`.
+    pub fn pause(&self) -> Duration {
+        todo!()
     }
 
     /// 그 턴의 답을 정한다. 다시 정하면 바뀐다. 이 뒤로 그 턴은 이 글을 답한다.

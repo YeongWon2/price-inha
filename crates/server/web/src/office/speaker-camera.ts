@@ -15,6 +15,38 @@ export const MIN_DWELL_MS = 2_000;
 /** 마지막 말 뒤 발언자 샷을 유지하는 시간(밀리초). */
 export const HOLD_AFTER_TALK_MS = 1_500;
 
+/** (25차 1번, 결정 18) 발언자 샷의 보는 중심: 탁자 샷의 중심에서 발언자 쪽으로 이 몫만 옮긴다. */
+export const SPEAKER_CENTER_SHARE = 0.5;
+/** (25차 1번, 결정 18) 발언자 샷의 거리: 탁자 샷 거리의 이 배수. */
+export const SPEAKER_DISTANCE_SCALE = 0.8;
+
+/** 카메라 궤도 값: 보는 점(tx, ty, tz)에서 거리 · 연직에서 잰 각(polar) · 둘레 각(theta, 방위각). */
+export interface Orbit {
+  radius: number;
+  polar: number;
+  theta: number;
+  tx: number;
+  ty: number;
+  tz: number;
+}
+
+/** 발언자가 선 자리(바닥 좌표). */
+export interface Spot {
+  x: number;
+  z: number;
+}
+
+/**
+ * (25차 1번, 결정 18) 탁자 샷 궤도에서 발언자 샷 궤도를 낸다. 돌지 않는다: 방위각(theta) · 고도(polar)는
+ * 탁자 샷 그대로다. 보는 중심의 바닥 좌표(tx, tz)만 발언자 자리 쪽으로 [`SPEAKER_CENTER_SHARE`]만큼 옮기고
+ * (높이 ty는 그대로), 거리는 탁자 샷의 [`SPEAKER_DISTANCE_SCALE`]배다. 넘긴 값은 바꾸지 않는다.
+ */
+export function speakerOrbit(table: Orbit, spot: Spot): Orbit {
+  void table;
+  void spot;
+  throw new Error("todo");
+}
+
 /** 자동 카메라의 목표. */
 export interface CameraGoal {
   shot: "speaker" | "table";

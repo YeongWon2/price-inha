@@ -1,12 +1,15 @@
 //! 1번: 논의 방(`trade-<번호>` · `day`)에 담당 글(`message.member`)이 쌓이면 1초 안에 사무실 이벤트
 //! [`KIND_OFFICE_TALK`]가 하나씩 나오고, 내용이 방 로그 글과 같다(가린 글). 점수 턴은 나오지 않는다.
+//! (25차 2번으로 고침) 팀장의 판단 글만 `text`가 사람이 읽는 문장이다([`leader_sentence`]).
 
 use std::time::{Duration, Instant};
 
 use pi_agent::Role;
+use pi_market::Market;
 use pi_store::RoomEvent;
 use price_inha::{
     DAY_ROOM, DemoTurn, KIND_DAY_DISCUSSION, KIND_OFFICE_TALK, OFFICE_TEXT_MAX, TRADE_ROOM_PREFIX,
+    leader_sentence,
 };
 use serde_json::{Value, json};
 
@@ -46,12 +49,19 @@ async fn talks_within(bench: &Bench, room_name: &str, count: usize) -> Vec<Value
     }
 }
 
-/// 방 로그 글 하나와 같은 `office.talk` 내용.
+/// 방 로그 글 하나와 같은 `office.talk` 내용. (25차 2번으로 고침) 팀장 판단 글의 `text`만 사람이 읽는 문장
+/// ([`leader_sentence`], 판단 모양이 아니면 원문)이고 나머지는 방 로그 글 그대로다.
 fn expected(event: &RoomEvent, topic: &str) -> Value {
+    let raw = event.payload["text"].as_str().unwrap_or_default();
+    let text = if event.actor_id == "leader" {
+        leader_sentence(raw, Market::Kr).unwrap_or_else(|| raw.to_string())
+    } else {
+        raw.to_string()
+    };
     json!({
         "room": event.room,
         "agent": event.actor_id,
-        "text": event.payload["text"],
+        "text": text,
         "at": event.at.0,
         "topic": topic,
     })
@@ -116,6 +126,11 @@ async fn 종목_논의의_담당_글마다_office_talk가_1초_안에_나오고_
         .find(|talk| talk["agent"] == "leader")
         .expect("팀장 판단 글도 같은 길로 나온다");
     assert_eq!(leader["topic"], WATCHED);
+    let sentence = leader["text"].as_str().unwrap_or_default();
+    assert!(
+        !sentence.trim_start().starts_with('{'),
+        "(25차 2번) 팀장 판단 글은 날 JSON이 아니라 문장이다: {sentence}"
+    );
 
     let scout = talks
         .iter()
@@ -198,5 +213,13 @@ async fn 하루_판단_방의_팀장_글도_office_talk로_나오고_주제는_d
     for (talk, event) in talks.iter().zip(&said) {
         assert_eq!(five(talk), expected(event, "day"));
     }
+    let leader = talks
+        .iter()
+        .find(|talk| talk["agent"] == "leader")
+        .expect("팀장의 하루 판단 글");
+    assert_eq!(
+        leader["text"], "오늘은 운용합니다.",
+        "(25차 2번) 하루 판단 운용은 문장으로 나온다"
+    );
     bench.close().await;
 }
