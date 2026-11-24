@@ -55,8 +55,7 @@ export const API = {
 
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
 export function templateStopPath(id: number | string): string {
-  void id;
-  throw new Error("todo");
+  return API.templates + "/" + encodeURIComponent(String(id)) + "/stop";
 }
 
 /**

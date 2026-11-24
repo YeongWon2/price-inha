@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 
 use super::Trading;
 use super::base::millis;
+use super::view::state_word;
 
 /// 템플릿 경로의 거부.
 pub(super) enum Refusal {
@@ -35,15 +36,6 @@ impl From<StoreError> for Refusal {
             StoreError::TemplateLocked { .. } => Refusal::Locked,
             other => Refusal::Store(other),
         }
-    }
-}
-
-fn state_word(state: TemplateState) -> &'static str {
-    match state {
-        TemplateState::Simulating => "simulating",
-        TemplateState::PromotionPending => "promotion_pending",
-        TemplateState::Live => "live",
-        TemplateState::Stopped => "stopped",
     }
 }
 
@@ -150,7 +142,7 @@ impl Trading {
     ///
     /// (21차 1번, 결정 9 · R14-1 · E28) 실전중 템플릿만 `plan_adjust`로 가른다: 위험을 키우는 칸이 하나라도
     /// 있으면 템플릿은 그대로 두고 사용자 변경 개선안(제안됨)과 그 승인 요청을 만들어
-    /// `{"state": "needs_approval", "proposal", "widened"}`로 답한다. 줄이기만이면 지금 길(실전중 잠금이면 409).
+    /// `{"state": "needs_approval", "proposal", "widened", "number": 승인 번호}`로 답한다. 줄이기만이면 지금 길(실전중 잠금이면 409).
     /// 상한 넘음(E5)은 어느 쪽이든 거부한다. 모의중 · 승격대기는 지금처럼 바로 반영(잠금은 저장소가 본다).
     pub(super) async fn adjust_template(&self, body: &Value) -> Result<Value, Refusal> {
         let id = TemplateId(body["id"].as_i64().ok_or(Refusal::Invalid)?);
@@ -229,6 +221,7 @@ impl Trading {
             "state": "needs_approval",
             "proposal": proposal.id.0,
             "widened": names,
+            "number": requested.number.as_str(),
         }))
     }
 }

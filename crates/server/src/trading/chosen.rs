@@ -23,7 +23,7 @@ pub(crate) const CHOOSE_TEMPLATE_NOTICE: &str =
     "쓰는 템플릿이 없거나 멈춰 있어 사는 주문이 나가지 않습니다. 새 템플릿을 고르세요";
 
 /// 상태를 가리지 않고 모두 읽는다.
-const STATES: [TemplateState; 4] = [
+pub(super) const STATES: [TemplateState; 4] = [
     TemplateState::Simulating,
     TemplateState::PromotionPending,
     TemplateState::Live,

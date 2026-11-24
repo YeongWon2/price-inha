@@ -1,11 +1,12 @@
-//! 주문 길의 경로(세션이 있어야 열린다): 팀 상태 · 다시 시작 · 승인 답하기 · 템플릿 고르기 · 값 맞추기.
+//! 주문 길의 경로(세션이 있어야 열린다): 팀 상태 · 다시 시작 · 승인 답하기 · 템플릿 고르기 · 값 맞추기 ·
+//! (27차) 템플릿 화면 읽기 · 실전 템플릿 멈추기.
 //! 모양은 [`super`]의 경로 상수 문서에 있다.
 
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::http::header::CACHE_CONTROL;
 use axum::response::{IntoResponse, Response};
@@ -14,9 +15,11 @@ use serde_json::{Value, json};
 
 use super::day::{Restart, team_word};
 use super::templates::Refusal;
+use super::view::Stopped;
 use super::{
     APPROVAL_ANSWER_PATH, RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED, TEAM_PATH, TEAM_RESTART_PATH,
-    TEMPLATE_ADJUST_PATH, TEMPLATE_OVER_CAP, TEMPLATE_PATH, Trading,
+    TEMPLATE_ADJUST_PATH, TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH, TEMPLATE_STOP_PATH,
+    TEMPLATES_VIEW_PATH, Trading,
 };
 use crate::TradingError;
 
@@ -28,6 +31,8 @@ pub(crate) fn routes(trading: Arc<Trading>) -> Router {
         .route(APPROVAL_ANSWER_PATH, post(answer))
         .route(TEMPLATE_PATH, post(choose))
         .route(TEMPLATE_ADJUST_PATH, post(adjust))
+        .route(TEMPLATES_VIEW_PATH, get(templates_view))
+        .route(TEMPLATE_STOP_PATH, post(stop_template))
         .with_state(trading)
 }
 
@@ -126,4 +131,26 @@ async fn choose(State(trading): State<Arc<Trading>>, body: Bytes) -> Response {
 
 async fn adjust(State(trading): State<Arc<Trading>>, body: Bytes) -> Response {
     template_reply(trading.adjust_template(&json_of(&body)).await)
+}
+
+async fn templates_view(State(trading): State<Arc<Trading>>) -> Response {
+    match trading.templates_view().await {
+        Ok(view) => reply(StatusCode::OK, view),
+        Err(error) => failed(&error),
+    }
+}
+
+async fn stop_template(State(trading): State<Arc<Trading>>, Path(id): Path<String>) -> Response {
+    let Ok(id) = id.parse::<i64>() else {
+        return reply(StatusCode::BAD_REQUEST, json!({ "error": "invalid_input" }));
+    };
+    match trading.stop_live_template(pi_store::TemplateId(id)) {
+        Ok(Stopped::Done(id)) => reply(StatusCode::OK, json!({ "id": id.0, "state": "stopped" })),
+        Ok(Stopped::NotLive(state)) => reply(
+            StatusCode::CONFLICT,
+            json!({ "error": TEMPLATE_NOT_LIVE, "state": state }),
+        ),
+        Ok(Stopped::Missing) => reply(StatusCode::NOT_FOUND, json!({ "error": "not_found" })),
+        Err(error) => failed(&error),
+    }
 }

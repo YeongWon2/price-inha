@@ -100,8 +100,8 @@ impl Trading {
         }
     }
 
-    /// 그 템플릿을 만든 뒤의 모의 결과.
-    async fn promotion_stats(
+    /// 그 템플릿을 만든 뒤의 모의 결과(승격 판정과 템플릿 화면의 승격 기준 줄이 같이 쓴다).
+    pub(super) async fn promotion_stats(
         &self,
         template: &pi_store::Template,
     ) -> Result<PromotionStats, TradingError> {
@@ -242,7 +242,7 @@ impl Trading {
     }
 
     /// 쓸 수 있는 실전 승격 승인 요청들: 기다림, 또는 승인됨인데 소비되지 않은 것.
-    fn promotion_requests(&self) -> Result<Vec<ApprovalView>, TradingError> {
+    pub(super) fn promotion_requests(&self) -> Result<Vec<ApprovalView>, TradingError> {
         let mut found = Vec::new();
         for status in [ApprovalStatus::Pending, ApprovalStatus::Approved] {
             for row in self.store.approvals_in_status(status)? {

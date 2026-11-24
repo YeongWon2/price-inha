@@ -1,0 +1,154 @@
+/*
+ * 템플릿 화면 모양(server 27차 3번): 고르기 · 값 표 · 승격 기준 표 · 판 이력 · 실전 운용. 토큰(var(--…))만 쓴다.
+ * 폰 폭에서는 값 표가 줄마다 카드처럼 접혀 화면을 가로로 밀지 않는다.
+ */
+.tpl-body { display: grid; gap: var(--space-4); min-width: 0; }
+.tpl-body > .ui-card { margin: 0; min-width: 0; }
+.tpl-hint, .ui-card > .tpl-hint { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+
+/* 스타일 고르기 · 지금 쓰는 템플릿 */
+.tpl-styles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tpl-styles .ui-button { min-width: 88px; }
+.tpl-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.tpl-current-label { color: var(--text-muted); font-size: var(--font-size-sm); }
+.tpl-current-name { font-weight: 700; }
+.ui-card > .ui-empty { margin-top: var(--space-4); padding: var(--space-4); }
+
+/* 안내 줄(실전중 승인 안내 · 잠김) */
+.tpl-notice, .ui-card > .tpl-notice {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+}
+.tpl-notice[data-tone="warning"] { border-left-color: var(--warning); }
+
+/* 표 공통 */
+.tpl-table-wrap { min-width: 0; }
+.ui-table th[scope="row"] { color: var(--text); font-size: var(--font-size-md); font-weight: 600; }
+.tpl-fields td, .tpl-fields th, .tpl-promotion td, .tpl-promotion th { vertical-align: middle; }
+.tpl-fields thead th:nth-child(n + 2):nth-child(-n + 3),
+.tpl-promotion thead th:nth-child(n + 2):nth-child(-n + 3) { text-align: right; }
+
+/* 값 표 */
+.tpl-fields .tpl-group th {
+  padding-top: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.tpl-fields tbody:first-of-type .tpl-group th { padding-top: var(--space-3); }
+.tpl-group-title { margin-right: var(--space-2); color: var(--text); font-size: var(--font-size-sm); font-weight: 700; }
+.tpl-group-hint { color: var(--text-muted); font-size: var(--font-size-sm); font-weight: 400; }
+.tpl-fields .tpl-value, .tpl-fields .tpl-cap { text-align: right; white-space: nowrap; }
+.tpl-fields .tpl-cap { color: var(--text-muted); font-size: var(--font-size-sm); }
+.tpl-fields tbody[data-group="other"] .tpl-value { text-align: left; white-space: normal; color: var(--text); }
+.tpl-fields tbody[data-group="other"] .tpl-cap { text-align: right; }
+.tpl-entry { width: 148px; }
+.tpl-fields .tpl-name { white-space: nowrap; width: 1%; padding-right: var(--space-5); }
+.tpl-fields tbody[data-group="other"] .tpl-input { visibility: hidden; }
+.tpl-fields tbody[data-group="other"] .tpl-cap { color: var(--text-muted); }
+.tpl-input { width: 100%; min-height: 34px; padding: var(--space-1) var(--space-2); text-align: right; font-variant-numeric: tabular-nums; }
+.tpl-input:read-only:not(:disabled) { border-style: dashed; background: transparent; color: var(--text-muted); }
+.tpl-input:read-only:not(:disabled)::placeholder { color: var(--text-muted); }
+.tpl-input:disabled { background: var(--surface-sunk); color: var(--text-muted); cursor: not-allowed; }
+.tpl-input[aria-invalid="true"] { border-color: var(--danger); outline: 1px solid var(--danger); }
+.tpl-note:empty { display: none; }
+.tpl-note { display: block; margin-top: var(--space-1); color: var(--danger); font-size: var(--font-size-sm); font-weight: 600; text-align: right; }
+.tpl-fields tr[data-invalid="true"] .tpl-name { color: var(--danger); }
+
+.tpl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-4);
+}
+.tpl-result { margin: 0; font-size: var(--font-size-sm); color: var(--text-muted); }
+.tpl-result:empty { display: none; }
+.tpl-result[data-tone="saved"] { color: var(--success); font-weight: 600; }
+.tpl-result[data-tone="over_cap"], .tpl-result[data-tone="locked"], .tpl-result[data-tone="failed"] { color: var(--danger); font-weight: 600; }
+.tpl-result[data-tone="needs_approval"] { color: var(--warning); font-weight: 600; }
+.ui-card > .tpl-result { margin-top: var(--space-3); }
+
+/* 승격 기준 표 */
+.tpl-promotion .tpl-num { text-align: right; white-space: nowrap; }
+.tpl-promotion .tpl-verdict { width: 1%; white-space: nowrap; text-align: right; }
+.tpl-promotion tr[data-short="true"] .tpl-num:nth-of-type(2) { color: var(--warning); font-weight: 600; }
+
+/* 실전 운용 */
+.tpl-live-notice, .ui-card > .tpl-live-notice {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+}
+
+/* 판 이력 */
+.tpl-revisions { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+.tpl-revision {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.tpl-revision-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.tpl-revision-at { color: var(--text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.tpl-revision-empty { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.tpl-changes { margin: var(--space-2) 0 0; padding: 0; list-style: none; display: grid; gap: var(--space-1); }
+.tpl-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
+}
+.tpl-change-name { min-width: 9em; font-weight: 600; }
+.tpl-change-values { font-variant-numeric: tabular-nums; }
+.tpl-before { color: var(--text-muted); }
+.tpl-arrow { color: var(--text-muted); }
+.tpl-change[data-widened="true"] .tpl-after { color: var(--warning); font-weight: 700; }
+
+/* 읽기 실패 */
+.tpl-failed { display: grid; gap: var(--space-3); justify-items: start; }
+
+/* 폰 폭: 값 표는 줄마다 접는다(가로로 밀지 않는다). */
+@media (max-width: 600px) {
+  .tpl-fields thead { display: none; }
+  .tpl-fields, .tpl-fields tbody { display: block; width: 100%; }
+  .tpl-fields .tpl-group, .tpl-fields .tpl-group th { display: block; }
+  .tpl-fields tr[data-key] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "name name" "value entry" "cap entry";
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tpl-fields tr[data-key] > * { display: block; padding: 0; border: 0; }
+  .tpl-fields .tpl-name { grid-area: name; width: auto; white-space: normal; padding: 0; }
+  .tpl-fields .tpl-value { grid-area: value; text-align: left; }
+  .tpl-fields .tpl-cap { grid-area: cap; text-align: left; }
+  .tpl-fields tbody[data-group="other"] tr[data-key] { grid-template-areas: "name name" "value value"; }
+  .tpl-fields tbody[data-group="other"] .tpl-cap,
+  .tpl-fields tbody[data-group="other"] .tpl-entry { display: none; }
+  .tpl-fields .tpl-cap[aria-label] { display: none; }
+  .tpl-entry { grid-area: entry; width: 120px; align-self: center; }
+  .tpl-promotion th, .tpl-promotion td { padding: var(--space-2) var(--space-1); font-size: var(--font-size-sm); }
+  .tpl-promotion th[scope="row"] { white-space: nowrap; font-size: var(--font-size-sm); }
+  .tpl-promotion thead th:first-child, .tpl-promotion th[scope="row"] { padding-left: 0; }
+  .tpl-change-name { min-width: 0; width: 100%; }
+}

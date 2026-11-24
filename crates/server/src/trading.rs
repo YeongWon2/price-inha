@@ -32,6 +32,7 @@ mod promote;
 mod retry;
 mod stop;
 mod templates;
+mod view;
 mod watch;
 
 use std::collections::HashMap;

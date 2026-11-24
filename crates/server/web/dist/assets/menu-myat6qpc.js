@@ -33,8 +33,15 @@ var API = {
 	pushSubscribe: "/api/push/subscribe",
 	notices: "/api/notices",
 	dailySummary: "/api/daily-summary",
-	approvals: "/api/approvals/"
+	approvals: "/api/approvals/",
+	templatesView: "/api/templates/current",
+	templates: "/api/templates",
+	templatesAdjust: "/api/templates/adjust"
 };
+/** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
+function templateStopPath(id) {
+	return API.templates + "/" + encodeURIComponent(String(id)) + "/stop";
+}
 /**
 * 사무실 담당 외형(server 20차 4번): 읽기 `GET` · 바꾸기 `POST`. 사무실 경로([`API.office`]) 아래에 둔다.
 * (21차 6번) 정식 상수([`API.officeLooks`] · [`API.officeLook`])이고 `SCREEN_PATHS.office`에 들어 있다.
@@ -62,7 +69,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.session, API.session, API.session;
+], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.session;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));
@@ -114,4 +121,4 @@ function mountMenu(slot, current) {
 	if (here && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, here.offsetLeft - nav.clientWidth / 2 + here.offsetWidth / 2);
 	return nav;
 }
-export { approvalPath as a, SCREEN_ROOTS as i, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, mountMenu as t };
+export { approvalPath as a, SCREEN_ROOTS as i, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, templateStopPath as s, mountMenu as t };
