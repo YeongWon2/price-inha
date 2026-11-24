@@ -47,6 +47,13 @@ impl pi_notify::Redactor for Hidden {
     }
 }
 
+/// (33차 3번) 사무실 공지 글의 가리기 자리: 비밀 보관소.
+impl pi_office::Redactor for Hidden {
+    fn redact(&self, text: &str) -> String {
+        self.0.redact(text)
+    }
+}
+
 /// 사무실의 이벤트 포트: 접속 관문이 뜬 뒤에 붙는 발행 손잡이.
 #[derive(Default)]
 pub(crate) struct LateSink(OnceLock<Publisher>);
@@ -79,6 +86,8 @@ pub(crate) struct Linked {
     pub(crate) notifier: Arc<Notifier>,
     pub(crate) office: Arc<Office>,
     pub(crate) sink: Arc<LateSink>,
+    /// (33차 3번) 공지 확인 답 · 이어 말하기의 하루 AI 호출 판정(팀이 붙으면 잇는다).
+    pub(crate) budget: Arc<super::SpareBudget>,
     /// (22차 1번) 논의 방의 담당 글을 사무실 팀 대화로 낸다.
     pub(crate) talk: Arc<super::TalkFeed>,
     /// 백업 조립 값과 백업(설정 화면이 바꾼다).
@@ -143,8 +152,14 @@ impl Linked {
         });
         let sink = Arc::new(LateSink::default());
         let team = store.team_state()?;
-        let office_sink: Arc<dyn EventSink> = Arc::clone(&sink) as Arc<dyn EventSink>;
-        let office = Office::new(team, office_sink, Arc::new(Clocked(Arc::clone(clock))));
+        let office_sink: Arc<dyn EventSink> = Arc::new(super::SummonSink::new(
+            Arc::clone(&sink) as Arc<dyn EventSink>
+        ));
+        let budget = Arc::new(super::SpareBudget::default());
+        // (33차) 공지 저장소 · 가리기와 하루 AI 호출 판정을 끼운다. 부르기 단계는 감싼 포트가 따로 낸다.
+        let office = Office::new(team, office_sink, Arc::new(Clocked(Arc::clone(clock))))
+            .with_notices(store.clone(), Arc::new(Hidden(Arc::clone(secrets))))
+            .with_ai_budget(Arc::clone(&budget) as Arc<dyn pi_office::AiBudget>);
         let backup = backup_http::effective(secrets.dir(), reach.backup)
             .map(|wiring| {
                 let backup = backup_of(wiring.clone(), store, secrets)?;
@@ -160,6 +175,7 @@ impl Linked {
             notifier: Arc::new(notifier),
             office: Arc::new(office),
             sink,
+            budget,
             talk,
             backup: Mutex::new(backup),
             store: store.clone(),

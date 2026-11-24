@@ -1,4 +1,4 @@
-import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-mixz7f78.js";
+import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ndyyrws6.js";
 var PENDING = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -1112,6 +1112,69 @@ var SpotSender = class {
 		} catch {}
 	}
 };
+// src/office/mention-text.ts
+/** 멘션 없는 팀 방 글에 보이는 안내(E44 · 4b2). */
+var NO_MENTION_HINT = "@로 담당을 부르거나 공지로 보내세요";
+/** 멘션한 이름이 명단에 없을 때 보낸 사람에게만 보이는 안내(E43 · 4d1, 원본 글 그대로). */
+var NO_MATCH_HINT = "지목한 상대가 이 방에 없어 아무도 답하지 않았습니다.";
+/** `@` 목록에 맞는 담당이 없을 때의 줄. */
+var MENTION_EMPTY = "해당하는 담당이 없습니다";
+/** 이름 → 보낼 글의 멘션 `@[이름]`(이름 속 `\` `[` `]` 앞에 `\`). */
+function mentionTag(name) {
+	let tag = "@[";
+	for (const c of name) {
+		if (c === "\\" || c === "[" || c === "]") tag += "\\";
+		tag += c;
+	}
+	return `${tag}]`;
+}
+/** 조각들 → 서버로 보낼 글. 글 조각은 그대로, 칩은 [`mentionTag`]로 잇는다(다듬지 않는다). */
+function serializePieces(pieces) {
+	return pieces.map((p) => p.kind === "text" ? p.text : mentionTag(p.name)).join("");
+}
+/** 조각에 멘션 칩이 하나라도 있는가. */
+function hasMention(pieces) {
+	return pieces.some((p) => p.kind === "mention");
+}
+/** 빈칸(줄바꿈 포함)인가. */
+function isSpace(c) {
+	return /\s/.test(c);
+}
+/**
+* 글 `text`의 커서 `caret`(글자 위치) 앞에서 열린 `@` 찾기. `@`가 줄 처음이거나 빈칸(줄바꿈 포함) 바로 뒤이고,
+* `@`부터 커서까지에 빈칸이 없을 때만 `{ start: "@"의 위치, query: "@" 뒤부터 커서까지 }`. 아니면 `null`.
+*/
+function mentionQuery(text, caret) {
+	const before = text.slice(0, Math.max(0, Math.min(caret, text.length)));
+	for (let i = before.length - 1; i >= 0; i -= 1) {
+		const c = before[i];
+		if (isSpace(c)) return null;
+		if (c === "@") {
+			if (i > 0 && !isSpace(before[i - 1])) return null;
+			return {
+				start: i,
+				query: before.slice(i + 1)
+			};
+		}
+	}
+	return null;
+}
+/** 찾는 말로 명단을 거른다: 소문자로 바꾼 이름에 소문자로 바꾼 찾는 말이 들어 있는 담당(명단 순서). 빈 말은 모두. */
+function filterMembers(members, query) {
+	const want = query.toLowerCase();
+	return members.filter((m) => m.name.toLowerCase().includes(want));
+}
+/** 목록 이동: `count`개 가운데 `index`에서 `delta`(±1)만큼, 끝에서 처음으로 · 처음에서 끝으로 돈다. `count`가 0이면 0. */
+function cycle(index, count, delta) {
+	if (count <= 0) return 0;
+	return ((index + delta) % count + count) % count;
+}
+/** 서버 답의 `hint` → 보낸 사람에게 보일 안내. `"no_mention"` → [`NO_MENTION_HINT`], `"no_match"` → [`NO_MATCH_HINT`], 그 밖은 `null`. */
+function hintText(hint) {
+	if (hint === "no_mention") return NO_MENTION_HINT;
+	if (hint === "no_match") return NO_MATCH_HINT;
+	return null;
+}
 var ACTOR_RADIUS = .22;
 /** 지도 정의에서 걸을 수 없는 칸의 표를 만든다. */
 function buildGrid(map) {
@@ -1437,6 +1500,774 @@ function startCell(grid, saved, entrance) {
 	return {
 		x: entrance.x,
 		y: entrance.y
+	};
+}
+// src/office/summon-client.ts
+/** JSON을 같은 출처로 `POST`한다. 닿지 못하면 `null`(던지지 않는다). */
+async function postJson(fetcher, url, body) {
+	try {
+		return await fetcher(url, {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body)
+		});
+	} catch {
+		return null;
+	}
+}
+/** 담당을 부른다. 200이면 `called`, 409 `meeting_reserved`면 `meeting`, 400 `unknown_agent`면 `unknown`, 그 밖은 `failed`. */
+async function requestSummon(fetcher, agent) {
+	const reply = await postJson(fetcher, API.officeSummon, { agent });
+	if (!reply) return { kind: "failed" };
+	if (reply.ok) return { kind: "called" };
+	const body = await reply.json().catch(() => null);
+	if (reply.status === 409 && body?.error === "meeting_reserved") return { kind: "meeting" };
+	if (reply.status === 400 && body?.error === "unknown_agent") return { kind: "unknown" };
+	return { kind: "failed" };
+}
+/** 도착을 알린다. 200이면 참. */
+async function reportArrived(fetcher, agent) {
+	return (await postJson(fetcher, API.officeSummonArrived, { agent }))?.ok === true;
+}
+/** 지금 보는 방을 알린다. 200이면 참. */
+async function reportView(fetcher, room) {
+	return (await postJson(fetcher, API.officeSummonView, { room }))?.ok === true;
+}
+// src/office/summon-view.ts
+/** 부를 때 걷기 빠르기(칸/초, 원본 300px/s ÷ 32px). */
+var SUMMON_SPEED = 9.4;
+/** 돌아갈 때 걷기 빠르기(칸/초, 원본 150px/s). */
+var RETURN_SPEED = 4.7;
+/** 도착으로 보는 거리(칸, 원본 36px). */
+var ARRIVE_RADIUS = 1.125;
+/** 담당 목록의 부르기 단추 글. */
+var SUMMON_BUTTON = "부르기";
+/** 부르기 단추의 class. */
+var SUMMON_BUTTON_CLASS = "summon";
+var PHASES = [
+	"idle",
+	"called",
+	"waiting",
+	"returning"
+];
+var REASONS = ["call", "mention"];
+/** `office.summon` 내용 → 이벤트. 모양이 틀리거나 모르는 단계 · 까닭이면 `null`. */
+function parseSummon(payload) {
+	if (typeof payload !== "object" || payload === null) return null;
+	const { agent, phase, reason, at } = payload;
+	if (typeof agent !== "string" || typeof phase !== "string" || !PHASES.includes(phase)) return null;
+	if (reason !== null && reason !== void 0 && !(typeof reason === "string" && REASONS.includes(reason))) return null;
+	return {
+		agent,
+		phase,
+		reason: reason ?? null,
+		at: typeof at === "number" ? at : 0
+	};
+}
+/**
+* 단계 `phase`에서 칸 `agent`의 담당을 어떻게 그릴지. `player`는 내 칸, `home`은 그 담당의 자리 칸.
+* - `called`: `agent`가 `player`에서 [`ARRIVE_RADIUS`] 안이면 `arrived`, 아니면 `besideCell(grid, agent, player)`로
+*   `walk`(빠르기 [`SUMMON_SPEED`]), 곁 칸이 없으면 `stay`.
+* - `waiting`: `face`(나를 보는 쪽, [`facingToward`]).
+* - `returning`: `home`으로 `walk`(빠르기 [`RETURN_SPEED`]).
+* - `idle`: `home`.
+*/
+function summonDraw(phase, grid, agent, player, home) {
+	switch (phase) {
+		case "called": {
+			if (arrivedNear(agent, player)) return { kind: "arrived" };
+			const to = besideCell(grid, agent, player);
+			return to ? {
+				kind: "walk",
+				to,
+				speed: SUMMON_SPEED
+			} : { kind: "stay" };
+		}
+		case "waiting": return {
+			kind: "face",
+			facing: facingToward(agent, player)
+		};
+		case "returning": return {
+			kind: "walk",
+			to: home,
+			speed: RETURN_SPEED
+		};
+		default: return { kind: "home" };
+	}
+}
+/** `from`에서 `to`를 보는 네 방향: 가로 거리가 세로 거리보다 크면 left/right, 아니면 up/down(y가 크면 down). */
+function facingToward(from, to) {
+	const dx = to.x - from.x;
+	const dy = to.y - from.y;
+	if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+	return dy > 0 ? "down" : "up";
+}
+/** 걷는 담당 `pos`가 목표 `target`에 닿았는가(거리 [`ARRIVE_RADIUS`] 이하). */
+function arrivedNear(pos, target) {
+	return Math.hypot(target.x - pos.x, target.y - pos.y) <= ARRIVE_RADIUS;
+}
+/** 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). */
+function opensConversation(reason) {
+	return reason === "call";
+}
+/** 회의 중 안내(E47): `{이름}{은/는} 지금 회의 중이에요`(받침 있으면 "은", 없으면 "는", 한글이 아니면 "은(는)"). */
+function meetingNotice(name) {
+	const last = name.charCodeAt(name.length - 1);
+	let particle = "은(는)";
+	if (last >= 44032 && last <= 55203) particle = (last - 44032) % 28 === 0 ? "는" : "은";
+	return `${name}${particle} 지금 회의 중이에요`;
+}
+/**
+* 대화 바꾸기 `prev` → `next`(대화 키: 팀 방 `"team"` 또는 담당 id)에서 서버에 알릴 방. 팀 방 ↔ 1:1 방이 바뀔 때만
+* `"team"` · `"direct"`, 같은 쪽 안에서 바뀌면(1:1 → 다른 1:1 포함) `null`.
+*/
+function viewChange(prev, next) {
+	const wasTeam = prev === "team";
+	const isTeam = next === "team";
+	if (wasTeam === isTeam) return null;
+	return isTeam ? "team" : "direct";
+}
+/** 담당 목록 줄에 다는 부르기 단추(글 [`SUMMON_BUTTON`], class [`SUMMON_BUTTON_CLASS`], `data-agent`). 누르면 `onSummon(agent)`. */
+function summonButton(agent, onSummon) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = SUMMON_BUTTON_CLASS;
+	button.dataset.agent = agent;
+	button.textContent = SUMMON_BUTTON;
+	button.addEventListener("click", (event) => {
+		event.stopPropagation();
+		onSummon(agent);
+	});
+	return button;
+}
+// src/office/summon-scene.ts
+/** 보는 쪽 → y축 회전(가구 · 담당과 같은 값). */
+var YAW = {
+	down: 0,
+	up: Math.PI,
+	left: -Math.PI / 2,
+	right: Math.PI / 2
+};
+/** 다시 들어왔을 때 곁에 있다고 보는 거리(칸). */
+var NEAR = 2;
+function createSummonScene(options) {
+	const grid = buildGrid(options.map);
+	const phases = /* @__PURE__ */ new Map();
+	const arrived = (agent, reason, opens) => {
+		reportArrived(options.fetcher, agent);
+		if (opens && opensConversation(reason)) options.openChat(agent);
+	};
+	function steerTo(view, agent, to, yaw, onArrive) {
+		const steer = {
+			to,
+			speed: SUMMON_SPEED,
+			yaw,
+			onArrive
+		};
+		view.steerAgent(agent, steer);
+	}
+	function draw(agent) {
+		const event = phases.get(agent);
+		if (!event) return;
+		const view = options.view();
+		const here = view?.agentAt(agent) ?? null;
+		const me = view?.playerAt() ?? null;
+		if (!view || !here || !me) {
+			if (event.phase === "called" || event.phase === "returning") arrived(agent, event.reason, event.phase === "called");
+			return;
+		}
+		const draw = summonDraw(event.phase, grid, cellOf(here), cellOf(me), cellOf(here));
+		const toward = YAW[facingToward(here, me)];
+		switch (draw.kind) {
+			case "walk":
+				if (event.phase === "returning") view.steerAgent(agent, {
+					to: null,
+					speed: draw.speed,
+					onArrive: () => arrived(agent, event.reason, false)
+				});
+				else steerTo(view, agent, draw.to, YAW[facingToward(draw.to, cellOf(me))], () => arrived(agent, event.reason, true));
+				return;
+			case "arrived":
+			case "stay":
+				steerTo(view, agent, cellOf(here), toward);
+				arrived(agent, event.reason, true);
+				return;
+			case "face":
+				faceOrCome(view, agent, here, me);
+				return;
+			default: view.steerAgent(agent, null);
+		}
+	}
+	/** 곁에서 기다림: 곁이면 나를 보고, 멀면(다시 들어옴) 곁으로 걸어온다. */
+	function faceOrCome(view, agent, here, me) {
+		if (Math.hypot(here.x - me.x, here.y - me.y) <= NEAR || arrivedNear(here, me)) {
+			steerTo(view, agent, cellOf(here), YAW[facingToward(here, me)]);
+			return;
+		}
+		const come = summonDraw("called", grid, cellOf(here), cellOf(me), cellOf(here));
+		if (come.kind === "walk") steerTo(view, agent, come.to, YAW[facingToward(come.to, cellOf(me))]);
+	}
+	return {
+		onEvent(payload) {
+			const event = parseSummon(payload);
+			if (!event) return;
+			phases.set(event.agent, event);
+			draw(event.agent);
+		},
+		fromSnapshot(agent, phase, reason) {
+			const event = parseSummon({
+				agent,
+				phase,
+				reason: reason ?? null,
+				at: 0
+			});
+			if (!event || event.phase === "idle") return;
+			phases.set(agent, event);
+		},
+		redraw() {
+			for (const agent of phases.keys()) draw(agent);
+		},
+		async summon(agent) {
+			const result = await requestSummon(options.fetcher, agent);
+			if (result.kind === "meeting") options.say(meetingNotice(options.nameOf(agent)));
+			else if (result.kind !== "called") options.say(`${options.nameOf(agent)}을(를) 부르지 못했습니다`);
+		},
+		conversation(prev, next) {
+			const room = viewChange(prev, next);
+			if (room) reportView(options.fetcher, room);
+		}
+	};
+}
+// src/office/mention-editor.ts
+/** 칩의 class. */
+var CHIP_CLASS = "mention-chip";
+/** 목록의 class(닫히면 `hidden`). */
+var LIST_CLASS = "mention-list";
+/** 목록 줄의 class(고른 줄은 `active`도 붙고 `aria-selected="true"`). */
+var OPTION_CLASS = "mention-option";
+/** 칩 하나를 만든다(보이는 글 `@이름`, 통째로 지워지게 편집 불가). */
+function makeChip(member) {
+	const chip = document.createElement("span");
+	chip.className = CHIP_CLASS;
+	chip.setAttribute("contenteditable", "false");
+	chip.dataset.agent = member.agent;
+	chip.dataset.name = member.name;
+	chip.textContent = `@${member.name}`;
+	return chip;
+}
+function isChip(node) {
+	return node instanceof HTMLElement && node.classList.contains("mention-chip");
+}
+/** 글 칸의 조각(이웃한 글은 합치고 빈 글은 뺀다). 줄바꿈 요소는 `\n`이다. */
+function readPieces(input) {
+	const pieces = [];
+	const pushText = (text) => {
+		if (text === "") return;
+		const last = pieces[pieces.length - 1];
+		if (last && last.kind === "text") last.text += text;
+		else pieces.push({
+			kind: "text",
+			text
+		});
+	};
+	input.childNodes.forEach((node) => {
+		if (isChip(node)) pieces.push({
+			kind: "mention",
+			agent: node.dataset.agent ?? "",
+			name: node.dataset.name ?? ""
+		});
+		else if (node instanceof HTMLBRElement) pushText("\n");
+		else pushText(node.textContent ?? "");
+	});
+	return pieces;
+}
+/** 커서가 든 글 칸 안의 자리(글 칸 밖이면 끝). */
+function caretOf(input) {
+	const selection = document.getSelection();
+	const node = selection?.anchorNode ?? null;
+	if (selection && node && input.contains(node)) return {
+		node,
+		offset: selection.anchorOffset
+	};
+	const last = input.lastChild;
+	if (last instanceof Text) return {
+		node: last,
+		offset: last.data.length
+	};
+	return {
+		node: input,
+		offset: input.childNodes.length
+	};
+}
+/** 커서를 그 자리에 둔다. */
+function placeCaret(node, offset) {
+	const selection = document.getSelection();
+	if (!selection) return;
+	const range = document.createRange();
+	range.setStart(node, offset);
+	range.collapse(true);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+/** 커서 바로 앞이 칩이면 그 칩. */
+function chipBeforeCaret(input) {
+	const { node, offset } = caretOf(input);
+	if (node instanceof Text) return offset === 0 && isChip(node.previousSibling) ? node.previousSibling : null;
+	if (node === input && offset > 0) {
+		const before = input.childNodes[offset - 1];
+		return isChip(before) ? before : null;
+	}
+	return null;
+}
+/** 조합 중인 키인가(한글 입력기). */
+function composingKey(event, composing) {
+	return composing || event.isComposing || event.keyCode === 229;
+}
+/** `host` 안에 글 칸과 목록을 만들어 단다. */
+function mountMentionEditor(host, options) {
+	const input = document.createElement("div");
+	input.className = "mention-input";
+	input.setAttribute("contenteditable", "true");
+	input.setAttribute("role", "textbox");
+	const list = document.createElement("div");
+	list.className = LIST_CLASS;
+	list.setAttribute("role", "listbox");
+	list.hidden = true;
+	host.append(list, input);
+	let spot = null;
+	let found = [];
+	let active = -1;
+	let composing = false;
+	const close = () => {
+		spot = null;
+		found = [];
+		active = -1;
+		list.hidden = true;
+		list.replaceChildren();
+	};
+	const paint = () => {
+		list.replaceChildren();
+		if (found.length === 0) {
+			const empty = document.createElement("div");
+			empty.className = "mention-empty";
+			empty.textContent = MENTION_EMPTY;
+			list.append(empty);
+		}
+		found.forEach((member, i) => {
+			const option = document.createElement("div");
+			option.className = OPTION_CLASS;
+			option.setAttribute("role", "option");
+			option.textContent = `@${member.name}`;
+			const on = i === active;
+			option.classList.toggle("active", on);
+			option.setAttribute("aria-selected", on ? "true" : "false");
+			option.addEventListener("mousedown", (event) => {
+				event.preventDefault();
+				choose(i);
+			});
+			list.append(option);
+		});
+		list.hidden = false;
+	};
+	const look = () => {
+		const { node, offset } = caretOf(input);
+		const query = node instanceof Text ? mentionQuery(node.data, offset) : null;
+		if (!query || !(node instanceof Text)) {
+			close();
+			return;
+		}
+		spot = {
+			node,
+			start: query.start,
+			end: offset
+		};
+		found = filterMembers(options.members(), query.query);
+		active = found.length > 0 ? 0 : -1;
+		paint();
+	};
+	const choose = (index) => {
+		const member = found[index];
+		if (!spot || !member) return;
+		const { node, start, end } = spot;
+		const before = node.data.slice(0, start);
+		const after = document.createTextNode(` ${node.data.slice(end)}`);
+		const chip = makeChip(member);
+		if (before === "") node.replaceWith(chip, after);
+		else node.replaceWith(document.createTextNode(before), chip, after);
+		placeCaret(after, 1);
+		close();
+	};
+	const submit = () => {
+		const pieces = readPieces(input);
+		const text = serializePieces(pieces);
+		if (text.trim() === "") return;
+		options.onSubmit(text, pieces);
+	};
+	const openKey = (event) => {
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			active = cycle(Math.max(active, 0), found.length, event.key === "ArrowDown" ? 1 : -1);
+			paint();
+		} else if (event.key === "Enter" || event.key === "Tab") {
+			event.preventDefault();
+			if (active >= 0) choose(active);
+		} else if (event.key === "Escape") {
+			event.preventDefault();
+			close();
+		}
+	};
+	input.addEventListener("keydown", (event) => {
+		if (composingKey(event, composing)) return;
+		if (spot) {
+			openKey(event);
+			return;
+		}
+		if (event.key === "Enter" && !event.shiftKey) {
+			event.preventDefault();
+			submit();
+		} else if (event.key === "Backspace") {
+			const chip = chipBeforeCaret(input);
+			if (!chip) return;
+			event.preventDefault();
+			const next = chip.nextSibling;
+			chip.remove();
+			if (next) placeCaret(next, 0);
+		}
+	});
+	input.addEventListener("input", () => {
+		if (!composing) look();
+	});
+	input.addEventListener("compositionstart", () => {
+		composing = true;
+	});
+	input.addEventListener("compositionend", () => {
+		composing = false;
+		look();
+	});
+	input.addEventListener("blur", close);
+	return {
+		input,
+		list,
+		isOpen: () => spot !== null,
+		candidates: () => spot ? [...found] : [],
+		activeIndex: () => spot ? active : -1,
+		pieces: () => readPieces(input),
+		text: () => serializePieces(readPieces(input)),
+		clear: () => {
+			input.replaceChildren();
+			close();
+		}
+	};
+}
+// src/office/notice-view.ts
+/** 공지 단추의 글. */
+var NOTICE_BUTTON = "공지";
+/** 공지 모드일 때 글 칸 옆에 보이는 표시. */
+var NOTICE_MODE_LABEL = "공지로 보내기";
+/** 공지 띠의 class. */
+var NOTICE_BAND_CLASS = "notice-band";
+/** 확인 상태 → 보이는 글. `answered` "✓ 답함", `waiting` · `queued` "기다림", `limit` "상한으로 답 못 함", `failed` "실패". */
+function ackLabel(state) {
+	switch (state) {
+		case "answered": return "✓ 답함";
+		case "limit": return "상한으로 답 못 함";
+		case "failed": return "실패";
+		default: return "기다림";
+	}
+}
+/** 보낼 길: 공지 모드이고 멘션이 없으면 `"notice"`, 그 밖은 `"team"`(멘션 글 — 멘션이 없으면 서버가 안내를 돌려준다). */
+function sendRoute(noticeMode, hasMention) {
+	return noticeMode && !hasMention ? "notice" : "team";
+}
+var ACK_STATES = [
+	"waiting",
+	"queued",
+	"answered",
+	"limit",
+	"failed"
+];
+/** 한 번 바뀌면 더 바뀌지 않는 확인 상태. */
+var SETTLED = [
+	"answered",
+	"limit",
+	"failed"
+];
+function record(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function ackState(value) {
+	return typeof value === "string" && ACK_STATES.includes(value) ? value : null;
+}
+/** 공지 한 줄(목록 · 이벤트의 모양). 틀리면 `null`. */
+function noticeFrom(value) {
+	const row = record(value);
+	if (!row || typeof row.notice !== "number" || typeof row.text !== "string" || typeof row.at !== "number") return null;
+	const acks = [];
+	for (const raw of Array.isArray(row.acks) ? row.acks : []) {
+		const ack = record(raw);
+		const state = ackState(ack?.state);
+		if (ack && typeof ack.agent === "string" && state) acks.push({
+			agent: ack.agent,
+			state
+		});
+	}
+	return {
+		notice: row.notice,
+		text: row.text,
+		at: row.at,
+		acks
+	};
+}
+/**
+* `office.notice` 내용 → 새 공지(담당 `agents`가 모두 `waiting`). 모양이 틀리면 `null`.
+* 이미 같은 번호가 `items`에 있으면 `items`를 그대로, 없으면 끝에 더한 새 목록을 돌려준다.
+*/
+function applyNoticeEvent(items, payload, agents) {
+	const item = noticeFrom(payload);
+	if (!item || items.some((i) => i.notice === item.notice)) return [...items];
+	item.acks = agents.map((agent) => ({
+		agent,
+		state: "waiting"
+	}));
+	return [...items, item];
+}
+/**
+* `office.notice_ack` 내용 → 그 공지의 그 담당 확인을 바꾼 새 목록. 확인은 한 번만 바뀐다: 이미 `answered` ·
+* `limit` · `failed`인 확인은 그대로다. 모르는 공지 · 담당 · 모양이 틀린 내용이면 `items` 그대로.
+*/
+function applyAckEvent(items, payload) {
+	const row = record(payload);
+	const state = ackState(row?.state);
+	if (!row || !state || typeof row.notice !== "number" || typeof row.agent !== "string") return [...items];
+	return items.map((item) => {
+		if (item.notice !== row.notice) return item;
+		const acks = item.acks.map((ack) => ack.agent === row.agent && !SETTLED.includes(ack.state) ? {
+			agent: ack.agent,
+			state
+		} : ack);
+		return {
+			...item,
+			acks
+		};
+	});
+}
+/** `GET` [`API.officeNotices`]의 본문(최근 것 먼저) → 보낸 순서(오래된 것 먼저)의 공지들. 모양이 틀린 줄은 버린다. */
+function noticesFromList(body) {
+	if (!Array.isArray(body)) return [];
+	return body.map(noticeFrom).filter((item) => item !== null).reverse();
+}
+/**
+* 공지 띠: `div.notice-band`(`data-notice`) 안에 공지 글(`.notice-text`)과 담당별 확인 줄(`.notice-acks` 안의
+* `span.ack`, `data-agent` · `data-state`, 글 `"{이름} {ackLabel}"`). 이름은 `names`에서, 없으면 id.
+*/
+function noticeElement(item, names) {
+	const band = document.createElement("div");
+	band.className = NOTICE_BAND_CLASS;
+	band.dataset.notice = String(item.notice);
+	const tag = document.createElement("span");
+	tag.className = "notice-tag";
+	tag.textContent = NOTICE_BUTTON;
+	const text = document.createElement("div");
+	text.className = "notice-text";
+	text.textContent = item.text;
+	const acks = document.createElement("div");
+	acks.className = "notice-acks";
+	for (const ack of item.acks) {
+		const chip = document.createElement("span");
+		chip.className = "ack";
+		chip.dataset.agent = ack.agent;
+		chip.dataset.state = ack.state;
+		chip.textContent = `${names[ack.agent] ?? ack.agent} ${ackLabel(ack.state)}`;
+		acks.append(chip);
+	}
+	band.append(tag, text, acks);
+	return band;
+}
+/** `host`에 공지 단추(글 [`NOTICE_BUTTON`], `aria-pressed`)와 모드 표시([`NOTICE_MODE_LABEL`])를 단다. 누르면 모드를 뒤집고 `onChange`. */
+function mountNoticeToggle(host, onChange) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "notice-toggle";
+	button.textContent = NOTICE_BUTTON;
+	const marker = document.createElement("span");
+	marker.className = "notice-mode";
+	marker.textContent = NOTICE_MODE_LABEL;
+	let on = false;
+	const set = (next) => {
+		on = next;
+		button.setAttribute("aria-pressed", on ? "true" : "false");
+		button.classList.toggle("on", on);
+		marker.hidden = !on;
+	};
+	set(false);
+	button.addEventListener("click", () => {
+		set(!on);
+		onChange(on);
+	});
+	host.append(button, marker);
+	return {
+		button,
+		marker,
+		isOn: () => on,
+		set
+	};
+}
+/** 공지를 보낸다: `POST` [`API.officeNotice`] `{"text", "sourceMessageId"}`(JSON, 같은 출처). 던지지 않는다. */
+async function postNotice(fetcher, text, sourceMessageId) {
+	try {
+		const reply = await fetcher(API.officeNotice, {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				text,
+				sourceMessageId
+			})
+		});
+		const body = record(await reply.json().catch(() => null));
+		if (!reply.ok || !body || typeof body.notice !== "number") return {
+			ok: false,
+			error: typeof body?.error === "string" ? body.error : `http_${reply.status}`
+		};
+		const acks = noticeFrom({
+			notice: body.notice,
+			text: "",
+			at: 0,
+			acks: body.acks
+		})?.acks ?? [];
+		return {
+			ok: true,
+			notice: body.notice,
+			acks
+		};
+	} catch {
+		return {
+			ok: false,
+			error: "network"
+		};
+	}
+}
+/** 지난 공지를 읽는다: `GET` [`API.officeNotices`]`?limit=<limit>` → [`noticesFromList`]. 실패하면 빈 목록(던지지 않는다). */
+async function loadNotices(fetcher, limit = 20) {
+	try {
+		const reply = await fetcher(`${API.officeNotices}?limit=${limit}`, { credentials: "same-origin" });
+		if (!reply.ok) return [];
+		return noticesFromList(await reply.json());
+	} catch {
+		return [];
+	}
+}
+// src/office/team-compose.ts
+/** 공지 보내기 실패 안내. */
+var NOTICE_FAILED = {
+	too_fast: "조금 뒤에 다시 보내세요",
+	text_too_long: "공지가 너무 깁니다"
+};
+/** 보낼 글 `@[이름]`을 채팅에 보일 `@이름`으로(가림 `\`을 푼다). */
+function showMentions(text) {
+	return text.replace(/@\[((?:\\.|[^\]\\])*)\]/g, (_, name) => `@${name.replace(/\\(.)/g, "$1")}`);
+}
+/** 시각 순서로 줄들 사이에 공지 띠를 끼운다(같은 시각이면 줄이 먼저). */
+function interleave(rows, extra) {
+	const out = [];
+	let i = 0;
+	const sorted = [...extra].sort((a, b) => a.at - b.at);
+	for (const row of rows) {
+		while (i < sorted.length && sorted[i].at < row.at) {
+			out.push(sorted[i].el);
+			i += 1;
+		}
+		out.push(row.el);
+	}
+	for (; i < sorted.length; i += 1) out.push(sorted[i].el);
+	return out;
+}
+function mountTeamCompose(options) {
+	const { form, textarea } = options;
+	const doc = form.ownerDocument;
+	const hint = doc.createElement("div");
+	hint.className = "compose-hint";
+	hint.setAttribute("role", "status");
+	hint.setAttribute("aria-live", "polite");
+	hint.hidden = true;
+	const box = doc.createElement("div");
+	box.className = "team-compose";
+	const tools = doc.createElement("div");
+	tools.className = "team-tools";
+	form.prepend(hint);
+	textarea.after(box);
+	box.after(tools);
+	let notices = [];
+	let sending = false;
+	const say = (text) => {
+		hint.textContent = text ?? "";
+		hint.hidden = !text;
+	};
+	const editor = mountMentionEditor(box, {
+		members: options.members,
+		onSubmit: () => submit()
+	});
+	editor.input.setAttribute("aria-label", "팀 방에 쓰기 (@로 담당 부르기)");
+	editor.input.dataset.placeholder = "@로 담당을 부르세요 (Enter 보내기)";
+	editor.input.addEventListener("keydown", (e) => e.stopPropagation());
+	editor.input.addEventListener("keyup", (e) => e.stopPropagation());
+	editor.input.addEventListener("input", () => say(null));
+	const toggle = mountNoticeToggle(tools, (on) => {
+		editor.input.classList.toggle("notice-on", on);
+		editor.input.focus();
+	});
+	async function sendNotice(text) {
+		sending = true;
+		const id = globalThis.crypto?.randomUUID?.() ?? `n-${Date.now().toString(36)}`;
+		const reply = await postNotice(options.fetcher, text, id);
+		sending = false;
+		if (!reply.ok) {
+			say(`공지를 보내지 못했습니다 — ${NOTICE_FAILED[reply.error] ?? reply.error}`);
+			return;
+		}
+		editor.clear();
+		toggle.set(false);
+		editor.input.classList.remove("notice-on");
+	}
+	function submit() {
+		const text = editor.text();
+		if (!text.trim() || !options.connected() || sending) return;
+		say(null);
+		if (sendRoute(toggle.isOn(), hasMention(editor.pieces())) === "notice") {
+			sendNotice(text);
+			return;
+		}
+		editor.clear();
+		options.sendTeam(text);
+	}
+	return {
+		setTeam(on) {
+			box.hidden = !on;
+			tools.hidden = !on;
+			textarea.hidden = on;
+			if (!on) say(null);
+		},
+		say,
+		submit,
+		async load() {
+			const loaded = await loadNotices(options.fetcher);
+			const known = new Set(notices.map((n) => n.notice));
+			notices = [...loaded.filter((n) => !known.has(n.notice)), ...notices].sort((a, b) => a.at - b.at);
+			options.changed();
+		},
+		onNotice(payload) {
+			notices = applyNoticeEvent(notices, payload, options.agents);
+			options.changed();
+		},
+		onAck(payload) {
+			notices = applyAckEvent(notices, payload);
+			options.changed();
+		},
+		bands: () => notices.map((item) => ({
+			at: item.at,
+			el: noticeElement(item, options.names())
+		}))
 	};
 }
 /** "누구와 대화?" 목록의 제목. */
@@ -1943,6 +2774,9 @@ var speaker = new SpeakerCamera();
 /** (32차 6번) 카메라 따라가기(기본 켜짐). 켜져 있으면 발언자 카메라가 끼어들지 않는다. */
 var follow = new FollowState();
 var toolbar = null;
+/** (33차) 팀 방 글 칸(멘션 칩 · 공지)과 부르기. */
+var compose = null;
+var summons = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 var replayUntil = 0;
 function renderLight() {
@@ -1968,7 +2802,7 @@ function renderLight() {
 			button.append(line);
 		}
 		button.addEventListener("click", () => selectConversation(id));
-		li.append(button);
+		li.append(button, summonButton(id, (agent) => void summons?.summon(agent)));
 		list.append(li);
 	}
 }
@@ -1987,7 +2821,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-bchis3sm.js");
+		const { webglAvailable, createScene } = await import("./scene3d-f5dn7utz.js");
 		return {
 			webglAvailable,
 			createScene
@@ -2028,6 +2862,7 @@ async function show3d() {
 	});
 	state.view = scene;
 	for (const [id, view] of state.agents) scene.setAgent(id, view, { snap: true });
+	summons?.redraw();
 }
 function applyAgent(view, snap) {
 	if (!view || !state.agents.has(view.agent)) return;
@@ -2100,8 +2935,10 @@ function renderTabs() {
 		b.textContent = (key === ROOM_TEAM ? "팀 방" : nameOf(key)) + glyph;
 		b.addEventListener("click", () => selectConversation(key));
 		tabs.append(b);
+		if (key !== ROOM_TEAM) tabs.append(summonButton(key, (agent) => void summons?.summon(agent)));
 	}
-	$("chat-to-wrap").hidden = state.conversation !== ROOM_TEAM;
+	$("chat-to-wrap").hidden = true;
+	compose?.setTeam(state.conversation === ROOM_TEAM);
 	renderCaption();
 }
 /** (23차 6번 · 7번 (가)) 화면 아래 자막과 팀 탭 위 `○○ 발언 중…`. 없으면 숨긴다. */
@@ -2119,6 +2956,7 @@ function renderCaption() {
 	bar.hidden = speaking === null;
 }
 function selectConversation(key) {
+	summons?.conversation(state.conversation, key);
 	state.conversation = key;
 	renderTabs();
 	renderLog(true);
@@ -2128,8 +2966,8 @@ function lineElement(line) {
 		const div = chatLineElement(chatLine({
 			kind: "me",
 			key: line.id,
-			text: line.text
-		}, state.names), line.room === ROOM_TEAM ? `→ ${nameOf(line.agent)}` : void 0);
+			text: showMentions(line.text)
+		}, state.names), line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : void 0);
 		if (line.failed) {
 			div.classList.add("failed");
 			const retry = document.createElement("button");
@@ -2185,18 +3023,27 @@ function teamElements(lines) {
 		talks.set(talk.key, talk);
 		entries.push(talk);
 	}
-	return teamFeed(entries, state.names).map((row) => {
+	return interleave(teamFeed(entries, state.names).map((row) => {
 		const talk = talks.get(row.key);
-		if (row.kind === "talk" && talk?.kind === "talk") return chatLineElement(chatLine({
-			kind: "talk",
-			key: talk.key,
-			agent: talk.agent,
-			text: talk.text,
-			topic: talk.topic
-		}, state.names), void 0, "talk");
+		if (row.kind === "talk" && talk?.kind === "talk") {
+			const view = chatLine({
+				kind: "talk",
+				key: talk.key,
+				agent: talk.agent,
+				text: talk.text,
+				topic: talk.topic
+			}, state.names);
+			return {
+				at: row.at,
+				el: chatLineElement(view, void 0, "talk")
+			};
+		}
 		const line = byKey.get(row.key);
-		return line ? lineElement(line) : null;
-	});
+		return {
+			at: row.at,
+			el: line ? lineElement(line) : null
+		};
+	}), compose?.bands() ?? []);
 }
 function renderLog(forceBottom) {
 	const log = $("chat-log");
@@ -2229,15 +3076,23 @@ async function send(room, agent, text, existing) {
 			credentials: "same-origin",
 			cache: "no-store",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
+			body: JSON.stringify(agent ? {
 				room,
 				agent,
+				text,
+				sourceMessageId: line.id
+			} : {
+				room,
 				text,
 				sourceMessageId: line.id
 			})
 		});
 		if (!reply.ok) throw new Error(String(reply.status));
-		applyChat(await reply.json());
+		const body = await reply.json();
+		if (Array.isArray(body?.responses)) {
+			for (const resp of body.responses) applyChat(resp);
+			compose?.say(hintText(body.hint));
+		} else applyChat(body);
 	} catch {
 		line.failed = true;
 	}
@@ -2254,7 +3109,30 @@ function wireChat() {
 	select.value = "leader";
 	const input = $("chat-input");
 	const form = $("chat-form");
+	compose = mountTeamCompose({
+		form: $("chat-form"),
+		textarea: input,
+		members: () => AGENT_IDS.map((agent) => ({
+			agent,
+			name: nameOf(agent)
+		})),
+		names: () => state.names,
+		agents: AGENT_IDS,
+		connected: () => state.connected,
+		sendTeam: (text) => void send(ROOM_TEAM, "", text),
+		changed: () => {
+			if (state.conversation === ROOM_TEAM) renderLog(false);
+		},
+		fetcher: (url, init) => fetch(url, {
+			...init,
+			cache: "no-store"
+		})
+	});
 	const submit = () => {
+		if (state.conversation === ROOM_TEAM) {
+			compose?.submit();
+			return;
+		}
 		const text = input.value;
 		if (!text.trim() || !state.connected) return;
 		const room = state.conversation === ROOM_TEAM ? ROOM_TEAM : "direct";
@@ -2299,6 +3177,9 @@ function onFrame(text) {
 		else if (frame.kind === "office.chat") applyChat(frame.payload);
 		else if (frame.kind === "office.talk") onTalk(frame.payload, frame.seq, !replayedOld(frame.payload));
 		else if (frame.kind === "office.approval") applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+		else if (frame.kind === "office.notice") compose?.onNotice(frame.payload);
+		else if (frame.kind === "office.notice_ack") compose?.onAck(frame.payload);
+		else if (frame.kind === "office.summon") summons?.onEvent(frame.payload);
 	}
 }
 /** 다시 이은 직후에 다시 받은 옛 논의 글인가(`at`이 말풍선 수명보다 오래됨). */
@@ -2363,7 +3244,10 @@ async function loadSnapshot() {
 		});
 		if (!reply.ok) return;
 		const snap = await reply.json();
-		for (const view of snap.agents ?? []) applyAgent(view, true);
+		for (const view of snap.agents ?? []) {
+			applyAgent(view, true);
+			summons?.fromSnapshot(view.agent, view.phase, view.reason);
+		}
 		for (const resp of snap.pending ?? []) applyChat(resp);
 		for (const talk of snap.talk ?? []) if (typeof talk.seq === "number") onTalk(talk, talk.seq, false);
 		if (typeof snap.last_seq === "number") state.lastSeq = snap.last_seq;
@@ -2425,7 +3309,10 @@ async function start() {
 			}));
 			state.meLoaded = state.me !== null;
 		}
-		if (state.lastSeq === null) await loadSnapshot();
+		if (state.lastSeq === null) {
+			await loadSnapshot();
+			await compose?.load();
+		}
 		openSocket();
 	} catch {
 		setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
@@ -2465,6 +3352,17 @@ async function main() {
 		state.map = null;
 	}
 	for (const id of AGENT_IDS) state.names[id] = state.map?.agents?.[id]?.name ?? id;
+	if (state.map) summons = createSummonScene({
+		map: state.map,
+		view: () => state.view,
+		fetcher: (url, init) => fetch(url, {
+			...init,
+			cache: "no-store"
+		}),
+		nameOf,
+		openChat: (id) => selectConversation(id),
+		say: (text) => compose?.say(text)
+	});
 	wireChat();
 	renderTabs();
 	renderLog(true);

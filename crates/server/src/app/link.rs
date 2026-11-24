@@ -242,6 +242,7 @@ pub(super) fn attach(
 ) {
     linked.sink.attach(gate.publisher());
     if let Some(crew) = crew {
+        linked.budget.attach(crew);
         crew.link(CrewLinks {
             knowledge: Arc::clone(&memory.knowledge),
             office: Some(Arc::clone(&linked.office)),
@@ -337,7 +338,8 @@ pub(super) fn stale_hook(linked: &Arc<Linked>) -> StaleHook {
 }
 
 /// 팀 상태가 바뀌면 사무실 모습을 맞춘다(V15). 조용한 시간이 끝났으면 미뤄 둔 알림을 보낸다
-/// ([`HELD_RELEASE_MS`]마다 본다, `Notifier::release_held`). `stop`이 참이 되면 끝난다.
+/// ([`HELD_RELEASE_MS`]마다 본다, `Notifier::release_held`). (33차 4번) [`crate::OFFICE_SUMMON_TICK`]마다
+/// 사무실 시계를 굴린다(부르기 10초 · 30초, 깨우기 엔진과 따로). `stop`이 참이 되면 끝난다.
 pub(super) fn spawn_office_sync(
     linked: &Arc<Linked>,
     store: Store,
@@ -347,7 +349,14 @@ pub(super) fn spawn_office_sync(
     tokio::spawn(async move {
         let mut shown = store.team_state().ok();
         let mut released: Option<i64> = None;
+        let mut ticked = tokio::time::Instant::now();
         loop {
+            if ticked.elapsed() >= crate::OFFICE_SUMMON_TICK {
+                ticked = tokio::time::Instant::now();
+                if let Err(error) = linked.office.tick().await {
+                    tracing::warn!(%error, "사무실 시계를 굴리지 못했습니다");
+                }
+            }
             let now = linked.now().0;
             if released.is_none_or(|at| now - at >= HELD_RELEASE_MS) {
                 released = Some(now);

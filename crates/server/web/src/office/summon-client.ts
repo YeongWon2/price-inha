@@ -21,24 +21,39 @@ export type SummonResult =
 /** 보는 방(서버가 아는 이름). */
 export type ViewRoom = "team" | "direct";
 
+/** JSON을 같은 출처로 `POST`한다. 닿지 못하면 `null`(던지지 않는다). */
+async function postJson(fetcher: Fetcher, url: string, body: unknown): Promise<Response | null> {
+  try {
+    return await fetcher(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** 담당을 부른다. 200이면 `called`, 409 `meeting_reserved`면 `meeting`, 400 `unknown_agent`면 `unknown`, 그 밖은 `failed`. */
 export async function requestSummon(fetcher: Fetcher, agent: string): Promise<SummonResult> {
-  void fetcher;
-  void agent;
-  void API;
-  throw new Error("todo");
+  const reply = await postJson(fetcher, API.officeSummon, { agent });
+  if (!reply) return { kind: "failed" };
+  if (reply.ok) return { kind: "called" };
+  const body = (await reply.json().catch(() => null)) as { error?: unknown } | null;
+  if (reply.status === 409 && body?.error === "meeting_reserved") return { kind: "meeting" };
+  if (reply.status === 400 && body?.error === "unknown_agent") return { kind: "unknown" };
+  return { kind: "failed" };
 }
 
 /** 도착을 알린다. 200이면 참. */
 export async function reportArrived(fetcher: Fetcher, agent: string): Promise<boolean> {
-  void fetcher;
-  void agent;
-  throw new Error("todo");
+  const reply = await postJson(fetcher, API.officeSummonArrived, { agent });
+  return reply?.ok === true;
 }
 
 /** 지금 보는 방을 알린다. 200이면 참. */
 export async function reportView(fetcher: Fetcher, room: ViewRoom): Promise<boolean> {
-  void fetcher;
-  void room;
-  throw new Error("todo");
+  const reply = await postJson(fetcher, API.officeSummonView, { room });
+  return reply?.ok === true;
 }

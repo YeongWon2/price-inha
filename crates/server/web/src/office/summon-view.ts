@@ -11,6 +11,7 @@
 // three.js 없이 칸 좌표와 DOM 단추만 다룬다.
 
 import type { Grid, Point } from "./nav";
+import { besideCell } from "./pathfind";
 import type { Facing } from "./player";
 import type { ViewRoom } from "./summon-client";
 
@@ -38,10 +39,24 @@ export const SUMMON_BUTTON = "부르기";
 /** 부르기 단추의 class. */
 export const SUMMON_BUTTON_CLASS = "summon";
 
+const PHASES: readonly SummonPhase[] = ["idle", "called", "waiting", "returning"];
+const REASONS: readonly SummonReason[] = ["call", "mention"];
+
 /** `office.summon` 내용 → 이벤트. 모양이 틀리거나 모르는 단계 · 까닭이면 `null`. */
 export function parseSummon(payload: unknown): SummonEvent | null {
-  void payload;
-  throw new Error("todo");
+  if (typeof payload !== "object" || payload === null) return null;
+  const row = payload as Record<string, unknown>;
+  const { agent, phase, reason, at } = row;
+  if (typeof agent !== "string" || typeof phase !== "string" || !(PHASES as readonly string[]).includes(phase)) return null;
+  if (reason !== null && reason !== undefined && !(typeof reason === "string" && (REASONS as readonly string[]).includes(reason))) {
+    return null;
+  }
+  return {
+    agent,
+    phase: phase as SummonPhase,
+    reason: (reason ?? null) as SummonReason | null,
+    at: typeof at === "number" ? at : 0,
+  };
 }
 
 /** 단계별로 그릴 것. */
@@ -66,38 +81,45 @@ export type SummonDraw =
  * - `idle`: `home`.
  */
 export function summonDraw(phase: SummonPhase, grid: Grid, agent: Point, player: Point, home: Point): SummonDraw {
-  void phase;
-  void grid;
-  void agent;
-  void player;
-  void home;
-  throw new Error("todo");
+  switch (phase) {
+    case "called": {
+      if (arrivedNear(agent, player)) return { kind: "arrived" };
+      const to = besideCell(grid, agent, player);
+      return to ? { kind: "walk", to, speed: SUMMON_SPEED } : { kind: "stay" };
+    }
+    case "waiting":
+      return { kind: "face", facing: facingToward(agent, player) };
+    case "returning":
+      return { kind: "walk", to: home, speed: RETURN_SPEED };
+    default:
+      return { kind: "home" };
+  }
 }
 
 /** `from`에서 `to`를 보는 네 방향: 가로 거리가 세로 거리보다 크면 left/right, 아니면 up/down(y가 크면 down). */
 export function facingToward(from: Point, to: Point): Facing {
-  void from;
-  void to;
-  throw new Error("todo");
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+  return dy > 0 ? "down" : "up";
 }
 
 /** 걷는 담당 `pos`가 목표 `target`에 닿았는가(거리 [`ARRIVE_RADIUS`] 이하). */
 export function arrivedNear(pos: Point, target: Point): boolean {
-  void pos;
-  void target;
-  throw new Error("todo");
+  return Math.hypot(target.x - pos.x, target.y - pos.y) <= ARRIVE_RADIUS;
 }
 
 /** 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). */
 export function opensConversation(reason: SummonReason | null): boolean {
-  void reason;
-  throw new Error("todo");
+  return reason === "call";
 }
 
 /** 회의 중 안내(E47): `{이름}{은/는} 지금 회의 중이에요`(받침 있으면 "은", 없으면 "는", 한글이 아니면 "은(는)"). */
 export function meetingNotice(name: string): string {
-  void name;
-  throw new Error("todo");
+  const last = name.charCodeAt(name.length - 1);
+  let particle = "은(는)";
+  if (last >= 0xac00 && last <= 0xd7a3) particle = (last - 0xac00) % 28 === 0 ? "는" : "은";
+  return `${name}${particle} 지금 회의 중이에요`;
 }
 
 /**
@@ -105,14 +127,22 @@ export function meetingNotice(name: string): string {
  * `"team"` · `"direct"`, 같은 쪽 안에서 바뀌면(1:1 → 다른 1:1 포함) `null`.
  */
 export function viewChange(prev: string, next: string): ViewRoom | null {
-  void prev;
-  void next;
-  throw new Error("todo");
+  const wasTeam = prev === "team";
+  const isTeam = next === "team";
+  if (wasTeam === isTeam) return null;
+  return isTeam ? "team" : "direct";
 }
 
 /** 담당 목록 줄에 다는 부르기 단추(글 [`SUMMON_BUTTON`], class [`SUMMON_BUTTON_CLASS`], `data-agent`). 누르면 `onSummon(agent)`. */
 export function summonButton(agent: string, onSummon: (agent: string) => void): HTMLButtonElement {
-  void agent;
-  void onSummon;
-  throw new Error("todo");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = SUMMON_BUTTON_CLASS;
+  button.dataset.agent = agent;
+  button.textContent = SUMMON_BUTTON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onSummon(agent);
+  });
+  return button;
 }

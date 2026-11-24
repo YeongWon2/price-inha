@@ -6,6 +6,8 @@
 // - 쉼 자리(`place: "bed"`)는 라운지 · 탕비실 의자다(누운 자세 없음).
 // - (23차 1 · 2번) 이름표는 발 아래(안은 이름뿐), 말풍선 기준점은 머리 위. 자리는 bubbles3d가 layout.ts로 정한다.
 //   머리 기준점은 원본(키 2.7에 서 있음 2.7 · 앉음 2.0)을 우리 캐릭터의 실제 키(불러온 모델의 높이)에 비례해 맞춘다.
+// - (33차) 부르기 · 멘션 걸어오기: `steer`로 자리 그리기 대신 그 칸까지 그 빠르기로 걷고(닿으면 `onArrive`),
+//   `to`가 `null`이면 자기 자리로 돌아가 닿은 뒤 자리 그리기로 돌아간다.
 
 import * as THREE from "three";
 import { CROSSFADE_SECONDS, clipName, defaultLook, makeActor, type AgentId } from "./actor";
@@ -53,6 +55,14 @@ function headHeight(height: number, sitting: boolean): number {
 
 interface Anchor extends Point { facing: number }
 
+/** (33차) 부르기 걸음: 그 칸(`null`이면 자기 자리)까지 그 빠르기로 걷고 닿으면 그쪽(yaw)을 보고 `onArrive`. */
+export interface Steer {
+  to: Point | null;
+  speed: number;
+  yaw?: number;
+  onArrive?: () => void;
+}
+
 interface Body {
   look: string;
   model: Obj;
@@ -86,6 +96,8 @@ interface Actor {
   tagSize: { width: number; height: number } | null;
   /** (22차 4번) 지나가며 잡담으로 멈춰 있다. */
   paused: boolean;
+  /** (33차) 부르기 걸음(없으면 자리 그리기). */
+  steer: Steer | null;
 }
 
 export interface ActorsOptions {
@@ -134,7 +146,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       x: rest.x + 0.5, y: rest.y + 0.5, yaw: facingYaw(map.agents[id].rest_facing),
       view: { place: "bed", work: "idle" },
       target: null, path: null, speed: WALK_SPEED, retryAt: 0, walking: false, label: "", height: DEFAULT_HEIGHT,
-      headY: DEFAULT_HEIGHT, tagSize: null, paused: false,
+      headY: DEFAULT_HEIGHT, tagSize: null, paused: false, steer: null,
     };
     tagTree(actor);
     actors.set(id, actor);
@@ -180,6 +192,8 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
   }
 
   function anchorOf(actor: Actor): Anchor {
+    const to = actor.steer?.to;
+    if (to) { return { x: to.x, y: to.y, facing: actor.steer?.yaw ?? actor.yaw }; }
     const a = map.agents[actor.id];
     if (actor.view.place === "desk") { return { x: a.desk.x, y: a.desk.y, facing: facingYaw(a.desk_facing) }; }
     if (actor.view.place === "meeting" && map.meeting_seats.length > 0) {
@@ -217,7 +231,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     if (!actor) { return; }
     const placeChanged = actor.view.place !== view.place;
     actor.view = { place: view.place, work: view.work };
-    actor.speed = view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED;
+    actor.speed = actor.steer?.speed ?? (view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED);
     if (placeChanged || snap || !actor.target) {
       retarget(actor, snap);
       for (const other of actors.values()) {
@@ -246,7 +260,29 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       budget -= move;
       actor.yaw += angleDiff(Math.atan2(dx, dy), actor.yaw) * (1 - Math.exp(-14 * Math.min(dt, 0.1)));
     }
-    if (actor.path && actor.path.length === 0) { placeAt(actor, actor.target); }
+    if (actor.path && actor.path.length === 0) { placeAt(actor, actor.target); arrive(actor); }
+  }
+
+  /** (33차) 부르기 걸음이 닿았다: 알리고, 자기 자리로 돌아온 것이면 자리 그리기로 돌아간다. */
+  function arrive(actor: Actor): void {
+    const steer = actor.steer;
+    if (!steer) { return; }
+    const done = steer.onArrive;
+    steer.onArrive = undefined;
+    if (!steer.to) {
+      actor.steer = null;
+      actor.speed = actor.view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED;
+    }
+    done?.();
+  }
+
+  /** (33차) 부르기 걸음을 건다(`null`이면 바로 자리 그리기로). */
+  function steerAgent(id: string, steer: Steer | null): void {
+    const actor = actors.get(id);
+    if (!actor) { return; }
+    actor.steer = steer;
+    actor.speed = steer?.speed ?? (actor.view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED);
+    retarget(actor, false);
   }
 
   function seated(actor: Actor): boolean {
@@ -303,6 +339,12 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
   return {
     setAgent,
     setLook,
+    steer: steerAgent,
+    /** (33차) 담당의 지금 자리(칸 단위 실수). */
+    at(id: string): Point | null {
+      const actor = actors.get(id);
+      return actor ? { x: actor.x, y: actor.y } : null;
+    },
     update(dt: number, t: number, now: number): void {
       for (const actor of actors.values()) { step(actor, dt, now); animate(actor, dt, t); }
     },

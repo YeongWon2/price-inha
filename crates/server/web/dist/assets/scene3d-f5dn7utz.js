@@ -1,4 +1,4 @@
-import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gcc8lkkr.js";
+import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-efyf5guo.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40384,7 +40384,8 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			height: DEFAULT_HEIGHT,
 			headY: DEFAULT_HEIGHT,
 			tagSize: null,
-			paused: false
+			paused: false,
+			steer: null
 		};
 		tagTree(actor);
 		actors.set(id, actor);
@@ -40452,6 +40453,12 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		].filter((p) => seatCells.has(`${p.x},${p.y}`));
 	}
 	function anchorOf(actor) {
+		const to = actor.steer?.to;
+		if (to) return {
+			x: to.x,
+			y: to.y,
+			facing: actor.steer?.yaw ?? actor.yaw
+		};
 		const a = map.agents[actor.id];
 		if (actor.view.place === "desk") return {
 			x: a.desk.x,
@@ -40504,7 +40511,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			place: view.place,
 			work: view.work
 		};
-		actor.speed = view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED;
+		actor.speed = actor.steer?.speed ?? (view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED);
 		if (placeChanged || snap || !actor.target) {
 			retarget(actor, snap);
 			for (const other of actors.values()) if (!fixedSeats && other !== actor && other.view.place === "meeting") retarget(other, snap);
@@ -40532,7 +40539,30 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			budget -= move;
 			actor.yaw += angleDiff$1(Math.atan2(dx, dy), actor.yaw) * (1 - Math.exp(-14 * Math.min(dt, .1)));
 		}
-		if (actor.path && actor.path.length === 0) placeAt(actor, actor.target);
+		if (actor.path && actor.path.length === 0) {
+			placeAt(actor, actor.target);
+			arrive(actor);
+		}
+	}
+	/** (33차) 부르기 걸음이 닿았다: 알리고, 자기 자리로 돌아온 것이면 자리 그리기로 돌아간다. */
+	function arrive(actor) {
+		const steer = actor.steer;
+		if (!steer) return;
+		const done = steer.onArrive;
+		steer.onArrive = void 0;
+		if (!steer.to) {
+			actor.steer = null;
+			actor.speed = actor.view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED;
+		}
+		done?.();
+	}
+	/** (33차) 부르기 걸음을 건다(`null`이면 바로 자리 그리기로). */
+	function steerAgent(id, steer) {
+		const actor = actors.get(id);
+		if (!actor) return;
+		actor.steer = steer;
+		actor.speed = steer?.speed ?? (actor.view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED);
+		retarget(actor, false);
 	}
 	function seated(actor) {
 		return seatsOf(actor).some((p) => Math.hypot(actor.x - (p.x + .5), actor.y - (p.y + .5)) <= SEAT_RADIUS);
@@ -40584,6 +40614,15 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 	return {
 		setAgent,
 		setLook,
+		steer: steerAgent,
+		/** (33차) 담당의 지금 자리(칸 단위 실수). */
+		at(id) {
+			const actor = actors.get(id);
+			return actor ? {
+				x: actor.x,
+				y: actor.y
+			} : null;
+		},
 		update(dt, t, now) {
 			for (const actor of actors.values()) {
 				step(actor, dt, now);
@@ -42108,7 +42147,10 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 		setLook: actors.setLook,
 		tool,
 		dispose,
-		setPlayerLook: (look) => player?.setLook(look)
+		setPlayerLook: (look) => player?.setLook(look),
+		steerAgent: actors.steer,
+		agentAt: actors.at,
+		playerAt: () => player?.pos() ?? null
 	};
 }
 function wireControls(canvas, host, h) {

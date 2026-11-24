@@ -28,6 +28,7 @@ mod http;
 mod link;
 mod news;
 mod notes;
+mod notices;
 mod poll;
 mod quota;
 mod review;

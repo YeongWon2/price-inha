@@ -1,6 +1,7 @@
 //! 사무실 경로(세션이 있어야 열린다): 접속 스냅샷 [`OFFICE_PATH`]와 말하기 [`OFFICE_CHAT_PATH`].
+//! (33차) 팀 방 멘션 글은 `team_chat`, 답 만들기는 `office_work`, 공지는 `notice_http`, 부르기는 `summon_http`에 있다.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -17,13 +18,14 @@ use serde_json::{Value, json};
 
 use super::linked::Linked;
 use super::{
-    CHAT_TOTAL_TIMEOUT, KIND_OFFICE_MESSAGE, OFFICE_BAD_INPUT, OFFICE_CHAT_PATH, OFFICE_PATH,
-    OFFICE_SEND_INTERVAL, OFFICE_SOURCE_ID_MAX, OFFICE_TEXT_MAX, OFFICE_TOO_FAST, OFFICE_TOO_LONG,
+    KIND_OFFICE_MESSAGE, OFFICE_BAD_INPUT, OFFICE_CHAT_PATH, OFFICE_NOTICE_PATH,
+    OFFICE_NOTICES_PATH, OFFICE_PATH, OFFICE_SEND_INTERVAL, OFFICE_SOURCE_ID_MAX,
+    OFFICE_SUMMON_ARRIVED_PATH, OFFICE_SUMMON_PATH, OFFICE_SUMMON_VIEW_PATH, OFFICE_TEXT_MAX,
+    OFFICE_TOO_FAST, OFFICE_TOO_LONG,
 };
 use crate::Crew;
-use crate::team::role_of;
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -31,12 +33,12 @@ pub(crate) fn reply(status: StatusCode, body: Value) -> Response {
     (status, [(CACHE_CONTROL, "no-store")], axum::Json(body)).into_response()
 }
 
-fn refuse(status: StatusCode, error: &str) -> Response {
+pub(super) fn refuse(status: StatusCode, error: &str) -> Response {
     reply(status, json!({ "error": error }))
 }
 
 /// 응답 객체(`office.chat`과 같은 모양).
-fn chat_json(response: &ChatResponse) -> Value {
+pub(super) fn chat_json(response: &ChatResponse) -> Value {
     let room = match response.room {
         Room::Team => "team",
         Room::Direct => "direct",
@@ -55,13 +57,17 @@ fn chat_json(response: &ChatResponse) -> Value {
 
 /// 사무실 경로의 상태.
 pub(crate) struct OfficeDesk {
-    linked: Arc<Linked>,
-    crew: Option<Arc<Crew>>,
-    store: Store,
+    pub(super) linked: Arc<Linked>,
+    pub(super) crew: Option<Arc<Crew>>,
+    pub(super) store: Store,
     /// 답을 기다리는 글(응답 번호 → 가린 글).
-    texts: Mutex<HashMap<String, String>>,
+    pub(super) texts: Mutex<HashMap<String, String>>,
+    /// (33차 2번) 멘션으로 받은 답 턴(응답 번호). 턴이 시작되면 그 담당이 곁으로 온다.
+    pub(super) mentions: Mutex<HashSet<String>>,
+    /// (33차 3번) 받은 공지의 처음 답(글 번호 → 답). 같은 글 번호는 한 번만 처리한다.
+    pub(super) notice_replies: tokio::sync::Mutex<Vec<(String, Value)>>,
     /// 담당마다 한 번에 하나씩 답한다.
-    turns: HashMap<&'static str, tokio::sync::Mutex<()>>,
+    pub(super) turns: HashMap<&'static str, tokio::sync::Mutex<()>>,
     /// 기기마다 마지막으로 받은 글의 시각.
     sent: Mutex<HashMap<IpAddr, UnixMillis>>,
     /// 마지막으로 본 이벤트 번호(스냅샷의 `last_seq`를 빨리 읽으려고).
@@ -86,6 +92,18 @@ fn parse_ask(body: &Value) -> Result<Ask, &'static str> {
         .as_str()
         .and_then(Agent::from_id)
         .ok_or(OFFICE_BAD_INPUT)?;
+    let (text, source) = parse_words(body)?;
+    Ok(Ask {
+        room,
+        agent,
+        text,
+        source,
+    })
+}
+
+/// 글(`text`)과 글 번호(`sourceMessageId`)를 읽는다: 없거나 비면 [`OFFICE_BAD_INPUT`], 길면 [`OFFICE_TOO_LONG`].
+/// (33차) 팀 방 멘션 글 · 공지도 같은 한도다.
+pub(super) fn parse_words(body: &Value) -> Result<(String, String), &'static str> {
     let text = body["text"].as_str().ok_or(OFFICE_BAD_INPUT)?;
     let source = body["sourceMessageId"].as_str().ok_or(OFFICE_BAD_INPUT)?;
     if source.is_empty() {
@@ -97,12 +115,7 @@ fn parse_ask(body: &Value) -> Result<Ask, &'static str> {
     if text.trim().is_empty() {
         return Err(OFFICE_BAD_INPUT);
     }
-    Ok(Ask {
-        room,
-        agent,
-        text: text.to_string(),
-        source: source.to_string(),
-    })
+    Ok((text.to_string(), source.to_string()))
 }
 
 impl OfficeDesk {
@@ -116,6 +129,8 @@ impl OfficeDesk {
             crew,
             store,
             texts: Mutex::new(HashMap::new()),
+            mentions: Mutex::new(HashSet::new()),
+            notice_replies: tokio::sync::Mutex::new(Vec::new()),
             turns,
             sent: Mutex::new(HashMap::new()),
             seen: Mutex::new(0),
@@ -135,7 +150,7 @@ impl OfficeDesk {
     }
 
     /// 같은 기기가 간격 안에 또 보냈으면 거짓. 받으면 시각을 남긴다.
-    fn pace(&self, device: IpAddr) -> bool {
+    pub(super) fn pace(&self, device: IpAddr) -> bool {
         let now = self.linked.now();
         let gap = i64::try_from(OFFICE_SEND_INTERVAL.as_millis()).unwrap_or(i64::MAX);
         let mut sent = lock(&self.sent);
@@ -146,47 +161,6 @@ impl OfficeDesk {
         }
         sent.insert(device, now);
         true
-    }
-
-    /// 그 담당의 대기열에서 차례가 온 것에 답한다(뒤에서 돈다).
-    async fn work(self: Arc<Self>, agent: Agent) {
-        let Some(turn) = self.turns.get(agent.id()) else {
-            return;
-        };
-        let _turn = turn.lock().await;
-        let office = &self.linked.office;
-        let next = match office.start_next(agent).await {
-            Ok(Some(next)) => next,
-            Ok(None) => return,
-            Err(error) => {
-                tracing::warn!(%error, "사무실 답을 시작하지 못했다");
-                return;
-            }
-        };
-        let text = lock(&self.texts)
-            .remove(&next.request_id)
-            .unwrap_or_default();
-        let answer = match &self.crew {
-            Some(crew) => {
-                let asked = crew.chat(role_of(agent), &text);
-                match tokio::time::timeout(CHAT_TOTAL_TIMEOUT, asked).await {
-                    Ok(Ok(answer)) => Ok(self.linked.secrets.redact(&answer)),
-                    Ok(Err(_)) => Err("agent_failed"),
-                    Err(_) => Err("timeout"),
-                }
-            }
-            None => Err("no_team"),
-        };
-        let done = match answer {
-            Ok(answer) if !answer.trim().is_empty() => {
-                office.complete(&next.request_id, &answer).await
-            }
-            Ok(_) => office.fail(&next.request_id, "empty_response").await,
-            Err(why) => office.fail(&next.request_id, why).await,
-        };
-        if let Err(error) = done {
-            tracing::warn!(%error, "사무실 답을 끝내지 못했다");
-        }
     }
 }
 
@@ -203,7 +177,13 @@ async fn snapshot(State(desk): State<Arc<OfficeDesk>>) -> Response {
     let agents: Vec<Value> = office
         .agents()
         .iter()
-        .map(|v| json!({"agent": v.agent.id(), "place": v.place.as_str(), "work": v.work.as_str()}))
+        .map(|v| {
+            json!({
+                "agent": v.agent.id(), "place": v.place.as_str(), "work": v.work.as_str(),
+                // (33차 4번) 부르기 단계(다시 들어와도 곁에 온 담당을 그린다).
+                "phase": v.phase.as_str(), "reason": v.reason.map(pi_office::SummonReason::as_str),
+            })
+        })
         .collect();
     let pending: Vec<Value> = office.pending_responses().iter().map(chat_json).collect();
     // (22차 1번) 첫 화면의 팀 대화: 최근 줄 가운데 `last_seq`까지(그 뒤는 실시간 연결로 온다). 번호를 붙여 준다.
@@ -233,6 +213,9 @@ async fn chat(
     body: Bytes,
 ) -> Response {
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    if body["room"] == "team" && body.get("agent").is_none_or(Value::is_null) {
+        return super::team_chat::post(&desk, &body, peer.ip()).await;
+    }
     let ask = match parse_ask(&body) {
         Ok(ask) => ask,
         Err(error) => return refuse(StatusCode::BAD_REQUEST, error),
@@ -267,6 +250,8 @@ async fn chat(
         }
     }
     lock(&desk.texts).insert(response.request_id.clone(), text);
+    // (33차 4번) 곁에서 기다리는 담당에게 말을 걸면 10초를 다시 센다.
+    office.note_conversation(ask.agent);
     tokio::spawn(Arc::clone(&desk).work(ask.agent));
     reply(StatusCode::OK, chat_json(&response))
 }
@@ -276,5 +261,13 @@ pub(crate) fn routes(desk: Arc<OfficeDesk>) -> Router {
     Router::new()
         .route(OFFICE_PATH, get(snapshot))
         .route(OFFICE_CHAT_PATH, post(chat))
+        .route(OFFICE_NOTICE_PATH, post(super::notice_http::send))
+        .route(OFFICE_NOTICES_PATH, get(super::notice_http::list))
+        .route(OFFICE_SUMMON_PATH, post(super::summon_http::summon))
+        .route(
+            OFFICE_SUMMON_ARRIVED_PATH,
+            post(super::summon_http::arrived),
+        )
+        .route(OFFICE_SUMMON_VIEW_PATH, post(super::summon_http::view))
         .with_state(desk)
 }

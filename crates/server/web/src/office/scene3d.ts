@@ -22,7 +22,7 @@ import { fitView, focusBounds, focusOf, type Focus } from "./framing";
 import { placeFurniture, type Furniture } from "./furniture";
 import { disposeLoaded } from "./gltf";
 import { buildGrid, type NavMap, type Point } from "./nav";
-import { createActors } from "./actors3d";
+import { createActors, type Steer } from "./actors3d";
 import { createBubbleLayer } from "./bubbles3d";
 import { actorPriority, layoutOffice } from "./layout";
 import { easeInOut, speakerOrbit, type CameraGoal, type SpeakerCamera } from "./speaker-camera";
@@ -58,6 +58,12 @@ export interface Scene {
   tool(id: ToolId): void;
   /** (32차) 내 캐릭터의 외형을 바꾼다. */
   setPlayerLook(look: string): void;
+  /** (33차) 부르기 걸음을 건다(`null`이면 자리 그리기로). */
+  steerAgent(id: string, steer: Steer | null): void;
+  /** (33차) 담당의 지금 자리(칸 단위 실수). */
+  agentAt(id: string): Point | null;
+  /** (33차) 내 캐릭터의 지금 자리(칸 단위 실수, 없으면 `null`). */
+  playerAt(): Point | null;
   dispose(): void;
 }
 
@@ -480,6 +486,9 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
   return {
     setAgent, setLook: actors.setLook, tool, dispose,
     setPlayerLook: (look: string) => player?.setLook(look),
+    steerAgent: actors.steer,
+    agentAt: actors.at,
+    playerAt: () => player?.pos() ?? null,
   };
 }
 

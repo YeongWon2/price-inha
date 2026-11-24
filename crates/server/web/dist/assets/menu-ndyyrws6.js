@@ -34,6 +34,11 @@ var API = {
 	officeLook: "/api/office/look",
 	officeMe: "/api/office/me",
 	officeMePosition: "/api/office/me/position",
+	officeNotice: "/api/office/notice",
+	officeNotices: "/api/office/notices",
+	officeSummon: "/api/office/summon",
+	officeSummonArrived: "/api/office/summon/arrived",
+	officeSummonView: "/api/office/summon/view",
 	pushKey: "/api/push/key",
 	pushSubscribe: "/api/push/subscribe",
 	notices: "/api/notices",
@@ -80,6 +85,11 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.officeLook,
 	API.officeMe,
 	API.officeMePosition,
+	API.officeNotice,
+	API.officeNotices,
+	API.officeSummon,
+	API.officeSummonArrived,
+	API.officeSummonView,
 	API.socket,
 	...APPROVALS
 ], [

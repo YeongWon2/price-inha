@@ -26,20 +26,27 @@ export const MENTION_EMPTY = "해당하는 담당이 없습니다";
 
 /** 이름 → 보낼 글의 멘션 `@[이름]`(이름 속 `\` `[` `]` 앞에 `\`). */
 export function mentionTag(name: string): string {
-  void name;
-  throw new Error("todo");
+  let tag = "@[";
+  for (const c of name) {
+    if (c === "\\" || c === "[" || c === "]") tag += "\\";
+    tag += c;
+  }
+  return `${tag}]`;
 }
 
 /** 조각들 → 서버로 보낼 글. 글 조각은 그대로, 칩은 [`mentionTag`]로 잇는다(다듬지 않는다). */
 export function serializePieces(pieces: readonly Piece[]): string {
-  void pieces;
-  throw new Error("todo");
+  return pieces.map((p) => (p.kind === "text" ? p.text : mentionTag(p.name))).join("");
 }
 
 /** 조각에 멘션 칩이 하나라도 있는가. */
 export function hasMention(pieces: readonly Piece[]): boolean {
-  void pieces;
-  throw new Error("todo");
+  return pieces.some((p) => p.kind === "mention");
+}
+
+/** 빈칸(줄바꿈 포함)인가. */
+function isSpace(c: string): boolean {
+  return /\s/.test(c);
 }
 
 /**
@@ -47,35 +54,38 @@ export function hasMention(pieces: readonly Piece[]): boolean {
  * `@`부터 커서까지에 빈칸이 없을 때만 `{ start: "@"의 위치, query: "@" 뒤부터 커서까지 }`. 아니면 `null`.
  */
 export function mentionQuery(text: string, caret: number): { start: number; query: string } | null {
-  void text;
-  void caret;
-  throw new Error("todo");
+  const before = text.slice(0, Math.max(0, Math.min(caret, text.length)));
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    const c = before[i];
+    if (isSpace(c)) return null;
+    if (c === "@") {
+      if (i > 0 && !isSpace(before[i - 1])) return null;
+      return { start: i, query: before.slice(i + 1) };
+    }
+  }
+  return null;
 }
 
 /** 찾는 말로 명단을 거른다: 소문자로 바꾼 이름에 소문자로 바꾼 찾는 말이 들어 있는 담당(명단 순서). 빈 말은 모두. */
 export function filterMembers(members: readonly Member[], query: string): Member[] {
-  void members;
-  void query;
-  throw new Error("todo");
+  const want = query.toLowerCase();
+  return members.filter((m) => m.name.toLowerCase().includes(want));
 }
 
 /** 목록 이동: `count`개 가운데 `index`에서 `delta`(±1)만큼, 끝에서 처음으로 · 처음에서 끝으로 돈다. `count`가 0이면 0. */
 export function cycle(index: number, count: number, delta: 1 | -1): number {
-  void index;
-  void count;
-  void delta;
-  throw new Error("todo");
+  if (count <= 0) return 0;
+  return (((index + delta) % count) + count) % count;
 }
 
 /** 서버 답의 `hint` → 보낸 사람에게 보일 안내. `"no_mention"` → [`NO_MENTION_HINT`], `"no_match"` → [`NO_MATCH_HINT`], 그 밖은 `null`. */
 export function hintText(hint: unknown): string | null {
-  void hint;
-  throw new Error("todo");
+  if (hint === "no_mention") return NO_MENTION_HINT;
+  if (hint === "no_match") return NO_MATCH_HINT;
+  return null;
 }
 
 /** 팀 방 멘션 글의 몸통: `{"room": "team", "text", "sourceMessageId"}`(`agent` 없음 — 서버가 멘션으로 답할 담당을 정한다). */
 export function teamMessageBody(text: string, sourceMessageId: string): { room: "team"; text: string; sourceMessageId: string } {
-  void text;
-  void sourceMessageId;
-  throw new Error("todo");
+  return { room: "team", text, sourceMessageId };
 }

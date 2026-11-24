@@ -9,6 +9,7 @@
 // - GET  /api/office/looks · POST /api/office/look   담당 외형(20차 4번): 처음에 읽어 외형을 정하고, 고르면 바꾼다.
 // - 스냅샷의 `talk` 칸 · WS 이벤트 `office.talk`   팀의 대화(22차): 팀 탭 · 머리 위 말풍선 · 가벼운 화면의 최근 말.
 // - GET  /api/office/me · POST /api/office/me/position   내 캐릭터(32차): 저장된 자리에서 시작, 자리는 띄엄띄엄 남긴다.
+// - (33차) 팀 방 멘션 글 `{room: "team", text, sourceMessageId}` · 공지 · 부르기는 team-compose.ts · summon-scene.ts.
 // 스냅샷과 말하기 길은 조립(price-inha)이 Office에 잇는다. 없으면 이벤트만으로 그린다.
 import { mountMenu } from "../ui/menu";
 import "./office.css";
@@ -21,6 +22,10 @@ import { createLookPicker } from "./look-picker";
 import { DEFAULT_LOOKS } from "./looks";
 import { FollowState } from "./follow";
 import { loadMe, type Me } from "./player-sync";
+import { hintText } from "./mention-text";
+import { createSummonScene, type SummonScene } from "./summon-scene";
+import { summonButton } from "./summon-view";
+import { interleave, mountTeamCompose, showMentions, type TeamCompose } from "./team-compose";
 import { mountControlsHint, mountToolbar, type Toolbar } from "./toolbar";
 import type { OfficeMap, Scene } from "./scene3d";
 import { SpeakerCamera } from "./speaker-camera";
@@ -53,8 +58,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getEl
 
 /** 담당 하나의 자리 · 일. */
 interface AgentView { place: string; work: string }
-/** 이벤트 `office.agent`의 몸통. */
-interface AgentEvent extends AgentView { agent: string }
+/** 이벤트 `office.agent`의 몸통((33차) 스냅샷에는 부르기 단계도 실린다). */
+interface AgentEvent extends AgentView { agent: string; phase?: unknown; reason?: unknown }
 /** 응답 객체(서버 Office의 ChatResponse). */
 interface ChatResponse {
   requestId: string;
@@ -90,6 +95,9 @@ const speaker = new SpeakerCamera();
 /** (32차 6번) 카메라 따라가기(기본 켜짐). 켜져 있으면 발언자 카메라가 끼어들지 않는다. */
 const follow = new FollowState();
 let toolbar: Toolbar | null = null;
+/** (33차) 팀 방 글 칸(멘션 칩 · 공지)과 부르기. */
+let compose: TeamCompose | null = null;
+let summons: SummonScene | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -119,7 +127,7 @@ function renderLight() {
       button.append(line);
     }
     button.addEventListener("click", () => selectConversation(id));
-    li.append(button);
+    li.append(button, summonButton(id, (agent) => void summons?.summon(agent)));
     list.append(li);
   }
 }
@@ -166,6 +174,7 @@ async function show3d(): Promise<void> {
   });
   state.view = scene;
   for (const [id, view] of state.agents) { scene.setAgent(id, view, { snap: true }); }
+  summons?.redraw();
 }
 
 function applyAgent(view: AgentEvent | null | undefined, snap: boolean): void {
@@ -238,8 +247,11 @@ function renderTabs(): void {
     b.textContent = (key === ROOM_TEAM ? "팀 방" : nameOf(key)) + glyph;
     b.addEventListener("click", () => selectConversation(key));
     tabs.append(b);
+    // (33차 7번) 담당 탭 옆 부르기 단추.
+    if (key !== ROOM_TEAM) { tabs.append(summonButton(key, (agent) => void summons?.summon(agent))); }
   }
-  $("chat-to-wrap").hidden = state.conversation !== ROOM_TEAM;
+  $("chat-to-wrap").hidden = true;
+  compose?.setTeam(state.conversation === ROOM_TEAM);
   renderCaption();
 }
 
@@ -256,6 +268,7 @@ function renderCaption(): void {
 }
 
 function selectConversation(key: string): void {
+  summons?.conversation(state.conversation, key);
   state.conversation = key;
   renderTabs();
   renderLog(true);
@@ -264,8 +277,8 @@ function selectConversation(key: string): void {
 function lineElement(line: Line): HTMLElement | null {
   if (line.kind === "me") {
     // (23차 8번) 내 글은 오른쪽 녹색 말풍선. 팀 방에서는 받는 담당을 작게 덧붙인다.
-    const view = chatLine({ kind: "me", key: line.id, text: line.text }, state.names);
-    const div = chatLineElement(view, line.room === ROOM_TEAM ? `→ ${nameOf(line.agent)}` : undefined);
+    const view = chatLine({ kind: "me", key: line.id, text: showMentions(line.text) }, state.names);
+    const div = chatLineElement(view, line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : undefined);
     if (line.failed) {
       div.classList.add("failed");
       const retry = document.createElement("button");
@@ -302,15 +315,17 @@ function teamElements(lines: Line[]): (HTMLElement | null)[] {
   }
   const talks = new Map<string, FeedEntry>();
   for (const talk of chatter.talkEntries()) { talks.set(talk.key, talk); entries.push(talk); }
-  return teamFeed(entries, state.names).map((row) => {
+  const rows = teamFeed(entries, state.names).map((row) => {
     const talk = talks.get(row.key);
     if (row.kind === "talk" && talk?.kind === "talk") {
       const view = chatLine({ kind: "talk", key: talk.key, agent: talk.agent, text: talk.text, topic: talk.topic }, state.names);
-      return chatLineElement(view, undefined, "talk");
+      return { at: row.at, el: chatLineElement(view, undefined, "talk") };
     }
     const line = byKey.get(row.key);
-    return line ? lineElement(line) : null;
+    return { at: row.at, el: line ? lineElement(line) : null };
   });
+  // (33차 6번) 공지 띠를 보낸 시각 순서로 끼운다.
+  return interleave<HTMLElement | null>(rows, compose?.bands() ?? []);
 }
 
 function renderLog(forceBottom: boolean): void {
@@ -341,10 +356,17 @@ async function send(room: string, agent: string, text: string, existing?: MyLine
       credentials: "same-origin",
       cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ room, agent, text, sourceMessageId: line.id }),
+      // (33차 1번) 팀 방 멘션 글은 담당 없이 보낸다(서버가 멘션으로 답할 담당을 정한다).
+      body: JSON.stringify(agent ? { room, agent, text, sourceMessageId: line.id } : { room, text, sourceMessageId: line.id }),
     });
     if (!reply.ok) { throw new Error(String(reply.status)); }
-    applyChat(await reply.json());
+    const body = await reply.json();
+    if (Array.isArray(body?.responses)) {
+      for (const resp of body.responses) { applyChat(resp); }
+      compose?.say(hintText(body.hint));
+    } else {
+      applyChat(body);
+    }
   } catch {
     line.failed = true;
   }
@@ -362,7 +384,19 @@ function wireChat(): void {
   select.value = "leader";
   const input = $<HTMLTextAreaElement>("chat-input");
   const form = $("chat-form");
+  compose = mountTeamCompose({
+    form: $("chat-form"),
+    textarea: input,
+    members: () => AGENT_IDS.map((agent) => ({ agent, name: nameOf(agent) })),
+    names: () => state.names,
+    agents: AGENT_IDS,
+    connected: () => state.connected,
+    sendTeam: (text) => void send(ROOM_TEAM, "", text),
+    changed: () => { if (state.conversation === ROOM_TEAM) { renderLog(false); } },
+    fetcher: (url, init) => fetch(url, { ...init, cache: "no-store" }),
+  });
   const submit = () => {
+    if (state.conversation === ROOM_TEAM) { compose?.submit(); return; }
     const text = input.value;
     if (!text.trim() || !state.connected) { return; }
     const room = state.conversation === ROOM_TEAM ? ROOM_TEAM : "direct";
@@ -406,6 +440,9 @@ function onFrame(text: string): void {
     else if (frame.kind === "office.chat") { applyChat(frame.payload as ChatResponse); }
     else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, !replayedOld(frame.payload)); }
     else if (frame.kind === KIND_OFFICE_APPROVAL) { applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init)); }
+    else if (frame.kind === "office.notice") { compose?.onNotice(frame.payload); }
+    else if (frame.kind === "office.notice_ack") { compose?.onAck(frame.payload); }
+    else if (frame.kind === "office.summon") { summons?.onEvent(frame.payload); }
   }
 }
 
@@ -472,7 +509,7 @@ async function loadSnapshot(): Promise<void> {
     const snap = (await reply.json()) as {
       agents?: AgentEvent[]; pending?: ChatResponse[]; last_seq?: unknown; talk?: { seq?: unknown }[];
     };
-    for (const view of snap.agents ?? []) { applyAgent(view, true); }
+    for (const view of snap.agents ?? []) { applyAgent(view, true); summons?.fromSnapshot(view.agent, view.phase, view.reason); }
     for (const resp of snap.pending ?? []) { applyChat(resp); }
     // (22차 1번) 최근 팀 대화(지난 것이라 말풍선은 띄우지 않는다).
     for (const talk of snap.talk ?? []) { if (typeof talk.seq === "number") { onTalk(talk, talk.seq, false); } }
@@ -523,7 +560,7 @@ async function start(): Promise<void> {
       state.me = await loadMe((input, init) => fetch(input, { ...init, cache: "no-store" }));
       state.meLoaded = state.me !== null;
     }
-    if (state.lastSeq === null) { await loadSnapshot(); }
+    if (state.lastSeq === null) { await loadSnapshot(); await compose?.load(); }
     openSocket();
   } catch {
     setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
@@ -567,6 +604,16 @@ async function main(): Promise<void> {
     state.map = null;
   }
   for (const id of AGENT_IDS) { state.names[id] = state.map?.agents?.[id]?.name ?? id; }
+  if (state.map) {
+    summons = createSummonScene({
+      map: state.map,
+      view: () => state.view,
+      fetcher: (url, init) => fetch(url, { ...init, cache: "no-store" }),
+      nameOf,
+      openChat: (id) => selectConversation(id),
+      say: (text) => compose?.say(text),
+    });
+  }
   wireChat();
   renderTabs();
   renderLog(true);

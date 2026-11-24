@@ -41,13 +41,18 @@ mod history_http;
 mod linked;
 mod looks_http;
 mod me_http;
+mod notice_http;
 mod office_http;
+mod office_work;
 mod phone_http;
 mod semantic;
 mod semantic_http;
 mod sentence;
 mod summary;
+mod summon_http;
+mod summon_sink;
 mod talk_feed;
+mod team_chat;
 
 pub(crate) use assets::routes as asset_routes;
 pub(crate) use backup_http::GITHUB_API_BASE;
@@ -61,6 +66,7 @@ pub(crate) use phone_http::{Phone, routes as phone_routes};
 pub(crate) use semantic::{Semantic, SemanticSettings};
 pub(crate) use semantic_http::routes as semantic_routes;
 pub(crate) use summary::daily_summary;
+pub(crate) use summon_sink::{SpareBudget, SummonSink};
 pub(crate) use talk_feed::{Following, TalkFeed, routes as talk_routes};
 
 /// 사무실 화면 자산을 다는 자리. `GET /office/`는 `index.html`, `GET /office/<경로>`는 그 파일.

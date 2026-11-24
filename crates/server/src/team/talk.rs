@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pi_agent::{DiscussionLimits, DiscussionRequest, Role};
+use pi_agent::{DiscussionLimits, DiscussionOutcome, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
 use pi_market::Symbol;
 use pi_store::{
@@ -205,20 +205,7 @@ impl Crew {
             limits: DiscussionLimits::default(),
         };
         let following = self.follow_talk(trade.id, symbol);
-        let result = {
-            // (17차 5번) 취소 · panic에도 자리 표시가 내려가게 가드의 정리로 건다.
-            let lowered = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let _discussing = DiscussingGuard::enter_with(
-                &self.discussing,
-                self.table_release(Arc::clone(&lowered), Arc::clone(&self.discussing)),
-            );
-            self.at_table(true).await;
-            let result = self.team.discuss(request).await;
-            if !lowered.swap(true, Ordering::SeqCst) {
-                self.at_table(false).await;
-            }
-            result
-        };
+        let result = self.discuss_at_table(request).await;
         if let Some(following) = following {
             following.finish().await;
         }
@@ -232,6 +219,28 @@ impl Crew {
             outcome,
             placed: self.tools.take(trade.id),
         })
+    }
+
+    /// 논의를 미팅룸 자리 표시와 함께 돈다. (33차 3번) 공지는 논의 옵션으로 넘긴다.
+    async fn discuss_at_table(
+        &self,
+        request: DiscussionRequest,
+    ) -> Result<DiscussionOutcome, pi_agent::Error> {
+        // (17차 5번) 취소 · panic에도 자리 표시가 내려가게 가드의 정리로 건다.
+        let lowered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _discussing = DiscussingGuard::enter_with(
+            &self.discussing,
+            self.table_release(Arc::clone(&lowered), Arc::clone(&self.discussing)),
+        );
+        self.at_table(true).await;
+        let result = self
+            .team
+            .discuss_with(request, self.discussion_options())
+            .await;
+        if !lowered.swap(true, Ordering::SeqCst) {
+            self.at_table(false).await;
+        }
+        result
     }
 
     /// (10b 9번) 링크가 이상해 버린 뉴스 기사 수를 그 매매의 방 로그에 남긴다(결정 2026-11-21 16번).
