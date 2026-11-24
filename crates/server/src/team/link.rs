@@ -89,7 +89,7 @@ fn max_of(input: &Value) -> Option<usize> {
 pub(super) fn release_table(
     office: Option<Arc<Office>>,
     done: Arc<std::sync::atomic::AtomicBool>,
-    _discussing: Arc<std::sync::atomic::AtomicUsize>,
+    discussing: Arc<std::sync::atomic::AtomicUsize>,
 ) -> Box<dyn FnOnce() + Send> {
     Box::new(move || {
         if done.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -99,6 +99,10 @@ pub(super) fn release_table(
             return;
         };
         runtime.spawn(async move {
+            // 띄운 작업이 실제로 돌 때 그 사이 새 논의가 열려 있으면 그 논의가 올린 자리 표시를 내리지 않는다.
+            if discussing.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+                return;
+            }
             for role in MEMBERS {
                 if let Err(error) = office
                     .set_activity(office_agent(role), Activity::Working)

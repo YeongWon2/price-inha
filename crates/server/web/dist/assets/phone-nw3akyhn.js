@@ -89,6 +89,7 @@ async function showApproval(id) {
 		$part(card, "summary").textContent = approval.summary || "";
 		$part(card, "fingerprint").textContent = approval.fingerprint || "";
 		$part(card, "result").textContent = "";
+		delete card.dataset.deciding;
 		card.querySelector("[data-field=\"code\"]").value = (approval.fingerprint || "").slice(0, 6);
 		setDecideButtons(card, false);
 		card.hidden = false;
@@ -113,17 +114,20 @@ async function decide(verb) {
 		result.textContent = "승인 내용을 아직 받지 못했어요.";
 		return;
 	}
-	if (card.dataset.deciding === "1") return;
-	card.dataset.deciding = "1";
+	if (card.dataset.deciding) return;
+	const sentId = card.dataset.approvalId;
+	card.dataset.deciding = sentId;
 	setDecideButtons(card, true);
 	try {
-		await postJson(decidePath(card.dataset.approvalId, verb), { fingerprint: card.dataset.fingerprint });
-		result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
+		await postJson(decidePath(sentId, verb), { fingerprint: card.dataset.fingerprint });
+		if (card.dataset.approvalId === sentId) result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
 	} catch (error) {
-		result.textContent = "처리하지 못했어요: " + message(error);
-		setDecideButtons(card, false);
+		if (card.dataset.approvalId === sentId) {
+			result.textContent = "처리하지 못했어요: " + message(error);
+			setDecideButtons(card, false);
+		}
 	} finally {
-		delete card.dataset.deciding;
+		if (card.dataset.deciding === sentId) delete card.dataset.deciding;
 	}
 }
 async function loadDailySummary() {

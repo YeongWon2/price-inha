@@ -161,8 +161,18 @@ pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
             check_service(home, service),
             check_backup(home),
             check_ollama(home),
+            check_ai_daily_limit(settings),
         ],
     }
+}
+
+/// (19차 3번) 진단: 하루 AI 호출 상한. 늘 문제 아님(✓).
+fn check_ai_daily_limit(settings: &Settings) -> Check {
+    let what = match settings.ai_daily_limit {
+        None => "하루 AI 호출 상한 없음".to_string(),
+        Some(limit) => format!("하루 AI 호출 상한 {limit}번"),
+    };
+    good(CheckItem::AiDailyLimit, what)
 }
 
 fn good(item: CheckItem, what: impl Into<String>) -> Check {

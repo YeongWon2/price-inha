@@ -323,7 +323,9 @@ impl Trading {
     }
 
     /// (16차 4번 · 17차 1 · 2 · 3번) 낡은 손절 · 청산 대기: 지금 남은 수량으로 같은 목적의 파는 주문을 먼저 내고, 나간 뒤에 대기를 지운다.
-    /// 실행기 장부로 남은 수량을 모르면(감시 자리나 시세가 없음) 지우지도 새로 내지도 않고 물러선다.
+    /// 장부의 남은 수량을 모르면(감시 자리나 시세가 없음) 지우지도 새로 내지도 않고 물러선다. 이때 남은 수량은
+    /// `stop_draft`가 돌려주는 감시 자리의 **처음 수량**이고, 이미 일부가 팔렸는지는 실행기 `sell`의 남은 수량
+    /// 대조(`SellTooLarge`)에 기댄다.
     async fn renew_stale(
         &self,
         pending: &SellRetry,
@@ -387,17 +389,32 @@ impl Trading {
                     ?other,
                     "남은 수량으로 새로 내지 못했습니다"
                 );
+                self.note_renew_failed(trade, remaining);
                 Ok(Tried::Blocked(Hold::other(
                     "남은 수량으로 새로 내지 못했습니다(대기는 그대로)",
                 )))
             }
             Err(error) => {
                 tracing::warn!(%error, trade = trade.0, "남은 수량으로 새로 내지 못했습니다");
+                self.note_renew_failed(trade, remaining);
                 Ok(Tried::Blocked(Hold::other(
                     "남은 수량으로 새로 내지 못했습니다(대기는 그대로)",
                 )))
             }
         }
+    }
+
+    /// (19차 2번) 새로 낸 주문이 나가지 못했을 때(실행기가 대기를 새 수량으로 덮어쓴다) 방에 한 줄, 그 시도마다 한 번.
+    /// 나가기 전이라 "남은 수량" · "새로 냈"을 쓰지 않는다(나간 뒤의 줄과 구별한다).
+    fn note_renew_failed(&self, trade: TradeId, quantity: Decimal) {
+        self.note_in_room(
+            trade,
+            "stale-renew-failed",
+            &format!(
+                "새로 낸 주문이 나가지 못해 대기를 {}주로 바꿔 다시 냅니다",
+                quantity.normalize()
+            ),
+        );
     }
 
     /// 그 매매의 방 `trade-<번호>`에 서버가 남기는 한 줄(같은 종류는 매매 · 시각마다 겹치지 않는 키).

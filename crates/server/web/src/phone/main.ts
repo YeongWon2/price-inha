@@ -115,6 +115,8 @@ async function showApproval(id: string): Promise<void> {
     $part(card, "summary").textContent = approval.summary || "";
     $part(card, "fingerprint").textContent = approval.fingerprint || "";
     $part(card, "result").textContent = "";
+    // 새 카드는 앞 카드의 보내는 중 표시를 이어받지 않는다(19차 5번).
+    delete card.dataset.deciding;
     // 결정 4번: 지문 앞 6자리를 보이기만 한다. 사용자가 치지 않는다.
     (card.querySelector('[data-field="code"]') as HTMLInputElement).value = (approval.fingerprint || "").slice(0, 6);
     setDecideButtons(card, false);
@@ -144,20 +146,26 @@ async function decide(verb: Verb): Promise<void> {
     return;
   }
   // 보내는 동안 두 단추를 막는다(첫 클릭 안에서 바로). 성공하면 막힌 채 두고, 실패하면 다시 켠다.
-  if (card.dataset.deciding === "1") return;
-  card.dataset.deciding = "1";
+  if (card.dataset.deciding) return;
+  // (19차 5번) 보낸 승인 id를 기억한다. 답이 왔을 때 카드가 다른 승인으로 바뀌었으면 그 카드의 결과 글 · 단추를 건드리지 않는다.
+  const sentId = card.dataset.approvalId;
+  card.dataset.deciding = sentId;
   setDecideButtons(card, true);
   try {
     // 화면이 받은 승인 카드의 지문을 그대로 보낸다(서버가 지금 내용의 지문과 비교한다).
-    await postJson(decidePath(card.dataset.approvalId, verb), {
+    await postJson(decidePath(sentId, verb), {
       fingerprint: card.dataset.fingerprint,
     });
-    result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
+    if (card.dataset.approvalId === sentId) {
+      result.textContent = verb === "approve" ? "승인했어요." : "거절했어요.";
+    }
   } catch (error) {
-    result.textContent = "처리하지 못했어요: " + message(error);
-    setDecideButtons(card, false);
+    if (card.dataset.approvalId === sentId) {
+      result.textContent = "처리하지 못했어요: " + message(error);
+      setDecideButtons(card, false);
+    }
   } finally {
-    delete card.dataset.deciding;
+    if (card.dataset.deciding === sentId) delete card.dataset.deciding;
   }
 }
 
