@@ -14,6 +14,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
+use pi_agent::Role;
+use pi_market::Market;
 use pi_office::EventSink;
 use pi_secrets::SecretStore;
 use pi_store::{RoomEvent, Store, StoreError};
@@ -21,7 +23,9 @@ use serde_json::{Value, json};
 
 use super::linked::LateSink;
 use super::office_http::reply;
-use super::{KIND_OFFICE_TALK, OFFICE_TALK_PATH, OFFICE_TALK_RECENT, OFFICE_TEXT_MAX};
+use super::{
+    KIND_OFFICE_TALK, OFFICE_TALK_PATH, OFFICE_TALK_RECENT, OFFICE_TEXT_MAX, leader_sentence,
+};
 
 /// 논의가 도는 동안 방 로그를 다시 보는 간격(1초 안에 내려고 짧게 둔다).
 const FOLLOW_TICK: Duration = Duration::from_millis(100);
@@ -49,6 +53,8 @@ pub(crate) struct TalkFeed {
 struct Follow {
     room: String,
     topic: String,
+    /// 팀장 판단 글의 금액을 쓸 시장.
+    market: Market,
     /// 이 번호까지 봤다.
     cursor: Mutex<u64>,
     stop: AtomicBool,
@@ -85,9 +91,14 @@ impl TalkFeed {
         }
     }
 
-    /// 방 로그 글 하나의 `office.talk` 내용(가린 글, [`OFFICE_TEXT_MAX`]자에서 자름).
-    fn talk_of(&self, event: &RoomEvent, topic: &str) -> Value {
-        let text = event.payload["text"].as_str().unwrap_or_default();
+    /// 방 로그 글 하나의 `office.talk` 내용(가린 글, [`OFFICE_TEXT_MAX`]자에서 자름). (25차 2번) 팀장 글이
+    /// 판단 모양이면 사람이 읽는 문장([`leader_sentence`])으로 낸다 — 방 로그 원문은 그대로 둔다.
+    fn talk_of(&self, event: &RoomEvent, topic: &str, market: Market) -> Value {
+        let raw = event.payload["text"].as_str().unwrap_or_default();
+        let sentence = (event.actor_id == Role::Leader.id())
+            .then(|| leader_sentence(raw, market))
+            .flatten();
+        let text = sentence.as_deref().unwrap_or(raw);
         let text: String = self
             .secrets
             .redact(text)
@@ -104,8 +115,8 @@ impl TalkFeed {
     }
 
     /// 내고 최근 줄에 더한다. `turn`을 쥔 채 부른다.
-    async fn emit(&self, event: &RoomEvent, topic: &str) {
-        let talk = self.talk_of(event, topic);
+    async fn emit(&self, event: &RoomEvent, topic: &str, market: Market) {
+        let talk = self.talk_of(event, topic, market);
         match EventSink::publish(self.sink.as_ref(), KIND_OFFICE_TALK, talk.clone()).await {
             Ok(seq) => {
                 if let Some(recent) = lock(&self.recent).as_mut() {
@@ -120,16 +131,16 @@ impl TalkFeed {
     }
 
     /// 서버가 방 로그에 직접 쓴 담당 글 하나를 곧바로 낸다(하루 판단 방).
-    pub(crate) async fn publish_event(&self, event: &RoomEvent, topic: &str) {
+    pub(crate) async fn publish_event(&self, event: &RoomEvent, topic: &str, market: Market) {
         if event.kind != "message.member" {
             return;
         }
         let _turn = self.turn.lock().await;
-        self.emit(event, topic).await;
+        self.emit(event, topic, market).await;
     }
 
     /// 방을 따라가기 시작한다: 지금 방의 마지막 번호 뒤의 담당 글을 [`FOLLOW_TICK`]마다 낸다.
-    pub(crate) fn follow(self: &Arc<Self>, room: &str, topic: &str) -> Following {
+    pub(crate) fn follow(self: &Arc<Self>, room: &str, topic: &str, market: Market) -> Following {
         let cursor = self.store.room_last_seq(room).unwrap_or_else(|error| {
             tracing::warn!(%error, "방 로그의 마지막 번호를 읽지 못했다");
             0
@@ -137,6 +148,7 @@ impl TalkFeed {
         let follow = Arc::new(Follow {
             room: room.to_string(),
             topic: topic.to_string(),
+            market,
             cursor: Mutex::new(cursor),
             stop: AtomicBool::new(false),
         });
@@ -174,7 +186,7 @@ impl TalkFeed {
                 return;
             };
             for event in batch.iter().filter(|e| e.kind == "message.member") {
-                self.emit(event, &follow.topic).await;
+                self.emit(event, &follow.topic, follow.market).await;
             }
             *lock(&follow.cursor) = last;
         }

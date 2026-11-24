@@ -5,6 +5,7 @@
 //! `[복기]` → 복기, 그 밖 → 논의 글).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use pi_ai::{
     AiError, AiProvider, CompletionRequest, CompletionResponse, Role as Speaker, StopReason, Usage,
 };
 use serde_json::json;
+use tokio::sync::Notify;
 
 /// 하루 운용 판단 턴의 머리.
 pub(crate) const DAY_PLAN_HEAD: &str = "[하루 판단]";
@@ -49,6 +51,12 @@ pub enum DemoTurn {
 pub struct DemoAi {
     scripts: Mutex<HashMap<DemoTurn, String>>,
     prompts: Mutex<Vec<String>>,
+    /// (25차 3번) 답마다 두는 뜸.
+    pause: Duration,
+    /// 서버를 끄는 중이면 참: 기다리던 뜸을 바로 끝내고 이 뒤로 뜸을 두지 않는다.
+    closed: AtomicBool,
+    /// 끄기를 기다리던 뜸에 알린다.
+    closing: Notify,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -65,12 +73,38 @@ impl DemoAi {
     /// 미팅룸에서 차례로 말하는 모습이 사람에게 보이게 하는 것이다. 실행 파일의 `--demo` 조립만 쓴다
     /// ([`crate::RunAssembly::demo_ai_pause`]). [`DemoAi::new`]는 뜸이 없다(`Duration::ZERO`).
     pub fn with_pause(pause: Duration) -> DemoAi {
-        todo!()
+        DemoAi {
+            pause,
+            ..DemoAi::default()
+        }
     }
 
     /// (25차 3번) 답마다 두는 뜸. [`DemoAi::new`]는 `Duration::ZERO`.
     pub fn pause(&self) -> Duration {
-        todo!()
+        self.pause
+    }
+
+    /// 서버를 끈다: 기다리던 뜸을 바로 끝내고 이 뒤로는 뜸 없이 답한다(끄기가 뜸을 기다리지 않게).
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.closing.notify_waiters();
+    }
+
+    /// 뜸을 둔다(뜸이 0이거나 끄는 중이면 곧바로 끝난다).
+    async fn rest(&self) {
+        if self.pause.is_zero() || self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let closing = self.closing.notified();
+        tokio::pin!(closing);
+        closing.as_mut().enable();
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(self.pause) => {}
+            () = closing => {}
+        }
     }
 
     /// 그 턴의 답을 정한다. 다시 정하면 바뀐다. 이 뒤로 그 턴은 이 글을 답한다.
@@ -176,6 +210,7 @@ impl AiProvider for DemoAi {
             .collect::<Vec<_>>()
             .join("\n");
         let text = self.reply(turn_of(&request, &last), &conversation);
+        self.rest().await;
         Ok(CompletionResponse {
             text,
             stop_reason: StopReason::EndTurn,

@@ -8,7 +8,7 @@ use pi_market::Market;
 use pi_secrets::SecretStore;
 
 use super::{App, Launch, Wiring};
-use crate::demo::{DemoWiring, demo_calendar};
+use crate::demo::{DEMO_AI_PAUSE, DemoWiring, demo_calendar};
 use crate::{AppError, CalendarFn, Reach, Settings, TeamWiring, TradingWiring};
 
 /// 실행 파일 `run`이 띄우는 조립 값 전부. [`run_assembly`]로 만들고 [`App::launch_run`]에 준다.
@@ -46,8 +46,11 @@ pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> R
         },
         reach: Reach::default(),
         demo,
-        // 뼈대(25차 N1): 아직 뜸을 두지 않는다(옛 값).
-        demo_ai_pause: Duration::ZERO,
+        demo_ai_pause: if settings.demo {
+            DEMO_AI_PAUSE
+        } else {
+            Duration::ZERO
+        },
     }
 }
 
@@ -59,6 +62,8 @@ pub(crate) struct DemoRun {
     pub(crate) wiring: DemoWiring,
     /// 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다(키가 등록돼 있어도).
     pub(crate) offline: bool,
+    /// (25차 3번) 시연용 가짜 AI가 답마다 두는 뜸([`RunAssembly::demo_ai_pause`]). 그 밖의 띄우기는 0.
+    pub(crate) ai_pause: Duration,
 }
 
 impl DemoRun {
@@ -85,6 +90,7 @@ impl App {
             DemoRun {
                 wiring: assembly.demo,
                 offline: true,
+                ai_pause: assembly.demo_ai_pause,
             }
         } else {
             DemoRun::default()

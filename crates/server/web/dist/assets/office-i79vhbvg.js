@@ -975,17 +975,38 @@ function createLookPicker(o) {
 		}
 	};
 }
+/** 발언자 샷으로 가는 전환 시간(밀리초, ease-in-out). */
+var SPEAKER_TRANSITION_MS = 1200;
 /** 탁자 샷으로 가는 전환 시간(밀리초, ease-in-out). */
-var TABLE_TRANSITION_MS = 1e3;
+var TABLE_TRANSITION_MS = 1200;
 /** 한 발언자 샷의 최소 머무름(밀리초). */
 var MIN_DWELL_MS = 2e3;
-/** 마지막 말 뒤 발언자 샷을 유지하는 시간(밀리초). */
-var HOLD_AFTER_TALK_MS = 1500;
+/** 마지막 말 뒤 발언자 샷을 유지하는 시간(밀리초). 그 안에 다른 담당이 말하면 탁자 샷을 거치지 않고 옮긴다. */
+var HOLD_AFTER_TALK_MS = 4e3;
+/** (25차 1번, 결정 18) 발언자 샷의 보는 중심: 탁자 샷의 중심에서 발언자 쪽으로 이 몫만 옮긴다. */
+var SPEAKER_CENTER_SHARE = .5;
+/** (25차 1번, 결정 18) 발언자 샷의 거리: 탁자 샷 거리의 이 배수. */
+var SPEAKER_DISTANCE_SCALE = .8;
+/**
+* (25차 1번, 결정 18) 탁자 샷 궤도에서 발언자 샷 궤도를 낸다. 돌지 않는다: 방위각(theta) · 고도(polar)는
+* 탁자 샷 그대로다. 보는 중심의 바닥 좌표(tx, tz)만 발언자 자리 쪽으로 [`SPEAKER_CENTER_SHARE`]만큼 옮기고
+* (높이 ty는 그대로), 거리는 탁자 샷의 [`SPEAKER_DISTANCE_SCALE`]배다. 넘긴 값은 바꾸지 않는다.
+*/
+function speakerOrbit(table, spot) {
+	return {
+		...table,
+		radius: table.radius * SPEAKER_DISTANCE_SCALE,
+		tx: table.tx + (spot.x - table.tx) * SPEAKER_CENTER_SHARE,
+		tz: table.tz + (spot.z - table.tz) * SPEAKER_CENTER_SHARE
+	};
+}
 /**
 * 발언자 카메라 상태 기계. 기본 켜짐.
-* - 담당들이 미팅룸에 모여 있을 때(`gather(true)`) 논의 글이 오면(`talk`) 그 담당의 발언자 샷(고도 15°, 0.9초).
-* - 다른 담당이 말해도 지금 샷이 시작된 지 2초가 지나기 전에는 바꾸지 않는다(2초가 되는 때 바꾼다).
-* - 마지막 말 뒤 1.5초(그리고 그 샷의 최소 머무름 2초)가 지나면 탁자 샷(고도 30°, 1.0초).
+* - 담당들이 미팅룸에 모여 있을 때(`gather(true)`) 논의 글이 오면(`talk`) 그 담당의 발언자 샷(고도는 탁자 샷 그대로
+*   30°, 1.2초 — 궤도는 [`speakerOrbit`]).
+* - 다른 담당이 말해도 지금 샷이 시작된 지 2초가 지나기 전에는 바꾸지 않는다(2초가 되는 때 바꾼다). 말 뒤 유지
+*   안이면 탁자 샷을 거치지 않고 곧바로 그 담당 쪽으로 옮긴다.
+* - 마지막 말 뒤 4초(그리고 그 샷의 최소 머무름 2초)가 지나면 탁자 샷(고도 30°, 1.2초).
 * - 사용자가 카메라를 손으로 움직이면(`manual`) 그 논의 동안(`gather(false)`가 올 때까지) 꺼진다.
 * - 단추(`setEnabled`)로 켜고 끈다. 꺼져 있으면 목표를 내지 않는다.
 * - 목표가 없으면(논의 글 전 · 모이지 않음 · 꺼짐) [`goal`]은 `null`이고 장면은 평소 카메라를 쓴다.
@@ -1056,8 +1077,8 @@ var SpeakerCamera = class {
 		return shot.kind === "speaker" ? {
 			shot: "speaker",
 			agent: shot.agent,
-			elevationDeg: 15,
-			transitionMs: 900,
+			elevationDeg: 30,
+			transitionMs: SPEAKER_TRANSITION_MS,
 			since: shot.since
 		} : {
 			shot: "table",
@@ -1074,7 +1095,7 @@ var SpeakerCamera = class {
 		this.shot = null;
 		this.next = null;
 	}
-	/** `now`까지 시간이 흐른 만큼 샷을 넘긴다: 기다리던 발언자(최소 머무름 뒤) → 탁자 샷(말 뒤 1.5초 · 최소 머무름 뒤). */
+	/** `now`까지 시간이 흐른 만큼 샷을 넘긴다: 기다리던 발언자(최소 머무름 뒤) → 탁자 샷(말 뒤 4초 · 최소 머무름 뒤). */
 	advance(now) {
 		const shot = this.shot;
 		if (!shot || shot.kind !== "speaker") return;
@@ -1314,7 +1335,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-c6ucn2ty.js");
+		const { webglAvailable, createScene } = await import("./scene3d-cr73e9r0.js");
 		return {
 			webglAvailable,
 			createScene
@@ -1819,4 +1840,4 @@ async function main() {
 	});
 }
 main();
-export { bubbleCandidates as a, bubbleWidth as c, LANE_AREA_RATIO as i, insideScreen as l, DEFAULT_LOOKS as n, bubbleText as o, LOOKS as r, bubbleWhere as s, easeInOut as t, overlap as u };
+export { LANE_AREA_RATIO as a, bubbleWhere as c, overlap as d, LOOKS as i, bubbleWidth as l, speakerOrbit as n, bubbleCandidates as o, DEFAULT_LOOKS as r, bubbleText as s, easeInOut as t, insideScreen as u };

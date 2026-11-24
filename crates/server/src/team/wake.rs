@@ -18,9 +18,9 @@ use pi_store::{
     UnixMillis,
 };
 use pi_trigger::{
-    DeliveryState, DisableReason, JobId, JobState, Monotonic, OpenReceipt, Ports, Receipt,
-    ReceiptKey, ReceiptStatus, ScheduleJob, ScheduleKind, StopSignal, StoreError, Target, Trigger,
-    TriggerConfig, TriggerEvent, TriggerStore, Wake, WakeError, Waker,
+    DeliveryState, DisableReason, ERROR_BACKOFF, JobId, JobState, Monotonic, OpenReceipt, Ports,
+    Receipt, ReceiptKey, ReceiptStatus, ScheduleJob, ScheduleKind, StopSignal, StoreError, Target,
+    Trigger, TriggerConfig, TriggerEvent, TriggerStore, Wake, WakeError, Waker,
 };
 use serde_json::{Value, json};
 use tokio::sync::watch;
@@ -346,7 +346,7 @@ pub(crate) async fn spawn_trigger(
     );
     config.times = crew.wiring.schedule;
     let ports = Ports {
-        clock,
+        clock: Arc::clone(&clock),
         monotonic: Arc::new(Steady(Instant::now())),
         markets: vec![Arc::new(CalendarMarket(Arc::clone(&crew.trading)))],
         store: Arc::new(StoreTriggers(crew.store.clone())),
@@ -355,20 +355,74 @@ pub(crate) async fn spawn_trigger(
     };
     let failed = |e: pi_trigger::Error| crate::TeamError::Trigger(e.to_string());
     let trigger = Arc::new(Trigger::new(config, ports).map_err(failed)?);
+    // (25차 4번) 다시 켠 뒤 처리(`start`)는 여기서 한 번만 한다. 첫 tick은 띄우는 자리에서 돌리고(띄운 바로 뒤
+    // 작업 상태가 있게), 그 뒤로는 `start`를 다시 부르지 않는 고리([`keep_ticking`])로 돈다 — `Trigger::run`은
+    // 안에서 다시 `start`해 첫 tick이 띄운 깨우기의 영수증을 중단됨으로 닫는다.
     trigger.start().await.map_err(failed)?;
-    if let Err(error) = trigger.tick().await {
-        tracing::warn!(%error, "깨우기 엔진의 첫 tick이 실패했다");
-    }
+    let first = match trigger.tick().await {
+        Ok(report) => report.next_delay,
+        Err(error) => {
+            tracing::warn!(%error, "깨우기 엔진의 첫 tick이 실패했다");
+            ERROR_BACKOFF[0]
+        }
+    };
     // (10b 8번) 시세 조건 · 자료 변화를 엔진에 넣는 고리. 엔진과 함께 멈춘다.
     let poller =
         Poller::new(Arc::clone(crew), Arc::clone(&trigger)).with_demo(demo.disclosure_every);
     let polling = stop.clone();
     Ok(tokio::spawn(async move {
-        let engine = async {
-            if let Err(error) = trigger.run(stop).await {
-                tracing::warn!(%error, "깨우기 엔진이 멈췄다");
-            }
-        };
+        let engine = keep_ticking(&trigger, clock, stop, first);
         tokio::join!(engine, poller.run(polling));
     }))
+}
+
+/// 끝난 깨우기의 결과를 비운다(쌓아 두지 않게). 반영하다 생긴 저장소 오류는 기록한다.
+fn drain_logged(trigger: &Trigger) {
+    for error in &trigger.drain_finished().errors {
+        tracing::warn!(%error, "끝난 깨우기의 결과를 저장소에 적지 못했다");
+    }
+}
+
+/// (25차 4번) 첫 tick 뒤의 고리: `first`만큼 기다린 뒤 `tick` → 기다리기를 되풀이한다(`start`를 다시 부르지
+/// 않는다 — [`Trigger::run`]과 같은 고리에서 그것만 뺐다). `stop`이 참이 되면 끝난다. tick의 오류는 기록하고 계속한다.
+async fn keep_ticking(
+    trigger: &Trigger,
+    clock: Arc<dyn Clock>,
+    mut stop: watch::Receiver<bool>,
+    first: Duration,
+) {
+    let mut delay = first;
+    loop {
+        drain_logged(trigger);
+        if *stop.borrow() {
+            return;
+        }
+        let sleep = clock.sleep(delay);
+        tokio::pin!(sleep);
+        tokio::select! {
+            () = &mut sleep => {}
+            changed = stop.changed() => {
+                if changed.is_err() {
+                    // 멈추라고 할 쪽이 사라졌다. 기다림은 마저 채운다.
+                    sleep.await;
+                }
+            }
+        }
+        if *stop.borrow() {
+            return;
+        }
+        delay = match trigger.tick().await {
+            Ok(report) => {
+                if report.data_dropped > 0 {
+                    let dropped = report.data_dropped;
+                    tracing::warn!(dropped, "이번 tick 보고에 버린 자료 사건이 있다");
+                }
+                report.next_delay
+            }
+            Err(error) => {
+                tracing::warn!(%error, "tick이 실패했다. 잠시 뒤 다시 본다");
+                ERROR_BACKOFF[0]
+            }
+        };
+    }
 }

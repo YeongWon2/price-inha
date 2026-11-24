@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use pi_agent::{Ports, Role, RoleConfig, Team, TimeLimits};
@@ -29,6 +30,8 @@ pub(crate) struct CrewParts {
     /// (24차 4번) 참이면 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다(키가 등록돼 있어도). 실행 파일의
     /// 시연 조립만 켠다.
     pub(crate) offline: bool,
+    /// (25차 3번) 시연용 가짜 AI가 답마다 두는 뜸(실행 파일의 시연 조립만 0이 아니다).
+    pub(crate) demo_ai_pause: Duration,
 }
 
 /// 같은 시계를 실행기 · 자료 · 승인의 시계 자리에 끼운다.
@@ -149,10 +152,13 @@ impl Crew {
             secrets,
             wiring,
             offline,
+            demo_ai_pause,
         } = parts;
         let shared = Arc::new(Shared(Arc::clone(&clock)));
         let redactor = Arc::new(SecretsRedactor::new(Arc::clone(&secrets)));
-        let demo = desk.demo().then(|| Arc::new(DemoAi::new()));
+        let demo = desk
+            .demo()
+            .then(|| Arc::new(DemoAi::with_pause(demo_ai_pause)));
         let source = match &demo {
             Some(demo) => Source::Demo(Arc::clone(demo)),
             None => Source::Desk(Arc::clone(&desk)),

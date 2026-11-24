@@ -102,7 +102,7 @@ impl Crew {
     /// (22차 1번) 논의가 도는 동안 그 방의 담당 글을 사무실 팀 대화로 낸다(사무실이 없으면 없음).
     fn follow_talk(&self, trade: TradeId, symbol: &str) -> Option<crate::reach::Following> {
         let talk = self.links.get().and_then(|links| links.talk.as_ref())?;
-        Some(talk.follow(&request_room(trade), symbol))
+        Some(talk.follow(&request_room(trade), symbol, self.trading.market()))
     }
 
     /// 지켜보는 종목마다 아직 논의하지 않은 공시가 있으면 논의한다.

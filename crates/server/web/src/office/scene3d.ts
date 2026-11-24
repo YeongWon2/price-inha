@@ -8,6 +8,8 @@
 // - 담당 자리: desk(업무 자리) · meeting(미팅룸 탁자) · bed(쉼 자리 — 라운지 · 탕비실). 이름표 · 방 이름표는 DOM.
 // - (23차 7번 (나)) 발언자 카메라: 담당 셋 이상이 미팅룸에 모이면 speaker-camera.ts의 목표(발언자 샷 · 탁자 샷)를
 //   ease-in-out으로 따라간다. 목표가 없으면 평소의 따라 비추기 카메라로 돌아간다. 손으로 움직이면 그 논의 동안 끈다.
+//   (25차 1번, 결정 18) 발언자 샷은 돌지 않는다: 탁자 샷의 방위각 · 고도 그대로, 중심만 발언자 쪽으로 절반 · 거리
+//   0.8배(speakerOrbit). 여섯 담당이 계속 화면 안에 있다.
 
 import * as THREE from "three";
 import { buildFloor, type Floor } from "./architecture";
@@ -19,7 +21,7 @@ import { buildGrid, type NavMap, type Point } from "./nav";
 import { createActors } from "./actors3d";
 import { createBubbleLayer } from "./bubbles3d";
 import { actorPriority, layoutOffice } from "./layout";
-import { easeInOut, type CameraGoal, type SpeakerCamera } from "./speaker-camera";
+import { easeInOut, speakerOrbit, type CameraGoal, type SpeakerCamera } from "./speaker-camera";
 import type { SpeechBoard } from "./speech";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
@@ -74,12 +76,6 @@ const START_POLAR = 0.95;
 const PRESS_SLOP_PX = 5;
 const MAX_PIXEL_RATIO = 1.75;
 const MIN_PIXEL_RATIO = 0.75;
-// 발언자 샷(원본 meeting-camera, docs/research/deskrpg.md 11절): 상반신(몸 높이의 50%)이 보이게, 최소 거리 2.2(원본 키 2.7
-// 기준 — 우리 키에 비례해 줄인다). 상반신이 화면 높이의 이만큼을 차지하게 거리를 잡는다.
-const UPPER_BODY = 0.5;
-const UPPER_BODY_FILL = 0.5;
-const ORIGIN_MIN_DISTANCE = 2.2;
-const ORIGIN_HEIGHT = 2.7;
 // 담당이 이만큼 이상 미팅룸에 있으면 "모였다"(framing.ts 따라 비추기와 같은 수).
 const GATHERED = 3;
 
@@ -160,8 +156,6 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   scene.add(furnitureRoot);
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
-  // 시야각 절반의 tan(발언자 샷 거리 계산).
-  const tanHalfFov = Math.tan((FOV / 2) * Math.PI / 180);
   const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 
   // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음에는 쓰는 자리 모두(framing.ts), 다수가 미팅룸 · 쉼 자리로
@@ -195,18 +189,12 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   let gathered = false;
   function goalOrbit(goal: CameraGoal): Orbit | null {
     const polar = (90 - goal.elevationDeg) * Math.PI / 180;
+    // 탁자 샷: 미팅룸 전체. 몸이 없는 발언자(사무실 담당이 아닌 id)도 카메라를 놓지 않고 탁자를 본다.
+    const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
+    const table: Orbit = { radius: v.distance, polar, theta: 0, tx: v.tx, ty: 0, tz: v.tz };
     const pose = goal.shot === "speaker" && goal.agent ? actors.pose(goal.agent) : null;
-    if (!pose) {
-      // 탁자 샷. 몸이 없는 발언자(사무실 담당이 아닌 id)도 카메라를 놓지 않고 탁자를 본다.
-      const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
-      return { radius: v.distance, polar, theta: 0, tx: v.tx, ty: 0, tz: v.tz };
-    }
-    // 상반신(머리 기준점에서 몸 높이의 50% 아래까지)의 가운데를 보고, 그 높이가 화면의 절반쯤이 되는 거리.
-    const span = pose.height * UPPER_BODY;
-    const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
-    const radius = Math.max(ORIGIN_MIN_DISTANCE * pose.height / ORIGIN_HEIGHT, fit);
-    // 발언자가 보는 쪽(앞)에서 본다.
-    return { radius, polar, theta: pose.yaw, tx: pose.x, ty: pose.headY - span / 2, tz: pose.z };
+    // 발언자 샷: 탁자 샷에서 돌지 않고 발언자 쪽으로 조금만 다가간다(결정 18).
+    return pose ? speakerOrbit(table, { x: pose.x, z: pose.z }) : table;
   }
   /**
    * 미팅룸에 모였는지를 발언자 카메라에 알린다. 프레임마다만 알리면 소집(`office.agent`)과 첫 논의 글(`office.talk`)이

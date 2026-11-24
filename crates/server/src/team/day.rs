@@ -104,7 +104,8 @@ impl Crew {
             &appended,
             self.links.get().and_then(|links| links.talk.as_ref()),
         ) {
-            talk.publish_event(event, "day").await;
+            talk.publish_event(event, "day", self.trading.market())
+                .await;
         }
         let payload = json!({"date": date, "plan": word, "reason": reason, "text": text});
         self.trading.record(KIND_DAY_DISCUSSION, payload).await?;

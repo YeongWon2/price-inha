@@ -1,4 +1,4 @@
-import { a as bubbleCandidates, c as bubbleWidth, l as insideScreen, n as DEFAULT_LOOKS, o as bubbleText, r as LOOKS, s as bubbleWhere, t as easeInOut, u as overlap } from "./office-hmtmnsx9.js";
+import { c as bubbleWhere, d as overlap, i as LOOKS, l as bubbleWidth, n as speakerOrbit, o as bubbleCandidates, r as DEFAULT_LOOKS, s as bubbleText, t as easeInOut, u as insideScreen } from "./office-i79vhbvg.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40502,7 +40502,7 @@ var SEAT_RADIUS = .22;
 var RETRY_MS = 1e3;
 var RUN_LEAN = .18;
 var RUN_BOUNCE = .05;
-var ORIGIN_HEIGHT$1 = 2.7;
+var ORIGIN_HEIGHT = 2.7;
 var ORIGIN_HEAD_STAND = 2.7;
 var ORIGIN_HEAD_SIT = 2;
 var DEFAULT_HEIGHT = 1.85;
@@ -40517,7 +40517,7 @@ function measureHeight(obj) {
 }
 /** 머리 기준점의 높이: 원본 비율(서 있음 2.7/2.7 · 앉음 2.0/2.7) × 우리 키. */
 function headHeight(height, sitting) {
-	return height * (sitting ? ORIGIN_HEAD_SIT : ORIGIN_HEAD_STAND) / ORIGIN_HEIGHT$1;
+	return height * (sitting ? ORIGIN_HEAD_SIT : ORIGIN_HEAD_STAND) / ORIGIN_HEIGHT;
 }
 function angleDiff(a, b) {
 	let d = a - b;
@@ -41200,10 +41200,6 @@ var START_POLAR = .95;
 var PRESS_SLOP_PX = 5;
 var MAX_PIXEL_RATIO = 1.75;
 var MIN_PIXEL_RATIO = .75;
-var UPPER_BODY = .5;
-var UPPER_BODY_FILL = .5;
-var ORIGIN_MIN_DISTANCE = 2.2;
-var ORIGIN_HEIGHT = 2.7;
 var GATHERED = 3;
 function angleTo(from, to) {
 	let d = to - from;
@@ -41294,7 +41290,6 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		looks,
 		grid: buildGrid(map)
 	});
-	const tanHalfFov = Math.tan(FOV / 2 * Math.PI / 180);
 	const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 	let focus = "all";
 	const want = {
@@ -41339,28 +41334,20 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 	let gathered = false;
 	function goalOrbit(goal) {
 		const polar = (90 - goal.elevationDeg) * Math.PI / 180;
-		const pose = goal.shot === "speaker" && goal.agent ? actors.pose(goal.agent) : null;
-		if (!pose) {
-			const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
-			return {
-				radius: v.distance,
-				polar,
-				theta: 0,
-				tx: v.tx,
-				ty: 0,
-				tz: v.tz
-			};
-		}
-		const span = pose.height * UPPER_BODY;
-		const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
-		return {
-			radius: Math.max(ORIGIN_MIN_DISTANCE * pose.height / ORIGIN_HEIGHT, fit),
+		const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
+		const table = {
+			radius: v.distance,
 			polar,
-			theta: pose.yaw,
-			tx: pose.x,
-			ty: pose.headY - span / 2,
-			tz: pose.z
+			theta: 0,
+			tx: v.tx,
+			ty: 0,
+			tz: v.tz
 		};
+		const pose = goal.shot === "speaker" && goal.agent ? actors.pose(goal.agent) : null;
+		return pose ? speakerOrbit(table, {
+			x: pose.x,
+			z: pose.z
+		}) : table;
 	}
 	/**
 	* 미팅룸에 모였는지를 발언자 카메라에 알린다. 프레임마다만 알리면 소집(`office.agent`)과 첫 논의 글(`office.talk`)이

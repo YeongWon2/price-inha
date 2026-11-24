@@ -43,6 +43,7 @@ mod office_http;
 mod phone_http;
 mod semantic;
 mod semantic_http;
+mod sentence;
 mod summary;
 mod talk_feed;
 
@@ -123,7 +124,7 @@ pub const OFFICE_TEXT_MAX: usize = 500;
 ///   쉼표(`71,100`), 미국은 센트 ÷ 100의 소수 둘째 자리(`187.20`).
 /// - JSON으로 읽히지 않는 글(판단 모양이 아닌 글)은 `None` — 부르는 쪽이 원문을 그대로 쓴다.
 pub fn leader_sentence(text: &str, market: pi_market::Market) -> Option<String> {
-    todo!()
+    sentence::sentence(text, market)
 }
 /// `sourceMessageId` 길이 상한. 원본은 UUID(36자)를 쓴다. 넉넉히 128자로 정했다.
 pub const OFFICE_SOURCE_ID_MAX: usize = 128;

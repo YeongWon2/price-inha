@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pi_gate::{GateServer, Publisher};
 use pi_market::{Clock, SystemClock};
@@ -204,9 +205,10 @@ fn team_with_limit(
 }
 
 /// (24차) `stored.1`(offline)이 참이면 팀이 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다.
+/// (25차 3번) `stored.2`는 시연용 가짜 AI가 답마다 두는 뜸이다.
 fn open_crew(
     team: Option<crate::TeamWiring>,
-    stored: (&Store, bool),
+    stored: (&Store, bool, Duration),
     wiring: &Wiring,
     trading: &Arc<Trading>,
     desk: &Arc<Desk>,
@@ -215,7 +217,7 @@ fn open_crew(
     let Some(team) = team else {
         return Ok(None);
     };
-    let (store, offline) = stored;
+    let (store, offline, demo_ai_pause) = stored;
     Ok(Some(Crew::open(CrewParts {
         store: store.clone(),
         clock: Arc::clone(&wiring.clock),
@@ -224,6 +226,7 @@ fn open_crew(
         secrets: Arc::clone(secrets),
         wiring: team,
         offline,
+        demo_ai_pause,
     })?))
 }
 
@@ -344,7 +347,7 @@ impl App {
         let team = team_with_limit(launch.team, &settings, &desk);
         let crew = open_crew(
             team,
-            (&store, demo.offline),
+            (&store, demo.offline, demo.ai_pause),
             &wiring,
             &trading,
             &desk,
@@ -445,6 +448,10 @@ impl App {
     /// 끄기가 늦어질 수 있다. 끄기는 고르기 잠금을 기다리므로, 그 잠금을 쥔 고르기가 CLI 확인을 끝낼 때까지다.
     pub async fn shutdown(self) -> Result<(), AppError> {
         self.desk.begin_closing();
+        // (25차 3번) 시연용 가짜 AI의 뜸을 바로 끝낸다(끄기가 뜸을 기다리지 않게).
+        if let Some(demo) = self.crew.as_ref().and_then(|crew| crew.demo_ai()) {
+            demo.close();
+        }
         self.stop.send_replace(true);
         let feed = self.feed.await.map_err(|_| AppError::Task);
         let days = self.days.await.map_err(|_| AppError::Task);
