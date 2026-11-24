@@ -551,3 +551,14 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | `crates/server/tests/round22/renew.rs` (도움 `stale_stop` · `stale_liquidation`과 그것을 쓰는 시험들) | 고침 | 지시서 18차 1번 |
 | `crates/server/tests/round18/carry.rs::보유_종목의_시세가_끊기면_이상_감지_멈춤이_된다` | 고침 | 지시서 18차 2번(기다리기만) |
 | 그 밖의 server 시험 | 유지 | 18차와 무관 |
+
+### 대조
+
+(R, 다시 연 뒤 확정 — 위 초안 표와 같다.)
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/round22/hold_off.rs::최대_손실로_전체_정지가_되면_팀장_팔기_대기만_지워지고_방_기록_한_줄이_남고_손절_익절_대기는_남는다` | 고침 | 지시서 18차 1번(준비 단계 순서만, 뜻 그대로) |
+| `crates/server/tests/round22/renew.rs` (도움 `stale_stop` · `stale_liquidation`과 그것을 쓰는 시험들) | 고침 | 지시서 18차 1번 |
+| `crates/server/tests/round18/carry.rs::보유_종목의_시세가_끊기면_이상_감지_멈춤이_된다` | 고침 | 지시서 18차 2번(기다리기만) |
+| 그 밖의 server 시험 | 유지 | 18차와 무관 |
