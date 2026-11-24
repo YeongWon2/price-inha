@@ -26,6 +26,13 @@ pub enum Error {
     /// 지금 상태에서 갈 수 없는 단계다(예: 아직 생각을 시작하지 않은 응답을 끝냄).
     #[error("응답 {0}은 지금 그 단계로 갈 수 없다")]
     InvalidTransition(String),
+    /// 그 담당이 지금 미팅룸에서 논의 중이라 부르거나 멘션으로 불러올 수 없다(E47).
+    /// 회의는 끊지 않는다.
+    #[error("{agent:?} 담당은 지금 회의 중이다")]
+    MeetingReserved {
+        /// 회의 중인 담당.
+        agent: Agent,
+    },
     /// 이벤트를 내보내는 포트가 실패했다.
     #[error("이벤트를 내보내지 못했다: {0}")]
     Publish(#[from] SinkError),

@@ -3,6 +3,9 @@
 //! 서버는 지도를 모르고 자리 이름만 정한다(`docs/research/office-deep.md` 1-4 · 11-3).
 
 pub use pi_store::TeamState;
+use pi_store::UnixMillis;
+
+use crate::summon::{SummonPhase, SummonReason};
 
 /// 담당 6명(V1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,15 +133,25 @@ pub struct AgentView {
     pub place: Place,
     /// 일 상태.
     pub work: Work,
+    /// 부르기 단계(결정 17 · D12). 걷는 길은 화면이 정하고 서버는 단계만 쥔다.
+    pub phase: SummonPhase,
+    /// 단계가 `Idle`이 아닐 때 왜 왔는가. `Idle`이면 `None`.
+    pub reason: Option<SummonReason>,
+    /// 단계가 마지막으로 바뀐 시각.
+    pub phase_at: UnixMillis,
 }
 
 impl AgentView {
-    /// 이벤트 `office.agent`의 내용: `{"agent", "place", "work"}`.
+    /// 이벤트 `office.agent`의 내용: `{"agent", "place", "work", "phase", "reason", "phaseAt"}`.
+    /// 앞의 세 칸은 옛 화면이 그대로 읽고, 뒤의 세 칸은 새 칸이다.
     pub(crate) fn to_json(self) -> serde_json::Value {
         serde_json::json!({
             "agent": self.agent.id(),
             "place": self.place.as_str(),
             "work": self.work.as_str(),
+            "phase": self.phase.as_str(),
+            "reason": self.reason.map(SummonReason::as_str),
+            "phaseAt": self.phase_at.0,
         })
     }
 }

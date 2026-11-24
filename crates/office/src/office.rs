@@ -10,6 +10,7 @@ use crate::chat::{ChatResponse, ChatStatus, Room};
 use crate::error::Error;
 use crate::place::{Activity, Agent, AgentView, TeamState, Work, place_of};
 use crate::port::{Clock, EventSink};
+use crate::summon::SummonPhase;
 use crate::{CHAT_QUEUE_MAX, EVENT_AGENT, EVENT_CHAT};
 
 /// 끝난 응답을 [`Office::response`]로 다시 볼 수 있게 남겨 두는 개수.
@@ -83,6 +84,9 @@ impl State {
             agent,
             place: place_of(self.team, self.activity[agent.index()]),
             work: self.work_of(agent),
+            phase: SummonPhase::Idle,
+            reason: None,
+            phase_at: UnixMillis(0),
         }
     }
 
@@ -114,6 +118,9 @@ impl Office {
             agent,
             place: place_of(team, Activity::Idle),
             work: Work::Idle,
+            phase: SummonPhase::Idle,
+            reason: None,
+            phase_at: UnixMillis(0),
         });
         let state = State {
             team,
@@ -331,6 +338,74 @@ impl Office {
             reason.to_owned()
         });
         self.finish(response).await
+    }
+
+    /// 담당을 부른다(C20 · 결정 17). 자리의 담당은 `Called`(까닭 `Call`)로 들어가고 `office.agent`를 하나 낸다.
+    ///
+    /// - 담당이 미팅룸에서 논의 중이면(`place`가 `Meeting`) [`Error::MeetingReserved`]이고 아무것도 바뀌지 않는다.
+    /// - 이미 `Called` · `Waiting`이면 그대로다(이벤트 없음). 일하는 중이어도 부를 수 있다.
+    /// - 돌려주는 것은 부른 뒤의 단계다.
+    pub async fn summon(&self, agent: Agent) -> Result<SummonPhase, Error> {
+        let _ = agent;
+        todo!()
+    }
+
+    /// 화면이 "도착했다"를 알린다. `Called`면 `Waiting`으로 간다. 그 밖의 단계에서는 아무것도 하지 않는다.
+    /// 돌려주는 것은 알린 뒤의 단계다.
+    pub async fn summon_arrived(&self, agent: Agent) -> Result<SummonPhase, Error> {
+        let _ = agent;
+        todo!()
+    }
+
+    /// 화면이 "자리로 돌아왔다"를 알린다. `Returning`이면 `Idle`로 간다. 그 밖의 단계에서는 아무것도 하지 않는다.
+    /// 돌려주는 것은 알린 뒤의 단계다.
+    pub async fn summon_returned(&self, agent: Agent) -> Result<SummonPhase, Error> {
+        let _ = agent;
+        todo!()
+    }
+
+    /// 곁에서 기다리는 담당과 대화가 있었다(말을 걸었거나 답이 갔다). `Waiting`이면 10초를 다시 센다.
+    /// 이벤트는 내지 않는다.
+    pub fn note_conversation(&self, agent: Agent) {
+        let _ = agent;
+        todo!()
+    }
+
+    /// 팀 방에서 멘션된 담당의 답 턴이 시작됐다(원본: 턴 시작과 동시에 이동). `Called`(까닭 `Mention`)로 들어간다.
+    /// 논의 중이면 [`Error::MeetingReserved`](답은 채팅에만 간다). 이미 불려 온 담당이면 그대로.
+    pub async fn mention_turn_started(&self, agent: Agent) -> Result<SummonPhase, Error> {
+        let _ = agent;
+        todo!()
+    }
+
+    /// 사용자가 방을 떠났다(화면이 알린다). 팀 방을 떠나면 멘션으로 온 담당(`Called` · `Waiting`)이
+    /// `Returning`으로 간다. 부름으로 온 담당은 그대로다. 바뀐 담당마다 이벤트를 내고 번호들을 돌려준다.
+    pub async fn user_left_room(&self, room: Room) -> Result<Vec<u64>, Error> {
+        let _ = room;
+        todo!()
+    }
+
+    /// 시계가 흘렀다. 넣어 준 시계로 지금을 읽어 때가 된 일을 한다. 바뀐 담당마다 이벤트를 내고 번호들을 돌려준다.
+    ///
+    /// - 부름으로 `Waiting`인 담당이 마지막 대화(없으면 도착) 뒤 10초 이상 조용하면 `Returning`.
+    ///   멘션으로 온 담당은 방을 보는 동안 남으므로 이 시간으로는 돌아가지 않는다.
+    /// - `Called`인 담당이 부른 뒤 30초 이상 도착 알림이 없으면 `Returning`을 거쳐 자리(`Idle`)로 되돌린다.
+    /// - `thinking` · `queued` 일이 마지막으로 바뀐 뒤 300초 이상 그대로면 한가(`idle`)로 풀고 이벤트를 낸다.
+    pub async fn tick(&self) -> Result<Vec<u64>, Error> {
+        todo!()
+    }
+
+    /// 담당의 일 상태 소식이 밖에서 늦게 왔다(N15 · E55). `at`은 그 소식의 시각이다.
+    /// 이미 반영한 것(오래된 일 풀기 포함)의 시각보다 크지 않으면 버리고 `Ok(None)`.
+    /// 반영하면 모습이 바뀌었을 때 낸 이벤트 번호를 돌려준다.
+    pub async fn report_work(
+        &self,
+        agent: Agent,
+        work: Work,
+        at: UnixMillis,
+    ) -> Result<Option<u64>, Error> {
+        let _ = (agent, work, at);
+        todo!()
     }
 
     /// 응답 하나.
