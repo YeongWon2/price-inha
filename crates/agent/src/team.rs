@@ -48,6 +48,7 @@ use crate::discussion::{DataItem, Decision, DiscussionOutcome, DiscussionRequest
 use crate::error::{Error, TurnFailure};
 use crate::floor::{Floor, is_pass, mentions};
 use crate::ports::{OrderDraft, Side};
+use crate::progress::DiscussionOptions;
 use crate::prompt;
 use crate::role::{Role, RoleConfig, TimeLimits};
 use crate::roomlog::{RoomLog, Writer};
@@ -166,6 +167,24 @@ impl Team {
             return watched(&session, reason, scores, Some(total));
         }
         self.judge(&session, floor.said(), scores, total).await
+    }
+
+    /// 논의 하나를 옵션(진행 신호 포트 · 호출 예산 · 다시 시도)과 함께 돈다(10차).
+    ///
+    /// - 옵션이 기본이면 [`Team::discuss`]와 똑같다.
+    /// - 신호는 [`crate::ProgressSignal`] 순서로 낸다. 포트가 실패해도 논의는 그대로 간다.
+    /// - 예산이 있으면 담당 턴은 `remaining - reserve`까지만 쓴다(예비분은 팀장 몫).
+    ///   남은 호출이 `wrap_up_at` 이하이면 새 라운드를 열지 않고 점수 턴 · 팀장 판단으로 넘어간다.
+    ///   그때 방 로그에 `room.activity`(`{"status": "wrap_up"}`)를 남기고 팀장 턴 글에
+    ///   [`crate::WRAP_UP_LINE`]을 넣는다. 담당 턴을 쓸 호출이 없으면 그 담당은 기권이다
+    ///   (점수 턴을 하지 않고, 합의 점수는 점수를 낸 담당만으로 따진다. 아무도 못 냈으면
+    ///   합의 기준을 건너뛰고 팀장 판단 턴으로 간다).
+    pub async fn discuss_with(
+        &self,
+        request: DiscussionRequest,
+        options: DiscussionOptions,
+    ) -> Result<DiscussionOutcome, Error> {
+        todo!()
     }
 
     /// 매매 담당이 주문 안을 만들어 도구 포트로 넘긴다(V4).

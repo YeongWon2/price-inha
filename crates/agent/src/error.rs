@@ -46,6 +46,11 @@ pub enum TurnFailure {
 #[error("도구 실패: {0}")]
 pub struct ToolError(pub String);
 
+/// 진행 신호 포트가 낸 오류. 논의는 이 오류와 상관없이 그대로 간다.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("신호 실패: {0}")]
+pub struct SignalError(pub String);
+
 /// 이 모듈의 오류.
 #[derive(Debug, Error)]
 #[non_exhaustive]

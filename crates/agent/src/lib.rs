@@ -9,6 +9,7 @@ mod discussion;
 pub mod error;
 mod floor;
 mod ports;
+mod progress;
 mod prompt;
 mod role;
 mod roomlog;
@@ -21,8 +22,12 @@ pub use action::{ActionCall, Reply, find_object_with, parse_reply};
 pub use discussion::{
     DataItem, Decision, DiscussionLimits, DiscussionOutcome, DiscussionRequest, WatchReason,
 };
-pub use error::{Error, ToolError, TurnFailure};
+pub use error::{Error, SignalError, ToolError, TurnFailure};
 pub use ports::{Clock, OrderDraft, SellDraft, Side, Tools};
+pub use progress::{
+    CallBudget, DiscussionOptions, ProgressSignal, ProgressSink, Stage, TURN_RETRY_MAX,
+    WRAP_UP_LINE,
+};
 pub use role::{
     DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_TOKENS, Role, RoleConfig, TimeLimits, TurnMode,
 };

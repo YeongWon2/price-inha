@@ -7,6 +7,7 @@ mod judgment;
 mod longroom;
 mod order;
 mod principles;
+mod progress;
 mod role;
 mod score;
 mod second;
