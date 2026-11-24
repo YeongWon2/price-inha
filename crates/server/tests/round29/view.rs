@@ -160,6 +160,30 @@ async fn 판_이력은_판_1에서_시작하고_값을_바꾸면_판_2에_바뀐
 
 // 검증: C28 V79 E28 R10-2
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 멈춤_템플릿은_모든_칸이_바꿀_수_없음으로_보인다() {
+    let bench = Bench::start().await;
+    let id = bench.live_template().await;
+    let reply = post(
+        bench.addr(),
+        &crate::common::stop_path(id),
+        &json!({}),
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    let template = entry(&view(&bench).await, id);
+    assert_eq!(template["state"], json!("stopped"), "{template}");
+    let fields = template["fields"].as_array().expect("칸 목록");
+    assert_eq!(fields.len(), 26);
+    for f in fields {
+        assert_eq!(f["editable"], json!(false), "멈춤은 잠겼다: {f}");
+    }
+    bench.close().await;
+}
+
+// 검증: C28 V79 E28 R10-2
+// 27차 보강: 시험 이름은 그대로 두고 단언만 새 규칙(실전중은 모든 칸 editable 참)이다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 실전중_템플릿은_모든_칸이_바꿀_수_없음으로_보인다() {
     let bench = Bench::start().await;
     let id = bench.live_template().await;
@@ -170,11 +194,15 @@ async fn 실전중_템플릿은_모든_칸이_바꿀_수_없음으로_보인다(
     let fields = template["fields"].as_array().expect("칸 목록");
     assert_eq!(fields.len(), 26);
     for f in fields {
-        assert_eq!(f["editable"], json!(false), "실전중은 잠겼다: {f}");
+        assert_eq!(
+            f["editable"],
+            json!(true),
+            "실전중은 값을 넣을 수 있다: {f}"
+        );
     }
     assert!(
         field(&template, "risk_per_trade_pct")["cap"].is_string(),
-        "잠겨도 상한은 보인다"
+        "상한은 보인다"
     );
     assert_eq!(
         template["approval"],

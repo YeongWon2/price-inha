@@ -3,7 +3,8 @@
 //
 // 화면 계약(시험이 고르는 표시):
 // - 칸 표 `[data-role="fields"]`: 줄 `tr[data-key=키]`, 그 안에 지금 값 `[data-role="value"]` · 상한 `[data-role="cap"]` ·
-//   입력 `input`(잠긴 칸은 `disabled`) · 칸 옆 안내 `[data-role="field-note"]`.
+//   입력 `input`(잠긴 칸 = 승격대기 · 멈춤은 `disabled`, 모의중 · 실전중은 입력할 수 있다) · 칸 옆 안내 `[data-role="field-note"]`.
+// - 승인 안내 `[data-role="approval-notice"]`: 실전중 템플릿에만, 값 표 위에 "바꾸면 승인이 필요합니다" 뜻의 글.
 // - 승격 기준 표 `[data-role="promotion"]`: 줄 `tr[data-criterion=기준]`, 모자란 줄은 `data-short="true"`.
 // - 판 이력 `[data-role="revisions"]`: 판 `[data-revision=번호]`, 바뀐 칸 `[data-key=키]`, 넓힘은 `data-widened="true"`와 "넓힘" 글.
 // - 실전 안내 `[data-role="live-notice"]`(글은 `LIVE_NOTICE`).

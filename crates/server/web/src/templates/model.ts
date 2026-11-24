@@ -137,7 +137,7 @@ export interface CapNote {
  * - `saved`: 저장됨(새 판 번호를 글에 담는다).
  * - `over_cap`: 상한 넘음(E5) — 값은 저장되지 않았고 칸마다 상한 안내.
  * - `needs_approval`: 실전중 위험을 키우는 변경(E28) — "승인 뒤 다음 거래일부터"와 승인 번호.
- * - `locked`: 잠긴 템플릿(409).
+ * - `locked`: 잠긴 템플릿(409) — 실전중에는 위험을 키우는 변경만 승인을 거쳐 바꿀 수 있다는 뜻의 글.
  * - `failed`: 그 밖의 실패.
  */
 export type SaveMessage =

@@ -29,12 +29,14 @@ describe("칸 표", () => {
     expect(rows[2].cap).toBeNull();
   });
 
-  it("바꿀 수 없는 칸(승격대기 · 실전중 · 멈춤)은 잠김이다", () => {
+  it("바꿀 수 없는 칸(승격대기 · 멈춤)은 잠김이고 모의중 · 실전중은 입력할 수 있다", () => {
     // 검증: V79 E28 R10-2
-    for (const state of ["promotion_pending", "live", "stopped"] as const) {
+    for (const state of ["promotion_pending", "stopped"] as const) {
       for (const row of fieldRows(swingEntry(1, state))) expect(row.locked, `${state}: ${row.key}`).toBe(true);
     }
-    for (const row of fieldRows(swingEntry(1, "simulating"))) expect(row.locked).toBe(false);
+    for (const state of ["simulating", "live"] as const) {
+      for (const row of fieldRows(swingEntry(1, state))) expect(row.locked, `${state}: ${row.key}`).toBe(false);
+    }
   });
 
   it("값 · 상한 글 만들기: 퍼센트 칸은 %, 없음은 '없음', 모르는 키는 키 그대로", () => {
@@ -148,7 +150,10 @@ describe("값 저장 결과 문구", () => {
 
   it("잠긴 템플릿(409)과 그 밖의 실패는 따로 알린다", () => {
     // 검증: E28 E57
-    expect(saveMessage({ status: 409, body: { error: "locked" } }, rows()).kind).toBe("locked");
+    const locked = saveMessage({ status: 409, body: { error: "locked" } }, rows());
+    expect(locked.kind).toBe("locked");
+    expect(locked.text).toContain("실전중");
+    expect(locked.text).toContain("승인");
     const failed = saveMessage({ status: 500, body: { error: "internal" } }, rows());
     expect(failed.kind).toBe("failed");
     expect(failed.text.length).toBeGreaterThan(0);

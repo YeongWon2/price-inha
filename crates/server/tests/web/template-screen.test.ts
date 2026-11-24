@@ -198,14 +198,43 @@ describe("템플릿 화면 · 값 맞추기", () => {
     expect(pick(main, '[data-role="save-result"]').textContent).toContain("4");
   });
 
-  it("실전중 · 승격대기 · 멈춤이면 모든 입력 칸이 잠긴다", async () => {
+  it("승격대기 · 멈춤이면 모든 입력 칸이 잠기고 승인 안내는 없다", async () => {
     // 검증: V79 E28
-    for (const state of ["live", "promotion_pending", "stopped"] as const) {
+    for (const state of ["promotion_pending", "stopped"] as const) {
       const main = await open(replyWith(swingEntry(1, state)));
       const inputs = [...main.querySelectorAll<HTMLInputElement>('[data-role="fields"] input')];
       expect(inputs.length, state).toBe(3);
       for (const input of inputs) expect(input.disabled, state).toBe(true);
+      expect(main.querySelector('[data-role="approval-notice"]'), state).toBeNull();
     }
+  });
+
+  it("실전중이면 입력할 수 있고 값 표 위에 승인이 필요하다는 안내가 보인다", async () => {
+    // 검증: V79 E28 V81
+    const main = await open(replyWith(swingEntry(1, "live")));
+    const inputs = [...main.querySelectorAll<HTMLInputElement>('[data-role="fields"] input')];
+    expect(inputs.length).toBe(3);
+    for (const input of inputs) expect(input.disabled).toBe(false);
+    const notice = pick<HTMLElement>(main, '[data-role="approval-notice"]');
+    expect(notice.textContent).toContain("승인");
+    const table = pick<HTMLElement>(main, '[data-role="fields"]');
+    expect(notice.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING, "안내가 값 표 위").toBeTruthy();
+    const simulating = await open(replyWith(swingEntry(1, "simulating")));
+    expect(simulating.querySelector('[data-role="approval-notice"]')).toBeNull();
+  });
+
+  it("실전중 저장이 잠금(409)으로 거절되면 실전중 · 승인 뜻의 문구가 보인다", async () => {
+    // 검증: E28 E57
+    const main = await open(replyWith(swingEntry(1, "live")));
+    server.adjust = { status: 409, body: { error: "locked" } };
+    const input = pick<HTMLInputElement>(main, '[data-role="fields"] tr[data-key="risk_per_trade_pct"] input');
+    input.value = "0.5";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    click(main, 'button[data-action="save"]');
+    await settle();
+    const result = pick(main, '[data-role="save-result"]').textContent ?? "";
+    expect(result).toContain("실전중");
+    expect(result).toContain("승인");
   });
 });
 

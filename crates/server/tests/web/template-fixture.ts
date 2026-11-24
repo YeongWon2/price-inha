@@ -3,7 +3,7 @@ import type { TemplateEntry, TemplateState, TemplatesReply } from "../../web/src
 
 /** 그 상태의 스윙 템플릿 하나(판 셋: 처음 · 1회 위험 줄이기 · 일일 손실 한도 넓히기). */
 export function swingEntry(id: number, state: TemplateState): TemplateEntry {
-  const editable = state === "simulating";
+  const editable = state === "simulating" || state === "live";
   return {
     id,
     style: "swing",

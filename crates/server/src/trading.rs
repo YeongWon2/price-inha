@@ -134,8 +134,9 @@ pub const TEMPLATE_ADJUST_PATH: &str = "/api/templates/adjust";
 /// }
 /// ```
 ///
-/// - `fields`는 `pi_template::template_view`의 칸(순서 · 키 · 값 · 상한)이고, `editable`은 모의중일 때만 참이다
-///   (승격대기 · 실전중 · 멈춤은 잠겨 모두 거짓).
+/// - `fields`는 `pi_template::template_view`의 칸(순서 · 키 · 값 · 상한)이고, `editable`은 모의중 · 실전중일 때 참이다
+///   (승격대기 · 멈춤은 잠겨 모두 거짓). 실전중에 값을 저장하면 서버의 지금 길을 탄다: 위험을 키우는 변경은 승인 대기,
+///   그 밖은 저장소 잠금 거절(409).
 /// - `revisions`는 `pi_store::Store::template_history`의 판 순서다. `changes`는 앞 판과의 차이
 ///   (`pi_template::diff_params`, 첫 판은 빈 목록)이고 `proposal`은 사용자 변경 개선안으로 생긴 판의 개선안 번호다.
 /// - `promotion`은 `pi_template::promotion_lines`(그 템플릿의 승격 기준 · 그 템플릿을 만든 뒤의 모의 결과)다.
