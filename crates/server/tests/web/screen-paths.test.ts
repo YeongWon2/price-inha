@@ -37,6 +37,9 @@ describe("화면이 부르는 경로", () => {
         "/api/access/key",
         "/api/access/unlock",
         "/api/access/log",
+        // 31차 1번 (다) · (라): 설정 화면은 뜻 검색 설정 · 진단 경로를 더 부른다.
+        "/api/setup/semantic",
+        "/api/setup/doctor",
       ]),
     );
     expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));

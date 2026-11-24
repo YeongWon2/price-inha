@@ -18,6 +18,7 @@ mod reach;
 mod retry;
 mod settings;
 mod setup;
+mod setup_doctor;
 mod setup_http;
 mod slots;
 mod team;
@@ -84,6 +85,9 @@ pub use setup::{
     SETUP_ITEMS, SETUP_KEYS_PATH, SETUP_PATH, SETUP_REQUIRED, SETUP_STARTED, SETUP_SYMBOLS_PATH,
     SetupItem, SetupItemSpec, SetupStatus, SymbolsSource, WATCHLIST_FILE, load_watchlist,
     parse_symbols, save_watchlist,
+};
+pub use setup_doctor::{
+    DIAG_FAIL, DIAG_INFO, DIAG_OK, DIAG_WARN, DIAGNOSIS_ITEMS, SETUP_DOCTOR_PATH,
 };
 pub use slots::{
     KEY_BACKUP_GITHUB_TOKEN, KEY_DART, KEY_ECOS, KEY_FRED, KEY_SLOTS, SETUP_PROVIDERS_PATH,

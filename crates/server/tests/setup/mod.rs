@@ -448,12 +448,14 @@ async fn 설정_상태는_등록_여부만_알려_주고_키_값은_어디에도
             "ai",
             "demo",
             "items",
+            "market",
+            "models",
             "ready",
             "started",
             "symbols",
             "symbols_source"
         ],
-        "정한 칸만 있다(6차: AI 연결 칸 ai가 더해졌다)"
+        "정한 칸만 있다(6차: AI 연결 칸 ai가 더해졌다, 31차: 시장 market · 담당 모델 models가 더해졌다)"
     );
     assert_eq!(
         keys_of(&status["ai"]),

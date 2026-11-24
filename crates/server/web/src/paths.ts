@@ -34,6 +34,10 @@ export const API = {
   setupBackup: "/api/setup/backup",
   setupSlots: "/api/setup/slots",
   setupProviders: "/api/setup/providers",
+  // 설정 화면 보강(server 31차 1번): 뜻 검색 설정 읽기 `GET` · 바꾸기 `POST`(그 컴퓨터만) · 진단 읽기 `GET`(읽기만).
+  // 시장 · 담당 모델은 설정 상태([`API.setup`])의 `market` · `models` 칸에서 읽는다.
+  setupSemantic: "/api/setup/semantic",
+  setupDoctor: "/api/setup/doctor",
   accessKey: "/api/access/key",
   accessUnlock: "/api/access/unlock",
   accessLog: "/api/access/log",
@@ -101,6 +105,9 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.accessKey,
     API.accessUnlock,
     API.accessLog,
+    // server 31차 1번 (다) · (라): 뜻 검색 설정 · 진단.
+    API.setupSemantic,
+    API.setupDoctor,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],

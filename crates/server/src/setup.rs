@@ -28,9 +28,16 @@
 //!   "symbols": ["005930", "000660"],
 //!   "symbols_source": "argument",
 //!   "ai": {"method": "api_key", "command": null, "config_dir": null, "cli": null,
-//!          "cli_version": null, "subscription": null, "legacy_auth_file": false}
+//!          "cli_version": null, "subscription": null, "legacy_auth_file": false},
+//!   "market": "kr",
+//!   "models": [{"agent": "scout", "model": "claude-sonnet-5-5"}, …]
 //! }
 //! ```
+//!
+//! - (31차 1번 (가) · (나)) `market`: 켤 때 정한 시장(`"kr"` · `"us"`, `Settings::market`). 바꾸는 길은 없다
+//!   (다시 켜야 한다). `models`: 담당마다 지금 쓰는 모델 이름(`pi_agent::Role::ALL` 순서, `agent`는
+//!   `Role::id`, `model`은 조립의 `TeamWiring::model`). 고르는 저장 길이 없어 보기만 한다. 팀을 잇지 않은
+//!   서버는 빈 목록 `[]`이다.
 //!
 //! - 칸은 위의 것이 전부다. 키의 값 · 일부 · 길이는 없다(V46). 종목은 비밀이 아니라서 보여 준다.
 //! - `items`는 [`SETUP_ITEMS`]의 순서다. (6차) `ai`는 사용자가 고른 연결이 갖춰졌을 때만 등록된 것이다:
