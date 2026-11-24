@@ -246,3 +246,4 @@ server 21차 1번(실전중 템플릿의 위험을 키우는 사용자 변경은
 | `crates/store/tests/round10.rs` · `round11.rs` · `round12_schema.rs`의 `SCHEMA_VERSION` · `user_version`이 9라는 단언 | 고침 | 지시서 15차 4번: 스키마가 바뀌면 판 번호가 하나 오른다(10) — 뜻("지금 판으로 열고 적는다") 그대로 |
 | 그 밖의 store 시험(옛 판 열기 · 개선안 · 템플릿 잠금) | 유지 | 옛 판 열기 규칙 · 잠금은 그대로, 새 길은 새 시험 |
 
+- 15차 검토 참고(다음 후보): 새 표 `proposal_sources` · `user_revisions`에 지우기 막는 트리거가 없다(잠긴 `round10_replace.rs` PROTECTED 목록 때문) — 목록을 고치고 트리거 더하기. 판 10 옮기기 뒤 `PRAGMA integrity_check` 한 번.
