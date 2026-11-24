@@ -152,8 +152,35 @@ fn dead_base_url() -> String {
 }
 
 pub(super) async fn start(home: &std::path::Path, at: DateTime<Utc>) -> App {
+    let clock = Arc::new(TestClock(AtomicI64::new(at.timestamp_millis())));
+    launch(home, clock, "20").await
+}
+
+/// 시계의 `sleep`이 진짜로 쉬는 시계. 한 시간에 한 번 받는 시세 흐름은 처음 한 번만 돌아, 시험이 정한 걸음 밖에서
+/// 뒤에서 도는 이상 감지가 끼어들지 않는다(21차 3번 단위 시험).
+struct QuietClock(AtomicI64);
+
+#[async_trait]
+impl Clock for QuietClock {
+    fn now(&self) -> DateTime<Utc> {
+        Utc.timestamp_millis_opt(self.0.load(Ordering::SeqCst))
+            .unwrap()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+}
+
+/// [`start`]와 같되 시세 흐름 · 하루 흐름이 시험이 정한 걸음 밖에서 돌지 않게 시계의 쉬기를 진짜로 쉰다.
+pub(super) async fn start_quiet(home: &std::path::Path, at: DateTime<Utc>) -> App {
+    let clock = Arc::new(QuietClock(AtomicI64::new(at.timestamp_millis())));
+    launch(home, clock, "3600000").await
+}
+
+async fn launch(home: &std::path::Path, clock: Arc<dyn Clock>, interval_ms: &str) -> App {
     let home = home.to_str().unwrap();
-    let args: Vec<String> = ["--home", home, "--port", "0", "--interval-ms", "20"]
+    let args: Vec<String> = ["--home", home, "--port", "0", "--interval-ms", interval_ms]
         .iter()
         .chain(["--symbols", "005930", "--demo"].iter())
         .map(|s| (*s).to_string())
@@ -175,7 +202,7 @@ pub(super) async fn start(home: &std::path::Path, at: DateTime<Utc>) -> App {
                 retry_base_delay: Duration::from_millis(1),
             },
         },
-        clock: Arc::new(TestClock(AtomicI64::new(at.timestamp_millis()))),
+        clock,
         peer_override: None,
         cli_locations: Vec::new(),
     };

@@ -11,7 +11,7 @@ const entries = import.meta.glob<string>(
 const APPROVALS = ["/api/approvals/{id}", "/api/approvals/{id}/approve", "/api/approvals/{id}/reject"];
 
 describe("화면이 부르는 경로", () => {
-  it("각 화면은 지금과 같은 경로를 부른다(사무실은 승인 카드 경로가 더해진다)", () => {
+  it("각 화면은 지금과 같은 경로를 부른다(사무실은 승인 카드 · 담당 외형 경로가 더해진다)", () => {
     // 검증: D11 D2 C2
     const sorted = (list: readonly string[]) => [...list].sort();
     expect(sorted(SCREEN_PATHS.setup)).toEqual(
@@ -32,7 +32,15 @@ describe("화면이 부르는 경로", () => {
     );
     expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));
     expect(sorted(SCREEN_PATHS.office)).toEqual(
-      sorted(["/api/session", "/api/office", "/api/office/chat", "/ws", ...APPROVALS]),
+      sorted([
+        "/api/session",
+        "/api/office",
+        "/api/office/chat",
+        "/api/office/looks",
+        "/api/office/look",
+        "/ws",
+        ...APPROVALS,
+      ]),
     );
     expect(sorted(SCREEN_PATHS.phone)).toEqual(
       sorted(["/api/push/key", "/api/push/subscribe", "/api/notices", "/api/daily-summary", ...APPROVALS]),

@@ -25,6 +25,8 @@ mod due;
 mod http;
 mod link;
 mod marks;
+#[cfg(test)]
+mod money_safety;
 mod order;
 mod promote;
 mod retry;
