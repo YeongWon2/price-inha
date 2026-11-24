@@ -11,6 +11,7 @@ use crate::model::StoreInfo;
 
 mod perm;
 mod v1;
+mod v10;
 mod v2;
 mod v3;
 mod v4;
@@ -29,6 +30,7 @@ use v6::V6;
 use v7::V7;
 use v8::V8;
 use v9::V9;
+use v10::V10;
 
 pub(crate) use v4::{legacy_envelope_seqs, legacy_envelope_seqs_upto, legacy_envelope_until};
 
@@ -39,7 +41,7 @@ const APPLICATION_ID: i64 = 0x5049_5354;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 버전 n에서 n+1로 올리는 SQL. `MIGRATIONS[n]`이 n → n+1이다. 이미 나간 것은 고치지 않고 뒤에 더한다.
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7, V8, V9];
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
 
 /// 파일을 열고, 이 저장소의 파일인지 본 뒤, 설정을 켜고 스키마를 최신으로 올린다.
 ///
@@ -125,7 +127,10 @@ fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     } else {
         None
     };
-    for step in MIGRATIONS.iter().skip(version as usize) {
+    for (index, step) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+        if index + 1 == 10 {
+            v10::relax_template_check(&tx)?;
+        }
         tx.execute_batch(step)?;
     }
     if let Some(boundary) = boundary {

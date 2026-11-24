@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::approval::{self, ApprovalId, ApprovalUse};
 use crate::error::{DenyReason, Transition};
 use crate::model::{TradeId, UnixMillis};
-use crate::template::TemplateId;
+use crate::template::{TemplateId, TemplateState};
 use crate::{Store, StoreError};
 
 /// 개선안을 내는 데 필요한 근거 매매의 가장 적은 수(M4 "2건 이상이어야 제안된다").
@@ -182,35 +182,89 @@ impl Store {
     /// 사용자 변경 개선안을 제안됨으로 만든다(15차 1번). 근거 매매 없이 되고(최소 근거 수 검사 없음),
     /// `increases_risk`는 늘 참이다. 출처는 [`ProposalSource::User`]로 남는다.
     ///
-    /// 템플릿이 없으면 오류이고 아무것도 만들지 않는다. (뼈대: 몸통은 아직 없다)
+    /// 템플릿이 없으면 [`StoreError::TemplateNotFound`]이고 아무것도 만들지 않는다.
     pub fn create_user_proposal(&self, new: NewUserProposal) -> Result<Proposal, StoreError> {
-        let _ = (self, new);
-        Err(StoreError::Incompatible(
-            "create_user_proposal 미구현".to_owned(),
-        ))
+        self.write(|conn| {
+            let exists = conn
+                .query_row(
+                    "SELECT 1 FROM templates WHERE id = ?1",
+                    [new.template.0],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if exists.is_none() {
+                return Err(StoreError::TemplateNotFound(new.template));
+            }
+            conn.execute(
+                "INSERT INTO proposals (state, content, increases_risk, created_at, updated_at)
+                 VALUES ('proposed', ?1, 1, ?2, ?2)",
+                params![serde_json::to_string(&new.content)?, new.at.0],
+            )?;
+            let id = ProposalId(conn.last_insert_rowid());
+            conn.execute(
+                "INSERT INTO proposal_sources (proposal_id, template_id) VALUES (?1, ?2)",
+                params![id.0, new.template.0],
+            )?;
+            get(conn, id)
+        })
     }
 
     /// 개선안의 출처(15차 1번). 없으면 [`StoreError::ProposalNotFound`].
     pub fn proposal_source(&self, id: ProposalId) -> Result<ProposalSource, StoreError> {
-        let _ = (self, id);
-        Err(StoreError::Incompatible(
-            "proposal_source 미구현".to_owned(),
-        ))
+        self.read(|conn| {
+            get(conn, id)?;
+            source(conn, id)
+        })
     }
 
     /// 냉각중인 사용자 변경 개선안을 반영됨으로 옮기고 같은 쓰기 안에서 그 템플릿에 새 리비전(`value`)을
     /// 쓴다(15차 2번, 잠금의 예외). 템플릿이 실전중이어도 된다. 템플릿이 멈춤이거나 냉각중이 아니거나
     /// 복기 개선안이면 거부하고 개선안도 템플릿도 그대로다.
+    ///
+    /// - 냉각중이 아니면 [`StoreError::TransitionDenied`].
+    /// - 복기 개선안이면 [`StoreError::ProposalLocked`].
+    /// - 템플릿이 멈춤이면 [`StoreError::TemplateLocked`].
     pub fn apply_cooled_user_proposal(
         &self,
         id: ProposalId,
         value: &serde_json::Value,
         at: UnixMillis,
     ) -> Result<Proposal, StoreError> {
-        let _ = (self, id, value, at);
-        Err(StoreError::Incompatible(
-            "apply_cooled_user_proposal 미구현".to_owned(),
-        ))
+        self.write(|conn| {
+            let now = expect(conn, id, ProposalState::Cooling, |_| ProposalState::Applied)?;
+            let ProposalSource::User { template } = source(conn, id)? else {
+                return Err(StoreError::ProposalLocked {
+                    id,
+                    state: now.state,
+                });
+            };
+            let target = crate::template::get(conn, template)?;
+            if target.state == TemplateState::Stopped {
+                return Err(StoreError::TemplateLocked {
+                    state: target.state,
+                });
+            }
+            conn.execute(
+                "UPDATE proposals SET state = 'applied', updated_at = ?2, applied_at = ?2
+                 WHERE id = ?1",
+                params![id.0, at.0],
+            )?;
+            let next = target.revision + 1;
+            conn.execute(
+                "INSERT INTO user_revisions (proposal_id, template_id, revision) VALUES (?1, ?2, ?3)",
+                params![id.0, template.0, next],
+            )?;
+            conn.execute(
+                "INSERT INTO template_revisions (template_id, revision, value, at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![template.0, next, serde_json::to_string(value)?, at.0],
+            )?;
+            conn.execute(
+                "UPDATE templates SET revision = ?2, updated_at = ?3 WHERE id = ?1",
+                params![template.0, next, at.0],
+            )?;
+            get(conn, id)
+        })
     }
 
     /// 냉각중 → 반영됨(`applied_at = at`). 냉각중이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.
@@ -399,4 +453,21 @@ fn apply_cooled(conn: &Connection, id: ProposalId, at: UnixMillis) -> Result<Pro
         params![id.0, at.0],
     )?;
     get(conn, id)
+}
+
+/// 개선안의 출처. 대상 템플릿 줄이 없으면 복기가 낸 것이다.
+fn source(conn: &Connection, id: ProposalId) -> Result<ProposalSource, StoreError> {
+    let template: Option<i64> = conn
+        .query_row(
+            "SELECT template_id FROM proposal_sources WHERE proposal_id = ?1",
+            [id.0],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(match template {
+        Some(template) => ProposalSource::User {
+            template: TemplateId(template),
+        },
+        None => ProposalSource::Review,
+    })
 }

@@ -5,14 +5,23 @@
 
 use std::collections::BTreeMap;
 
+use rusqlite::params;
+
 use crate::model::UnixMillis;
 use crate::{Store, StoreError};
 
 impl Store {
     /// 담당별로 고른 외형 id 전부(담당 이름 순서).
     pub fn office_looks(&self) -> Result<BTreeMap<String, String>, StoreError> {
-        let _ = self;
-        Ok(BTreeMap::new())
+        self.read(|conn| {
+            let mut stmt = conn.prepare("SELECT agent, look FROM office_looks ORDER BY agent")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<BTreeMap<_, _>>>()?;
+            Ok(rows)
+        })
     }
 
     /// 담당의 외형을 정한다(이미 있으면 바꾼다). 담당이나 외형이 빈 글자면 거부하고
@@ -23,9 +32,18 @@ impl Store {
         look: &str,
         at: UnixMillis,
     ) -> Result<(), StoreError> {
-        let _ = (self, agent, look, at);
-        Err(StoreError::Incompatible(
-            "set_office_look 미구현".to_owned(),
-        ))
+        if agent.trim().is_empty() || look.trim().is_empty() {
+            return Err(StoreError::Incompatible(
+                "담당과 외형은 빈 글자일 수 없다".to_owned(),
+            ));
+        }
+        self.write(|conn| {
+            conn.execute(
+                "INSERT INTO office_looks (agent, look, at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (agent) DO UPDATE SET look = excluded.look, at = excluded.at",
+                params![agent, look, at.0],
+            )?;
+            Ok(())
+        })
     }
 }

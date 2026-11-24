@@ -277,7 +277,7 @@ fn template_from(row: &Row<'_>) -> Result<Template, StoreError> {
     })
 }
 
-fn get(conn: &Connection, id: TemplateId) -> Result<Template, StoreError> {
+pub(crate) fn get(conn: &Connection, id: TemplateId) -> Result<Template, StoreError> {
     let sql = format!("{SELECT} WHERE t.id = ?1");
     let found = conn
         .query_row(&sql, [id.0], |row| Ok(template_from(row)))
