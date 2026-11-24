@@ -250,7 +250,7 @@ impl Store {
 }
 
 /// 쪽 크기: `max`를 상한으로 줄인다.
-fn page_limit(max: usize) -> i64 {
+pub(crate) fn page_limit(max: usize) -> i64 {
     // 상한이 100이라 i64에 언제나 들어간다.
     i64::try_from(max.min(HISTORY_PAGE_MAX)).unwrap_or(0)
 }

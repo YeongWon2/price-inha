@@ -5,9 +5,13 @@
 //! 칸이 생기기 전 매매는 "기록 없음"(빈 값)이다.
 //! 이유 글의 비밀키 가리기는 부르는 쪽이 한 뒤 넘긴다.
 
+use std::collections::HashSet;
+
+use rusqlite::{Connection, OptionalExtension, Row, params};
+
 use crate::model::{Judgment, Trade, TradeId};
-use crate::plan::TradeSide;
-use crate::{Store, StoreError};
+use crate::plan::{self, TradeSide};
+use crate::{Store, StoreError, trade};
 
 /// 담당 의견의 방향.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,16 +100,143 @@ impl Store {
         opinions: &[RoleOpinion],
         summary: &TradeSummary,
     ) -> Result<Trade, StoreError> {
-        let _ = (self, id, judgment, side, opinions, summary);
-        Err(StoreError::Incompatible(
-            "judge_trade_with_opinions 미구현".to_owned(),
-        ))
+        check_opinions(&judgment, opinions)?;
+        self.write(|conn| {
+            let judged = plan::judge_with_side(conn, id, judgment, side)?;
+            for opinion in opinions {
+                insert_opinion(conn, id, opinion)?;
+            }
+            conn.execute(
+                "INSERT INTO trade_summaries (trade_id, summary, reversal) VALUES (?1, ?2, ?3)",
+                params![id.0, summary.summary, summary.reversal],
+            )?;
+            Ok(judged)
+        })
     }
 
     /// 매매 하나의 담당 의견과 팀장 요약. 기록이 없으면 빈 값([`TradeOpinions::default`]).
     /// 없는 번호면 [`StoreError::TradeNotFound`].
     pub fn trade_opinions(&self, id: TradeId) -> Result<TradeOpinions, StoreError> {
-        let _ = (self, id);
-        Err(StoreError::Incompatible("trade_opinions 미구현".to_owned()))
+        self.read(|conn| {
+            trade::get(conn, id)?;
+            let mut stmt = conn.prepare(
+                "SELECT role, stance, conviction, reason, horizon_days, abstained \
+                 FROM role_opinions WHERE trade_id = ?1 ORDER BY id",
+            )?;
+            let mut rows = stmt.query([id.0])?;
+            let mut opinions = Vec::new();
+            while let Some(row) = rows.next()? {
+                opinions.push(opinion_from(row)?);
+            }
+            let summary = conn
+                .query_row(
+                    "SELECT summary, reversal FROM trade_summaries WHERE trade_id = ?1",
+                    [id.0],
+                    |r| {
+                        Ok(TradeSummary {
+                            summary: r.get(0)?,
+                            reversal: r.get(1)?,
+                        })
+                    },
+                )
+                .optional()?;
+            Ok(TradeOpinions { opinions, summary })
+        })
     }
+}
+
+// ───────────── 안에서만 쓰는 것 ─────────────
+
+/// 의견이 [`RoleOpinion`]의 규칙에 맞는지 본다. 판단의 담당 점수에 있는 담당만, 한 담당에 하나.
+fn check_opinions(judgment: &Judgment, opinions: &[RoleOpinion]) -> Result<(), StoreError> {
+    let scored: HashSet<&str> = judgment.scores.iter().map(|s| s.role.as_str()).collect();
+    let mut seen = HashSet::new();
+    for o in opinions {
+        let role = &o.role;
+        let why = if !scored.contains(role.as_str()) {
+            Some("담당 점수에 없는 담당이다")
+        } else if !seen.insert(role.as_str()) {
+            Some("같은 담당의 의견이 둘이다")
+        } else if o.abstained && (o.stance.is_some() || o.conviction.is_some()) {
+            Some("기권인데 방향이나 확신도가 있다")
+        } else if !o.abstained && (o.stance.is_none() || o.conviction.is_none()) {
+            Some("기권이 아닌데 방향이나 확신도가 없다")
+        } else if o.horizon_days == Some(0) {
+            Some("보는 기간은 1 이상이어야 한다")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return Err(StoreError::InvalidOpinion(format!("{role}: {why}")));
+        }
+    }
+    Ok(())
+}
+
+fn insert_opinion(conn: &Connection, id: TradeId, o: &RoleOpinion) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO role_opinions \
+         (trade_id, role, stance, conviction, reason, horizon_days, abstained) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            id.0,
+            o.role,
+            o.stance.map(stance_code),
+            o.conviction.map(conviction_code),
+            o.reason,
+            o.horizon_days.map(i64::from),
+            o.abstained
+        ],
+    )?;
+    Ok(())
+}
+
+fn opinion_from(row: &Row<'_>) -> Result<RoleOpinion, StoreError> {
+    let stance: Option<String> = row.get(1)?;
+    let conviction: Option<String> = row.get(2)?;
+    let horizon: Option<i64> = row.get(4)?;
+    let horizon_days = horizon
+        .map(|h| {
+            u32::try_from(h)
+                .map_err(|_| StoreError::Incompatible(format!("이상한 보는 기간 값: {h}")))
+        })
+        .transpose()?;
+    Ok(RoleOpinion {
+        role: row.get(0)?,
+        stance: stance.as_deref().map(stance_from).transpose()?,
+        conviction: conviction.as_deref().map(conviction_from).transpose()?,
+        reason: row.get(3)?,
+        horizon_days,
+        abstained: row.get(5)?,
+    })
+}
+
+fn stance_code(stance: Stance) -> &'static str {
+    match stance {
+        Stance::Bullish => "bullish",
+        Stance::Bearish => "bearish",
+        Stance::Neutral => "neutral",
+    }
+}
+
+fn stance_from(code: &str) -> Result<Stance, StoreError> {
+    Stance::ALL
+        .into_iter()
+        .find(|s| stance_code(*s) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 의견 방향 값: {code}")))
+}
+
+fn conviction_code(conviction: Conviction) -> &'static str {
+    match conviction {
+        Conviction::Low => "low",
+        Conviction::Medium => "medium",
+        Conviction::High => "high",
+    }
+}
+
+fn conviction_from(code: &str) -> Result<Conviction, StoreError> {
+    Conviction::ALL
+        .into_iter()
+        .find(|c| conviction_code(*c) == code)
+        .ok_or_else(|| StoreError::Incompatible(format!("모르는 확신도 값: {code}")))
 }

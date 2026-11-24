@@ -43,18 +43,6 @@ pub(super) fn relax_template_check(tx: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// 옮기기 끝에 파일이 온전한지 본다(`PRAGMA integrity_check`). 정의 글자를 직접 고친 뒤이므로 꼭 본다.
-/// ok가 아니면 옮기기는 실패하고(묶음이 돌아간다) 파일은 판 9 그대로다.
-pub(super) fn integrity_ok(tx: &Connection) -> Result<(), StoreError> {
-    let result: String = tx.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-    if result != "ok" {
-        return Err(StoreError::Incompatible(format!(
-            "판 10으로 옮긴 뒤 무결성 검사가 실패했다: {result}"
-        )));
-    }
-    Ok(())
-}
-
 /// 버전 9에서 10으로 올리는 SQL. [`relax_template_check`] 뒤에 돈다.
 pub(super) const V10: &str = "
 CREATE TABLE proposal_sources (

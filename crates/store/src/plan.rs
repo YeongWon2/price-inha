@@ -48,15 +48,7 @@ impl Store {
         judgment: Judgment,
         side: TradeSide,
     ) -> Result<Trade, StoreError> {
-        self.write(|conn| {
-            let judged = trade::judge(conn, id, judgment)?;
-            ensure_plan(conn, id)?;
-            conn.execute(
-                "UPDATE trade_plans SET side = ?2 WHERE trade_id = ?1",
-                params![id.0, side_code(side)],
-            )?;
-            Ok(judged)
-        })
+        self.write(|conn| judge_with_side(conn, id, judgment, side))
     }
 
     /// 매매 방향. 방향 없이 판단했거나 아직 판단하지 않았으면 `None`.
@@ -158,14 +150,31 @@ impl Store {
 
 // ───────────── 안에서만 쓰는 것 ─────────────
 
-fn side_code(side: TradeSide) -> &'static str {
+/// 판단하고 같은 묶음 안에서 방향을 남긴다([`Store::judge_trade_with_side`]의 길).
+/// 담당 의견과 함께 판단하는 길(19차)도 같은 묶음 안에서 이것을 쓴다.
+pub(crate) fn judge_with_side(
+    conn: &Connection,
+    id: TradeId,
+    judgment: Judgment,
+    side: TradeSide,
+) -> Result<Trade, StoreError> {
+    let judged = trade::judge(conn, id, judgment)?;
+    ensure_plan(conn, id)?;
+    conn.execute(
+        "UPDATE trade_plans SET side = ?2 WHERE trade_id = ?1",
+        params![id.0, side_code(side)],
+    )?;
+    Ok(judged)
+}
+
+pub(crate) fn side_code(side: TradeSide) -> &'static str {
     match side {
         TradeSide::Buy => "buy",
         TradeSide::Sell => "sell",
     }
 }
 
-fn side_from(code: &str) -> Result<TradeSide, StoreError> {
+pub(crate) fn side_from(code: &str) -> Result<TradeSide, StoreError> {
     TradeSide::ALL
         .into_iter()
         .find(|side| side_code(*side) == code)
