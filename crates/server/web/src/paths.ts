@@ -59,6 +59,10 @@ export const API = {
   // 매매 하나는 [`tradePath`], 하루 정리는 [`API.dailySummary`]`?date=`.
   trades: "/api/trades",
   approvalLog: "/api/approvals",
+  // 계좌 · 운용 화면(server 30차): 모의계좌 읽기 `GET` · 팀 상태 `GET` · 다시 시작 `POST`(몸통 없음).
+  account: "/api/account",
+  team: "/api/team",
+  teamRestart: "/api/team/restart",
 } as const;
 
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
@@ -101,8 +105,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
-  // 관리 화면 넷(server 26차 4번): 이 차수의 틀은 세션만 얻는다(내용은 뒤 차수).
-  account: [API.session],
+  // 계좌 · 운용 화면(server 30차 2번 · 3번): 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결.
+  account: [API.session, API.account, API.team, API.teamRestart, API.socket],
   // 템플릿 화면(server 27차 4번): 읽기 · 고르기 · 값 맞추기 · 멈추기, "실전 운용 시작"은 승인 카드 읽기 · 승인.
   templates: [
     API.session,

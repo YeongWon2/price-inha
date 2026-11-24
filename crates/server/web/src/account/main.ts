@@ -1,6 +1,6 @@
-// 관리 화면 · 계좌(server 26차 4번): 메뉴 · 제목 · "준비 중" 빈 상태만 그린다(내용은 뒤 차수).
+// 관리 화면 · 계좌(server 30차 2번): 메뉴와 계좌 · 운용 화면(팀 상태 · 다시 시작 · 계좌 · 보유 · 모의계좌 안내).
 import { mountMenu } from "../ui/menu";
-import { mountAdminFrame } from "../ui/admin";
+import { mountAccount } from "./screen";
 
 mountMenu(document.getElementById("menu"), "account");
-void mountAdminFrame(document.getElementById("screen"));
+void mountAccount(document.getElementById("screen"));

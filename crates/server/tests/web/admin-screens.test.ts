@@ -1,5 +1,6 @@
-// 관리 화면 틀 넷(server 26차 4번 · 6번 · F12 · R18-3 · N21 · V77): 계좌 · 템플릿 · 규칙 · 히스토리 화면은 이 차수에서
-// 메뉴 · 제목 · "준비 중" 빈 상태만 그린다. 관리 화면 소스는 3D(three · scene3d)를 부르지 않고, 새 npm 의존성이 없다.
+// 관리 화면 넷(server 26차 4번 · 6번 · 30차 2번 · F12 · R18-3 · N21 · V77): 계좌 · 템플릿 · 규칙 · 히스토리 화면은
+// 메뉴 · 제목과 내용을 그린다("준비 중" 틀은 30차로 남지 않는다). 관리 화면 소스는 3D(three · scene3d)를 부르지 않고,
+// 새 npm 의존성이 없다.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API } from "../../web/src/paths";
 import { SOURCES, mainOf, reach } from "./source-graph";
@@ -33,13 +34,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// 27차 3번 · 28차 2번 · 29차 2번: 템플릿 · 규칙 · 히스토리 화면에는 내용이 생긴다(template-screen.test.ts ·
-// rules-screen.test.ts · history-screen.test.ts) — "준비 중" 틀 단언은 나머지 하나(계좌)에만.
-const FRAMES = ADMIN.filter(([screen]) => screen !== "templates" && screen !== "rules" && screen !== "history");
-
+// 27차 3번 · 28차 2번 · 29차 2번 · 30차 2번: 관리 화면 넷 모두 내용이 생긴다(template-screen · rules-screen ·
+// history-screen · account-screen 시험) — "준비 중" 틀은 남는 화면이 없다. 메뉴와 제목(h1)은 그대로다.
 describe("관리 화면 틀", () => {
-  for (const [screen, label, href] of FRAMES) {
-    it(`${label} 화면은 메뉴 · 제목 · "준비 중" 빈 상태를 그린다`, async () => {
+  for (const [screen, label, href] of ADMIN) {
+    it(`${label} 화면은 메뉴 · 제목을 그리고 "준비 중"이 아닌 내용을 그린다`, async () => {
       // 검증: V75 F12
       const html = PAGES[`../../web/${screen}/index.html`];
       expect(html, `${screen}/index.html이 있다`).toBeTypeOf("string");
@@ -69,12 +68,17 @@ describe("관리 화면 틀", () => {
       expect(titles.length, `${screen}: 제목 하나`).toBe(1);
       expect(titles[0].textContent).toContain(label);
 
-      const empty = [...document.querySelectorAll('[role="status"]')].filter((node) => node.textContent?.includes("준비 중"));
-      expect(empty.length, `${screen}: "준비 중" 빈 상태`).toBe(1);
-      expect((nav as HTMLElement).contains(empty[0])).toBe(false);
-
-      // 이 차수의 틀은 내용을 읽지 않는다: 부르는 서버 경로는 세션뿐이다.
-      for (const url of calls) expect(url, `${screen}: ${url}`).toBe(API.session);
+      // "준비 중" 빈 상태는 어느 화면에도 없다.
+      expect(document.body.textContent ?? "", `${screen}: "준비 중"이 없다`).not.toContain("준비 중");
+      // 내용이 있다: 본문 자리에 제목 · 안내 줄 밖의 그림이 있고, 세션 밖의 서버 경로를 읽는다
+      // (이 가짜 서버는 세션 밖을 404로 답하므로 그 내용은 오류 줄일 수 있다).
+      const main = document.getElementById("screen") as HTMLElement;
+      const drawn = [...main.children].filter((node) => node.tagName !== "H1" && !node.classList.contains("admin-lead"));
+      expect(drawn.length, `${screen}: 본문에 그린 것이 있다`).toBeGreaterThan(0);
+      expect(
+        calls.some((url) => url !== API.session),
+        `${screen}: 세션 밖의 경로를 읽는다`,
+      ).toBe(true);
     });
   }
 });

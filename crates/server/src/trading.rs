@@ -156,6 +156,36 @@ pub const TEMPLATES_VIEW_PATH: &str = "/api/templates/current";
 /// - 멈춘 뒤 다시 실전으로 가는 길은 없다(새로 고른다).
 pub const TEMPLATE_STOP_PATH: &str = "/api/templates/{id}/stop";
 
+/// (30차 1번 · C31 · V86 · R3-1 · R16-5) 모의계좌 읽기. `GET`, 세션이 있어야 한다(원격은 세션 없이 401).
+/// 팀을 잇지 않고 띄운 서버에서도 읽힌다(주문 길의 경로다). 응답 200:
+///
+/// ```text
+/// {
+///   "account": "paper",
+///   "cash": [{"currency": "KRW" | "USD", "available", "held", "unsettled"}],
+///   "holdings": [{"symbol", "market": "kr" | "us", "currency", "quantity", "average_price",
+///                 "last_price": 십진수 글자 | null, "value": 십진수 글자 | null, "pnl": 십진수 글자 | null}],
+///   "equity": [{"currency", "total", "day_start", "day_pnl", "peak", "drawdown_pct",
+///               "drawdown_limit_pct": 십진수 글자 | null}]
+/// }
+/// ```
+///
+/// - 금액 · 수량 · 퍼센트는 모두 **십진수 글자**다(부동소수점 수를 쓰지 않는다). 모르는 값은 `null`이다.
+/// - `account`는 언제나 [`ACCOUNT_PAPER`]다: 계좌는 모의계좌(pi-paper)뿐이다(AGENTS 6번 · 결정 17).
+/// - `cash`는 통화(KRW, USD 차례)마다 한 줄 — `pi_paper::PaperBroker::account_snapshot`의 쓸 수 있는 · 묶인 ·
+///   결제 전 돈이다.
+/// - `holdings`는 보유 종목(수량이 0인 것은 없다). `last_price`는 그 종목의 마지막으로 받은 시세이고, 받은 시세가
+///   없으면 `null`이며 그때 `value`(= 수량 × 지금 값) · `pnl`(= `value` − 수량 × 평균 단가)도 `null`이다.
+/// - `equity`는 통화마다 한 줄 — 주문 길이 하루 손실 · 낙폭 판정에 쓰는 장부(`trading/marks.rs`)와 같은 값이다:
+///   `total` 지금 평가액(현금 전부 + 보유 평가, 시세가 없는 종목은 평균 단가로), `day_start` 그날 시작 평가액,
+///   `day_pnl` = `total` − `day_start`(오늘 손익, 평가 손익 포함), `peak` 최고 평가액(처음 돈 아래로 내려가지 않는다),
+///   `drawdown_pct` = (`peak` − `total`) ÷ `peak` × 100(소수 둘째 자리 반올림, 최고 위면 0),
+///   `drawdown_limit_pct` 지금 쓰는 템플릿의 `max_drawdown_pct`(쓰는 템플릿이 없으면 `null`).
+pub const ACCOUNT_PATH: &str = "/api/account";
+
+/// 계좌 읽기 응답의 `account` 값: 모의계좌.
+pub const ACCOUNT_PAPER: &str = "paper";
+
 /// 템플릿 멈추기 거부: 실전중이 아니다.
 pub const TEMPLATE_NOT_LIVE: &str = "not_live";
 
