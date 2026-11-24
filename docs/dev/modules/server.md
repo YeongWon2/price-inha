@@ -911,3 +911,17 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | 설정 · 키 화면 시험(`key-screens` · `key-fields` · `setup-key-screen` · `setup-ai-limit`) · 뜻 검색(`/api/setup/semantic`) 시험 · doctor 시험 | 유지 | 지금 칸 · 지금 경로의 동작은 그대로(화면에 묶음이 더해질 뿐) |
 | 그 밖의 server 시험 | 유지 | 31차와 무관 |
 
+
+### 31차 대조 보강 (2026-11-25 조정자, 결정 21)
+
+N1이 알아냈다: 알림음 설정(1번 (바))은 `localStorage`를 쓰는데, `key-fields`의 V46 N8 단언이 화면 코드 어디에도 그 글자를 금지한다. 위 표의 "유지"를 아래로 바꾼다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/key-fields.test.ts`의 "화면 코드는 브라우저 저장소 · 쿠키 · 주소에 값을 남기지 않고…" 단언 | 고침 | 결정 21: `web/src/ui/sound-pref.ts` 한 파일만 `localStorage` 금지에서 뺀다(알림음 켜짐 · 꺼짐 한 값, 비밀값 아님). 그 파일의 다른 금지와 다른 파일의 금지는 그대로 |
+| `crates/server/tests/web/screen-paths.test.ts`에서 설정 화면의 경로 목록 | 고침 | 지시서 31차 1번: 설정 화면의 기대 목록에 뜻 검색 설정 · 진단 경로만 더한다 |
+| `crates/server/tests/setup/` 의 설정 상태(`GET /api/setup`) 칸 목록을 정확히 비교하는 시험 | 고침 | 지시서 31차 1번 (가) · (나): 시장 · 담당 모델 칸만 더한다. 키 값 없음 · 숫자 없음 단언은 그대로 |
+| 설정 · 키 화면의 그 밖 시험(`key-screens` · `key-fields`의 나머지 · `setup-key-screen` · `setup-ai-limit`) · 뜻 검색 시험 · doctor 시험 | 유지 | 지금 칸 · 지금 경로의 동작은 그대로 |
+| 그 밖의 server 시험 | 유지 | 31차와 무관 |
