@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 
 use common::{t, temp_store};
 use pi_store::{
-    AccountKind, FactValue, Judgment, MessageRole, NewFact, NewMessage, NewProposal, NewRoomEvent,
-    NewTrade, Rationale, RoomActorKind, Store, TradeId, TradeSide, TriggerReceiptKey,
-    TriggerReceiptStatus,
+    AccountKind, ApprovalStatus, ApprovalUse, FactValue, Judgment, MessageRole, NewApprovalRequest,
+    NewFact, NewMessage, NewProposal, NewRoomEvent, NewTemplate, NewTrade, NewUserProposal,
+    Rationale, RoomActorKind, Store, TradeId, TradeSide, TriggerReceiptKey, TriggerReceiptStatus,
 };
 use rusqlite::types::Value as SqlValue;
 use serde_json::json;
@@ -27,7 +27,7 @@ use serde_json::json;
 // ───────────── 도우미 ─────────────
 
 /// 보호한다고 적은 표. 지우기를 막는 표는 모두 여기 있어야 한다(아래 테스트가 스키마에서 확인한다).
-const PROTECTED: [&str; 23] = [
+const PROTECTED: [&str; 25] = [
     "team_history",
     "events",
     "access_log",
@@ -51,6 +51,8 @@ const PROTECTED: [&str; 23] = [
     "restore_marks",
     "trade_plans",
     "trade_state_changes",
+    "proposal_sources",
+    "user_revisions",
 ];
 
 const VERBS: [&str; 2] = ["INSERT OR REPLACE INTO", "REPLACE INTO"];
@@ -194,6 +196,46 @@ fn fill(store: &Store) -> TradeId {
         .unwrap();
     // 되살리기 표시 하나(쌓기만 하는 표가 줄을 가지게).
     store.mark_restored(t(60)).unwrap();
+
+    // 사용자 변경 개선안을 만들고 반영해 proposal_sources · user_revisions에 줄을 만든다(버전 10).
+    let template = store
+        .create_template(NewTemplate {
+            value: json!({ "스타일": "스윙", "R%": "1.0" }),
+            at: t(70),
+        })
+        .unwrap();
+    let user = store
+        .create_user_proposal(NewUserProposal {
+            template: template.id,
+            content: json!({ "스타일": "스윙", "R%": "1.5" }),
+            at: t(71),
+        })
+        .unwrap();
+    let approval = store
+        .create_approval(NewApprovalRequest {
+            fingerprint: "sha256:user-change".to_string(),
+            summary: json!({ "대상": "user-change" }),
+            created_at: t(72),
+            expires_at: t(1_000_000),
+        })
+        .unwrap()
+        .id;
+    store
+        .resolve_approval(approval, ApprovalStatus::Approved, t(73))
+        .unwrap();
+    store
+        .approve_proposal(
+            user.id,
+            ApprovalUse {
+                id: approval,
+                fingerprint: "sha256:user-change".to_string(),
+            },
+            t(74),
+        )
+        .unwrap();
+    store
+        .apply_cooled_user_proposal(user.id, &json!({ "스타일": "스윙", "R%": "1.5" }), t(75))
+        .unwrap();
     judged
 }
 
