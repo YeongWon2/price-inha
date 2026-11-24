@@ -41,7 +41,10 @@ var API = {
 	proposals: "/api/proposals",
 	proposalAnswer: "/api/proposals/answer",
 	trades: "/api/trades",
-	approvalLog: "/api/approvals"
+	approvalLog: "/api/approvals",
+	account: "/api/account",
+	team: "/api/team",
+	teamRestart: "/api/team/restart"
 };
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
 function tradePath(id) {
@@ -78,7 +81,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session, API.trades, API.dailySummary, API.approvalLog;
+], API.session, API.account, API.team, API.teamRestart, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session, API.trades, API.dailySummary, API.approvalLog;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));

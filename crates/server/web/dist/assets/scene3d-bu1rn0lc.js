@@ -1,4 +1,4 @@
-import { c as bubbleWhere, d as overlap, i as LOOKS, l as bubbleWidth, n as speakerOrbit, o as bubbleCandidates, r as DEFAULT_LOOKS, s as bubbleText, t as easeInOut, u as insideScreen } from "./office-f87bwx2i.js";
+import { c as bubbleWhere, d as overlap, i as LOOKS, l as bubbleWidth, n as speakerOrbit, o as bubbleCandidates, r as DEFAULT_LOOKS, s as bubbleText, t as easeInOut, u as insideScreen } from "./office-emekl23w.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors

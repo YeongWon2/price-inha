@@ -1,0 +1,114 @@
+/*
+ * 계좌 · 운용 화면 모양(server 30차 2번): 모의계좌 안내 · 팀 상태 · 계좌 카드 · 보유 표. 토큰(var(--…))만 쓴다.
+ * 손익 빛깔은 한국 관례(오름 --up 빨강 · 내림 --down 파랑). 폰 폭에서는 보유 표가 카드 안에서만 가로로 밀린다.
+ */
+.acc-body, .acc-top { display: grid; gap: var(--space-4); min-width: 0; }
+.acc-body .ui-card { margin: 0; min-width: 0; }
+.acc-label { color: var(--text-muted); font-size: var(--font-size-sm); }
+.acc-body p, .acc-notice { word-break: keep-all; overflow-wrap: anywhere; }
+
+/* 모의계좌 안내: 늘 보인다 */
+.acc-notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+/* 팀 상태 */
+.acc-team-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.acc-team-head .ui-badge { font-size: var(--font-size-md); }
+.acc-team .acc-plan { margin: 0; font-weight: 600; }
+.acc-team .acc-reason { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 0; }
+.acc-stop {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+}
+.acc-stop .acc-stop-text { margin: 0; }
+.acc-team .acc-restart-result { margin: var(--space-3) 0 0; font-weight: 600; }
+.acc-restart-result:empty { display: none; }
+
+/* 계좌 카드: 통화마다 한 칸 */
+.acc-currencies { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-3); }
+.acc-currency {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+}
+.acc-currency-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
+.acc-currency-name { margin: 0; font-size: var(--font-size-md); font-weight: 700; }
+.acc-currency .acc-total {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.acc-stats { display: grid; gap: var(--space-1); margin: 0; }
+.acc-stat { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
+.acc-stat dt { margin: 0; }
+.acc-stat .acc-stat-value { margin: 0; font-variant-numeric: tabular-nums; text-align: right; font-weight: 600; }
+[data-trend="up"] { color: var(--up); }
+[data-trend="down"] { color: var(--down); }
+
+/* 낙폭: 글과 한도 대비 막대 */
+.acc-drawdown { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.acc-drawdown-label { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
+.acc-drawdown-value { font-variant-numeric: tabular-nums; text-align: right; font-weight: 600; }
+.acc-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+.acc-bar-fill { height: 100%; min-width: 2px; border-radius: inherit; background: var(--success); }
+.acc-bar[data-level="near"] .acc-bar-fill { background: var(--warning); }
+.acc-bar[data-level="over"] .acc-bar-fill { background: var(--danger); }
+
+/* 보유 표 */
+.acc-table-wrap { min-width: 0; overflow-x: auto; }
+.acc-holdings th:nth-child(n + 2), .acc-holdings td:nth-child(n + 2) { text-align: right; white-space: nowrap; }
+.acc-holdings td:first-child { font-weight: 600; }
+
+/* 폰 폭: 보유 표의 줄을 접어 평가 손익까지 한눈에 보인다(가로로 밀지 않는다) */
+@media (max-width: 560px) {
+  .acc-holdings thead { display: none; }
+  .acc-holdings, .acc-holdings tbody { display: block; }
+  .acc-holdings tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .acc-holdings td, .acc-holdings td:nth-child(n + 2) {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+    white-space: nowrap;
+  }
+  .acc-holdings td:first-child { grid-column: 1 / -1; }
+  .acc-holdings td:nth-child(n + 2)::before { content: attr(data-label); color: var(--text-muted); font-size: var(--font-size-sm); font-weight: 400; }
+}
+
+/* 읽기 실패 */
+.acc-failed { display: grid; gap: var(--space-3); justify-items: start; }

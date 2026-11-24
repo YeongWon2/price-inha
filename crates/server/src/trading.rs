@@ -13,6 +13,7 @@
 //!   (`pi_exec::Error::AnomalyStop`)는 저장소의 팀 상태 전이(`pi_store::Store::change_team_state`)로 한다.
 //! - 시각은 [`crate::Wiring::clock`]에서만 읽는다. 돈은 십진수다.
 
+mod account;
 mod answer;
 mod base;
 #[cfg(test)]

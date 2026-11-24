@@ -1,5 +1,5 @@
 //! 주문 길의 경로(세션이 있어야 열린다): 팀 상태 · 다시 시작 · 승인 답하기 · 템플릿 고르기 · 값 맞추기 ·
-//! (27차) 템플릿 화면 읽기 · 실전 템플릿 멈추기.
+//! (27차) 템플릿 화면 읽기 · 실전 템플릿 멈추기 · (30차) 모의계좌 읽기.
 //! 모양은 [`super`]의 경로 상수 문서에 있다.
 
 use std::sync::Arc;
@@ -17,9 +17,9 @@ use super::day::{Restart, team_word};
 use super::templates::Refusal;
 use super::view::Stopped;
 use super::{
-    APPROVAL_ANSWER_PATH, RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED, TEAM_PATH, TEAM_RESTART_PATH,
-    TEMPLATE_ADJUST_PATH, TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH, TEMPLATE_STOP_PATH,
-    TEMPLATES_VIEW_PATH, Trading,
+    ACCOUNT_PATH, APPROVAL_ANSWER_PATH, RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED, TEAM_PATH,
+    TEAM_RESTART_PATH, TEMPLATE_ADJUST_PATH, TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH,
+    TEMPLATE_STOP_PATH, TEMPLATES_VIEW_PATH, Trading,
 };
 use crate::TradingError;
 
@@ -33,7 +33,16 @@ pub(crate) fn routes(trading: Arc<Trading>) -> Router {
         .route(TEMPLATE_ADJUST_PATH, post(adjust))
         .route(TEMPLATES_VIEW_PATH, get(templates_view))
         .route(TEMPLATE_STOP_PATH, post(stop_template))
+        .route(ACCOUNT_PATH, get(account))
         .with_state(trading)
+}
+
+/// (30차 1번) 모의계좌 읽기.
+async fn account(State(trading): State<Arc<Trading>>) -> Response {
+    match trading.account_view().await {
+        Ok(view) => reply(StatusCode::OK, view),
+        Err(error) => failed(&error),
+    }
 }
 
 /// JSON 응답. 브라우저나 중간 자리가 간직하지 않게 한다.
