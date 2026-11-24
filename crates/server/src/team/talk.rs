@@ -23,6 +23,8 @@ pub(super) const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, 
 pub(super) struct DiscussingGuard {
     /// 세는 수(지켜보는 쪽과 함께 쓴다).
     count: Arc<AtomicUsize>,
+    /// 버려질 때 한 번 부르는 정리(사무실 자리 표시 내리기 등).
+    release: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl DiscussingGuard {
@@ -31,27 +33,26 @@ impl DiscussingGuard {
         count.fetch_add(1, Ordering::SeqCst);
         Self {
             count: Arc::clone(count),
+            release: None,
         }
+    }
+
+    /// (17차 5번) [`DiscussingGuard::enter`]에 더해, 버려질 때(끝 · panic · 취소) `release`를 한 번 부른다.
+    /// 논의 도중 취소돼도 사무실 자리 표시(논의 탁자 → 자리로 돌아가기)가 내려가게 하는 자리다.
+    pub(super) fn enter_with(count: &Arc<AtomicUsize>, release: Box<dyn FnOnce() + Send>) -> Self {
+        let mut guard = Self::enter(count);
+        guard.release = Some(release);
+        guard
     }
 }
 
 impl Drop for DiscussingGuard {
-    /// 센 것을 되돌린다(panic · 취소로 버려져도).
+    /// 센 것을 되돌리고 정리를 한 번 부른다(panic · 취소로 버려져도).
     fn drop(&mut self) {
         self.count.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-impl DiscussingGuard {
-    /// (17차 5번) [`DiscussingGuard::enter`]에 더해, 버려질 때(끝 · panic · 취소) `release`를 한 번 부른다.
-    /// 논의 도중 취소돼도 사무실 자리 표시(논의 탁자 → 자리로 돌아가기)가 내려가게 하는 자리다.
-    /// 쓰는 쪽(`Crew::discuss_symbol`)에 이어 붙이면 `cfg(test)`를 뗀다.
-    #[cfg(test)]
-    pub(super) fn enter_with(
-        _count: &Arc<AtomicUsize>,
-        _release: Box<dyn FnOnce() + Send>,
-    ) -> Self {
-        todo!("17차 5번: 버려질 때 release를 한 번 부른다")
+        if let Some(release) = self.release.take() {
+            release();
+        }
     }
 }
 
@@ -67,7 +68,7 @@ impl Crew {
 
     /// (16차 3번) 하루 AI 호출 상한이 켜져 있으면 논의 한 번을 한 번으로 센다(한국 시각 날짜별, 저장).
     /// 상한에 닿았으면 그날 남은 논의를 쉬고(오류) 사용자에게 그날 한 번 알린다. 손절 등은 AI를 부르지 않아 상관없다.
-    fn take_ai_call(&self) -> Result<(), TeamError> {
+    pub(super) fn take_ai_call(&self) -> Result<(), TeamError> {
         let Some(cap) = &self.ai_cap else {
             return Ok(());
         };
@@ -194,10 +195,17 @@ impl Crew {
             limits: DiscussionLimits::default(),
         };
         let result = {
-            let _discussing = DiscussingGuard::enter(&self.discussing);
+            // (17차 5번) 취소 · panic에도 자리 표시가 내려가게 가드의 정리로 건다.
+            let lowered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let _discussing = DiscussingGuard::enter_with(
+                &self.discussing,
+                self.table_release(Arc::clone(&lowered)),
+            );
             self.at_table(true).await;
             let result = self.team.discuss(request).await;
-            self.at_table(false).await;
+            if !lowered.swap(true, Ordering::SeqCst) {
+                self.at_table(false).await;
+            }
             result
         };
         if let Some(news) = news.filter(|news| news.dropped > 0) {

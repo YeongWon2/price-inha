@@ -298,7 +298,12 @@ impl App {
             wiring: launch.trading,
         };
         let trading = Trading::open(parts).await?;
-        let crew = open_crew(launch.team, &store, &wiring, &trading, &desk, &secrets)?;
+        // (17차 4번) 설정의 하루 AI 호출 상한을 팀 조립에 잇는다(팀 조립에 이미 적힌 값이 앞선다).
+        let team = launch.team.map(|mut team| {
+            team.ai_daily_limit = team.ai_daily_limit.or(settings.ai_daily_limit);
+            team
+        });
+        let crew = open_crew(team, &store, &wiring, &trading, &desk, &secrets)?;
         let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());
         let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);

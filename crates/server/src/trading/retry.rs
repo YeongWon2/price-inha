@@ -18,6 +18,7 @@
 //!   tick마다 보므로 저장소를 직접 바꾸는 길 · 백업 복원도 덮는다.
 //! - (16차 4번) 손절 · 청산 대기가 낡았으면(`SellTooLarge` · `PermitMismatch`로 거부, 또는 매매가 보유중이 아니게 됨)
 //!   지운다. 지금 남은 수량이 0보다 크면 그 수량으로 같은 목적의 파는 주문을 새 표시로 낸다. 방 기록에 한 줄.
+//!   (17차 1 · 2번) 새로 내기는 낸 뒤에 지운다: 막히거나 실패하면 대기를 그대로 두고 물러선다. 청산은 처음 주문 모양을 지킨다.
 
 use chrono::{DateTime, Duration, Utc};
 use pi_exec::{SellPurpose, SellRetry};
@@ -321,8 +322,8 @@ impl Trading {
         }
     }
 
-    /// (16차 4번) 낡은 손절 · 청산 대기를 지우고, 지금 남은 수량이 있으면 그 수량으로 같은 목적의 파는 주문을 새로 낸다.
-    /// 감시 자리나 시세가 없어 남은 수량을 모르면 지우지 않고 물러선다.
+    /// (16차 4번 · 17차 1 · 2 · 3번) 낡은 손절 · 청산 대기: 지금 남은 수량으로 같은 목적의 파는 주문을 먼저 내고, 나간 뒤에 대기를 지운다.
+    /// 실행기 장부로 남은 수량을 모르면(감시 자리나 시세가 없음) 지우지도 새로 내지도 않고 물러선다.
     async fn renew_stale(
         &self,
         pending: &SellRetry,
@@ -351,8 +352,8 @@ impl Trading {
         let Some(remaining) = remaining else {
             return Ok(Tried::Blocked(Hold::other("남은 수량을 알 수 없습니다")));
         };
-        self.executor.forget_pending_sell(trade);
         if remaining <= Decimal::ZERO {
+            self.executor.forget_pending_sell(trade);
             self.note_in_room(
                 trade,
                 "stale-cleared",
@@ -360,33 +361,43 @@ impl Trading {
             );
             return Ok(Tried::Done);
         }
-        request.draft.order_type = pi_paper::OrderType::Market;
-        request.draft.limit_price = None;
+        // (17차 1 · 2번) 대기를 지우기 전에 새로 낸다: 손절은 시장가, 청산은 처음 주문 종류 · 가격 그대로.
+        if purpose == Purpose::StopLoss {
+            request.draft.order_type = pi_paper::OrderType::Market;
+            request.draft.limit_price = None;
+        }
         request.draft.ai_quantity = Some(remaining);
-        self.note_in_room(
-            trade,
-            "stale-renewed",
-            &format!(
-                "낡은 다시 내기를 지우고 남은 수량 {}주로 새로 냅니다",
-                remaining.normalize()
-            ),
-        );
         match self.place_order(request).await {
-            Ok(super::Placed::Ordered(id)) => {
-                if purpose == Purpose::StopLoss {
-                    self.note_stop(trade, &super::Placed::Ordered(id));
-                }
+            Ok(super::Placed::Ordered(_)) => {
+                // 실행기는 나간 매매의 대기를 스스로 지운다. 남아 있으면 여기서 지운다.
+                self.executor.forget_pending_sell(trade);
+                self.note_in_room(
+                    trade,
+                    "stale-renewed",
+                    &format!(
+                        "낡은 다시 내기를 지우고 남은 수량 {}주로 새로 냈습니다",
+                        remaining.normalize()
+                    ),
+                );
+                Ok(Tried::Done)
             }
-            Ok(other) => tracing::warn!(
-                trade = trade.0,
-                ?other,
-                "남은 수량으로 새로 내지 못했습니다"
-            ),
+            Ok(other) => {
+                tracing::warn!(
+                    trade = trade.0,
+                    ?other,
+                    "남은 수량으로 새로 내지 못했습니다"
+                );
+                Ok(Tried::Blocked(Hold::other(
+                    "남은 수량으로 새로 내지 못했습니다(대기는 그대로)",
+                )))
+            }
             Err(error) => {
-                tracing::warn!(%error, trade = trade.0, "남은 수량으로 새로 내지 못했습니다")
+                tracing::warn!(%error, trade = trade.0, "남은 수량으로 새로 내지 못했습니다");
+                Ok(Tried::Blocked(Hold::other(
+                    "남은 수량으로 새로 내지 못했습니다(대기는 그대로)",
+                )))
             }
         }
-        Ok(Tried::Done)
     }
 
     /// 그 매매의 방 `trade-<번호>`에 서버가 남기는 한 줄(같은 종류는 매매 · 시각마다 겹치지 않는 키).

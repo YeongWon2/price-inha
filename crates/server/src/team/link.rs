@@ -112,6 +112,34 @@ impl Crew {
         }
     }
 
+    /// (17차 5번) 논의 가드가 버려질 때 부르는 정리: 자리 표시를 내린다(`at_table(false)`와 같은 일).
+    /// `Drop`에서는 기다릴 수 없어 작업을 띄워 한다. `done`이 이미 참이면(정상으로 끝나 내렸으면) 하지 않는다.
+    pub(super) fn table_release(
+        &self,
+        done: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Box<dyn FnOnce() + Send> {
+        let office = self.links.get().and_then(|l| l.office.clone());
+        Box::new(move || {
+            if done.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let (Some(office), Ok(runtime)) = (office, tokio::runtime::Handle::try_current())
+            else {
+                return;
+            };
+            runtime.spawn(async move {
+                for role in MEMBERS {
+                    if let Err(error) = office
+                        .set_activity(office_agent(role), Activity::Working)
+                        .await
+                    {
+                        tracing::warn!(%error, "사무실 모습을 바꾸지 못했다");
+                    }
+                }
+            });
+        })
+    }
+
     /// 종목 · 계기로 지난 매매 기록을 자동 회상해 논의 자료로 만든다(V22). 지금 매매는 뺀다.
     ///
     /// 먼저 같은 종목의 팔린 매매를 조건으로 찾고(`recall_by_condition`, 최근 것부터), 모자라면 종목 ·

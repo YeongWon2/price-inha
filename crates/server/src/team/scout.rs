@@ -216,6 +216,10 @@ impl Crew {
 
     /// 뉴스 공시 시세 담당의 턴 하나(답하지 못하면 없음).
     async fn scout_turn(&self, title: &str, input: &str) -> Option<String> {
+        // (17차 4번) 상한이 켜져 있으면 깨우기 턴도 한 번으로 센다. 닿았으면 부르지 않는다(알림은 논의와 같은 그날 한 번).
+        if self.take_ai_call().is_err() {
+            return None;
+        }
         let config = self.role(Role::Scout);
         let limits = pi_agent::TimeLimits::MARKET;
         match self

@@ -73,6 +73,7 @@ pub const DEFAULT_SYMBOLS_WINDOW: Duration = Duration::from_secs(60);
 /// | 키 등록 시도를 세는 시간 | `--register-window-ms <수>` | [`ENV_REGISTER_WINDOW_MS`] | [`DEFAULT_REGISTER_WINDOW`] |
 /// | 종목 등록 시도 횟수 (4차) | `--symbols-attempts <수>` | [`ENV_SYMBOLS_ATTEMPTS`] | [`DEFAULT_SYMBOLS_ATTEMPTS`] |
 /// | 종목 등록 시도를 세는 시간 (4차) | `--symbols-window-ms <수>` | [`ENV_SYMBOLS_WINDOW_MS`] | [`DEFAULT_SYMBOLS_WINDOW`] |
+/// | 하루 AI 호출 상한 (17차) | `--ai-daily-limit <수>` | [`ENV_AI_DAILY_LIMIT`] | 없음(상한 없음) |
 /// | 시연 | `--demo` | 없음 | 끔 |
 ///
 /// 인자가 환경 변수를 이긴다. 비밀 값(키 · 토큰)을 받는 인자와 환경 변수는 없다.
@@ -186,6 +187,14 @@ impl Settings {
             DEFAULT_CALENDAR_RETRY,
         )?;
         let limits = attempt_limits(&given, &pick)?;
+        let ai_daily_limit = match pick(
+            &given.ai_daily_limit,
+            ARG_AI_DAILY_LIMIT,
+            ENV_AI_DAILY_LIMIT,
+        ) {
+            Some((value, name)) => Some(attempts(Some((value, name)), 1)?),
+            None => None,
+        };
         Ok(Settings {
             home,
             bind,
@@ -204,7 +213,7 @@ impl Settings {
             user_home: user_home.map(Path::to_path_buf),
             cli_env: crate::cli_base_env(env),
             log_file: log_file(given.log_file.as_deref())?,
-            ai_daily_limit: None,
+            ai_daily_limit,
         })
     }
 
@@ -347,9 +356,10 @@ const ARG_SYMBOLS_ATTEMPTS: &str = "--symbols-attempts";
 const ARG_SYMBOLS_WINDOW_MS: &str = "--symbols-window-ms";
 const ARG_DEMO: &str = "--demo";
 const ARG_LOG_FILE: &str = "--log-file";
+const ARG_AI_DAILY_LIMIT: &str = "--ai-daily-limit";
 
 /// 읽는 환경 변수 전부.
-const ENV_NAMES: [&str; 13] = [
+const ENV_NAMES: [&str; 14] = [
     ENV_HOME,
     ENV_BIND,
     ENV_PORT,
@@ -363,6 +373,7 @@ const ENV_NAMES: [&str; 13] = [
     ENV_REGISTER_WINDOW_MS,
     ENV_SYMBOLS_ATTEMPTS,
     ENV_SYMBOLS_WINDOW_MS,
+    ENV_AI_DAILY_LIMIT,
 ];
 
 /// 인자로 준 것들(값은 아직 글자 그대로). 같은 인자를 두 번 주면 뒤의 것을 쓴다.
@@ -383,6 +394,7 @@ struct Given {
     symbols_window_ms: Option<String>,
     demo: bool,
     log_file: Option<String>,
+    ai_daily_limit: Option<String>,
 }
 
 impl Given {
@@ -409,6 +421,7 @@ impl Given {
                 ARG_SYMBOLS_ATTEMPTS => (&mut given.symbols_attempts, ARG_SYMBOLS_ATTEMPTS),
                 ARG_SYMBOLS_WINDOW_MS => (&mut given.symbols_window_ms, ARG_SYMBOLS_WINDOW_MS),
                 ARG_LOG_FILE => (&mut given.log_file, ARG_LOG_FILE),
+                ARG_AI_DAILY_LIMIT => (&mut given.ai_daily_limit, ARG_AI_DAILY_LIMIT),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };
