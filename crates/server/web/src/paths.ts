@@ -47,7 +47,17 @@ export const API = {
   notices: "/api/notices",
   dailySummary: "/api/daily-summary",
   approvals: "/api/approvals/",
+  // 템플릿 화면(server 27차): 읽기 `GET` · 고르기 `POST` · 값 맞추기 `POST`. 멈추기는 [`templateStopPath`].
+  templatesView: "/api/templates/current",
+  templates: "/api/templates",
+  templatesAdjust: "/api/templates/adjust",
 } as const;
+
+/** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
+export function templateStopPath(id: number | string): string {
+  void id;
+  throw new Error("todo");
+}
 
 /**
  * 사무실 담당 외형(server 20차 4번): 읽기 `GET` · 바꾸기 `POST`. 사무실 경로([`API.office`]) 아래에 둔다.
@@ -81,7 +91,16 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
   // 관리 화면 넷(server 26차 4번): 이 차수의 틀은 세션만 얻는다(내용은 뒤 차수).
   account: [API.session],
-  templates: [API.session],
+  // 템플릿 화면(server 27차 4번): 읽기 · 고르기 · 값 맞추기 · 멈추기, "실전 운용 시작"은 승인 카드 읽기 · 승인.
+  templates: [
+    API.session,
+    API.templatesView,
+    API.templates,
+    API.templatesAdjust,
+    "/api/templates/{id}/stop",
+    "/api/approvals/{id}",
+    "/api/approvals/{id}/approve",
+  ],
   rules: [API.session],
   history: [API.session],
 };

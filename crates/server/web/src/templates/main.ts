@@ -1,6 +1,6 @@
-// 관리 화면 · 템플릿(server 26차 4번): 메뉴 · 제목 · "준비 중" 빈 상태만 그린다(내용은 뒤 차수).
+// 관리 화면 · 템플릿(server 27차 3번): 메뉴와 템플릿 화면(고르기 · 값 맞추기 · 상태 · 승격 기준 · 판 이력 · 멈추기).
 import { mountMenu } from "../ui/menu";
-import { mountAdminFrame } from "../ui/admin";
+import { mountTemplates } from "./screen";
 
 mountMenu(document.getElementById("menu"), "templates");
-void mountAdminFrame(document.getElementById("screen"));
+void mountTemplates(document.getElementById("screen"));

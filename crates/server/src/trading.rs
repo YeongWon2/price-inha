@@ -107,7 +107,53 @@ pub const TEMPLATE_PATH: &str = "/api/templates";
 /// `sector_weight_pct` · `min_cash_pct` · `auto_order_limit_pct`(퍼센트 단위). 모르는 칸 · 읽을 수 없는 값은
 /// 400 `{"error": "invalid_input"}`. 절대 상한을 넘거나 아래쪽 경계를 어기면(`pi_template::adjust`의 거부)
 /// 400 `{"error": `[`TEMPLATE_OVER_CAP`]`, "fields": [어긴 칸의 받는 이름(위 목록의 글자)]}`(E5)이고 새 판을 만들지 않는다.
+///
+/// (21차 1번 · 27차 3번 나) 실전중 템플릿의 위험을 키우는 바꾸기는 200
+/// `{"state": "needs_approval", "proposal": 개선안 번호, "widened": [키운 칸], "number": 승인 번호 글자}`다.
+/// `number`는 그 개선안의 승인 요청 번호다(화면이 "승인 뒤 다음 거래일부터"와 함께 보인다).
 pub const TEMPLATE_ADJUST_PATH: &str = "/api/templates/adjust";
+
+/// (27차 1번 · C28) 템플릿 화면 읽기. `GET`, 세션이 있어야 한다(원격은 세션 없이 401) →
+/// 200 `{"current": 쓰는 템플릿 번호 | null, "templates": [템플릿, …]}`. 템플릿이 없으면 `{"current": null, "templates": []}`.
+///
+/// `current`는 쓰는 템플릿(가장 나중에 고른 것, 상태를 가리지 않는다)이다. `templates`는 번호 순서(작은 것부터)이고
+/// 템플릿 하나는:
+///
+/// ```text
+/// {
+///   "id": 번호,
+///   "style": "day_trade" | "swing" | "long_term",
+///   "state": "simulating" | "promotion_pending" | "live" | "stopped",
+///   "revision": 지금 판 번호,
+///   "fields": [{"key", "value", "cap": 십진수 글자 | null, "editable": 참 | 거짓}],
+///   "revisions": [{"revision", "at": 유닉스 밀리초, "changes": [{"key", "before", "after", "widened"}],
+///                  "proposal": 개선안 번호 | null}],
+///   "promotion": [{"criterion": "trades" | "trading_days" | "net_pnl" | "max_drawdown" | "out_of_sample",
+///                  "need": 십진수 글자, "have": 십진수 글자 | null, "met": 참 | 거짓}],
+///   "approval": 기다리는 실전 승격 승인 번호 글자 | null
+/// }
+/// ```
+///
+/// - `fields`는 `pi_template::template_view`의 칸(순서 · 키 · 값 · 상한)이고, `editable`은 모의중일 때만 참이다
+///   (승격대기 · 실전중 · 멈춤은 잠겨 모두 거짓).
+/// - `revisions`는 `pi_store::Store::template_history`의 판 순서다. `changes`는 앞 판과의 차이
+///   (`pi_template::diff_params`, 첫 판은 빈 목록)이고 `proposal`은 사용자 변경 개선안으로 생긴 판의 개선안 번호다.
+/// - `promotion`은 `pi_template::promotion_lines`(그 템플릿의 승격 기준 · 그 템플릿을 만든 뒤의 모의 결과)다.
+/// - `approval`은 승격대기일 때 기다리는 실전 승격 승인 요청의 번호다(화면의 "실전 운용 시작"이 지금 승인 카드
+///   길 [`crate::APPROVAL_PATH`] · [`crate::APPROVAL_DECIDE_PATH`]로 잇는다). 그 밖의 상태는 `null`.
+pub const TEMPLATES_VIEW_PATH: &str = "/api/templates/current";
+
+/// (27차 2번 · F6-9a · E58) 실전 템플릿 멈추기. `POST /api/templates/{id}/stop`, 몸통 없음. 세션과 같은 출처가 있어야
+/// 한다. 승인을 거치지 않고 바로 한다.
+///
+/// - 실전중이면 멈춤으로 옮긴다(사용자 멈춤 전이, `pi_store::Store::stop_template`): 200 `{"id", "state": "stopped"}`.
+/// - 실전중이 아니면(모의중 · 승격대기 · 멈춤) 409 `{"error": `[`TEMPLATE_NOT_LIVE`]`, "state": 지금 상태 글자}`이고 그대로다.
+/// - 없는 번호는 404 `{"error": "not_found"}`, 번호로 읽을 수 없으면 400 `{"error": "invalid_input"}`.
+/// - 멈춘 뒤 다시 실전으로 가는 길은 없다(새로 고른다).
+pub const TEMPLATE_STOP_PATH: &str = "/api/templates/{id}/stop";
+
+/// 템플릿 멈추기 거부: 실전중이 아니다.
+pub const TEMPLATE_NOT_LIVE: &str = "not_live";
 
 /// 다시 시작 거부: 필수 키를 먼저 다시 등록해야 한다(E9).
 pub const RESTART_KEYS_REQUIRED: &str = "keys_required";

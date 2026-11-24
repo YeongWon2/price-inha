@@ -33,8 +33,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// 27차 3번: 템플릿 화면에는 내용이 생긴다(template-screen.test.ts) — "준비 중" 틀 단언은 나머지 셋에만.
+const FRAMES = ADMIN.filter(([screen]) => screen !== "templates");
+
 describe("관리 화면 틀", () => {
-  for (const [screen, label, href] of ADMIN) {
+  for (const [screen, label, href] of FRAMES) {
     it(`${label} 화면은 메뉴 · 제목 · "준비 중" 빈 상태를 그린다`, async () => {
       // 검증: V75 F12
       const html = PAGES[`../../web/${screen}/index.html`];
