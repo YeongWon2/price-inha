@@ -157,6 +157,11 @@ pub struct TeamWiring {
     pub reembed_interval: std::time::Duration,
     /// (10차 10c 13번) 한 걸음에서 다시 만드는 조각 수 상한. 기본 [`DEFAULT_REEMBED_BATCH`].
     pub reembed_batch: usize,
+    /// (16차 3번) 하루 AI 호출 상한: 한국 시각 하루 안에 팀 논의 · 깨우기로 AI를 부른 횟수의 상한.
+    /// 비우면(`None`, 기본) 상한이 없다(스펙 그대로). 켜져 있고 상한에 닿으면 그날 남은 논의 · 깨우기를 쉬고
+    /// 사용자에게 한 번 알린다. 손절 · 청산 · 이상 감지 · 한도 판단은 AI를 부르지 않아 그대로 돈다.
+    /// 센 횟수는 저장돼 다시 켜도 그날 안에서는 이어진다.
+    pub ai_daily_limit: Option<u32>,
 }
 
 /// 공식 조립이 아는 종목 → DART 고유번호(시가총액이 큰 국내 종목). 표에 없는 종목은 공시 · 재무를 받지
@@ -192,6 +197,7 @@ impl TeamWiring {
             dart_daily_limit: DEFAULT_DART_DAILY_LIMIT,
             reembed_interval: DEFAULT_REEMBED_INTERVAL,
             reembed_batch: DEFAULT_REEMBED_BATCH,
+            ai_daily_limit: None,
         }
     }
 }

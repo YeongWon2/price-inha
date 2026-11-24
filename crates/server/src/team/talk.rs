@@ -1,6 +1,8 @@
 //! 매매 논의(T9 · T10): 새 공시 보기와 종목 하나의 논의.
 
 use std::sync::atomic::Ordering;
+#[cfg(test)]
+use std::sync::{Arc, atomic::AtomicUsize};
 
 use pi_agent::{DiscussionLimits, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
@@ -15,6 +17,34 @@ use crate::TeamError;
 
 /// 논의에 나오는 담당(명단 순서). 매매 담당은 판단 뒤 주문 안 턴에만 나온다.
 pub(super) const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, Role::Leader];
+
+/// (16차 5번 뼈대) N2: `#[cfg(test)]`를 지우고 `Crew::discuss_symbol`의 `fetch_add` · `fetch_sub`를 이 가드로 바꾼다.
+///
+/// 열려 있는 논의의 수를 세는 가드: 만들면 수가 하나 늘고, 버려지면(끝 · panic · 취소) 하나 준다.
+/// 뜻 검색 다시 만들기는 이 수가 0일 때만 돈다([`crate::Crew::discussing`]). `fetch_add` → 논의 → `fetch_sub`를
+/// 손으로 짝지으면 논의가 panic · 취소됐을 때 수가 영영 줄지 않아 다시 만들기가 쉬지 않는다.
+#[cfg(test)]
+pub(super) struct DiscussingGuard {
+    /// 세는 수(지켜보는 쪽과 함께 쓴다).
+    count: Arc<AtomicUsize>,
+}
+
+#[cfg(test)]
+impl DiscussingGuard {
+    /// 논의 하나를 열었다고 세고, 버려지면 되돌리는 가드를 돌려준다.
+    pub(super) fn enter(count: &Arc<AtomicUsize>) -> Self {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+impl Drop for DiscussingGuard {
+    /// 센 것을 되돌린다(panic · 취소로 버려져도).
+    fn drop(&mut self) {
+        let _count = &self.count;
+        todo!()
+    }
+}
 
 /// 그 매매의 논의 방 이름.
 fn request_room(trade: TradeId) -> String {
@@ -175,5 +205,81 @@ impl Crew {
             self.store.attach_trade_facts(trade, &ids)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::time::Duration;
+
+    use super::*;
+
+    fn count() -> Arc<AtomicUsize> {
+        Arc::new(AtomicUsize::new(0))
+    }
+
+    // 16차 5번: N2가 약하게 하면 안 되는 시험들이다(가드 하나로 끝 · 둘 · panic · 취소를 모두 본다).
+    #[test]
+    fn 가드는_만들면_수가_하나_늘고_버려지면_하나_준다() {
+        let count = count();
+        let guard = DiscussingGuard::enter(&count);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        drop(guard);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 가드가_여럿이면_버려진_만큼만_준다() {
+        let count = count();
+        let first = DiscussingGuard::enter(&count);
+        let second = DiscussingGuard::enter(&count);
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        drop(first);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        drop(second);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 가드를_쥔_채_panic해도_수가_줄어든다() {
+        let count = count();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = DiscussingGuard::enter(&count);
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            panic!("논의 도중 panic");
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "panic으로 풀려도 수가 돌아온다"
+        );
+    }
+
+    #[tokio::test]
+    async fn 가드를_쥔_채_기다리던_작업을_취소하면_수가_줄어든다() {
+        let count = count();
+        let held = Arc::clone(&count);
+        let task = tokio::spawn(async move {
+            let _guard = DiscussingGuard::enter(&held);
+            // 끝나지 않는 논의(AI 답을 영영 기다린다).
+            std::future::pending::<()>().await;
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while count.load(Ordering::SeqCst) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "작업이 가드를 쥐어야 한다"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        task.abort();
+        let _cancelled = task.await;
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "취소로 버려져도 수가 돌아온다"
+        );
     }
 }

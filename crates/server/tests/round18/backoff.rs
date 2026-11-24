@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use pi_paper::Fault;
-use price_inha::{DemoTurn, NOTICES_PATH};
+use price_inha::{DemoTurn, NOTICES_PATH, TRADE_ROOM_PREFIX};
 use serde_json::json;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -19,6 +19,8 @@ use crate::common::{Bench, ENTRY, HYNIX, Plan, STEP, STOP, get, kst, monday, plu
 
 /// 손절을 다시 내지 못할 때의 알림(지시서 글자 그대로).
 const STUCK_STOP: &str = "손절을 다시 내지 못하고 있습니다";
+/// 전체 정지로 팀장 팔기 대기를 거둘 때 그 매매의 방에 남기는 글(16차 1번, 지시서 글자 그대로).
+const WITHDRAWN: &str = "전체 정지로 팀장 팔기 다시 내기를 거둠";
 /// 1초씩 넣는 시세의 수(물러서기가 없으면 걸음마다 여러 번 점검한다).
 const TICKS: usize = 120;
 /// 120초 동안 물러서며 다시 볼 때의 점검 수(1 · 2 · 4 · … · 64초)에 여유를 둔 상한.
@@ -84,6 +86,18 @@ impl<'a> MakeWriter<'a> for Captured {
     }
 }
 
+/// 그 매매의 방에 남은 줄 가운데 팀장 팔기 대기를 거뒀다는 줄의 수.
+fn withdrawn_lines(bench: &Bench, trade: pi_store::TradeId) -> usize {
+    let room = format!("{TRADE_ROOM_PREFIX}{}", trade.0);
+    bench
+        .store()
+        .room_events(&room, 0, 1000)
+        .unwrap()
+        .iter()
+        .filter(|event| event.payload.to_string().contains(WITHDRAWN))
+        .count()
+}
+
 /// 알림 목록 가운데 손절을 다시 내지 못한다는 것들(제목 + 본문).
 async fn stuck_notices(bench: &Bench) -> Vec<String> {
     let reply = get(bench.addr(), &format!("{NOTICES_PATH}?after=0&max=200")).await;
@@ -95,7 +109,9 @@ async fn stuck_notices(bench: &Bench) -> Vec<String> {
         .collect()
 }
 
-// 검증: E30 E13 F4 C10
+// 16차 1번으로 고침: 전체 정지가 되면 막힌 팀장 팔기 대기는 지워져 다시 점검하지 않는다(이름은 그대로 둔다).
+// 16차 1번으로 고침: 전체 정지가 되면 막힌 팀장 팔기 대기는 지워져 다시 점검하지 않는다(이름은 그대로 둔다).
+// 검증: E30 E13 F4 C10 E34 C8
 #[tokio::test]
 async fn 전체_정지_중_막힌_팀장_팔기_대기는_1초마다_다시_점검하지_않고_물러선다() {
     let bench = Plan::demo().start(kst(monday(), 10, 0)).await;
@@ -112,7 +128,7 @@ async fn 전체_정지_중_막힌_팀장_팔기_대기는_1초마다_다시_점�
     let _failed = bench.crew().discuss(HYNIX, "실적 전망 하향 공시").await;
     assert_eq!(bench.pending_sells(held).len(), 1, "팀장 팔기가 기다린다");
 
-    // 전체 정지가 되면 팀장 팔기는 규칙에 막힌다(손절 · 청산만 나간다). 계좌는 돌아왔다.
+    // 전체 정지가 되면 팀장 팔기 대기는 거둔다(손절 · 청산만 나간다, 16차 1번). 계좌는 돌아왔다.
     bench.full_stop();
     bench.trading().paper().set_fault(None);
     let captured = Captured::global();
@@ -131,14 +147,18 @@ async fn 전체_정지_중_막힌_팀장_팔기_대기는_1초마다_다시_점�
         bench.sells(HYNIX).await.is_empty(),
         "막힌 팀장 팔기는 나가지 않는다"
     );
+    assert!(
+        bench.pending_sells(held).is_empty(),
+        "전체 정지가 되면 팀장 팔기 다시 내기 대기는 지워진다"
+    );
     assert_eq!(
-        bench.pending_sells(held).len(),
+        withdrawn_lines(&bench, held),
         1,
-        "막힌 팀장 팔기는 그대로 기다린다"
+        "거뒀다는 줄은 그 매매의 방에 한 번만 남는다(점검이 되풀이돼도 늘지 않는다)"
     );
     assert!(
         lines <= MAX_RECORDS,
-        "막힌 다시 내기는 물러서며 다시 보고 같은 까닭은 한 번만 남긴다: 기록 {lines}줄"
+        "대기가 없으니 다시 점검하며 기록을 쌓지 않는다: 기록 {lines}줄"
     );
     bench.close().await;
 }
