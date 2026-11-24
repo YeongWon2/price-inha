@@ -1,4 +1,5 @@
 //! 폰 경로(세션이 있어야 열린다): 푸시 공개키 · 구독 · 알림 목록 · 승인 카드 · 승인/거절 · 하루 정리.
+//! 히스토리 화면의 경로(29차)도 같은 상태로 함께 끼운다([`super::history_http`]).
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -10,12 +11,13 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use pi_notify::NewSubscription;
+use pi_store::Store;
 use serde_json::{Value, json};
 use url::{Host, Url};
 
 use super::linked::Linked;
 use super::office_http::reply;
-use super::summary::daily_summary;
+use super::summary::{daily_summary, parse_date};
 use super::{
     APPROVAL_DECIDE_PATH, APPROVAL_PATH, DAILY_SUMMARY_PATH, NOTICES_PATH, PUSH_KEY_PATH,
     PUSH_SUBSCRIBE_PATH, SUBSCRIBE_REFUSED,
@@ -28,13 +30,22 @@ pub(crate) struct Phone {
     pub(crate) linked: Arc<Linked>,
     pub(crate) trading: Arc<Trading>,
     pub(crate) crew: Option<Arc<Crew>>,
+    /// (29차) 히스토리 조회(매매 목록 · 매매 하나 · 승인 요청 기록)를 읽는 저장소.
+    pub(crate) store: Store,
 }
 
-fn refuse(status: StatusCode, error: &str) -> Response {
+impl Phone {
+    /// 승인 요청 사유를 사람에게 보일 글로: 비밀 값을 가린다. 승인 카드와 승인 기록이 함께 쓴다.
+    pub(crate) fn shown_reason(&self, reason: &str) -> String {
+        self.linked.secrets.redact(reason)
+    }
+}
+
+pub(super) fn refuse(status: StatusCode, error: &str) -> Response {
     reply(status, json!({ "error": error }))
 }
 
-fn internal_error(error: impl std::fmt::Display) -> Response {
+pub(super) fn internal_error(error: impl std::fmt::Display) -> Response {
     tracing::warn!(%error, "폰 요청을 처리하지 못했습니다");
     refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal")
 }
@@ -153,7 +164,7 @@ async fn approval(State(phone): State<Arc<Phone>>, Path(id): Path<String>) -> Re
             StatusCode::OK,
             json!({
                 "number": view.number.as_str(),
-                "summary": phone.linked.secrets.redact(&view.reason),
+                "summary": phone.shown_reason(&view.reason),
                 "fingerprint": view.fingerprint.as_str(),
                 "short_code": view.short_code,
                 "status": approval_status_word(view.status),
@@ -195,8 +206,18 @@ async fn decide(
     }
 }
 
-async fn summary(State(phone): State<Arc<Phone>>) -> Response {
-    match daily_summary(&phone.linked, &phone.trading, phone.crew.as_ref()).await {
+/// `?date=YYYY-MM-DD`(29차): 없으면 오늘, 틀린 글자면 400.
+async fn summary(State(phone): State<Arc<Phone>>, RawQuery(query): RawQuery) -> Response {
+    let mut date = None;
+    for (key, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
+        if key == "date" && date.is_none() {
+            let Some(parsed) = parse_date(&value) else {
+                return refuse(StatusCode::BAD_REQUEST, "invalid_input");
+            };
+            date = Some(parsed);
+        }
+    }
+    match daily_summary(&phone.linked, &phone.trading, phone.crew.as_ref(), date).await {
         Ok(body) => reply(StatusCode::OK, body),
         Err(error) => internal_error(error),
     }
@@ -211,5 +232,6 @@ pub(crate) fn routes(phone: Arc<Phone>) -> Router {
         .route(APPROVAL_PATH, get(approval))
         .route(APPROVAL_DECIDE_PATH, post(decide))
         .route(DAILY_SUMMARY_PATH, get(summary))
+        .merge(super::history_http::routes())
         .with_state(phone)
 }

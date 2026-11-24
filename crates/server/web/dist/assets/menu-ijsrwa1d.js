@@ -39,8 +39,14 @@ var API = {
 	templatesAdjust: "/api/templates/adjust",
 	rules: "/api/rules",
 	proposals: "/api/proposals",
-	proposalAnswer: "/api/proposals/answer"
+	proposalAnswer: "/api/proposals/answer",
+	trades: "/api/trades",
+	approvalLog: "/api/approvals"
 };
+/** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
+function tradePath(id) {
+	return API.trades + "/" + encodeURIComponent(String(id));
+}
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
 function templateStopPath(id) {
 	return API.templates + "/" + encodeURIComponent(String(id)) + "/stop";
@@ -72,7 +78,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session;
+], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session, API.trades, API.dailySummary, API.approvalLog;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));
@@ -124,4 +130,4 @@ function mountMenu(slot, current) {
 	if (here && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, here.offsetLeft - nav.clientWidth / 2 + here.offsetWidth / 2);
 	return nav;
 }
-export { approvalPath as a, SCREEN_ROOTS as i, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, templateStopPath as s, mountMenu as t };
+export { approvalPath as a, tradePath as c, SCREEN_ROOTS as i, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, templateStopPath as s, mountMenu as t };

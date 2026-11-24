@@ -65,6 +65,7 @@ pub(super) fn session_parts(
         linked: Arc::clone(linked),
         trading: Arc::clone(trading),
         crew: crew.cloned(),
+        store: store.clone(),
     });
     let alert: Arc<dyn LockAlert> = Arc::new(LockNotices(Arc::clone(linked)));
     (
@@ -202,7 +203,7 @@ fn close_hook(
                 return;
             };
             let crew = crew.and_then(|c| c.upgrade());
-            match daily_summary(&linked, &trading, crew.as_ref()).await {
+            match daily_summary(&linked, &trading, crew.as_ref(), None).await {
                 Ok(summary) => {
                     let body = format!(
                         "{} · {}",

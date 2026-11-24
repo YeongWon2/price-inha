@@ -1,0 +1,155 @@
+/*
+ * 히스토리 화면 모양(server 29차 2번): 탭 · 매매 목록과 펼친 근거 · 하루 정리 · 승인 기록. 토큰(var(--…))만 쓴다.
+ * 목록은 머리 줄과 같은 칸 격자로 줄을 맞춘다. 폰 폭에서는 줄마다 두 단으로 접혀 화면을 가로로 밀지 않는다.
+ */
+
+/* 탭 */
+.his-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunk);
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.his-tab {
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.his-tab:hover { color: var(--text); }
+.his-tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-sm); }
+.his-tab:focus-visible, .his-row:focus-visible, .his-panel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.his-panel { min-width: 0; }
+.his-panel > .ui-card { margin: 0; min-width: 0; }
+.ui-card > .his-lead { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+
+/* 거르기 · 날짜 */
+.his-filter { display: inline-flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); font-size: var(--font-size-sm); }
+.his-filter-label { color: var(--text-muted); font-weight: 600; }
+.his-select, .his-date { width: auto; min-width: 10em; }
+
+/* 목록(머리 줄과 같은 격자) */
+.his-table { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.his-list { margin: 0; padding: 0; list-style: none; }
+.his-head, .his-row {
+  display: grid;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.his-trade-cols { grid-template-columns: 3.5em minmax(5em, 1fr) 6.5em 9.5em 9.5em 1em; }
+.his-approval-cols { grid-template-columns: 7em 5em minmax(0, 1fr) 12.5em; }
+.his-head {
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.his-list > li + li { border-top: 1px solid var(--border); }
+.his-row { width: 100%; min-height: 44px; font-size: var(--font-size-sm); color: var(--text); }
+button.his-row {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+button.his-row:hover { background: var(--surface-sunk); }
+.his-trade[data-open="true"] > .his-row, .his-row[aria-expanded="true"] { background: var(--accent-soft); }
+.his-num { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.his-symbol { font-weight: 700; font-variant-numeric: tabular-nums; }
+.his-time { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.his-cell-state { min-width: 0; }
+.his-chevron { justify-self: end; width: .55em; height: .55em; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(45deg); }
+.his-row[aria-expanded="true"] .his-chevron { transform: rotate(-135deg); }
+
+/* 펼친 근거 */
+.his-detail, .his-detail-wait { padding: var(--space-3) var(--space-4) var(--space-4); background: var(--bg); border-top: 1px dashed var(--border); }
+.his-detail-wait > * { margin: 0; }
+.his-detail > .his-side { margin: 0 0 var(--space-4); font-weight: 600; }
+.his-detail-parts { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-4); }
+.his-detail-title { margin: 0 0 var(--space-2); color: var(--text-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.his-basis { margin: 0; display: grid; gap: var(--space-1); }
+.his-basis-line { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: var(--space-3); padding: var(--space-1) 0; }
+.his-basis-line + .his-basis-line { border-top: 1px solid var(--border); }
+.his-basis dt { color: var(--text-muted); font-size: var(--font-size-sm); font-weight: 600; }
+.his-basis dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.his-items { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.his-items-scores { flex-direction: column; gap: 2px; }
+.his-items-facts > .his-item {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunk);
+  font-size: var(--font-size-sm);
+}
+.his-flow { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.his-step { display: grid; grid-template-columns: 0.75em minmax(0, 1fr); column-gap: var(--space-2); align-items: baseline; }
+.his-step::before { content: ""; width: .6em; height: .6em; border-radius: var(--radius-pill); background: var(--accent); }
+.his-step:last-child::before { box-shadow: 0 0 0 3px var(--accent-soft); }
+.his-step-label { font-weight: 600; }
+.his-step-at { grid-column: 2; color: var(--text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+
+/* 승인 기록 */
+.his-approval-summary { min-width: 0; overflow-wrap: anywhere; }
+.his-times { display: grid; }
+.his-closed { font-size: var(--font-size-sm); }
+
+/* 하루 정리 */
+.his-summary { display: grid; gap: var(--space-3); }
+.his-summary-date { margin: 0; font-size: var(--font-size-lg); font-weight: 700; }
+.his-summary-part { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.his-summary-title { margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.his-summary-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+
+/* 더 보기 · 빈 상태 · 읽기 실패 */
+.his-foot:not(:empty) { display: flex; justify-content: center; margin-top: var(--space-3); }
+.his-list-body > .ui-empty { padding: var(--space-4); }
+.his-failed { display: grid; gap: var(--space-3); justify-items: start; }
+
+/* 폰 폭: 목록 줄은 두 단으로 접고, 근거는 한 단으로 쌓는다. */
+@media (max-width: 600px) {
+  .his-tabs { width: 100%; }
+  .his-tab { flex: 1 0 auto; padding: 0 var(--space-3); }
+  .his-head { display: none; }
+  .his-trade-cols {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "num symbol state" "time time chevron";
+    row-gap: var(--space-1);
+  }
+  .his-trade-cols > .his-num { grid-area: num; }
+  .his-trade-cols > .his-symbol { grid-area: symbol; }
+  .his-trade-cols > .his-cell-state { grid-area: state; }
+  .his-trade-cols > [data-role="time"] { grid-area: time; }
+  .his-trade-cols > .his-decided { display: none; }
+  .his-trade-cols > .his-chevron { grid-area: chevron; }
+  .his-approval-cols {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "number status" "summary summary" "times times";
+    row-gap: var(--space-1);
+  }
+  .his-approval-cols > .his-number { grid-area: number; }
+  .his-approval-cols > .his-cell-state { grid-area: status; }
+  .his-approval-cols > .his-approval-summary { grid-area: summary; }
+  .his-approval-cols > .his-times { grid-area: times; display: flex; flex-wrap: wrap; gap: 0 var(--space-3); }
+  .his-detail, .his-detail-wait { padding: var(--space-3); }
+  .his-detail-parts { grid-template-columns: minmax(0, 1fr); }
+  .his-basis-line { grid-template-columns: 5em minmax(0, 1fr); }
+}

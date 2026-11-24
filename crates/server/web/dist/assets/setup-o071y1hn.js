@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-fj8wu6yl.js";
+import { n as API, t as mountMenu } from "./menu-ijsrwa1d.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */

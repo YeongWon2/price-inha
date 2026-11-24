@@ -37,6 +37,7 @@ use std::time::Duration;
 
 mod assets;
 mod backup_http;
+mod history_http;
 mod linked;
 mod looks_http;
 mod office_http;

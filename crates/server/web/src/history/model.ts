@@ -159,25 +159,68 @@ export interface ApprovalRow {
   consumed: string | null;
 }
 
+/** 매매 상태 글자 → 스펙의 이름. */
+const TRADE_STATE_LABELS: Readonly<Record<string, string>> = {
+  discussing: "논의중",
+  judged: "판단됨",
+  awaiting_approval: "승인대기",
+  blocked: "막힘",
+  ordered: "주문됨",
+  holding: "보유중",
+  sold: "팔림",
+  reviewed: "복기됨",
+};
+
+/** 승인 요청 결과 글자 → 보이는 글. */
+const APPROVAL_STATUS_LABELS: Readonly<Record<string, string>> = {
+  pending: "기다림",
+  approved: "승인",
+  rejected: "거절",
+  no_answer: "답 없음",
+  expired: "만료",
+};
+
+/** 한국 시각(UTC+9)의 밀리초 차이. */
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** 근거 요약 줄의 칸과 이름(F7-7 차례). */
+const BASIS_LABELS: readonly (readonly [BasisKey, string])[] = [
+  ["hypothesis", "가설"],
+  ["trigger", "계기"],
+  ["entry", "진입"],
+  ["stop", "손절"],
+  ["target", "목표"],
+  ["scores", "담당 점수"],
+  ["facts", "자료"],
+];
+
+/** 표에서 그 글자의 글을 찾는다. 없으면 글자 그대로. */
+function labelOf(table: Readonly<Record<string, string>>, word: string): string {
+  return Object.prototype.hasOwnProperty.call(table, word) ? table[word] : word;
+}
+
 /**
  * 매매 상태 글(스펙의 매매 상태 이름): 논의중 · 판단됨 · 승인대기 · 막힘 · 주문됨 · 보유중 · 팔림 · 복기됨.
  * 모르는 글자는 그대로.
  */
 export function tradeStateLabel(state: string): string {
-  void state;
-  throw new Error("todo");
+  return labelOf(TRADE_STATE_LABELS, state);
 }
 
 /** 승인 요청 결과 글: 기다림 · 승인 · 거절 · 답 없음 · 만료. 모르는 글자는 그대로. */
 export function approvalStatusLabel(status: string): string {
-  void status;
-  throw new Error("todo");
+  return labelOf(APPROVAL_STATUS_LABELS, status);
 }
 
 /** 매매 방향 글: 사기 · 팔기, 없으면 [`NONE_TEXT`]. */
 export function sideText(side: string | null): string {
-  void side;
-  throw new Error("todo");
+  if (side === "buy") return "사기";
+  if (side === "sell") return "팔기";
+  return side === null ? NONE_TEXT : side;
+}
+
+function two(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 /**
@@ -185,31 +228,60 @@ export function sideText(side: string | null): string {
  * 예: `Date.UTC(2026, 10, 15, 15, 0)` → `"2026-11-16 00:00"`.
  */
 export function timeText(ms: number): string {
-  void ms;
-  throw new Error("todo");
+  const at = new Date(ms + KST_OFFSET_MS);
+  const date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`;
+  return `${date} ${two(at.getUTCHours())}:${two(at.getUTCMinutes())}`;
+}
+
+/** 정수 부분 글자에 세 자리마다 쉼표. */
+function grouped(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 /**
  * 십진수 금액 글자 → 그 시장 돈 모양. 원화(`KRW`)는 천 단위 쉼표와 "원"(`"100000"` → `"100,000원"`,
  * `"-5000"` → `"-5,000원"`), 달러(`USD`)는 "$"와 천 단위 쉼표 · 소수 둘째 자리(`"1234.5"` → `"$1,234.50"`,
  * `"-12"` → `"-$12.00"`). 없으면 [`NONE_TEXT`]. 모르는 통화는 수 글 뒤에 통화 글자.
+ * 부동소수점으로 바꾸지 않고 글자로만 다룬다.
  */
 export function moneyText(value: string | null, currency: string): string {
-  void value;
-  void currency;
-  throw new Error("todo");
+  if (value === null) return NONE_TEXT;
+  const shape = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!shape) return value;
+  const sign = shape[1] === "-" ? "-" : "";
+  const whole = grouped(shape[2]);
+  const fraction = shape[3] ?? "";
+  if (currency === "USD") return `${sign}$${whole}.${(fraction + "00").slice(0, 2)}`;
+  const number = fraction ? `${whole}.${fraction}` : whole;
+  if (currency === "KRW") return `${sign}${number}원`;
+  return `${sign}${number} ${currency}`;
 }
 
 /** 매매 목록의 줄(응답 차례). */
 export function tradeRows(reply: TradesReply): TradeRow[] {
-  void reply;
-  throw new Error("todo");
+  return reply.trades.map((item) => ({
+    id: item.id,
+    symbol: item.symbol,
+    state: item.state,
+    stateLabel: tradeStateLabel(item.state),
+    created: timeText(item.created_at),
+    updated: timeText(item.updated_at),
+    decided: item.decided_at === null ? null : timeText(item.decided_at),
+  }));
 }
 
 /** 상태 흐름의 줄(응답 차례 = 시각 순서). */
 export function flowRows(detail: TradeDetail): FlowRow[] {
-  void detail;
-  throw new Error("todo");
+  return detail.states.map((change) => ({
+    state: change.state,
+    label: tradeStateLabel(change.state),
+    at: timeText(change.at),
+  }));
+}
+
+/** 글이 비었으면 [`NONE_TEXT`]. */
+function orNone(text: string | null): string {
+  return text === null || text.trim() === "" ? NONE_TEXT : text;
 }
 
 /**
@@ -220,12 +292,30 @@ export function flowRows(detail: TradeDetail): FlowRow[] {
  * - 값이 없으면 [`NONE_TEXT`].
  */
 export function basisLines(detail: TradeDetail): BasisLine[] {
-  void detail;
-  throw new Error("todo");
+  const basis = detail.basis;
+  const names = [...new Set([...detail.facts, ...basis.sources.map((source) => source.name)])];
+  const text: Record<BasisKey, string> = {
+    hypothesis: orNone(basis.hypothesis),
+    trigger: orNone(basis.trigger),
+    entry: moneyText(basis.entry, detail.currency),
+    stop: moneyText(basis.stop, detail.currency),
+    target: moneyText(basis.target, detail.currency),
+    scores: orNone(basis.scores.map((s) => `${s.role} ${s.score}점 — ${s.reason}`).join(" · ")),
+    facts: orNone(names.join(" · ")),
+  };
+  return BASIS_LABELS.map(([key, label]) => ({ key, label, text: text[key] }));
 }
 
 /** 승인 기록의 줄(응답 차례). */
 export function approvalRows(reply: ApprovalsReply): ApprovalRow[] {
-  void reply;
-  throw new Error("todo");
+  return reply.approvals.map((item) => ({
+    id: item.id,
+    number: item.number,
+    summary: item.summary,
+    status: item.status,
+    statusLabel: approvalStatusLabel(item.status),
+    created: timeText(item.created_at),
+    resolved: item.resolved_at === null ? null : timeText(item.resolved_at),
+    consumed: item.consumed_at === null ? null : timeText(item.consumed_at),
+  }));
 }
