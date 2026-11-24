@@ -111,7 +111,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
 .bubble-lane { position: absolute; top: 8px; right: 8px; bottom: 56px; display: flex; flex-direction: column; align-items: flex-end;
   gap: 6px; overflow: hidden; pointer-events: none; }
 .bubble-lane .bubble { position: static; transform: none !important; }
-.bubble-lane .bubble::before { content: attr(data-name) " · "; font-weight: 600; }
+/* 원본처럼 모든 말풍선은 "이름 · 글"(머리에서 비켜 놓여도 누구 말인지 보인다). */
+.bubble::before { content: attr(data-name) " · "; font-weight: 600; }
 .msg.talk .topic { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 #light-list .said { display: block; margin-top: 4px; color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-color-scheme: dark) {

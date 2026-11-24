@@ -1,4 +1,4 @@
-import { i as placeBubbles, n as LOOKS, r as bubbleWidth, t as DEFAULT_LOOKS } from "./office-bafqxbf7.js";
+import { i as placeBubbles, n as LOOKS, r as bubbleWidth, t as DEFAULT_LOOKS } from "./office-b787iagh.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors

@@ -1088,7 +1088,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-cpwmtnga.js");
+		const { webglAvailable, createScene } = await import("./scene3d-kk84ga02.js");
 		return {
 			webglAvailable,
 			createScene
