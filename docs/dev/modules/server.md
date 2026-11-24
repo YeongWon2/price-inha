@@ -780,3 +780,14 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 
 - 원본 동작 근거: 원본에 없음(우리 화면) — additions.md R18 · F12 · N21, 결정 17. 색은 `docs/research/deskrpg.md` 11절의 원본 색.
 - 시험으로 확인할 것(V75~V77): 화면 여덟 개의 HTML에 같은 메뉴 여섯 항목 · 지금 화면에 `aria-current` / 새 화면 넷이 세션 없이는 막히고 세션이 있으면 200(Rust) / 경로 표(`screen-paths`)에 새 화면 넷 / 빌드 결과의 관리 화면 묶음에 three가 없다 · 크기 상한 / 토큰 파일에 라이트 · 다크 값이 모두 있고 화면 CSS가 날 색 값을 새로 쓰지 않는다(사무실 3D 층 고정 색은 예외 목록) / 메뉴 부품의 DOM 시험.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/screen-paths.test.ts` | 고침 | 지시서 26차 4번: 화면이 넷에서 여덟이 된다 — 화면 이름 목록 · HTML 목록과 개수 · `SCREEN_ROOTS` · `SCREEN_PATHS`의 기대를 새 화면 넷까지로(뜻: "화면이 부르는 경로는 모두 표에 있고 바깥 주소가 없다" 그대로) |
+| 화면 파일 목록 · dist 파일을 정확히 세는 Rust 시험(`round11/assets.rs` · `round18/screens.rs` 등 — 있으면) | 고침 | 지시서 26차 4번: 새 화면 넷의 HTML · 묶음이 더해진다 — 목록 · 개수 기대만 따라간다 |
+| `crates/server/tests/web/key-screens.test.ts` · `key-fields.test.ts` · `setup-key-screen.test.ts` · `setup-ai-limit.test.ts` · `phone-*.test.ts` | 유지 | 설정 · 키 · 폰 화면의 기능과 칸은 그대로(색 · 간격만 토큰으로) — 특정 색 값 · 클래스 이름을 못 박은 단언이 있으면 N1이 멈추고 알린다 |
+| `crates/server/tests/web/office-*.test.ts` | 유지 | 사무실 3D 층은 그대로(위 줄에 메뉴만 더한다) |
+| 그 밖의 server 시험 | 유지 | 26차와 무관 |
+
