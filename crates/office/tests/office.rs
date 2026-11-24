@@ -233,10 +233,10 @@ async fn 논의에_들어가면_탁자로_끝나면_책상으로_간다() {
     let events = rec.all();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].0, seq.unwrap());
-    assert_eq!(
-        events[0].2,
-        json!({"agent": "risk", "place": "meeting", "work": "idle"})
-    );
+    // (5차) 이벤트에 부르기 단계 칸이 더해져도 옛 세 칸은 그대로다.
+    assert_eq!(events[0].2["agent"], json!("risk"));
+    assert_eq!(events[0].2["place"], json!("meeting"));
+    assert_eq!(events[0].2["work"], json!("idle"));
 
     // 같은 활동을 다시 알려도 이벤트 없음
     assert_eq!(
