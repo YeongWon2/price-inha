@@ -680,3 +680,11 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 - 원본 동작 근거: `docs/research/deskrpg.md` 10절 — 3 · 4 · 5번은 원본과 같은 수치 · 순서(회의 말풍선만 결정 16으로 다름). 1 · 2 · 6번은 원본에 없음(스펙 R5-2 · F7-4 · V14, 결정 16).
 - 시험으로 확인할 것: 가짜 AI로 종목 논의를 돌리면 담당 글마다 `office.talk`가 1초 안에 나오고 내용이 방 로그 글과 같다(가린 것) / 점수 턴은 안 나온다 / `GET /api/office/talk`가 최근 50줄을 시각 순서로, 세션 없으면 401 / 화면 시험(vitest): 말풍선 글 자르기 · 수명 12초 · 스트리밍 교체 · "···" 4초 · 겹침 자리 고르기 · 말풍선 줄로 보내기 · 잡담 조건 · 쉬는 시간 · 같은 대사 피하기 · 팀 탭에 논의 줄이 시각 순서로 / 설정 화면 AI 상한 표시 · 저장.
 
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/office-trim.test.ts` | 유지 | 팀 탭 줄 자르기 규칙은 그대로 — 논의 줄이 섞이는 것은 새 시험 |
+| `crates/server/tests/web/office-*.test.ts` 그 밖 · `phone-*.test.ts` · `key-*.test.ts` · `setup-key-screen.test.ts` · `screen-paths.test.ts` | 유지 | 22차는 새 이벤트 · 새 화면 요소만 더한다 |
+| `crates/server/tests/round*/` · `flow/` · `setup/` · `server.rs` | 유지 | 논의 · 채팅 · 설정 저장 동작은 그대로 |
+
