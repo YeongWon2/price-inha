@@ -20,8 +20,8 @@ use tokio::task::JoinHandle;
 use super::App;
 use crate::feed::StaleHook;
 use crate::reach::{
-    Linked, LockNotices, OfficeDesk, Phone, Semantic, backup_routes, daily_summary, office_routes,
-    phone_routes, semantic_routes,
+    Linked, LockNotices, Looks, OfficeDesk, Phone, Semantic, backup_routes, daily_summary,
+    looks_routes, office_routes, phone_routes, semantic_routes,
 };
 use crate::team::CrewLinks;
 use crate::trading::{Hooks, approval_status_word};
@@ -268,6 +268,15 @@ pub(super) fn open_memory(
 }
 
 /// 세션 경로에 뜻 검색 설정 화면([`crate::SETUP_SEMANTIC_PATH`])을 더한다.
+/// (20차 4번) 담당 외형 경로를 더한다. 사무실 잇기가 없어도(시연 · 2차 조립) 단다 — 보관 폴더의 파일만 쓴다.
+pub(super) fn with_looks(extra: Option<Router>, home: &Path) -> Option<Router> {
+    let routes = looks_routes(Arc::new(Looks::open(home)));
+    Some(match extra {
+        Some(extra) => extra.merge(routes),
+        None => routes,
+    })
+}
+
 pub(super) fn with_semantic(extra: Option<Router>, semantic: &Arc<Semantic>) -> Option<Router> {
     let routes = semantic_routes(Arc::clone(semantic));
     Some(match extra {

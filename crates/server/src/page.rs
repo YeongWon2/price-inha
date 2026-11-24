@@ -49,6 +49,8 @@ fn content_type(rel: &str) -> &'static str {
         "webmanifest" => "application/manifest+json",
         "png" => "image/png",
         "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "glb" => "model/gltf-binary",
         "md" | "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
@@ -72,7 +74,7 @@ fn content_security_policy(host: Option<&str>) -> String {
         .map(|host| format!(" ws://{host} wss://{host}"))
         .unwrap_or_default();
     format!(
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; \
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; \
          manifest-src 'self'; worker-src 'self'; connect-src 'self'{socket}; base-uri 'none'; \
          form-action 'none'; frame-ancestors 'none'"
     )

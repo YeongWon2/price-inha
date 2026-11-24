@@ -308,6 +308,7 @@ impl App {
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());
         let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);
         let extra = link::with_semantic(extra, &memory.semantic);
+        let extra = link::with_looks(extra, &settings.home);
         let protected = session_routes(&trading, crew.as_ref(), extra);
         let gate = open_gate(
             &settings, &wiring, &store, &secrets, &desk, protected, alert,

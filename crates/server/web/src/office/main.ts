@@ -6,10 +6,13 @@
 // - POST /api/office/chat                담당에게 말하기(C5): {room, agent, text, sourceMessageId} → 응답 객체
 // - WS   /ws?last_seq=N                  번호 있는 이벤트 `office.agent` · `office.chat`를 받는다(C2 · E3).
 // - WS   이벤트 `office.approval`        승인 카드(10c 14번): 폰과 같은 길 · 같은 지문 대조로 승인 · 거절.
+// - GET  /api/office/looks · POST /api/office/look   담당 외형(20차 4번): 처음에 읽어 외형을 정하고, 고르면 바꾼다.
 // 스냅샷과 말하기 길은 조립(price-inha)이 Office에 잇는다. 없으면 이벤트만으로 그린다.
 import "./office.css";
-import { API } from "../paths";
+import { API, OFFICE_LOOK_PATHS } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
+import { createLookPicker } from "./look-picker";
+import { DEFAULT_LOOKS } from "./looks";
 import type { OfficeMap, Scene } from "./scene3d";
 import { trimLines, type Line } from "./trim";
 
@@ -23,7 +26,8 @@ const RETRY_MAX_MS = 10000;
 const FOLLOW_PX = 80;
 
 const AGENT_IDS = ["news", "strategy", "risk", "review", "trader", "leader"];
-const PLACE_LABEL: Record<string, string> = { bed: "자기 방 침대", desk: "사무실 자기 자리", meeting: "논의 탁자" };
+// 20차 고침: 침실은 없다. 일하지 않는 시간(`bed`)은 라운지 · 탕비실 쉼 자리다.
+const PLACE_LABEL: Record<string, string> = { bed: "라운지 쉼 자리", desk: "사무실 자기 자리", meeting: "미팅룸 탁자" };
 const WORK_LABEL: Record<string, string> = { idle: "", queued: "대기", thinking: "생각 중", failed: "실패" };
 const ROOM_TEAM = "team";
 
@@ -56,6 +60,8 @@ const state = {
   lastSeq: null as number | null,
   connected: false,
   view: null as Scene | null,                  // 3D 장면(있으면)
+  looks: { ...DEFAULT_LOOKS } as Record<string, string>, // 담당 → 외형 id(서버가 정본)
+  looksLoaded: false,
 };
 
 // ---------- 화면: 3D 또는 가벼운 화면 ----------
@@ -103,6 +109,7 @@ async function show3d(): Promise<void> {
     labels: $("labels"),
     map: state.map as OfficeMap,
     names: state.names,
+    looks: state.looks,
     onPick: (id: string) => selectConversation(id),
     onLost: () => showLight("lost"),
   });
@@ -316,6 +323,44 @@ function onFrame(text: string): void {
   }
 }
 
+/** 서버의 담당 → 외형을 받아 둔다(목록 밖 값은 버린다). */
+function takeLooks(body: unknown): Record<string, string> {
+  const agents = (body as { agents?: Record<string, unknown> } | null)?.agents ?? {};
+  for (const id of AGENT_IDS) {
+    const look = agents[id];
+    if (typeof look === "string") { state.looks[id] = look; }
+  }
+  return { ...state.looks };
+}
+
+function applyLooks(): void {
+  if (state.view) { for (const id of AGENT_IDS) { state.view.setLook(id, state.looks[id]); } }
+}
+
+async function loadLooks(): Promise<void> {
+  try {
+    const reply = await fetch(OFFICE_LOOK_PATHS.list, { credentials: "same-origin", cache: "no-store" });
+    if (!reply.ok) { return; }
+    takeLooks(await reply.json());
+    state.looksLoaded = true;
+    applyLooks();
+  } catch {
+    // 못 읽으면 기본 외형으로 그린다.
+  }
+}
+
+async function chooseLook(agent: string, look: string): Promise<Record<string, string>> {
+  const reply = await fetch(OFFICE_LOOK_PATHS.choose, {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent, look }),
+  });
+  if (!reply.ok) { throw new Error(String(reply.status)); }
+  return takeLooks(await reply.json());
+}
+
 async function loadSnapshot(): Promise<void> {
   try {
     const reply = await fetch(SNAPSHOT_PATH, { credentials: "same-origin", cache: "no-store" });
@@ -363,6 +408,7 @@ async function start(): Promise<void> {
     const reply = await fetch(SESSION_PATH, { method: "POST", credentials: "same-origin", cache: "no-store" });
     if (!reply.ok) { throw new Error("session"); }
     // 처음 이을 때만 스냅샷을 받는다. 그 뒤에는 마지막 번호부터 이어 받는다.
+    if (!state.looksLoaded) { await loadLooks(); }
     if (state.lastSeq === null) { await loadSnapshot(); }
     openSocket();
   } catch {
@@ -385,6 +431,20 @@ async function main(): Promise<void> {
   renderTabs();
   renderLog(true);
   setConn("잇는 중", "wait");
+  const picker = createLookPicker({
+    panel: $("looks"),
+    agents: AGENT_IDS,
+    nameOf,
+    current: () => state.looks,
+    choose: chooseLook,
+    applied: () => applyLooks(),
+  });
+  $("look-toggle").addEventListener("click", () => {
+    if (!$("looks").hidden) { picker.close(); return; }
+    picker.open(state.conversation === ROOM_TEAM ? undefined : state.conversation);
+  });
+  // 처음 이음(세션 · 외형 · 스냅샷)을 먼저 해 3D가 고른 외형으로 바로 그려지게 한다. 실패하면 뒤에서 다시 잇는다.
+  await start();
 
   // 폰처럼 좁은 화면은 처음부터 가벼운 화면이다. 3D가 안 되면 가벼운 화면으로 떨어진다.
   const narrow = window.matchMedia("(max-width: 760px)").matches;
@@ -415,7 +475,6 @@ async function main(): Promise<void> {
       }
     }
   });
-  void start();
 }
 
 void main();

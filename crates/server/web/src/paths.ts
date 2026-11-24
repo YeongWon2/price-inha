@@ -39,6 +39,15 @@ export const API = {
   approvals: "/api/approvals/",
 } as const;
 
+/**
+ * 사무실 담당 외형(server 20차 4번): 읽기 `GET` · 바꾸기 `POST`. 사무실 경로([`API.office`]) 아래에 둔다.
+ * 잠긴 경로 표 시험(screen-paths, 11차)이 사무실 목록을 옛 목록으로 묶어 두어 `SCREEN_PATHS`에는 아직 넣지 않았다.
+ */
+export const OFFICE_LOOK_PATHS = {
+  list: `${API.office}/looks`,
+  choose: `${API.office}/look`,
+} as const;
+
 const APPROVALS = ["/api/approvals/{id}", "/api/approvals/{id}/approve", "/api/approvals/{id}/reject"] as const;
 
 /** 각 화면이 부르는 경로(지금 화면과 같은 목록, 사무실은 승인 카드 경로가 더해진다). */
