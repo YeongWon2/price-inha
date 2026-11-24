@@ -20,6 +20,8 @@ mod build;
 mod changes;
 mod day;
 mod demo_ai;
+mod demo_data;
+mod demo_feed;
 mod facts;
 mod guard;
 mod http;

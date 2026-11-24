@@ -279,15 +279,57 @@ impl Waker for CrewWaker {
     }
 }
 
+/// 장 시작 작업 id.
+const OPEN_JOB: &str = "team-open";
+
+/// (24차 3번, 시연 조립에서만) 장 시작 작업을 처음 보고 지금 그날 정규장 안이면, 그 작업의 기준 시각을 그날 장 시작
+/// 바로 앞으로 적어 둔다. 그래서 첫 tick이 이미 지난 그날 장 시작 회차를 기한으로 보고(장이 열려 있으니 바로)
+/// 하루 판단을 연다. 처음 보는 작업은 기준 시각을 띄운 시각으로 잡아 지난 회차를 돌리지 않는 것이 엔진의 동작이라,
+/// 장 중간에 띄운 시연은 다음 날까지 하루를 시작하지 않기 때문이다. 이미 상태가 있으면(다시 켬) 건드리지 않는다.
+fn catch_up_today(crew: &Crew, now: DateTime<Utc>) {
+    let store = &crew.store;
+    match store.trigger_jobs() {
+        Ok(jobs) if jobs.iter().all(|job| job.job != OPEN_JOB) => {}
+        Ok(_) => return,
+        Err(error) => {
+            tracing::warn!(%error, "깨우기 작업 상태를 읽지 못했다");
+            return;
+        }
+    }
+    let trading = &crew.trading;
+    let Some(calendar) = trading.calendar_on(trading.date_of(now)) else {
+        return;
+    };
+    let Some(open) = calendar
+        .session_at(now)
+        .filter(|session| session.kind == pi_market::SessionKind::Regular)
+        .map(|session| session.start)
+    else {
+        return;
+    };
+    let before = open - chrono::Duration::milliseconds(1);
+    let job = JobState::new(JobId::new(OPEN_JOB), Some(before));
+    if let Err(error) = store.save_trigger_job(OPEN_JOB, &job_value(&job)) {
+        tracing::warn!(%error, "장 시작 따라잡기를 적지 못했다");
+    }
+}
+
 /// 깨우기 엔진을 띄운다. `stop`이 참이 되면 끝난다.
 ///
 /// 띄우기 전에 여기서 한 번 돈다: 처음 보는 작업의 기준 시각을 **띄운 시각**으로 적어 두어, 뒤에서 도는
 /// 고리가 늦게 시작해도 띄운 뒤에 온 회차(예: 장 시작 전에 띄우고 맞은 장 시작)를 놓치지 않는다.
+///
+/// (24차) `demo`가 시연 달력을 켰으면, 장 중간에 처음 띄운 날에도 그날 장 시작 회차를 따라잡는다
+/// ([`catch_up_today`]). 가짜 공시 간격이 있으면 그 간격마다 시연용 가짜 공시를 넣는다.
 pub(crate) async fn spawn_trigger(
     crew: &Arc<Crew>,
     clock: Arc<dyn Clock>,
     stop: watch::Receiver<bool>,
+    demo: &crate::DemoWiring,
 ) -> Result<JoinHandle<()>, crate::TeamError> {
+    if demo.calendar {
+        catch_up_today(crew, clock.now());
+    }
     let market = crew.trading.market();
     let job = |id: &str, kind| ScheduleJob {
         id: JobId::new(id),
@@ -297,7 +339,7 @@ pub(crate) async fn spawn_trigger(
     };
     let mut config = TriggerConfig::new(
         vec![
-            job("team-open", ScheduleKind::MarketOpen),
+            job(OPEN_JOB, ScheduleKind::MarketOpen),
             job("team-after-close", ScheduleKind::AfterClose),
         ],
         Vec::new(),
@@ -318,7 +360,8 @@ pub(crate) async fn spawn_trigger(
         tracing::warn!(%error, "깨우기 엔진의 첫 tick이 실패했다");
     }
     // (10b 8번) 시세 조건 · 자료 변화를 엔진에 넣는 고리. 엔진과 함께 멈춘다.
-    let poller = Poller::new(Arc::clone(crew), Arc::clone(&trigger));
+    let poller =
+        Poller::new(Arc::clone(crew), Arc::clone(&trigger)).with_demo(demo.disclosure_every);
     let polling = stop.clone();
     Ok(tokio::spawn(async move {
         let engine = async {

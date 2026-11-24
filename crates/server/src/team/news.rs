@@ -62,6 +62,8 @@ pub(crate) struct NewsDesk {
     base_url: String,
     /// 하루 요청 상한(논의 · 주기 가져오기가 함께 센다).
     quota: DailyQuota,
+    /// (24차 4번) 참이면 키가 있어도 없는 것으로 보고 묻지 않는다(실행 파일의 시연 조립).
+    offline: bool,
 }
 
 fn millis(at: DateTime<Utc>) -> UnixMillis {
@@ -90,12 +92,19 @@ impl NewsDesk {
             quota: DailyQuota::new(store.clone(), USED_KEY, limit),
             store,
             base_url,
+            offline: false,
         }
     }
 
-    /// 뉴스 키가 등록돼 있나.
+    /// (24차 4번) `on`이면 바깥으로 묻지 않는다: 키가 등록돼 있어도 [`NewsDesk::has_key`]는 거짓이다.
+    pub(crate) fn offline(mut self, on: bool) -> NewsDesk {
+        self.offline = on;
+        self
+    }
+
+    /// 뉴스 키가 등록돼 있나(바깥으로 묻지 않게 했으면 거짓).
     pub(super) fn has_key(&self) -> bool {
-        matches!(self.keys.read_news_keys(NAVER_NEWS_KEYS), Ok(Some(_)))
+        !self.offline && matches!(self.keys.read_news_keys(NAVER_NEWS_KEYS), Ok(Some(_)))
     }
 
     /// 오늘(한국 날짜) 요청 하나를 쓴다. 상한에 닿았으면 거짓. 센 수는 저장소에 남긴다.

@@ -26,6 +26,9 @@ pub(crate) struct CrewParts {
     pub(crate) desk: Arc<Desk>,
     pub(crate) secrets: Arc<SecretStore>,
     pub(crate) wiring: TeamWiring,
+    /// (24차 4번) 참이면 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다(키가 등록돼 있어도). 실행 파일의
+    /// 시연 조립만 켠다.
+    pub(crate) offline: bool,
 }
 
 /// 같은 시계를 실행기 · 자료 · 승인의 시계 자리에 끼운다.
@@ -108,6 +111,33 @@ fn data_adapter(
     )))
 }
 
+/// 뉴스 창구와 자료 어댑터. (24차 4번) `offline`(실행 파일의 시연 조립)이면 바깥에 묻지 않는다: 뉴스는 키가 없는
+/// 것으로 보고, 자료는 시연 자료([`super::demo_data::DemoData`])를 쓴다.
+fn sources(
+    wiring: &TeamWiring,
+    (secrets, offline): (Arc<SecretStore>, bool),
+    shared: &Arc<Shared>,
+    store: &Store,
+    clock: &Arc<dyn Clock>,
+) -> Result<(Arc<super::news::NewsDesk>, Arc<dyn DataAdapter>), TeamError> {
+    let news = super::news::NewsDesk::open(
+        wiring.news.clone(),
+        wiring.news_daily_limit,
+        Arc::clone(&secrets),
+        store.clone(),
+        Arc::clone(shared) as Arc<dyn pi_data::Clock>,
+    );
+    let news = Arc::new(news.offline(offline));
+    if offline {
+        return Ok((
+            news,
+            Arc::new(super::demo_data::DemoData::new(Arc::clone(clock))),
+        ));
+    }
+    let keys: Arc<dyn KeySource> = secrets;
+    Ok((news, data_adapter(wiring, keys, shared, store, clock)?))
+}
+
 impl Crew {
     /// 만든다. 시연 모드면 가짜 AI를, 아니면 고른 AI 연결을 쓴다(둘 다 가리는 공급자로 감싼다).
     pub(crate) fn open(parts: CrewParts) -> Result<Arc<Crew>, TeamError> {
@@ -118,6 +148,7 @@ impl Crew {
             desk,
             secrets,
             wiring,
+            offline,
         } = parts;
         let shared = Arc::new(Shared(Arc::clone(&clock)));
         let redactor = Arc::new(SecretsRedactor::new(Arc::clone(&secrets)));
@@ -146,15 +177,7 @@ impl Crew {
         let roles = roles(&wiring.model);
         let team = Team::new(ports, roles.clone(), TimeLimits::MARKET)
             .map_err(|error| TeamError::Agent(error.to_string()))?;
-        let news = Arc::new(super::news::NewsDesk::open(
-            wiring.news.clone(),
-            wiring.news_daily_limit,
-            Arc::clone(&secrets),
-            store.clone(),
-            Arc::clone(&shared) as Arc<dyn pi_data::Clock>,
-        ));
-        let keys: Arc<dyn KeySource> = secrets;
-        let data = data_adapter(&wiring, keys, &shared, &store, &clock)?;
+        let (news, data) = sources(&wiring, (secrets, offline), &shared, &store, &clock)?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
         // (22차 6번) 상한 값은 논의를 열 때마다 정한다(켤 때 값, 없으면 설정 화면이 저장한 값).
         let ai_cap =

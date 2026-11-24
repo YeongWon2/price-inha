@@ -6,14 +6,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, Utc, Weekday};
 use pi_market::{
     Clock, Currency, FakeAdapter, Market, MarketAdapter, MarketCalendar, MarketError, Quote,
-    Symbol, TradingDay,
+    Session, SessionKind, Symbol, TradingDay,
 };
 use rust_decimal::Decimal;
 
-/// 시연용 어댑터. 달력은 정하지 않으므로(휴장) 시세 늦음을 알리지 않는다.
+/// 시연용 어댑터. 기본은 달력을 정하지 않으므로(휴장) 시세 늦음을 알리지 않는다. (24차) 시연 달력을 켜면
+/// ([`DemoAdapter::with_calendar`]) [`demo_calendar`]를 낸다.
 pub(crate) struct DemoAdapter {
     fake: FakeAdapter,
     market: Market,
@@ -21,6 +22,8 @@ pub(crate) struct DemoAdapter {
     /// 종목마다 지금 값(통화의 가장 작은 단위).
     minor: Mutex<HashMap<Symbol, i64>>,
     ticks: AtomicU64,
+    /// (24차) 시연 달력을 내는가.
+    calendar: bool,
 }
 
 /// 가격 모양: 한 걸음의 크기 · 처음 값의 범위(걸음 수) · 소수 자리.
@@ -40,7 +43,14 @@ impl DemoAdapter {
             clock,
             minor: Mutex::new(HashMap::new()),
             ticks: AtomicU64::new(0),
+            calendar: false,
         }
+    }
+
+    /// (24차 1번) `on`이면 시연 달력([`demo_calendar`])을 낸다.
+    pub(crate) fn with_calendar(mut self, on: bool) -> Self {
+        self.calendar = on;
+        self
     }
 
     fn shape(&self) -> Shape {
@@ -127,17 +137,61 @@ impl DemoWiring {
 /// 00:05 이상 23:55 미만 하나다. 그래서 자정 앞뒤 10분은 장 밖이다. 앞 · 뒤 거래일은 하루 전 · 하루 뒤다.
 /// 시연 어댑터 안에서만 쓴다(실제 모드는 시장 어댑터 달력만 쓴다, E56).
 pub fn demo_calendar(market: Market, date: NaiveDate) -> MarketCalendar {
-    // 뼈대: 지금 동작(달력 없음 = 휴장)과 같은 빈 달력. 구현은 N19를 따른다.
-    let closed = |date: NaiveDate| TradingDay {
-        date,
-        sessions: Vec::new(),
-    };
     MarketCalendar {
         market,
-        today: closed(date),
-        previous_business_day: closed(date.pred_opt().unwrap_or(date)),
-        next_business_day: closed(date.succ_opt().unwrap_or(date)),
+        today: demo_day(market, date),
+        previous_business_day: demo_day(market, date.pred_opt().unwrap_or(date)),
+        next_business_day: demo_day(market, date.succ_opt().unwrap_or(date)),
     }
+}
+
+/// 시연 정규장이 여는 시장 시각(00:05)과 닫는 시장 시각(23:55), 분.
+const DEMO_OPEN_MINUTE: u32 = 5;
+const DEMO_CLOSE_MINUTE: u32 = 23 * 60 + 55;
+
+/// 시연 달력의 하루: 그 시장 시각 00:05 이상 23:55 미만 정규장 하나(시각을 셀 수 없으면 세션 없음).
+fn demo_day(market: Market, date: NaiveDate) -> TradingDay {
+    let start = market_time(market, date, DEMO_OPEN_MINUTE);
+    let end = market_time(market, date, DEMO_CLOSE_MINUTE);
+    let sessions = match (start, end) {
+        (Some(start), Some(end)) => vec![Session {
+            kind: SessionKind::Regular,
+            start,
+            end,
+        }],
+        _ => Vec::new(),
+    };
+    TradingDay { date, sessions }
+}
+
+/// 그 시장 날짜 · 시각(자정부터 센 분)의 UTC 시각. 국내는 UTC+9, 미국은 미 동부 시각(서머타임이면 UTC-4,
+/// 아니면 UTC-5)이다.
+fn market_time(market: Market, date: NaiveDate, minute: u32) -> Option<DateTime<Utc>> {
+    let offset_hours: i64 = match market {
+        Market::Us if us_eastern_dst(date, minute) => -4,
+        Market::Us => -5,
+        _ => 9,
+    };
+    let local = date.and_hms_opt(minute / 60, minute % 60, 0)?;
+    let utc = local.checked_sub_signed(TimeDelta::try_hours(offset_hours)?)?;
+    Some(utc.and_utc())
+}
+
+/// 미 동부의 그 날 · 그 시각(자정부터 센 분)이 서머타임인가(chrono-tz 없이 손으로 센다, `pi_market`과 같은 규칙).
+///
+/// 서머타임은 3월 둘째 일요일 02:00부터 11월 첫째 일요일 02:00(서머타임 시각)까지다.
+fn us_eastern_dst(date: NaiveDate, minute: u32) -> bool {
+    let year = date.year();
+    let (Some(begin), Some(end)) = (
+        NaiveDate::from_weekday_of_month_opt(year, 3, Weekday::Sun, 2),
+        NaiveDate::from_weekday_of_month_opt(year, 11, Weekday::Sun, 1),
+    ) else {
+        return false;
+    };
+    let after_two = minute >= 2 * 60;
+    let started = date > begin || (date == begin && after_two);
+    let ended = date > end || (date == end && after_two);
+    started && !ended
 }
 
 /// FNV-1a. 종목마다 다른 시작 값을 정하는 데만 쓴다.
@@ -178,6 +232,9 @@ impl MarketAdapter for DemoAdapter {
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
+        if self.calendar {
+            return Ok(demo_calendar(self.market, date));
+        }
         self.fake.calendar(date).await
     }
 }
@@ -208,6 +265,52 @@ mod tests {
             }
             last = now;
         }
+    }
+
+    #[test]
+    fn 미국_시연_달력은_서머타임이면_utc_4로_센다() {
+        let summer = NaiveDate::from_ymd_opt(2026, 7, 15).unwrap_or_default();
+        let day = demo_calendar(Market::Us, summer).today;
+        let start = day.sessions.first().map(|session| session.start);
+        let end = day.sessions.first().map(|session| session.end);
+        // 뉴욕 00:05(UTC-4) = 04:05 UTC, 23:55 = 다음 날 03:55 UTC.
+        assert_eq!(
+            start.map(|at| at.to_rfc3339()),
+            Some("2026-07-15T04:05:00+00:00".to_string())
+        );
+        assert_eq!(
+            end.map(|at| at.to_rfc3339()),
+            Some("2026-07-16T03:55:00+00:00".to_string())
+        );
+        // 바뀌는 날: 3월 둘째 일요일(2026-03-08)은 00:05가 표준시, 23:55가 서머타임이다.
+        let switch = NaiveDate::from_ymd_opt(2026, 3, 8).unwrap_or_default();
+        let day = demo_calendar(Market::Us, switch).today;
+        let hours = day
+            .sessions
+            .first()
+            .map(|session| (session.end - session.start).num_minutes());
+        assert_eq!(
+            hours,
+            Some(23 * 60 + 50 - 60),
+            "서머타임 시작 날은 한 시간 짧다"
+        );
+    }
+
+    #[test]
+    fn 시연_어댑터는_켰을_때만_달력을_낸다() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 21).unwrap_or_default();
+        let off = DemoAdapter::new(Market::Kr, Arc::new(SystemClock));
+        let on = DemoAdapter::new(Market::Kr, Arc::new(SystemClock)).with_calendar(true);
+        let runtime = tokio::runtime::Builder::new_current_thread().build();
+        let Ok(runtime) = runtime else { return };
+        let off = runtime
+            .block_on(off.calendar(date))
+            .map(|c| c.today.sessions.len());
+        let on = runtime
+            .block_on(on.calendar(date))
+            .map(|c| c.today.sessions.len());
+        assert_eq!(off.ok(), Some(0), "기본은 달력 없음(휴장)");
+        assert_eq!(on.ok(), Some(1), "켜면 시연 정규장 하나");
     }
 
     #[tokio::test]

@@ -16,6 +16,7 @@ use pi_market::Symbol;
 use pi_trigger::{ConditionKind, DataChange, DataKind, Direction, TriggerEvent};
 
 use super::Crew;
+use super::demo_feed::DEMO_SOURCE;
 use crate::TeamError;
 
 /// 거시 깨우기에서 논의하는 종목의 상한.
@@ -86,7 +87,9 @@ fn group(events: &[TriggerEvent]) -> Vec<Group> {
                 let Some(symbol) = change.symbol.clone() else {
                     continue;
                 };
-                let disclosure = change.kind == DataKind::Disclosure;
+                // (24차) 시연용 가짜 공시는 DART에 "아직 논의하지 않은 공시인가"를 묻지 않는다(바깥으로 나가지 않는다).
+                let disclosure =
+                    change.kind == DataKind::Disclosure && change.source != DEMO_SOURCE;
                 (symbol, data_line(change), disclosure)
             }
             _ => continue,

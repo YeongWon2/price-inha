@@ -198,18 +198,20 @@ pub(super) async fn check_cli_briefly(desk: &Arc<Desk>) -> Option<JoinHandle<()>
 }
 
 /// 시세 흐름을 뒤에서 돌린다: `--demo`면 가짜 어댑터, 아니면 공급자 등록부(토스 하나). 받은 시세는 주문 길로도 간다.
+/// `feeding`은 (주문 길, 시세 늦음 알림 자리, (24차) 시연 어댑터가 시연 달력을 내는가)다.
 pub(super) fn spawn_feed(
     settings: &Settings,
     wiring: Wiring,
     secrets: Arc<SecretStore>,
     gate: &GateServer,
     desk: &Arc<Desk>,
-    feeding: (&Arc<Trading>, Option<StaleHook>),
+    feeding: (&Arc<Trading>, Option<StaleHook>, bool),
     mut stopping: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
-    let (trading, stale) = feeding;
+    let (trading, stale, demo_calendar) = feeding;
     let source = if settings.demo {
-        let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock));
+        let demo = DemoAdapter::new(settings.market, Arc::clone(&wiring.clock))
+            .with_calendar(demo_calendar);
         Source::Demo(Arc::new(demo))
     } else {
         let keys: Arc<dyn CredentialSource> = Arc::new(BrokerKeys::new(secrets));

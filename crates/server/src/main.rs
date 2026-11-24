@@ -408,7 +408,8 @@ async fn run(
     let started = App::launch_run(settings, assembly).await;
     let app = started.map_err(Failure::App)?;
     let mode = if demo {
-        " (시연용 가짜 시세)"
+        // (24차 4번) 시연 모드는 바깥으로 나가지 않는다(키가 등록돼 있어도).
+        " (시연 모드: 가짜 시세 · 가짜 AI · 모의계좌)"
     } else {
         " (필수 설정이 빠져 있으면 이 주소의 설정 화면에서 등록합니다)"
     };

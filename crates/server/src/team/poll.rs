@@ -34,6 +34,7 @@ use pi_trigger::{
 use tokio::sync::watch;
 
 use super::changes::Changes;
+use super::demo_feed::DemoDisclosures;
 use super::news::Searched;
 use super::seen::Seen;
 use super::{Crew, facts};
@@ -107,6 +108,8 @@ pub(super) struct Poller {
     last_news: Option<DateTime<Utc>>,
     /// (10b 보강 3번) 하루 한 번 재무 · 거시 값 바뀜.
     changes: Changes,
+    /// (24차 3번) 시연용 가짜 공시(실행 파일의 시연 조립만 켠다).
+    demo: Option<DemoDisclosures>,
 }
 
 impl Poller {
@@ -120,7 +123,14 @@ impl Poller {
             last_dart: None,
             last_news: None,
             changes: Changes::default(),
+            demo: None,
         }
+    }
+
+    /// (24차 3번) `every`가 있으면 그 간격(시계 기준)마다 시연용 가짜 공시를 넣는다.
+    pub(super) fn with_demo(mut self, every: Option<Duration>) -> Poller {
+        self.demo = every.map(DemoDisclosures::new);
+        self
     }
 
     /// `stop`이 참이 될 때까지 돈다.
@@ -140,6 +150,9 @@ impl Poller {
                 // 재무 · 거시 바뀜은 공시 구독에 묶는다(결정 19).
                 if subscribed.disclosure && now >= open {
                     self.changes.daily(&self.crew, &self.trigger, now).await;
+                }
+                if subscribed.disclosure {
+                    self.demo_disclosure(now);
                 }
             }
             tokio::select! {
@@ -339,6 +352,20 @@ impl Poller {
             published_at: now,
             learned_at: now,
         }
+    }
+
+    /// (24차 3번) 간격이 지났으면 시연용 가짜 공시 하나를 넘긴다. 본 것 기억(처음 보는 종목 · 출처는 그때 것을
+    /// 이미 본 것으로만 적는다)은 거치지 않는다 — 번호가 늘 새것이고 첫 건을 삼키지 않게.
+    fn demo_disclosure(&mut self, now: DateTime<Utc>) {
+        let Some(change) = self
+            .demo
+            .as_mut()
+            .and_then(|demo| demo.next(&self.crew, now))
+        else {
+            return;
+        };
+        let pushed = self.trigger.push_data(change);
+        tracing::debug!(?pushed, "시연용 가짜 공시를 넣었다");
     }
 
     /// 처음 보는 것만 깨우기 엔진에 넘긴다. 속도 제한으로 받지 않은 것은 다음에 다시 넘긴다.

@@ -37,7 +37,10 @@ mod run;
 
 pub use parts::announce_addr;
 use parts::{check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, spawn_feed};
+use run::DemoRun;
 pub use run::{RunAssembly, run_assembly};
+
+use crate::demo::DemoWiring;
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -170,14 +173,16 @@ pub struct App {
 }
 
 /// 팀이 있으면 깨우기 엔진을 띄운다.
+/// (24차) `demo`는 시연 값(꺼짐이면 지금 동작 그대로).
 async fn crew_trigger(
     crew: Option<&Arc<Crew>>,
     clock: &Arc<dyn Clock>,
     stop: &watch::Sender<bool>,
+    demo: &DemoWiring,
 ) -> Result<Option<JoinHandle<()>>, AppError> {
     match crew {
         Some(crew) => Ok(Some(
-            spawn_trigger(crew, Arc::clone(clock), stop.subscribe()).await?,
+            spawn_trigger(crew, Arc::clone(clock), stop.subscribe(), demo).await?,
         )),
         None => Ok(None),
     }
@@ -198,9 +203,10 @@ fn team_with_limit(
     })
 }
 
+/// (24차) `stored.1`(offline)이 참이면 팀이 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다.
 fn open_crew(
     team: Option<crate::TeamWiring>,
-    store: &Store,
+    stored: (&Store, bool),
     wiring: &Wiring,
     trading: &Arc<Trading>,
     desk: &Arc<Desk>,
@@ -209,6 +215,7 @@ fn open_crew(
     let Some(team) = team else {
         return Ok(None);
     };
+    let (store, offline) = stored;
     Ok(Some(Crew::open(CrewParts {
         store: store.clone(),
         clock: Arc::clone(&wiring.clock),
@@ -216,7 +223,28 @@ fn open_crew(
         desk: Arc::clone(desk),
         secrets: Arc::clone(secrets),
         wiring: team,
+        offline,
     })?))
+}
+
+/// 보관 폴더의 비밀 보관소(부르는 쪽이 연 것이 있으면 그것)와 저장소를 연다. 밖의 주소로 열면 경고를 남긴다.
+fn open_home(
+    settings: &Settings,
+    secrets: Option<Arc<SecretStore>>,
+) -> Result<(Arc<SecretStore>, Store), AppError> {
+    let secrets = match secrets {
+        Some(secrets) => secrets,
+        // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
+        None => Arc::new(SecretStore::open(settings.home.clone())?),
+    };
+    let store = Store::open(settings.home.join(DB_FILE))?;
+    if !settings.bind.is_loopback() {
+        tracing::warn!(
+            bind = %settings.bind,
+            "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
+        );
+    }
+    Ok((secrets, store))
 }
 
 impl App {
@@ -280,30 +308,29 @@ impl App {
         launch: Launch,
     ) -> Result<App, AppError> {
         // 띄우기의 미래 값이 커서 힙에 둔다(부르는 쪽의 미래 값을 작게).
-        Box::pin(App::assemble(settings, wiring, launch, None)).await
+        Box::pin(App::assemble(
+            settings,
+            wiring,
+            launch,
+            None,
+            DemoRun::default(),
+        ))
+        .await
     }
 
-    /// 띄우기의 몸통. `reach`가 있으면 3차 조립까지 한다([`App::launch_with`]).
+    /// 띄우기의 몸통. `reach`가 있으면 3차 조립까지 한다([`App::launch_with`]). (24차) `demo`는 실행 파일 조립의
+    /// 시연 값이다([`App::launch_run`]만 켠다): 시연 달력 · 시연용 가짜 공시 · 바깥 자료 부르지 않기.
     pub(super) async fn assemble(
         settings: Settings,
         wiring: Wiring,
-        launch: Launch,
+        mut launch: Launch,
         reach: Option<crate::Reach>,
+        demo: DemoRun,
     ) -> Result<App, AppError> {
         // 되살리기 중 꺼져 남은 작업 폴더(보관 폴더 옆)를 지운다.
         crate::reach::clear_restore_leftover(&settings.home);
-        let secrets = match launch.secrets {
-            Some(secrets) => secrets,
-            // 보관 폴더는 비밀 보관소가 만든다(없으면 0700으로).
-            None => Arc::new(SecretStore::open(settings.home.clone())?),
-        };
-        let store = Store::open(settings.home.join(DB_FILE))?;
-        if !settings.bind.is_loopback() {
-            tracing::warn!(
-                bind = %settings.bind,
-                "그 컴퓨터 밖의 주소로 엽니다. 접속 키가 생기기 전까지 밖에서 온 요청은 모두 거부합니다"
-            );
-        }
+        demo.fix_calendar(settings.market, &mut launch);
+        let (secrets, store) = open_home(&settings, launch.secrets)?;
         let verifier = key_verifier(&wiring, launch.team.as_ref(), reach.as_ref());
         let desk = open_desk(&settings, &wiring, &secrets, verifier).await?;
         let parts = TradingParts {
@@ -315,7 +342,14 @@ impl App {
         };
         let trading = Trading::open(parts).await?;
         let team = team_with_limit(launch.team, &settings, &desk);
-        let crew = open_crew(team, &store, &wiring, &trading, &desk, &secrets)?;
+        let crew = open_crew(
+            team,
+            (&store, demo.offline),
+            &wiring,
+            &trading,
+            &desk,
+            &secrets,
+        )?;
         let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());
         let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);
@@ -335,13 +369,13 @@ impl App {
         trading.tick().await;
         let (stop, stopping) = watch::channel(false);
         let days = trading.spawn_days(stop.subscribe());
-        let trigger = crew_trigger(crew.as_ref(), &wiring.clock, &stop).await?;
+        let trigger = crew_trigger(crew.as_ref(), &wiring.clock, &stop, &demo.wiring).await?;
         let office_sync = linked
             .as_ref()
             .map(|l| link::spawn_office_sync(l, store.clone(), stop.subscribe()));
         let reembed = link::spawn_semantic(&memory.semantic, crew.as_ref(), &wiring.clock, &stop);
         let stale = linked.as_ref().map(link::stale_hook);
-        let feeding = (&trading, stale);
+        let feeding = (&trading, stale, demo.wiring.calendar);
         let feed = spawn_feed(&settings, wiring, secrets, &gate, &desk, feeding, stopping);
         Ok(App {
             gate,

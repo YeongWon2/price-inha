@@ -361,7 +361,8 @@ impl App {
         launch: Launch,
         reach: Reach,
     ) -> Result<App, AppError> {
-        Box::pin(App::assemble(settings, wiring, launch, Some(reach))).await
+        let demo = super::DemoRun::default();
+        Box::pin(App::assemble(settings, wiring, launch, Some(reach), demo)).await
     }
 
     /// (W5 3차) 지식 검색 창구(같은 저장소). 임베딩은 없다.
