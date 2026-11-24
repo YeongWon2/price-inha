@@ -149,6 +149,8 @@ pub(super) async fn open_gate(
         .public_routes(page::routes())
         .public_routes(crate::reach::asset_routes())
         .protected_routes(setup_http::status_routes(Arc::clone(&view)))
+        // (31차 고침 · 결정 22) 알림음 켜기 · 끄기: 세션이면(원격 포함) 읽고 바꾼다.
+        .protected_routes(crate::setup_sound::routes(settings.home.clone()))
         .protected_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.

@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-myjmdctv.js";
+import { n as API, t as mountMenu } from "./menu-banclx3t.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, o as field, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
 // src/setup/ai-limit.ts
@@ -38,24 +38,33 @@ function aiLimitRequest(limit) {
 		body: { [AI_LIMIT_KEY]: limit }
 	};
 }
-// src/ui/sound-pref.ts
-/** 웹 저장소의 키 하나. 값은 [`SOUND_ON`] · [`SOUND_OFF`]. */
-var SOUND_PREF_KEY = "price-inha.sound";
-/** 알림음이 켜져 있나. 남긴 값이 [`SOUND_OFF`]일 때만 꺼짐이고, 없거나 읽지 못하면 켜짐이다. */
-function soundEnabled() {
+/** 서버 답에서 `enabled`(참 · 거짓)를 꺼낸다. 모양이 다르면 `null`. */
+function enabledOf(body) {
+	if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+	const value = body.enabled;
+	return typeof value === "boolean" ? value : null;
+}
+/** 알림음이 켜져 있나(서버에서 읽는다). 읽지 못하거나 답의 모양이 맞지 않으면 [`SOUND_DEFAULT`]. 던지지 않는다. */
+async function soundEnabled() {
 	try {
-		return globalThis.localStorage.getItem(SOUND_PREF_KEY) !== "off";
+		const reply = await call("GET", API.setupSound);
+		if (!reply.ok) return true;
+		return enabledOf(reply.body) ?? true;
 	} catch {
 		return true;
 	}
 }
-/** 알림음 켜기 · 끄기를 이 기기에 남긴다. 남겼으면 `true`, 저장소를 쓸 수 없으면 `false`(던지지 않는다). */
-function setSoundEnabled(on) {
+/**
+* 알림음 켜기 · 끄기를 서버에 보내고 서버가 답한 값(저장한 뒤의 `enabled`)을 돌려준다.
+* 보내지 못했거나(연결) 거절됐거나(상태) 답의 모양이 맞지 않으면 `null`. 던지지 않는다.
+*/
+async function saveSound(on) {
 	try {
-		globalThis.localStorage.setItem(SOUND_PREF_KEY, on ? "on" : "off");
-		return true;
+		const reply = await call("POST", API.setupSound, { enabled: on });
+		if (!reply.ok) return null;
+		return enabledOf(reply.body);
 	} catch {
-		return false;
+		return null;
 	}
 }
 // src/setup/extras.ts
@@ -110,9 +119,9 @@ var RESTORE_COMMAND = "price-inha restore";
 /** 되살리기 안내. */
 var RESTORE_NOTE = "되살리기는 이 화면에서 하지 않습니다. 서버를 끈 뒤 터미널에서 아래 명령으로 빈 폴더에 되살리고, 그 폴더로 다시 켭니다.";
 /** 알림음 칸 이름. */
-var SOUND_LABEL = "승인 알림음 (이 기기에만 남습니다)";
-/** 알림음을 이 기기에 남기지 못했을 때의 글. */
-var SOUND_NOT_SAVED = "이 브라우저에는 알림음 설정을 남길 수 없습니다(이번 화면에서만 적용).";
+var SOUND_LABEL = "승인 알림음";
+/** 알림음 바꾸기에 실패했을 때의 글. */
+var SOUND_SAVE_FAILED = "알림음 설정을 바꾸지 못했습니다. 서버와 연결되지 않았거나 잠시 응답하지 않습니다. 다시 시도해 주세요.";
 /** 되살린 폴더로 다시 켜는 명령. */
 var RESTART_COMMAND = "price-inha run --home <되살린 폴더>";
 /** 되살리기 명령 전체(파일 · 폴더 자리는 사람이 채운다). */
@@ -278,19 +287,36 @@ function semanticCard(initial) {
 	paint();
 	return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), toggle, message);
 }
-/** 알림음 설정을 그린다(`data-role="sound"`). */
-function soundSetting() {
+/** [`soundSetting`]의 자리와, 서버에서 읽은 값을 칸에 보이고 나면 끝나는 약속(던지지 않는다). */
+function soundBlock() {
 	const holder = field(SOUND_LABEL, "sound-on", "checkbox");
 	holder.classList.add("setup-extra-check");
 	const box = inputOf(holder);
-	box.checked = soundEnabled();
+	box.checked = true;
+	box.disabled = true;
 	const message = el("div", "setup-extra-message");
 	message.setAttribute("aria-live", "polite");
+	let current = true;
 	box.addEventListener("change", () => {
-		const saved = setSoundEnabled(box.checked);
-		message.replaceChildren(...saved ? [] : [el("p", "hint", SOUND_NOT_SAVED)]);
+		const wanted = box.checked;
+		box.disabled = true;
+		message.replaceChildren();
+		saveSound(wanted).then((saved) => {
+			if (saved === null) message.replaceChildren(errorLine(SOUND_SAVE_FAILED));
+			else current = saved;
+			box.checked = current;
+			box.disabled = false;
+		});
 	});
-	return block("sound", "알림음", holder, message);
+	const ready = soundEnabled().then((on) => {
+		current = on;
+		box.checked = on;
+		box.disabled = false;
+	});
+	return {
+		node: block("sound", "알림음", holder, message),
+		ready
+	};
 }
 /** 경로 하나를 읽는다. 실패(상태 · 연결)면 `null`. */
 async function read(url) {
@@ -317,7 +343,8 @@ async function mountSetupExtras(root) {
 	};
 	const slots = {};
 	for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
-	root.replaceChildren(...Object.values(slots), soundSetting());
+	const sound = soundBlock();
+	root.replaceChildren(...Object.values(slots), sound.node);
 	const status = read(API.setup).then((body) => {
 		swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
 		swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -337,7 +364,8 @@ async function mountSetupExtras(root) {
 		status,
 		semantic,
 		doctor,
-		backup
+		backup,
+		sound.ready
 	]);
 }
 // src/setup/main.ts

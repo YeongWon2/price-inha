@@ -3,8 +3,9 @@
 // 공통 부품(`ui/parts.ts`) · 같은 출처 부르기(`ui/call.ts`)만 쓰고 3D에 닿지 않는다. 서버가 준 글자는 글자로만 넣는다.
 //
 // 읽는 경로(모두 `GET`, 경로 표 `SCREEN_PATHS.setup` 안): 설정 상태 `API.setup`(`market` · `models` 칸),
-// 뜻 검색 `API.setupSemantic`, 진단 `API.setupDoctor`, 백업 `API.setupBackup`. 바꾸는 경로는 뜻 검색 `POST` 하나뿐이다
-// (시장 · 모델은 보기만, 되살리기는 화면에서 하지 않는다 — 실행 중인 저장소를 바꾸지 않는다).
+// 뜻 검색 `API.setupSemantic`, 진단 `API.setupDoctor`, 백업 `API.setupBackup`, 알림음 `API.setupSound`. 바꾸는 경로는
+// 뜻 검색 `POST`와 알림음 `POST`뿐이다(시장 · 모델은 보기만, 되살리기는 화면에서 하지 않는다 — 실행 중인 저장소를
+// 바꾸지 않는다).
 //
 // 그리는 자리(`data-role`):
 // - `market`: 시장 이름(`kr` → "국내", `us` → "미국")과 [`MARKET_RESTART_NOTE`]. 입력 · 단추 없음.
@@ -28,6 +29,7 @@ import { API } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
 import type { BadgeTone } from "../ui/parts";
+import { SOUND_DEFAULT, saveSound, soundEnabled } from "../ui/sound-pref";
 
 /** 진단 상태(서버 `DIAG_*`). */
 export type DiagStatus = "ok" | "warn" | "fail" | "info";
@@ -119,7 +121,10 @@ export const RESTORE_NOTE =
   "되살리기는 이 화면에서 하지 않습니다. 서버를 끈 뒤 터미널에서 아래 명령으로 빈 폴더에 되살리고, 그 폴더로 다시 켭니다.";
 
 /** 알림음 칸 이름. */
-export const SOUND_LABEL = "승인 알림음 (이 기기에만 남습니다)";
+export const SOUND_LABEL = "승인 알림음";
+
+/** 알림음 바꾸기에 실패했을 때의 글. */
+const SOUND_SAVE_FAILED = "알림음 설정을 바꾸지 못했습니다. 서버와 연결되지 않았거나 잠시 응답하지 않습니다. 다시 시도해 주세요.";
 
 /** 되살린 폴더로 다시 켜는 명령. */
 const RESTART_COMMAND = "price-inha run --home <되살린 폴더>";
@@ -293,7 +298,37 @@ export function semanticCard(initial: SemanticSettings): HTMLElement {
  * 서버의 답으로 맞춘다. 실패면 칸을 되돌리고 이 자리에 오류 줄(`role="alert"`)을 보인다. 브라우저에 남기지 않는다.
  */
 export function soundSetting(): HTMLElement {
-  throw new Error("todo");
+  return soundBlock().node;
+}
+
+/** [`soundSetting`]의 자리와, 서버에서 읽은 값을 칸에 보이고 나면 끝나는 약속(던지지 않는다). */
+function soundBlock(): { node: HTMLElement; ready: Promise<void> } {
+  const holder = field(SOUND_LABEL, "sound-on", "checkbox");
+  holder.classList.add("setup-extra-check");
+  const box = inputOf(holder);
+  box.checked = SOUND_DEFAULT;
+  // 서버 값을 읽기 전에는 바꾸지 못하게 잠근다.
+  box.disabled = true;
+  const message = el("div", "setup-extra-message");
+  message.setAttribute("aria-live", "polite");
+  let current = SOUND_DEFAULT;
+  box.addEventListener("change", () => {
+    const wanted = box.checked;
+    box.disabled = true;
+    message.replaceChildren();
+    void saveSound(wanted).then((saved) => {
+      if (saved === null) message.replaceChildren(errorLine(SOUND_SAVE_FAILED));
+      else current = saved;
+      box.checked = current;
+      box.disabled = false;
+    });
+  });
+  const ready = soundEnabled().then((on) => {
+    current = on;
+    box.checked = on;
+    box.disabled = false;
+  });
+  return { node: block("sound", "알림음", holder, message), ready };
 }
 
 /** 경로 하나를 읽는다. 실패(상태 · 연결)면 `null`. */
@@ -317,7 +352,8 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
   const titles: Record<string, string> = { market: "시장", models: "담당 모델", semantic: "뜻 검색", diagnosis: "진단", restore: "되살리기" };
   const slots: Record<string, HTMLElement> = {};
   for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
-  root.replaceChildren(...Object.values(slots), soundSetting());
+  const sound = soundBlock();
+  root.replaceChildren(...Object.values(slots), sound.node);
   const status = read(API.setup).then((body) => {
     swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
     swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -335,5 +371,5 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
     const state = guide.querySelector('[data-role="backup-state"]');
     if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
   });
-  await Promise.allSettled([status, semantic, doctor, backup]);
+  await Promise.allSettled([status, semantic, doctor, backup, sound.ready]);
 }

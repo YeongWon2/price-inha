@@ -55,12 +55,12 @@ pub(crate) fn register_routes(desk: Arc<Desk>) -> Router {
 }
 
 /// JSON 응답. 브라우저나 중간 자리가 간직하지 않게 한다.
-fn reply(status: StatusCode, body: Value) -> Response {
+pub(crate) fn reply(status: StatusCode, body: Value) -> Response {
     (status, [(CACHE_CONTROL, "no-store")], axum::Json(body)).into_response()
 }
 
 /// 등록 결과를 응답으로 옮긴다: "등록됨" 또는 까닭. 그 밖의 칸은 없다.
-fn registered(outcome: Result<(), SetupRefusal>) -> Response {
+pub(crate) fn registered(outcome: Result<(), SetupRefusal>) -> Response {
     match outcome {
         Ok(()) => reply(StatusCode::OK, json!({ "registered": true })),
         Err(why) => {
@@ -76,7 +76,7 @@ fn registered(outcome: Result<(), SetupRefusal>) -> Response {
 ///
 /// 상한만큼 미리 잡아 두고 옮겨 담는다: 늘리며 옮기다 옛 자리에 본문 조각이 남지 않게 한다.
 /// 거부할 때는 담은 것을 0으로 덮는다. 웹 서버 라이브러리가 쥔 조각은 지우지 못한다(한계).
-async fn body_of(request: Request) -> Result<Vec<u8>, SetupRefusal> {
+pub(crate) async fn body_of(request: Request) -> Result<Vec<u8>, SetupRefusal> {
     let mut body = request.into_body();
     // 길이를 미리 알리면(Content-Length) 읽기 전에 거부한다.
     if body.size_hint().lower() > MAX_BODY_BYTES as u64 {

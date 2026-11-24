@@ -23,6 +23,7 @@ var API = {
 	setupProviders: "/api/setup/providers",
 	setupSemantic: "/api/setup/semantic",
 	setupDoctor: "/api/setup/doctor",
+	setupSound: "/api/setup/sound",
 	accessKey: "/api/access/key",
 	accessUnlock: "/api/access/unlock",
 	accessLog: "/api/access/log",
@@ -69,7 +70,7 @@ var APPROVALS = [
 	"/api/approvals/{id}/approve",
 	"/api/approvals/{id}/reject"
 ];
-API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.remoteKeys, API.setupSlots, API.setupProviders, [
+API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.setupSound, API.remoteKeys, API.setupSlots, API.setupProviders, [
 	API.session,
 	API.office,
 	API.officeChat,

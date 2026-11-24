@@ -5,12 +5,28 @@
 // - 쓰기: `POST API.setupSound` `{"enabled": bool}`(같은 출처 부르기 `ui/call.ts`의 `call`) → 답은 같은 모양.
 //   실패면 던지지 않는다.
 
+import { API } from "../paths";
+import { call } from "./call";
+
 /** 저장한 값이 없거나 읽지 못했을 때의 값(켜짐). */
 export const SOUND_DEFAULT = true;
 
+/** 서버 답에서 `enabled`(참 · 거짓)를 꺼낸다. 모양이 다르면 `null`. */
+function enabledOf(body: unknown): boolean | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  const value = (body as { enabled?: unknown }).enabled;
+  return typeof value === "boolean" ? value : null;
+}
+
 /** 알림음이 켜져 있나(서버에서 읽는다). 읽지 못하거나 답의 모양이 맞지 않으면 [`SOUND_DEFAULT`]. 던지지 않는다. */
 export async function soundEnabled(): Promise<boolean> {
-  throw new Error("todo");
+  try {
+    const reply = await call("GET", API.setupSound);
+    if (!reply.ok) return SOUND_DEFAULT;
+    return enabledOf(reply.body) ?? SOUND_DEFAULT;
+  } catch {
+    return SOUND_DEFAULT;
+  }
 }
 
 /**
@@ -18,10 +34,16 @@ export async function soundEnabled(): Promise<boolean> {
  * 보내지 못했거나(연결) 거절됐거나(상태) 답의 모양이 맞지 않으면 `null`. 던지지 않는다.
  */
 export async function saveSound(on: boolean): Promise<boolean | null> {
-  throw new Error("todo");
+  try {
+    const reply = await call("POST", API.setupSound, { enabled: on });
+    if (!reply.ok) return null;
+    return enabledOf(reply.body);
+  } catch {
+    return null;
+  }
 }
 
 /** 알림음 켜기 · 끄기를 서버에 남긴다. 남겼으면 `true`, 남기지 못했으면 `false`(던지지 않는다). */
 export async function setSoundEnabled(on: boolean): Promise<boolean> {
-  throw new Error("todo");
+  return (await saveSound(on)) !== null;
 }
