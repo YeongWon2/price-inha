@@ -123,7 +123,13 @@ impl State {
 pub(crate) fn adopt(state: &mut State, orphans: &[Trade], holdings: &[Holding]) {
     let mut fresh = Vec::new();
     for trade in orphans {
-        let Some(held) = holdings.iter().find(|h| h.symbol.as_str() == trade.symbol) else {
+        // 저장소의 매매에는 시장 칸이 없어 종목 글자 모양으로 시장을 가린다(10차 2번): 같은 글자의
+        // 다른 시장 보유를 이 매매에 맞추지 않는다.
+        let market = symbol_market(&trade.symbol);
+        let Some(held) = holdings
+            .iter()
+            .find(|h| h.market == market && h.symbol.as_str() == trade.symbol)
+        else {
             continue;
         };
         let ledgered: Decimal = state
@@ -144,6 +150,15 @@ pub(crate) fn adopt(state: &mut State, orphans: &[Trade], holdings: &[Holding]) 
         ));
     }
     state.positions.extend(fresh);
+}
+
+/// 종목 글자의 시장: 국내 종목 코드(숫자 여섯 자리)면 국내, 아니면 미국.
+fn symbol_market(symbol: &str) -> Market {
+    if symbol.len() == 6 && symbol.bytes().all(|b| b.is_ascii_digit()) {
+        Market::Kr
+    } else {
+        Market::Us
+    }
 }
 
 /// 사는 주문 키.

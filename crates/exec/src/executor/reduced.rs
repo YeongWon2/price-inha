@@ -64,6 +64,10 @@ impl Executor {
         }
         let id = submission.trade_id;
         let trade = self.store.get_trade(id)?;
+        // 승인 표시(승인 증표로 낸 것)로 요청 전량이 나가는 길을 막는다(결정 14).
+        if submission.permit.granted() {
+            return Err(Error::GrantedPermit);
+        }
         let approved = submission.permit.approved().clone();
         self.check_buy_accounts(submission.template_account, &trade, &approved)?;
         if !fits_buy(&submission.permit, &trade) {
