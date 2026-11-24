@@ -1,7 +1,7 @@
 //! 주문 전 점검(C9 · FN1)과 점검 통과 표시(E33).
 
-use pi_paper::{AccountKind, ApprovedOrder, CheckAuthority, CheckPermit, OrderType};
-use rust_decimal::Decimal;
+use pi_paper::{AccountKind, ApprovedOrder, CheckAuthority, CheckPermit, MarketRules, OrderType};
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::screen::{common_violations, missing_fields, plan_buy, plan_sell};
 use crate::sizing::percent_of;
@@ -46,7 +46,7 @@ pub fn check(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Outcome {
     match evaluate(draft, ctx) {
         Err(blocked) => Outcome::Blocked(blocked),
         Ok(done) => match done.limit {
-            Some(limit) if done.amount > limit => {
+            Some(limit) if done.cost > limit => {
                 Outcome::NeedsApproval(PendingApproval::new(done.order, done.amount, limit))
             }
             _ => Outcome::Pass(Passed::new(done.order, done.amount)),
@@ -57,7 +57,10 @@ pub fn check(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Outcome {
 /// 점검을 다 지난 주문. `limit`은 사는 주문의 자동 주문 금액 한도(넘으면 승인 대기, 셈이 넘치면 0).
 pub(crate) struct Evaluated {
     pub(crate) order: ApprovedOrder,
+    /// 보이는 주문 금액(수량 × 값).
     pub(crate) amount: Decimal,
+    /// 한도와 비교하는 금액. 사는 주문은 `amount + 올림(amount × 수수료율)`(결정 14), 파는 주문은 `amount`.
+    pub(crate) cost: Decimal,
     pub(crate) limit: Option<Decimal>,
 }
 
@@ -93,7 +96,13 @@ pub(crate) fn evaluate(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Result<Eva
     let limit = buy.then(|| {
         percent_of(ctx.book.equity, ctx.params.auto_order_limit_pct).unwrap_or(Decimal::ZERO)
     });
-    let over = limit.is_some_and(|l| plan.amount > l);
+    // 사는 주문의 한도 판정 금액은 수수료를 넣는다. 셈이 넘치면 보수적으로 넘는 쪽(승인 대기)이다.
+    let cost = if buy {
+        buy_cost(plan.amount, ctx.market_rules).unwrap_or(Decimal::MAX)
+    } else {
+        plan.amount
+    };
+    let over = limit.is_some_and(|l| cost > l);
     if over && draft.order_type == OrderType::Market {
         found.push(Violation::MarketBuyOverAutoLimit);
     }
@@ -112,8 +121,18 @@ pub(crate) fn evaluate(draft: &OrderDraft, ctx: &CheckContext<'_>) -> Result<Eva
     Ok(Evaluated {
         order,
         amount: plan.amount,
+        cost,
         limit,
     })
+}
+
+/// 사는 주문의 한도 판정 금액: `금액 + 올림(금액 × 수수료율)`(금액 = 수량 × 값). 올림 단위는 그 시장 돈의
+/// 최소 단위(시장 규칙의 반올림 자릿수: 원 1, 달러 0.01). 셈이 넘치면 `None`.
+pub(crate) fn buy_cost(notional: Decimal, rules: &MarketRules) -> Option<Decimal> {
+    let fee = notional
+        .checked_mul(rules.commission_rate)?
+        .round_dp_with_strategy(rules.rounding.scale, RoundingStrategy::AwayFromZero);
+    notional.checked_add(fee)
 }
 
 /// 규칙 엔진의 막힘(언제나 원칙 · 근거 부족).
@@ -144,6 +163,12 @@ pub fn issue(authority: &CheckAuthority, passed: Passed) -> CheckPermit {
 /// [`issue`]와 같되, 표시를 매매 하나(`trade`, 저장소의 매매 번호)에 묶는다(E33). 주문을 내는
 /// 쪽은 [`CheckPermit::trade`]가 그 매매의 번호인지 대조한다. 같은 종목 · 방향의 다른 매매에
 /// 이 표시를 쓰지 못하게 한다.
+///
+/// 승인 증표로 지난 주문([`Passed::approval`]이 있음)은 승인 표시(`granted() == true`)로 낸다(결정 14).
 pub fn issue_for_trade(authority: &CheckAuthority, passed: Passed, trade: i64) -> CheckPermit {
-    authority.approve_for_trade(trade, passed.into_order())
+    if passed.approval().is_some() {
+        authority.approve_granted_for_trade(trade, passed.into_order())
+    } else {
+        authority.approve_for_trade(trade, passed.into_order())
+    }
 }

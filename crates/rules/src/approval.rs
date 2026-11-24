@@ -7,7 +7,7 @@
 use pi_paper::{ApprovedOrder, Side};
 use rust_decimal::Decimal;
 
-use crate::check::evaluate;
+use crate::check::{buy_cost, evaluate};
 use crate::sizing::floor_within;
 use crate::{
     BlockKind, Blocked, CheckContext, OrderDraft, Passed, PendingApproval, Reason, Violation,
@@ -82,8 +82,8 @@ pub fn approved(
 ///   [`crate::Violation::MarketBuyOverAutoLimit`] 그대로).
 /// - 다시 셈한 주문의 종목 · 방향 · 호가 유형이 `pending.order()`와 다르거나 사는 주문이 아니면
 ///   [`crate::Reason::ApprovalMismatch`].
-/// - 수량 = `min(다시 셈한 수량, pending의 수량, floor(평가액 × 자동 주문 금액 한도% ÷ 지정가))`.
-///   지정가는 다시 셈한 값이다. 0이면 [`crate::Violation::NothingWithinLimit`].
+/// - 수량 = `min(다시 셈한 수량, pending의 수량)` 이하에서, 금액(`수량 × 값 + 올림(수량 × 값 × 수수료율)`)이
+///   평가액 × 자동 주문 금액 한도% 이하인 가장 큰 수량(결정 14). 지정가는 다시 셈한 값이다. 0이면 [`crate::Violation::NothingWithinLimit`].
 /// - 줄인 금액은 한도 이하라 승인 없이 [`Passed`]이고 [`Passed::approval`]은 `None`이다.
 pub fn reduce_within_limit(
     pending: PendingApproval,
@@ -110,11 +110,25 @@ pub fn reduce_within_limit(
         None => Decimal::ZERO,
     };
     let limit = done.limit.unwrap_or(Decimal::ZERO);
-    let quantity = done
-        .order
-        .quantity
-        .min(waiting.quantity)
-        .min(floor_within(limit, unit));
+    // 한도 안(수수료 포함)에서 가장 큰 수량. 금액은 수량에 따라 줄지 않으므로 어림한 수량에서
+    // 반올림 때문에 어긋난 몇 주를 맞춘다. 셈이 넘치면 그 수량은 한도 밖으로 본다.
+    let most = done.order.quantity.min(waiting.quantity);
+    let rules = ctx.market_rules;
+    let fits = |q: Decimal| {
+        q.checked_mul(unit)
+            .and_then(|notional| buy_cost(notional, rules))
+            .is_some_and(|cost| cost <= limit)
+    };
+    let loaded = unit.checked_mul(Decimal::ONE + rules.commission_rate);
+    let mut quantity = loaded
+        .map_or(Decimal::ZERO, |loaded| floor_within(limit, loaded))
+        .min(most);
+    while quantity > Decimal::ZERO && !fits(quantity) {
+        quantity -= Decimal::ONE;
+    }
+    while quantity < most && fits(quantity + Decimal::ONE) {
+        quantity += Decimal::ONE;
+    }
     if quantity <= Decimal::ZERO {
         return Err(Blocked {
             kind: BlockKind::PrincipleOrRationale,
