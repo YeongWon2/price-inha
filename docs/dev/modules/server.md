@@ -925,3 +925,24 @@ N1이 알아냈다: 알림음 설정(1번 (바))은 `localStorage`를 쓰는데,
 | `crates/server/tests/setup/` 의 설정 상태(`GET /api/setup`) 칸 목록을 정확히 비교하는 시험 | 고침 | 지시서 31차 1번 (가) · (나): 시장 · 담당 모델 칸만 더한다. 키 값 없음 · 숫자 없음 단언은 그대로 |
 | 설정 · 키 화면의 그 밖 시험(`key-screens` · `key-fields`의 나머지 · `setup-key-screen` · `setup-ai-limit`) · 뜻 검색 시험 · doctor 시험 | 유지 | 지금 칸 · 지금 경로의 동작은 그대로 |
 | 그 밖의 server 시험 | 유지 | 31차와 무관 |
+
+### 31차 고침 (2026-11-25 조정자, 결정 22 — 결정 21과 위 "31차 대조 보강"을 거둔다)
+
+알림음 설정(1번 (바))은 브라우저 저장소가 아니라 **서버**가 둔다. V46 · D11 · N8("화면은 브라우저 저장소 · 쿠키 · 주소에 값을 남기지 않는다")은 그대로 지킨다.
+
+1. `GET /api/setup/sound` → `{"enabled": true|false}`(기본 켜짐). `POST /api/setup/sound` `{"enabled": bool}` → 같은 모양. 관문은 `/api/setup`의 다른 쓰기와 같다(세션 · 원격 401 · Origin). `enabled`가 참 · 거짓이 아니면 400이고 저장하지 않는다.
+2. 저장은 홈 폴더의 설정 파일에 한다(하루 AI 상한을 두는 방식과 같게 — 저장소 판을 올리지 않는다). 서버를 다시 만들어도 남는다. 파일을 읽지 못하면 기본(켜짐)으로 본다.
+3. 화면: `web/src/ui/sound-pref.ts`는 브라우저 저장소를 쓰지 않는다 — 서버에서 읽고 서버에 쓴다(읽기 · 쓰기 실패에도 던지지 않고 기본 켜짐). 설정 화면의 알림음 칸은 읽은 값을 보이고, 바꾸면 보낸 뒤 서버의 답으로 맞춘다(실패면 되돌리고 오류 줄).
+4. 화면 코드 어디에도 `localStorage` 글자가 없다(`key-fields`의 예외를 되돌린다).
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/key-fields.test.ts`의 V46 N8 단언에 넣은 `ui/sound-pref.ts` 예외 한 줄 | 고침 | 결정 22: 예외를 되돌려 31차 전의 단언으로 돌아간다(어느 파일에도 브라우저 저장소 글자 없음) |
+| `crates/server/tests/web/sound-pref.test.ts` | 고침 | 결정 22: 브라우저 저장소가 아니라 서버(`/api/setup/sound`)에서 읽고 쓰는 것으로 다시 쓴다(기본 켜짐 · 실패에도 던지지 않음은 그대로) |
+| `crates/server/tests/web/setup-extras.test.ts`의 알림음 시험들 | 고침 | 결정 22: 저장소가 아니라 서버 읽기 · 쓰기로. 그 밖(시장 · 모델 · 뜻 검색 · 진단 · 되살리기)은 그대로 |
+| `crates/server/tests/web/screen-paths.test.ts`에서 설정 화면의 경로 목록 | 고침 | 설정 화면이 `/api/setup/sound`를 더 부른다 — 그 경로만 더한다 |
+| `crates/server/tests/setup/`의 "화면은 키 값을 브라우저 저장소나 주소에 남기지 않는다"(V46 · D11) | 유지 | 결정 22의 까닭 그 자체 — 빌드한 묶음 어디에도 브라우저 저장소 글자가 없어야 한다 |
+| `crates/server/tests/round33/`(설정 상태 · 진단) · `tests/setup/`의 칸 목록 시험 | 유지 | 31차에 쓴 그대로. 알림음 API 시험은 새로 더한다 |
+| 그 밖의 server 시험 | 유지 | 무관 |
