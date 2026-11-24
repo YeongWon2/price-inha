@@ -182,6 +182,20 @@ async fn crew_trigger(
 }
 
 /// 투자 팀을 잇는다(`team`이 없으면 잇지 않는다).
+/// (17차 4번) 설정의 하루 AI 호출 상한을 팀 조립에 잇는다(팀 조립에 이미 적힌 값이 앞선다). (22차 6번) 그 켤 때 값을
+/// 설정 책상에도 적는다(설정 상태에 보이고, 화면에서 저장한 값보다 앞선다).
+fn team_with_limit(
+    team: Option<crate::TeamWiring>,
+    settings: &Settings,
+    desk: &Desk,
+) -> Option<crate::TeamWiring> {
+    team.map(|mut team| {
+        team.ai_daily_limit = team.ai_daily_limit.or(settings.ai_daily_limit);
+        desk.set_launch_ai_limit(team.ai_daily_limit);
+        team
+    })
+}
+
 fn open_crew(
     team: Option<crate::TeamWiring>,
     store: &Store,
@@ -298,11 +312,7 @@ impl App {
             wiring: launch.trading,
         };
         let trading = Trading::open(parts).await?;
-        // (17차 4번) 설정의 하루 AI 호출 상한을 팀 조립에 잇는다(팀 조립에 이미 적힌 값이 앞선다).
-        let team = launch.team.map(|mut team| {
-            team.ai_daily_limit = team.ai_daily_limit.or(settings.ai_daily_limit);
-            team
-        });
+        let team = team_with_limit(launch.team, &settings, &desk);
         let crew = open_crew(team, &store, &wiring, &trading, &desk, &secrets)?;
         let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());

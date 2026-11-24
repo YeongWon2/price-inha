@@ -15,6 +15,7 @@ use tokio::sync::Notify;
 
 mod ai;
 mod keys;
+mod limit;
 
 use crate::ai_link::Leftovers;
 use crate::keys::KeyPresence;
@@ -28,6 +29,8 @@ use crate::{
 };
 use ai::{AiNow, Held, hold};
 pub(crate) use ai::{AiParts, Work, prepare_work};
+pub(crate) use limit::limit_request;
+pub use limit::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 
 /// 키 확인 하나가 끝나기를 기다리는 가장 긴 시간. 넘으면 "닿지 않음"이고 저장하지 않는다.
 /// (`pi-ai` · `pi-market`의 요청마다 시간 제한이 따로 있다. 이것은 그 바깥의 끝이다.)
@@ -81,6 +84,8 @@ pub(crate) struct Desk {
     retired: Mutex<Vec<Arc<ClaudeCliProvider>>>,
     /// (8차 3번) 서버가 꺼지기 시작했다. 고르기 잠금을 기다리기 전에 세운다. 선 뒤의 고르기는 거부한다.
     closing: AtomicBool,
+    /// (22차 6번) 하루 AI 호출 상한(켤 때 값 · 저장한 값).
+    ai_limit: limit::AiLimit,
 }
 
 impl Desk {
@@ -99,7 +104,9 @@ impl Desk {
             work_blocked: matches!(parts.work, Work::NotEmpty),
             held,
         };
+        let ai_limit = limit::AiLimit::load(&parts.home);
         let desk = Self {
+            ai_limit,
             presence: KeyPresence::new(Arc::clone(&parts.secrets)),
             secrets: parts.secrets,
             verifier: parts.verifier,

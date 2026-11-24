@@ -1,4 +1,4 @@
-import { n as LOOKS, t as DEFAULT_LOOKS } from "./office-oqtqvgpa.js";
+import { i as placeBubbles, n as LOOKS, r as bubbleWidth, t as DEFAULT_LOOKS } from "./office-bafqxbf7.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40413,7 +40413,14 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			retryAt: 0,
 			walking: false,
 			label: "",
-			headY: HEAD_Y
+			headY: HEAD_Y,
+			screen: {
+				x: 0,
+				y: 0,
+				visible: false
+			},
+			tagSize: null,
+			paused: false
 		};
 		tagTree(actor);
 		actors.set(id, actor);
@@ -40538,7 +40545,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		}
 	}
 	function step(actor, dt, now) {
-		if (!actor.target) return;
+		if (!actor.target || actor.paused) return;
 		if (!actor.path) {
 			if (!(Math.hypot(actor.x - (actor.target.x + .5), actor.y - (actor.target.y + .5)) < ARRIVE) && actor.retryAt && now >= actor.retryAt) retarget(actor, false);
 			return;
@@ -40582,7 +40589,8 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 	function animate(actor, dt, t) {
 		actor.root.position.set(actor.x, 0, actor.y);
 		actor.root.rotation.set(0, actor.yaw, 0);
-		const clip = clipName(actor.walking, !actor.walking && seated(actor));
+		const moving = actor.walking && !actor.paused;
+		const clip = clipName(moving, !moving && seated(actor));
 		if (actor.body) animateBody(actor, actor.body, clip, dt);
 		if (actor.doll) poseDoll(actor.doll, clip, actor.view.work, t + actor.phase);
 		actor.headY = clip === "sit" ? SIT_HEAD_Y : HEAD_Y;
@@ -40592,6 +40600,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		if (label !== actor.label) {
 			actor.tag.textContent = label;
 			actor.label = label;
+			actor.tagSize = null;
 		}
 		actor.tag.dataset.work = work;
 		actor.tag.dataset.place = actor.view.place;
@@ -40618,15 +40627,73 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		placeLabels(camera, width, height) {
 			for (const actor of actors.values()) {
 				projected.set(actor.x, actor.headY, actor.y).project(camera);
-				if (!(projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05)) {
+				const visible = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
+				const sx = (projected.x + 1) / 2 * width;
+				const sy = (1 - projected.y) / 2 * height;
+				actor.screen = {
+					x: sx,
+					y: sy,
+					visible
+				};
+				if (!visible) {
 					actor.tag.style.display = "none";
 					continue;
 				}
 				actor.tag.style.display = "";
-				const sx = (projected.x + 1) / 2 * width;
-				const sy = (1 - projected.y) / 2 * height;
 				actor.tag.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
 			}
+		},
+		/** (22차 3번) 이번 프레임의 머리 점(이름표 바로 위)과 이름표 자리. [`placeLabels`] 뒤에 부른다. */
+		heads() {
+			return [...actors.values()].map((actor) => {
+				if (!actor.tagSize && actor.screen.visible) actor.tagSize = {
+					width: actor.tag.offsetWidth,
+					height: actor.tag.offsetHeight
+				};
+				const size = actor.tagSize ?? {
+					width: 0,
+					height: 0
+				};
+				const label = {
+					x: actor.screen.x - size.width / 2,
+					y: actor.screen.y - size.height,
+					...size
+				};
+				return {
+					id: actor.id,
+					x: actor.screen.x,
+					y: label.y,
+					label,
+					visible: actor.screen.visible
+				};
+			});
+		},
+		/** (22차 4번) 잡담을 볼 담당들(세계 좌표 · 한가 · 걷는 중). 바쁨은 말풍선 층이 채운다. */
+		walkers() {
+			return [...actors.values()].map((a) => ({
+				id: a.id,
+				x: a.x,
+				z: a.y,
+				idle: a.view.work === "idle" && a.view.place !== "meeting",
+				walking: a.walking && !a.paused,
+				busy: false
+			}));
+		},
+		/** 두 담당 사이가 트여 있는가(벽 · 가구에 막히지 않음). */
+		canSee(a, b) {
+			const one = actors.get(a);
+			const two = actors.get(b);
+			return Boolean(one && two && clearLine(grid, {
+				x: one.x,
+				y: one.y
+			}, {
+				x: two.x,
+				y: two.y
+			}));
+		},
+		/** 잡담으로 멈출 담당을 적는다. */
+		pause(isPaused) {
+			for (const actor of actors.values()) actor.paused = isPaused(actor.id);
 		},
 		pick(clientX, clientY, camera, canvas) {
 			const rect = canvas.getBoundingClientRect();
@@ -40640,6 +40707,296 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 				if (actor.body) disposeBody(actor.body);
 				actor.tag.remove();
 			}
+		}
+	};
+}
+// src/office/smalltalk.ts
+/** 잡담 수치(원본과 같다). 시간은 밀리초, 거리는 세계 단위. */
+var SMALLTALK_RULES = {
+	/** 두 담당 사이 거리가 이 값 이하일 때만. */
+	range: 1.8,
+	/** 먼저 말한 쪽 말풍선: 시작부터 이 시간까지. */
+	firstUntilMs: 4500,
+	/** 답하는 쪽 말풍선: 시작 뒤 이 시간부터. */
+	replyFromMs: 2e3,
+	/** 답하는 쪽 말풍선: 시작 뒤 이 시간까지. */
+	replyUntilMs: 6500,
+	/** 둘 다 시작부터 이 시간 동안 멈춘다. */
+	pauseMs: 7500,
+	/** 담당마다 쉬는 시간. */
+	personalMs: 45e3,
+	/** 같은 쌍이 쉬는 시간. */
+	pairMs: 9e4,
+	/** 전체가 쉬는 시간. */
+	globalMs: 12e3
+};
+/** 주식 사무실 잡담 16쌍(한국어, 우리 대사 — 원본 대사를 옮기지 않는다). */
+var SMALLTALK_LINES = [
+	{
+		ask: "오늘 장 분위기 어때요?",
+		answer: "아직은 눈치 보는 중이에요."
+	},
+	{
+		ask: "커피 한 잔 하셨어요?",
+		answer: "벌써 두 잔째예요."
+	},
+	{
+		ask: "어제 공시 많았죠?",
+		answer: "정리하느라 혼났어요."
+	},
+	{
+		ask: "점심 뭐 드실래요?",
+		answer: "장 끝나고 생각해 볼게요."
+	},
+	{
+		ask: "환율 좀 보셨어요?",
+		answer: "조금 올랐더라고요."
+	},
+	{
+		ask: "오늘 거래량 괜찮나요?",
+		answer: "평소보다 조금 많아요."
+	},
+	{
+		ask: "손절선은 다 점검하셨죠?",
+		answer: "아침에 한 번 더 봤어요."
+	},
+	{
+		ask: "요즘 바쁘시죠?",
+		answer: "실적 시즌이라 그렇네요."
+	},
+	{
+		ask: "모니터 하나 더 놓을까요?",
+		answer: "자리가 있으면 좋겠네요."
+	},
+	{
+		ask: "어제 복기는 끝내셨어요?",
+		answer: "거의 다 썼어요."
+	},
+	{
+		ask: "오후에 회의 있나요?",
+		answer: "논의 생기면 바로 모여요."
+	},
+	{
+		ask: "장 시작 전에 뭐 보세요?",
+		answer: "밤사이 해외 지수요."
+	},
+	{
+		ask: "의자 바꾸셨어요?",
+		answer: "허리가 편해졌어요."
+	},
+	{
+		ask: "오늘 날씨 좋죠?",
+		answer: "창밖 볼 틈은 없네요."
+	},
+	{
+		ask: "주말엔 뭐 하셨어요?",
+		answer: "책 좀 읽었어요."
+	},
+	{
+		ask: "기다리는 일정 있어요?",
+		answer: "다음 주 실적 발표요."
+	}
+];
+/** 지나가며 잡담 판. */
+var Smalltalk = class {
+	random;
+	/** 지금(또는 마지막) 잡담. */
+	current = null;
+	/** 바로 앞 잡담의 대사 번호. */
+	lastLine = -1;
+	/** 전체가 마지막으로 시작한 시각. */
+	lastStart = Number.NEGATIVE_INFINITY;
+	/** 담당마다 마지막으로 시작한 시각. */
+	personal = /* @__PURE__ */ new Map();
+	/** 쌍마다 마지막으로 시작한 시각. */
+	pairs = /* @__PURE__ */ new Map();
+	/** `random`은 [0, 1)을 주는 함수(시험은 고정 값을 넘긴다). */
+	constructor(random = Math.random) {
+		this.random = random;
+	}
+	rested(id, now) {
+		return now - (this.personal.get(id) ?? Number.NEGATIVE_INFINITY) >= SMALLTALK_RULES.personalMs;
+	}
+	pairRested(a, b, now) {
+		return now - (this.pairs.get(pairKey(a, b)) ?? Number.NEGATIVE_INFINITY) >= SMALLTALK_RULES.pairMs;
+	}
+	ready(a, b, canSee, now) {
+		if (!a.idle || !b.idle || a.busy || b.busy) return false;
+		if (!a.walking && !b.walking) return false;
+		if (Math.hypot(a.x - b.x, a.z - b.z) > SMALLTALK_RULES.range) return false;
+		if (!this.rested(a.id, now) || !this.rested(b.id, now) || !this.pairRested(a.id, b.id, now)) return false;
+		return canSee(a.id, b.id) && canSee(b.id, a.id);
+	}
+	pickLine() {
+		const count = SMALLTALK_LINES.length;
+		let line = Math.min(count - 1, Math.floor(this.random() * count));
+		if (line === this.lastLine && count > 1) line = (line + 1) % count;
+		return line;
+	}
+	/**
+	* 조건(둘 다 한가 · 한쪽 이상 걷는 중 · 거리 [`SMALLTALK_RULES.range`] 이하 · `canSee`로 서로 보임 · 대화 · 상태 말풍선
+	* 없음 · 쉬는 시간 지남)이 맞는 쌍이 있으면 잡담 하나를 `now`에 시작해 돌려준다(한 번에 하나). 바로 앞 잡담과 같은
+	* 대사는 고르지 않는다. 없으면 `null`.
+	*/
+	tick(walkers, canSee, now) {
+		if (now - this.lastStart < SMALLTALK_RULES.globalMs) return null;
+		for (let i = 0; i < walkers.length; i += 1) for (let j = i + 1; j < walkers.length; j += 1) {
+			const [a, b] = [walkers[i], walkers[j]];
+			if (!this.ready(a, b, canSee, now)) continue;
+			const swap = this.random() >= .5;
+			const exchange = {
+				first: swap ? b.id : a.id,
+				second: swap ? a.id : b.id,
+				line: this.pickLine(),
+				start: now
+			};
+			this.current = exchange;
+			this.lastLine = exchange.line;
+			this.lastStart = now;
+			this.personal.set(a.id, now);
+			this.personal.set(b.id, now);
+			this.pairs.set(pairKey(a.id, b.id), now);
+			return exchange;
+		}
+		return null;
+	}
+	/** `now`에 보일 잡담 말들: 먼저 말한 쪽은 질문(시작 ~ 4.5초), 답하는 쪽은 답(2초 ~ 6.5초). */
+	speaking(now) {
+		const ex = this.current;
+		if (!ex) return [];
+		const line = SMALLTALK_LINES[ex.line];
+		const since = now - ex.start;
+		const out = [];
+		if (since >= 0 && since < SMALLTALK_RULES.firstUntilMs) out.push({
+			agent: ex.first,
+			text: line.ask
+		});
+		if (since >= SMALLTALK_RULES.replyFromMs && since < SMALLTALK_RULES.replyUntilMs) out.push({
+			agent: ex.second,
+			text: line.answer
+		});
+		return out;
+	}
+	/** 그 담당이 `now`에 잡담 때문에 멈춰 있는가(시작부터 [`SMALLTALK_RULES.pauseMs`]). */
+	paused(agent, now) {
+		const ex = this.current;
+		if (!ex || ex.first !== agent && ex.second !== agent) return false;
+		const since = now - ex.start;
+		return since >= 0 && since < SMALLTALK_RULES.pauseMs;
+	}
+};
+/** 순서와 상관없는 쌍 열쇠. */
+function pairKey(a, b) {
+	return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+// src/office/bubbles3d.ts
+function createBubbleLayer(labels, board, names) {
+	const smalltalk = new Smalltalk();
+	const lane = document.createElement("div");
+	lane.className = "bubble-lane";
+	labels.appendChild(lane);
+	const shown = /* @__PURE__ */ new Map();
+	function element(id) {
+		let one = shown.get(id);
+		if (!one) {
+			const el = document.createElement("div");
+			el.className = "bubble";
+			el.dataset.agent = id;
+			el.dataset.name = names[id] ?? id;
+			labels.appendChild(el);
+			one = {
+				el,
+				text: "",
+				size: {
+					width: 0,
+					height: 0
+				}
+			};
+			shown.set(id, one);
+		}
+		return one;
+	}
+	function hide(one) {
+		one.el.style.display = "none";
+		if (one.el.parentElement === lane) labels.appendChild(one.el);
+	}
+	function talkSmall(now, walkers, canSee) {
+		const ready = walkers.map((w) => ({
+			...w,
+			busy: w.busy || board.busy(w.id, now)
+		}));
+		const started = smalltalk.tick(ready, canSee, now);
+		if (started) {
+			board.clear(started.first, "smalltalk");
+			board.clear(started.second, "smalltalk");
+		}
+		for (const say of smalltalk.speaking(now)) board.smalltalk(say.agent, say.text, now, now + 250);
+	}
+	function update(now, heads, walkers, canSee, width, height) {
+		talkSmall(now, walkers, canSee);
+		const maxWidth = bubbleWidth(width);
+		const spots = [];
+		const visible = /* @__PURE__ */ new Set();
+		for (const head of heads) {
+			const bubble = board.shown(head.id, now);
+			const one = shown.get(head.id);
+			if (!bubble) {
+				if (one) hide(one);
+				continue;
+			}
+			const el = element(head.id);
+			const text = bubble.text;
+			if (el.text !== text || el.el.style.maxWidth !== `${maxWidth}px`) {
+				el.text = text;
+				el.el.textContent = text;
+				el.el.title = `${names[head.id] ?? head.id} · ${text}`;
+				el.el.dataset.kind = bubble.kind;
+				el.el.style.maxWidth = `${maxWidth}px`;
+				el.el.style.display = "";
+				el.size = {
+					width: el.el.offsetWidth || maxWidth,
+					height: el.el.offsetHeight || 24
+				};
+			}
+			if (!head.visible) {
+				hide(el);
+				continue;
+			}
+			visible.add(head.id);
+			spots.push({
+				agent: head.id,
+				x: head.x,
+				y: head.y,
+				bubble: el.size,
+				label: head.label
+			});
+		}
+		const placement = placeBubbles(spots, {
+			width,
+			height
+		});
+		for (const { agent, rect } of placement.placed) {
+			const one = element(agent);
+			if (one.el.parentElement === lane) labels.appendChild(one.el);
+			one.el.style.display = "";
+			one.el.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+		}
+		for (const agent of placement.lane) {
+			const one = element(agent);
+			one.el.style.display = "";
+			one.el.style.transform = "";
+			if (one.el.parentElement !== lane) lane.appendChild(one.el);
+		}
+		for (const agent of placement.hidden) hide(element(agent));
+		for (const [id, one] of shown) if (!visible.has(id)) hide(one);
+	}
+	return {
+		update,
+		paused: (id, now) => smalltalk.paused(id, now),
+		dispose() {
+			for (const one of shown.values()) one.el.remove();
+			shown.clear();
+			lane.remove();
 		}
 	};
 }
@@ -40712,7 +41069,7 @@ function roomTags(labels, map) {
 		};
 	});
 }
-function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow }) {
+function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
 	host.appendChild(renderer.domElement);
@@ -40734,6 +41091,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		looks,
 		grid: buildGrid(map)
 	});
+	const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 	let focus = "all";
 	const want = {
 		radius: 30,
@@ -40871,11 +41229,14 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		const frameMs = now - last;
 		const dt = Math.min(frameMs / 1e3, .2);
 		last = now;
+		const wall = Date.now();
+		if (bubbles) actors.pause((id) => bubbles.paused(id, wall));
 		actors.update(dt, (now - clock0) / 1e3, now);
 		updateCamera(dt);
 		renderer.render(scene, camera);
 		actors.placeLabels(camera, host.clientWidth, host.clientHeight);
 		placeRoomTags(host.clientWidth, host.clientHeight);
+		bubbles?.update(wall, actors.heads(), actors.walkers(), actors.canSee, host.clientWidth, host.clientHeight);
 		measure(now, frameMs);
 	}
 	raf = requestAnimationFrame(frameStep);
@@ -40886,6 +41247,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		document.removeEventListener("visibilitychange", onVisibility);
 		canvas.removeEventListener("webglcontextlost", onContextLost);
 		actors.dispose();
+		bubbles?.dispose();
 		scene.traverse((o) => {
 			if (o.geometry) o.geometry.dispose();
 			const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];

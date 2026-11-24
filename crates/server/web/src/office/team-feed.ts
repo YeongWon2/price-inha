@@ -30,7 +30,7 @@ export interface FeedRow {
 
 /** `office.talk` 하나를 팀 탭 것으로. `key`는 이벤트 번호로 만든다(같은 번호는 같은 줄). */
 export function talkEntry(talk: Talk, seq: number): FeedEntry {
-  throw new Error("todo");
+  return { kind: "talk", key: `talk-${seq}`, at: talk.at, agent: talk.agent, text: talk.text, topic: talk.topic };
 }
 
 /**
@@ -38,5 +38,23 @@ export function talkEntry(talk: Talk, seq: number): FeedEntry {
  * 담당 이름은 `names`(담당 id → 이름)에서 찾고, 없으면 id를 그대로 쓴다.
  */
 export function teamFeed(entries: readonly FeedEntry[], names: Readonly<Record<string, string>>): FeedRow[] {
-  throw new Error("todo");
+  const seen = new Set<string>();
+  const kept: { entry: FeedEntry; order: number }[] = [];
+  entries.forEach((entry, order) => {
+    if (seen.has(entry.key)) return;
+    seen.add(entry.key);
+    kept.push({ entry, order });
+  });
+  kept.sort((a, b) => a.entry.at - b.entry.at || a.order - b.order);
+  return kept.map(({ entry }) => {
+    const name = Object.hasOwn(names, entry.agent) ? names[entry.agent] : entry.agent;
+    return {
+      kind: entry.kind,
+      key: entry.key,
+      at: entry.at,
+      who: entry.kind === "me" ? `나 → ${name}` : name,
+      text: entry.text,
+      tag: entry.kind === "talk" ? entry.topic : null,
+    };
+  });
 }

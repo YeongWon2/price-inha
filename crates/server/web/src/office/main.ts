@@ -7,13 +7,16 @@
 // - WS   /ws?last_seq=N                  번호 있는 이벤트 `office.agent` · `office.chat`를 받는다(C2 · E3).
 // - WS   이벤트 `office.approval`        승인 카드(10c 14번): 폰과 같은 길 · 같은 지문 대조로 승인 · 거절.
 // - GET  /api/office/looks · POST /api/office/look   담당 외형(20차 4번): 처음에 읽어 외형을 정하고, 고르면 바꾼다.
+// - 스냅샷의 `talk` 칸 · WS 이벤트 `office.talk`   팀의 대화(22차): 팀 탭 · 머리 위 말풍선 · 가벼운 화면의 최근 말.
 // 스냅샷과 말하기 길은 조립(price-inha)이 Office에 잇는다. 없으면 이벤트만으로 그린다.
 import "./office.css";
 import { API, OFFICE_LOOK_PATHS } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
+import { Chatter, KIND_OFFICE_TALK, talkElement } from "./chatter";
 import { createLookPicker } from "./look-picker";
 import { DEFAULT_LOOKS } from "./looks";
 import type { OfficeMap, Scene } from "./scene3d";
+import { teamFeed, type FeedEntry } from "./team-feed";
 import { trimLines, type Line } from "./trim";
 
 const SESSION_PATH = API.session;
@@ -63,6 +66,8 @@ const state = {
   looks: { ...DEFAULT_LOOKS } as Record<string, string>, // 담당 → 외형 id(서버가 정본)
   looksLoaded: false,
 };
+/** (22차) 팀의 대화: 말풍선 판 · 최근 말 · 팀 탭의 논의 줄. */
+const chatter = new Chatter();
 
 // ---------- 화면: 3D 또는 가벼운 화면 ----------
 
@@ -81,6 +86,14 @@ function renderLight() {
     where.className = "where";
     where.textContent = PLACE_LABEL[a.place] ?? a.place;
     button.append(name, where);
+    // (22차 5번) 가장 최근 말(12초) 한 줄.
+    const said = chatter.latest(id);
+    if (said) {
+      const line = document.createElement("span");
+      line.className = "said";
+      line.textContent = said;
+      button.append(line);
+    }
     button.addEventListener("click", () => selectConversation(id));
     li.append(button);
     list.append(li);
@@ -113,6 +126,7 @@ async function show3d(): Promise<void> {
     onPick: (id: string) => selectConversation(id),
     onLost: () => showLight("lost"),
     onFollow: (following: boolean) => { $("recenter").hidden = following; },
+    speech: chatter.board,
   });
   state.view = scene;
   $("recenter").hidden = true;
@@ -123,6 +137,7 @@ function applyAgent(view: AgentEvent | null | undefined, snap: boolean): void {
   if (!view || !state.agents.has(view.agent)) { return; }
   const next = { place: view.place, work: view.work };
   state.agents.set(view.agent, next);
+  chatter.work(view.agent, next.work);
   if (state.view) { state.view.setAgent(view.agent, next, { snap }); }
   if (!$("light").hidden) { renderLight(); }
   renderTabs();
@@ -143,7 +158,9 @@ function applyChat(resp: ChatResponse | null | undefined): void {
   const old = state.responses.get(resp.requestId);
   if (old && Number(old.updatedAt) > Number(resp.updatedAt)) { return; }
   state.responses.set(resp.requestId, resp);
+  chatter.chat(resp);
   if (!old) {
+    chatter.stamp(resp.requestId);
     const lines = linesOf(convKeyOf(resp));
     // 자기 질문 바로 뒤에 붙인다. 질문이 이 화면에 없으면 끝에 붙인다.
     const at = lines.findIndex((l) => l.kind === "me" && l.id === resp.sourceMessageId);
@@ -232,12 +249,33 @@ function lineElement(line: Line): HTMLElement | null {
   return div;
 }
 
+/** (22차 2번) 팀 탭: 내 글 · 담당 답 · 논의 줄을 시각 순서로. */
+function teamElements(lines: Line[]): (HTMLElement | null)[] {
+  const byKey = new Map<string, Line>();
+  const entries: FeedEntry[] = [];
+  for (const line of lines) {
+    const key = line.kind === "me" ? line.id : line.requestId;
+    byKey.set(key, line);
+    const resp = line.kind === "resp" ? state.responses.get(line.requestId) : undefined;
+    entries.push(line.kind === "me"
+      ? { kind: "me", key, at: chatter.stamp(key), agent: line.agent, text: line.text }
+      : { kind: "reply", key, at: chatter.stamp(key), agent: resp?.agent ?? "", text: resp?.content ?? "" });
+  }
+  entries.push(...chatter.talkEntries());
+  return teamFeed(entries, state.names).map((row) => {
+    if (row.kind === "talk") { return talkElement(row); }
+    const line = byKey.get(row.key);
+    return line ? lineElement(line) : null;
+  });
+}
+
 function renderLog(forceBottom: boolean): void {
   const log = $("chat-log");
   const follow = forceBottom || log.scrollHeight - log.scrollTop - log.clientHeight <= FOLLOW_PX;
   log.replaceChildren();
-  for (const line of linesOf(state.conversation)) {
-    const el = lineElement(line);
+  const lines = linesOf(state.conversation);
+  const elements = state.conversation === ROOM_TEAM ? teamElements(lines) : lines.map(lineElement);
+  for (const el of elements) {
     if (el) { log.append(el); }
   }
   if (follow) { log.scrollTop = log.scrollHeight; }
@@ -245,6 +283,7 @@ function renderLog(forceBottom: boolean): void {
 
 async function send(room: string, agent: string, text: string, existing?: MyLine): Promise<void> {
   const line: MyLine = existing ?? { kind: "me", id: newId(), room, agent, text };
+  chatter.stamp(line.id);
   line.failed = false;
   if (!existing) {
     const lines = linesOf(room === ROOM_TEAM ? ROOM_TEAM : agent);
@@ -321,8 +360,16 @@ function onFrame(text: string): void {
     state.lastSeq = frame.seq;
     if (frame.kind === "office.agent") { applyAgent(frame.payload as AgentEvent, false); }
     else if (frame.kind === "office.chat") { applyChat(frame.payload as ChatResponse); }
+    else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, true); }
     else if (frame.kind === KIND_OFFICE_APPROVAL) { applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init)); }
   }
+}
+
+/** (22차) 팀 대화 한 줄: 팀 탭에 넣고, 실시간이면 말풍선 · 최근 말에도. */
+function onTalk(payload: unknown, seq: number, live: boolean): void {
+  if (!chatter.talk(payload, seq, live)) { return; }
+  if (state.conversation === ROOM_TEAM) { renderLog(false); }
+  if (!$("light").hidden) { renderLight(); }
 }
 
 /** 서버의 담당 → 외형을 받아 둔다(목록 밖 값은 버린다). */
@@ -367,9 +414,13 @@ async function loadSnapshot(): Promise<void> {
   try {
     const reply = await fetch(SNAPSHOT_PATH, { credentials: "same-origin", cache: "no-store" });
     if (!reply.ok) { return; }
-    const snap = (await reply.json()) as { agents?: AgentEvent[]; pending?: ChatResponse[]; last_seq?: unknown };
+    const snap = (await reply.json()) as {
+      agents?: AgentEvent[]; pending?: ChatResponse[]; last_seq?: unknown; talk?: { seq?: unknown }[];
+    };
     for (const view of snap.agents ?? []) { applyAgent(view, true); }
     for (const resp of snap.pending ?? []) { applyChat(resp); }
+    // (22차 1번) 최근 팀 대화(지난 것이라 말풍선은 띄우지 않는다).
+    for (const talk of snap.talk ?? []) { if (typeof talk.seq === "number") { onTalk(talk, talk.seq, false); } }
     if (typeof snap.last_seq === "number") { state.lastSeq = snap.last_seq; }
   } catch {
     // 스냅샷이 없으면 이벤트만으로 그린다.
@@ -464,6 +515,13 @@ async function main(): Promise<void> {
     }
   }
   $("recenter").addEventListener("click", () => { state.view?.recenter(); });
+  // (22차 5번) 가벼운 화면의 최근 말은 12초가 지나면 내린다.
+  let lightSaid = "";
+  setInterval(() => {
+    if ($("light").hidden) { return; }
+    const said = AGENT_IDS.map((id) => chatter.latest(id) ?? "").join("\u0001");
+    if (said !== lightSaid) { lightSaid = said; renderLight(); }
+  }, 1000);
   toggle.addEventListener("click", async () => {
     if (state.view) {
       showLight("chosen");

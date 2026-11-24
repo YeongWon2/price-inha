@@ -206,9 +206,24 @@ async fn snapshot(State(desk): State<Arc<OfficeDesk>>) -> Response {
         .map(|v| json!({"agent": v.agent.id(), "place": v.place.as_str(), "work": v.work.as_str()}))
         .collect();
     let pending: Vec<Value> = office.pending_responses().iter().map(chat_json).collect();
+    // (22차 1번) 첫 화면의 팀 대화: 최근 줄 가운데 `last_seq`까지(그 뒤는 실시간 연결로 온다). 번호를 붙여 준다.
+    let talk: Vec<Value> = match desk.linked.talk.recent().await {
+        Ok(lines) => lines
+            .into_iter()
+            .filter(|(seq, _)| *seq <= last_seq)
+            .map(|(seq, mut talk)| {
+                talk["seq"] = json!(seq);
+                talk
+            })
+            .collect(),
+        Err(error) => {
+            tracing::warn!(%error, "팀 대화 최근 줄을 읽지 못했다");
+            Vec::new()
+        }
+    };
     reply(
         StatusCode::OK,
-        json!({"agents": agents, "pending": pending, "last_seq": last_seq}),
+        json!({"agents": agents, "pending": pending, "last_seq": last_seq, "talk": talk}),
     )
 }
 

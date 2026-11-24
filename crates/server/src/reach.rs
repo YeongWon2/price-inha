@@ -44,6 +44,7 @@ mod phone_http;
 mod semantic;
 mod semantic_http;
 mod summary;
+mod talk_feed;
 
 pub(crate) use assets::routes as asset_routes;
 pub(crate) use backup_http::GITHUB_API_BASE;
@@ -56,6 +57,7 @@ pub(crate) use phone_http::{Phone, routes as phone_routes};
 pub(crate) use semantic::{Semantic, SemanticSettings};
 pub(crate) use semantic_http::routes as semantic_routes;
 pub(crate) use summary::daily_summary;
+pub(crate) use talk_feed::{Following, TalkFeed, routes as talk_routes};
 
 /// 사무실 화면 자산을 다는 자리. `GET /office/`는 `index.html`, `GET /office/<경로>`는 그 파일.
 pub const OFFICE_ASSETS_PREFIX: &str = "/office/";
@@ -66,7 +68,8 @@ pub const PHONE_ASSETS_PREFIX: &str = "/phone/";
 /// 사무실 접속 스냅샷. `GET` → `{"agents": [{"agent", "place", "work"}], "pending": [응답 객체],
 /// "last_seq": 수}`. 마지막 번호를 **먼저** 읽고 모습 · 끝나지 않은 응답을 읽는다(그 뒤의 이벤트는
 /// `/ws?last_seq=`로 받는다, E3). 담당 id는 `pi_office::Agent::id`(`news` · `strategy` · `risk` · `review` ·
-/// `trader` · `leader`)다.
+/// `trader` · `leader`)다. (22차 1번) `"talk"` 칸에 최근 팀 대화([`OFFICE_TALK_PATH`]와 같은 줄, `last_seq`까지)를
+/// 이벤트 번호(`"seq"`)를 붙여 시각 순서로 준다. 화면은 이것으로 첫 화면을 그리고 그 뒤는 [`KIND_OFFICE_TALK`]로 받는다.
 pub const OFFICE_PATH: &str = "/api/office";
 
 /// 담당에게 말하기(C5). `POST` `{"room": "team" | "direct", "agent": 담당 id, "text": 글,

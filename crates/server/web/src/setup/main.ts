@@ -4,6 +4,7 @@
 import "./setup.css";
 import { API } from "../paths";
 import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
+import { aiLimitRequest, formatAiLimit, parseAiLimit, readAiLimit } from "./ai-limit";
 
 /** 서버가 보낸 JSON 또는 그 조각. 모양은 쓰는 자리에서 확인한다(옛 화면과 같은 확인). */
 type Data = any;
@@ -226,6 +227,7 @@ function byId(id: string): HTMLInputElement {
     });
     setText($missing, missingText(missing));
     showAiStatus(status.ai);
+    setText(byId("ai-limit-now"), formatAiLimit(readAiLimit(status)));
     var symbols = Array.isArray(status.symbols) ? status.symbols : [];
     var fixed = status.symbols_source === "argument";
     setText($symbolsNow, symbols.length === 0 ? "" :
@@ -464,6 +466,50 @@ function byId(id: string): HTMLInputElement {
       .then(function () { if ($button) { $button.disabled = false; } });
   }
 
+  // (22차 6번) 하루 AI 호출 상한을 바꾼다: AI 설정 저장 길로 `daily_limit` 칸 하나를 보낸다.
+  function wireAiLimit() {
+    var $button = byId("b-ai-limit");
+    var $message = byId("m-ai-limit");
+    $button.addEventListener("click", function () {
+      var parsed = parseAiLimit(byId("f-ai-limit").value);
+      if (!parsed.ok) {
+        setText($message, "1 이상 정수를 넣거나 비워 두세요.");
+        $message.className = "msg bad";
+        return;
+      }
+      var request = aiLimitRequest(parsed.limit);
+      $button.disabled = true;
+      setText($message, "저장하는 중…");
+      $message.className = "msg";
+      fetch(request.path, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request.body)
+      })
+        .then(function (reply: Data) {
+          return reply.json().catch(function () { return null; }).then(function (data: Data) {
+            if (reply.ok) {
+              setText(byId("ai-limit-now"), formatAiLimit(readAiLimit(data)));
+              setText($message, "저장했습니다");
+              $message.className = "msg ok";
+              byId("f-ai-limit").value = "";
+            } else {
+              setText($message, reply.status === 403 ? "이 컴퓨터에서 연 화면에서만 바꿀 수 있습니다."
+                : reply.status === 400 ? "1 이상 정수를 넣거나 비워 두세요." : "저장하지 못했습니다.");
+              $message.className = "msg bad";
+            }
+          });
+        })
+        .catch(function () {
+          setText($message, "서버에 닿지 않습니다.");
+          $message.className = "msg bad";
+        })
+        .then(function () { $button.disabled = false; });
+    });
+  }
+
   function wireAi() {
     byId("ai-pick-api").addEventListener("change", function () {
       aiPicked = true;
@@ -653,6 +699,7 @@ function byId(id: string): HTMLInputElement {
       { client_id: "f-client-id", client_secret: "f-client-secret" });
     wireKey("b-ai-key", "m-ai-key", "ai_api_key", { api_key: "f-api-key" });
     wireAi();
+    wireAiLimit();
     Object.keys(SLOT_FIELDS).forEach(function (item: Data) {
       var fields: Record<string, string> = {};
       fields[SLOT_FIELDS[item]] = "f-slot-" + item;

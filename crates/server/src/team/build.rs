@@ -156,9 +156,9 @@ impl Crew {
         let keys: Arc<dyn KeySource> = secrets;
         let data = data_adapter(&wiring, keys, &shared, &store, &clock)?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
-        let ai_cap = wiring.ai_daily_limit.map(|limit| {
-            super::quota::DailyQuota::new(store.clone(), super::quota::AI_USED_KEY, limit)
-        });
+        // (22차 6번) 상한 값은 논의를 열 때마다 정한다(켤 때 값, 없으면 설정 화면이 저장한 값).
+        let ai_cap =
+            super::quota::DailyQuota::new(store.clone(), super::quota::AI_USED_KEY, u32::MAX);
         let crew = Arc::new(Crew {
             journal: Journal::new(store.clone()),
             store,

@@ -15,6 +15,8 @@ import { placeFurniture, type Furniture } from "./furniture";
 import { disposeLoaded } from "./gltf";
 import { buildGrid, type NavMap, type Point } from "./nav";
 import { createActors } from "./actors3d";
+import { createBubbleLayer } from "./bubbles3d";
+import type { SpeechBoard } from "./speech";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
 type Obj = any;
@@ -54,6 +56,8 @@ export interface SceneOptions {
   onLost?: () => void;
   /** 따라 비추기가 켜지거나(사용자 조작 없음) 꺼질 때. */
   onFollow?: (following: boolean) => void;
+  /** (22차 3번) 머리 위 말풍선 판(있으면 말풍선 층을 그린다 — 지나가며 잡담 포함). */
+  speech?: SpeechBoard;
 }
 
 const FOV = 38;
@@ -117,7 +121,7 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
   });
 }
 
-export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow }: SceneOptions): Scene {
+export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
   host.appendChild(renderer.domElement);
@@ -132,6 +136,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   scene.add(furnitureRoot);
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
+  const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 
   // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음에는 쓰는 자리 모두(framing.ts), 다수가 미팅룸 · 쉼 자리로
   // 옮기면 그쪽을 비춘다. 사용자가 끌기 · 확대를 하면 따라가지 않는다(recenter로 다시 켠다).
@@ -243,11 +248,15 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     const frameMs = now - last;
     const dt = Math.min(frameMs / 1000, 0.2);
     last = now;
+    // 말풍선 판과 잡담은 벽시계 밀리초를 쓴다(서버 이벤트를 받은 때와 같은 시계).
+    const wall = Date.now();
+    if (bubbles) { actors.pause((id) => bubbles.paused(id, wall)); }
     actors.update(dt, (now - clock0) / 1000, now);
     updateCamera(dt);
     renderer.render(scene, camera);
     actors.placeLabels(camera, host.clientWidth, host.clientHeight);
     placeRoomTags(host.clientWidth, host.clientHeight);
+    bubbles?.update(wall, actors.heads(), actors.walkers(), actors.canSee, host.clientWidth, host.clientHeight);
     measure(now, frameMs);
   }
   raf = requestAnimationFrame(frameStep);
@@ -259,6 +268,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     document.removeEventListener("visibilitychange", onVisibility);
     canvas.removeEventListener("webglcontextlost", onContextLost);
     actors.dispose();
+    bubbles?.dispose();
     scene.traverse((o: Obj) => {
       if (o.geometry) { o.geometry.dispose(); }
       const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];

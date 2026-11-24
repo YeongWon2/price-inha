@@ -90,7 +90,7 @@ impl Crew {
         now: DateTime<Utc>,
     ) -> Result<(), TeamError> {
         let (word, reason) = plan_fields(plan);
-        self.store.append_room_event(NewRoomEvent {
+        let appended = self.store.append_room_event(NewRoomEvent {
             room: DAY_ROOM.to_string(),
             event_id: format!("day-{date}-leader"),
             kind: "message.member".to_string(),
@@ -99,6 +99,13 @@ impl Crew {
             payload: json!({"text": text, "plan": word}),
             at: millis(now),
         })?;
+        // (22차 1번) 쓴 자리에서 곧바로 사무실 팀 대화로 낸다(같은 줄이 이미 있었으면 다시 내지 않는다).
+        if let (pi_store::RoomAppend::Appended(event), Some(talk)) = (
+            &appended,
+            self.links.get().and_then(|links| links.talk.as_ref()),
+        ) {
+            talk.publish_event(event, "day").await;
+        }
         let payload = json!({"date": date, "plan": word, "reason": reason, "text": text});
         self.trading.record(KIND_DAY_DISCUSSION, payload).await?;
         Ok(())

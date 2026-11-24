@@ -79,6 +79,8 @@ pub(crate) struct Linked {
     pub(crate) notifier: Arc<Notifier>,
     pub(crate) office: Arc<Office>,
     pub(crate) sink: Arc<LateSink>,
+    /// (22차 1번) 논의 방의 담당 글을 사무실 팀 대화로 낸다.
+    pub(crate) talk: Arc<super::TalkFeed>,
     /// 백업 조립 값과 백업(설정 화면이 바꾼다).
     backup: Mutex<Option<(BackupWiring, Arc<Backup>)>>,
     store: Store,
@@ -149,10 +151,16 @@ impl Linked {
                 Ok::<_, AppError>((wiring, Arc::new(backup)))
             })
             .transpose()?;
+        let talk = Arc::new(super::TalkFeed::new(
+            store.clone(),
+            Arc::clone(&sink),
+            Arc::clone(secrets),
+        ));
         Ok(Linked {
             notifier: Arc::new(notifier),
             office: Arc::new(office),
             sink,
+            talk,
             backup: Mutex::new(backup),
             store: store.clone(),
             clock: Arc::clone(clock),

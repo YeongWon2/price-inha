@@ -45,6 +45,11 @@ impl DailyQuota {
 
     /// 오늘(한국 날짜) 요청 하나를 쓴다. 상한에 닿았으면 거짓. 센 수는 저장소에 남긴다.
     pub(super) fn take(&self, now: DateTime<Utc>) -> bool {
+        self.take_within(now, self.limit)
+    }
+
+    /// (22차 6번) [`DailyQuota::take`]와 같되 상한을 부르는 쪽이 준다(설정 화면이 바꾼 값을 곧바로 쓰려고).
+    pub(super) fn take_within(&self, now: DateTime<Utc>, limit: u32) -> bool {
         let today = kst_date(now);
         let mut used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
         let count = match *used {
@@ -52,7 +57,7 @@ impl DailyQuota {
             Some(_) => 0,
             None => self.saved_count(today),
         };
-        if count >= self.limit {
+        if count >= limit {
             *used = Some((today, count));
             return false;
         }

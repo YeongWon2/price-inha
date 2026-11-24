@@ -41,12 +41,15 @@ export const STATE_ICONS: Readonly<Record<SpeechState, string>> = {
 
 /** 빈칸(줄바꿈 포함)을 하나로 접고 앞뒤를 깎은 뒤, [`SPEECH_MAX`]자를 넘으면 [`SPEECH_CUT`]자 + "..."로 자른다. */
 export function trimSpeech(text: string): string {
-  throw new Error("todo");
+  const folded = text.replace(/\s+/g, " ").trim();
+  const chars = Array.from(folded);
+  if (chars.length <= SPEECH_MAX) return folded;
+  return `${chars.slice(0, SPEECH_CUT).join("")}...`;
 }
 
 /** 말풍선 폭(px): `max(80, min(190, 화면폭 - 16))`. */
 export function bubbleWidth(screenWidth: number): number {
-  throw new Error("todo");
+  return Math.max(BUBBLE_MIN_WIDTH, Math.min(BUBBLE_MAX_WIDTH, screenWidth - BUBBLE_SCREEN_MARGIN));
 }
 
 /** 보이는 말풍선 하나. `until`이 `Infinity`면 지울 때까지 보인다. */
@@ -63,42 +66,65 @@ export interface Bubble {
  * 담당마다의 말풍선 판. 한 담당에 종류마다 하나씩 두고, 보일 때는 우선순위가 가장 높은 하나만 보인다.
  */
 export class SpeechBoard {
+  /** 담당 id → 종류 → 말풍선. */
+  private readonly bubbles = new Map<string, Map<SpeechKind, Bubble>>();
+
+  private put(bubble: Bubble): void {
+    let mine = this.bubbles.get(bubble.agent);
+    if (!mine) {
+      mine = new Map();
+      this.bubbles.set(bubble.agent, mine);
+    }
+    mine.set(bubble.kind, bubble);
+  }
+
+  private live(agent: string, kind: SpeechKind, now: number): Bubble | undefined {
+    const bubble = this.bubbles.get(agent)?.get(kind);
+    return bubble && now < bubble.until ? bubble : undefined;
+  }
+
   /**
    * 대화 말풍선(논의 글 · 담당 답)을 둔다. 같은 담당의 대화 말풍선은 통째로 바꾼다(스트리밍 중에는 지금까지의 글
    * 전체를 넘긴다 — 덧붙이지 않는다). 수명은 `now`부터 [`SPEECH_LIFE_MS`]. `state`가 있으면 그 표시를 글 앞에 붙인다.
    */
   say(agent: string, text: string, now: number, state?: SpeechState): void {
-    throw new Error("todo");
+    const shown = state ? trimSpeech(`${STATE_ICONS[state]} ${text}`) : trimSpeech(text);
+    this.put({ agent, kind: "talk", text: shown, until: now + SPEECH_LIFE_MS });
   }
 
   /** 글 없이 "말하는 중"만 알 때: 대화 말풍선을 [`TYPING_TEXT`]로 [`TYPING_LIFE_MS`] 동안 둔다. */
   typing(agent: string, now: number): void {
-    throw new Error("todo");
+    this.put({ agent, kind: "talk", text: TYPING_TEXT, until: now + TYPING_LIFE_MS });
   }
 
   /** 상태 말풍선(표시만)을 둔다. 지울 때까지 보인다. */
   status(agent: string, state: SpeechState, now: number): void {
-    throw new Error("todo");
+    void now;
+    this.put({ agent, kind: "status", text: STATE_ICONS[state], until: Number.POSITIVE_INFINITY });
   }
 
   /** 잡담 말풍선을 `until`까지 둔다. */
   smalltalk(agent: string, text: string, now: number, until: number): void {
-    throw new Error("todo");
+    void now;
+    this.put({ agent, kind: "smalltalk", text: trimSpeech(text), until });
   }
 
   /** 그 담당의 말풍선을 지운다(`kind`가 없으면 모두). */
   clear(agent: string, kind?: SpeechKind): void {
-    throw new Error("todo");
+    if (kind === undefined) this.bubbles.delete(agent);
+    else this.bubbles.get(agent)?.delete(kind);
   }
 
   /** `now`에 그 담당에게 보이는 말풍선(우선순위가 가장 높은 하나). 없으면 `undefined`. */
   shown(agent: string, now: number): Bubble | undefined {
-    throw new Error("todo");
+    return (
+      this.live(agent, "talk", now) ?? this.live(agent, "status", now) ?? this.live(agent, "smalltalk", now)
+    );
   }
 
   /** `now`에 대화나 상태 말풍선이 있는가(있으면 잡담하지 않는다). */
   busy(agent: string, now: number): boolean {
-    throw new Error("todo");
+    return this.live(agent, "talk", now) !== undefined || this.live(agent, "status", now) !== undefined;
   }
 }
 
@@ -144,7 +170,50 @@ export interface Placement {
  * 넓이의 합이 화면 넓이의 [`LANE_AREA_RATIO`]를 넘으면 모두 말풍선 줄로 보낸다.
  */
 export function placeBubbles(spots: readonly HeadSpot[], screen: Size): Placement {
-  throw new Error("todo");
+  const hidden: string[] = [];
+  const visible: HeadSpot[] = [];
+  for (const spot of spots) {
+    const onScreen = spot.x >= 0 && spot.x <= screen.width && spot.y >= 0 && spot.y <= screen.height;
+    if (onScreen) visible.push(spot);
+    else hidden.push(spot.agent);
+  }
+  const area = visible.reduce((sum, s) => sum + s.bubble.width * s.bubble.height, 0);
+  if (area > screen.width * screen.height * LANE_AREA_RATIO) {
+    return { placed: [], lane: visible.map((s) => s.agent), hidden };
+  }
+  const labels = spots.map((s) => s.label);
+  const placed: { agent: string; rect: Rect }[] = [];
+  const lane: string[] = [];
+  for (const spot of visible) {
+    const rect = candidates(spot).find(
+      (r) => insideScreen(r, screen) && !placed.some((p) => overlap(p.rect, r)) && !labels.some((l) => overlap(l, r)),
+    );
+    if (rect) placed.push({ agent: spot.agent, rect });
+    else lane.push(spot.agent);
+  }
+  return { placed, lane, hidden };
+}
+
+/** 3×3 후보(가운데 줄 먼저, 줄 안에서는 가운데 · 오른쪽 · 왼쪽). */
+function candidates(spot: HeadSpot): Rect[] {
+  const { width, height } = spot.bubble;
+  const x0 = spot.x - width / 2;
+  const y0 = spot.y - height - BUBBLE_HEAD_GAP;
+  const shift = width * BUBBLE_SIDE_SHIFT;
+  const step = height + BUBBLE_HEAD_GAP;
+  const out: Rect[] = [];
+  for (const dy of [0, -step, step]) {
+    for (const dx of [0, shift, -shift]) out.push({ x: x0 + dx, y: y0 + dy, width, height });
+  }
+  return out;
+}
+
+function insideScreen(r: Rect, screen: Size): boolean {
+  return r.x >= 0 && r.y >= 0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
+}
+
+function overlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
 /** 한 담당이 한 말(가벼운 화면의 최근 말). `at`은 밀리초. */
@@ -159,5 +228,10 @@ export interface Said {
  * [`trimSpeech`]를 거친 글, 아니면 `null`.
  */
 export function latestLine(said: readonly Said[], agent: string, now: number): string | null {
-  throw new Error("todo");
+  let latest: Said | undefined;
+  for (const one of said) {
+    if (one.agent === agent && (!latest || one.at >= latest.at)) latest = one;
+  }
+  if (!latest || now - latest.at >= LATEST_LIFE_MS) return null;
+  return trimSpeech(latest.text);
 }

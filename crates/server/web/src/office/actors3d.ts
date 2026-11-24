@@ -9,7 +9,9 @@ import * as THREE from "three";
 import { CROSSFADE_SECONDS, clipName, defaultLook, makeActor, type AgentId } from "./actor";
 import { poseDoll, makeDoll, removeDoll, type Doll } from "./doll";
 import { instance, loadLook } from "./gltf";
-import { findPath, type Grid, type Point } from "./nav";
+import { clearLine, findPath, type Grid, type Point } from "./nav";
+import type { Head } from "./bubbles3d";
+import type { Walker } from "./smalltalk";
 import { facingYaw } from "./furniture";
 import type { AgentLook, OfficeMap } from "./scene3d";
 
@@ -56,6 +58,11 @@ interface Actor {
   walking: boolean;
   label: string;
   headY: number;
+  /** (22차) 이름표의 화면 자리(이번 프레임) · 크기(글이 바뀔 때 잰다). */
+  screen: { x: number; y: number; visible: boolean };
+  tagSize: { width: number; height: number } | null;
+  /** (22차 4번) 지나가며 잡담으로 멈춰 있다. */
+  paused: boolean;
 }
 
 export interface ActorsOptions {
@@ -103,6 +110,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       x: rest.x + 0.5, y: rest.y + 0.5, yaw: facingYaw(map.agents[id].rest_facing),
       view: { place: "bed", work: "idle" },
       target: null, path: null, speed: WALK_SPEED, retryAt: 0, walking: false, label: "", headY: HEAD_Y,
+      screen: { x: 0, y: 0, visible: false }, tagSize: null, paused: false,
     };
     tagTree(actor);
     actors.set(id, actor);
@@ -191,7 +199,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
   }
 
   function step(actor: Actor, dt: number, now: number): void {
-    if (!actor.target) { return; }
+    if (!actor.target || actor.paused) { return; }
     if (!actor.path) {
       const there = Math.hypot(actor.x - (actor.target.x + 0.5), actor.y - (actor.target.y + 0.5)) < ARRIVE;
       if (!there && actor.retryAt && now >= actor.retryAt) { retarget(actor, false); }
@@ -238,7 +246,8 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
   function animate(actor: Actor, dt: number, t: number): void {
     actor.root.position.set(actor.x, 0, actor.y);
     actor.root.rotation.set(0, actor.yaw, 0);
-    const clip = clipName(actor.walking, !actor.walking && seated(actor));
+    const moving = actor.walking && !actor.paused;
+    const clip = clipName(moving, !moving && seated(actor));
     if (actor.body) { animateBody(actor, actor.body, clip, dt); }
     if (actor.doll) { poseDoll(actor.doll, clip, actor.view.work, t + actor.phase); }
     actor.headY = clip === "sit" ? SIT_HEAD_Y : HEAD_Y;
@@ -248,6 +257,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     if (label !== actor.label) {
       actor.tag.textContent = label;
       actor.label = label;
+      actor.tagSize = null;
     }
     actor.tag.dataset.work = work;
     actor.tag.dataset.place = actor.view.place;
@@ -272,12 +282,41 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       for (const actor of actors.values()) {
         projected.set(actor.x, actor.headY, actor.y).project(camera);
         const visible = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
-        if (!visible) { actor.tag.style.display = "none"; continue; }
-        actor.tag.style.display = "";
         const sx = (projected.x + 1) / 2 * width;
         const sy = (1 - projected.y) / 2 * height;
+        actor.screen = { x: sx, y: sy, visible };
+        if (!visible) { actor.tag.style.display = "none"; continue; }
+        actor.tag.style.display = "";
         actor.tag.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
       }
+    },
+    /** (22차 3번) 이번 프레임의 머리 점(이름표 바로 위)과 이름표 자리. [`placeLabels`] 뒤에 부른다. */
+    heads(): Head[] {
+      return [...actors.values()].map((actor) => {
+        if (!actor.tagSize && actor.screen.visible) {
+          actor.tagSize = { width: actor.tag.offsetWidth, height: actor.tag.offsetHeight };
+        }
+        const size = actor.tagSize ?? { width: 0, height: 0 };
+        const label = { x: actor.screen.x - size.width / 2, y: actor.screen.y - size.height, ...size };
+        return { id: actor.id, x: actor.screen.x, y: label.y, label, visible: actor.screen.visible };
+      });
+    },
+    /** (22차 4번) 잡담을 볼 담당들(세계 좌표 · 한가 · 걷는 중). 바쁨은 말풍선 층이 채운다. */
+    walkers(): Walker[] {
+      return [...actors.values()].map((a) => ({
+        id: a.id, x: a.x, z: a.y, idle: a.view.work === "idle" && a.view.place !== "meeting",
+        walking: a.walking && !a.paused, busy: false,
+      }));
+    },
+    /** 두 담당 사이가 트여 있는가(벽 · 가구에 막히지 않음). */
+    canSee(a: string, b: string): boolean {
+      const one = actors.get(a);
+      const two = actors.get(b);
+      return Boolean(one && two && clearLine(grid, { x: one.x, y: one.y }, { x: two.x, y: two.y }));
+    },
+    /** 잡담으로 멈출 담당을 적는다. */
+    pause(isPaused: (id: string) => boolean): void {
+      for (const actor of actors.values()) { actor.paused = isPaused(actor.id); }
     },
     pick(clientX: number, clientY: number, camera: Obj, canvas: HTMLElement): string | undefined {
       const rect = canvas.getBoundingClientRect();

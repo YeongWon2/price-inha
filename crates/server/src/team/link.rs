@@ -32,6 +32,8 @@ pub(crate) struct CrewLinks {
     pub(crate) semantic: Option<Arc<Semantic>>,
     /// (16차 3번) 하루 AI 호출 상한에 닿았을 때 사용자에게 알리는 자리.
     pub(crate) ai_capped: Option<Box<dyn Fn() + Send + Sync>>,
+    /// (22차 1번) 논의 방의 담당 글을 사무실 팀 대화로 내는 곳.
+    pub(crate) talk: Option<Arc<crate::reach::TalkFeed>>,
 }
 
 /// 담당 → 사무실의 담당.

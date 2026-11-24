@@ -21,7 +21,7 @@ use super::App;
 use crate::feed::StaleHook;
 use crate::reach::{
     Linked, LockNotices, Looks, OfficeDesk, Phone, Semantic, backup_routes, daily_summary,
-    looks_routes, office_routes, phone_routes, semantic_routes,
+    looks_routes, office_routes, phone_routes, semantic_routes, talk_routes,
 };
 use crate::team::CrewLinks;
 use crate::trading::{Hooks, approval_status_word};
@@ -70,6 +70,7 @@ pub(super) fn session_parts(
     (
         Some(
             office_routes(desk)
+                .merge(talk_routes(Arc::clone(&linked.talk)))
                 .merge(phone_routes(phone))
                 .merge(backup_routes(Arc::clone(linked))),
         ),
@@ -234,6 +235,7 @@ pub(super) fn attach(
             office: Some(Arc::clone(&linked.office)),
             semantic: Some(Arc::clone(&memory.semantic)),
             ai_capped: Some(ai_capped_hook(linked)),
+            talk: Some(Arc::clone(&linked.talk)),
         });
     }
     trading.hook(Hooks {

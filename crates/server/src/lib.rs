@@ -25,12 +25,12 @@ mod trading;
 
 pub use access_http::{ACCESS_KEY_PATH, ACCESS_LOG_PATH, ACCESS_UNLOCK_PATH};
 pub use ai_link::{
-    AI_CHOICE_FILE, AI_DAILY_LIMIT_KEY, AiChoice, AiMethod, AiStatus, CLI_CHECKING,
-    CLI_COMMON_LOCATIONS, CLI_CONCURRENCY, CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED,
-    CLI_NOT_LOGGED_IN, CLI_NOT_SUBSCRIPTION, CLI_TERMS_NOTICE, CLI_TOO_OLD, CLI_UNCHECKED,
-    CLI_USER_LOCATION, CLI_WORK_DIR, CLI_WORK_NOT_EMPTY, LEGACY_AUTH_FILE, LEGACY_AUTH_NOTICE,
-    SETUP_AI_DAILY_LIMIT, SETUP_AI_PATH, cli_base_env, cli_config, cli_refusal, cli_state,
-    find_claude, legacy_auth_file, load_ai_choice, prepare_cli_work_dir, save_ai_choice,
+    AI_CHOICE_FILE, AiChoice, AiMethod, AiStatus, CLI_CHECKING, CLI_COMMON_LOCATIONS,
+    CLI_CONCURRENCY, CLI_ENV_ALLOWLIST, CLI_LOGGED_IN, CLI_NOT_INSTALLED, CLI_NOT_LOGGED_IN,
+    CLI_NOT_SUBSCRIPTION, CLI_TERMS_NOTICE, CLI_TOO_OLD, CLI_UNCHECKED, CLI_USER_LOCATION,
+    CLI_WORK_DIR, CLI_WORK_NOT_EMPTY, LEGACY_AUTH_FILE, LEGACY_AUTH_NOTICE, SETUP_AI_PATH,
+    cli_base_env, cli_config, cli_refusal, cli_state, find_claude, legacy_auth_file,
+    load_ai_choice, prepare_cli_work_dir, save_ai_choice,
 };
 pub use app::{
     App, DB_FILE, FEED_BROKER_REJECTED, FEED_BROKER_UNREACHABLE, FEED_CONNECTING, FEED_DEMO,
@@ -45,6 +45,7 @@ pub use cli::{
     SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor,
     restore,
 };
+pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
 };

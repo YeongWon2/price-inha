@@ -69,11 +69,15 @@ impl Crew {
     /// (16차 3번) 하루 AI 호출 상한이 켜져 있으면 논의 한 번을 한 번으로 센다(한국 시각 날짜별, 저장).
     /// 상한에 닿았으면 그날 남은 논의를 쉬고(오류) 사용자에게 그날 한 번 알린다. 손절 등은 AI를 부르지 않아 상관없다.
     pub(super) fn take_ai_call(&self) -> Result<(), TeamError> {
-        let Some(cap) = &self.ai_cap else {
+        let limit = self
+            .wiring
+            .ai_daily_limit
+            .or_else(|| self.desk.saved_ai_limit());
+        let Some(limit) = limit else {
             return Ok(());
         };
         let now = self.clock.now();
-        if cap.take(now) {
+        if self.ai_cap.take_within(now, limit) {
             return Ok(());
         }
         let today = super::quota::kst_date(now);
@@ -93,6 +97,12 @@ impl Crew {
             }
         }
         Err(TeamError::AiLimit)
+    }
+
+    /// (22차 1번) 논의가 도는 동안 그 방의 담당 글을 사무실 팀 대화로 낸다(사무실이 없으면 없음).
+    fn follow_talk(&self, trade: TradeId, symbol: &str) -> Option<crate::reach::Following> {
+        let talk = self.links.get().and_then(|links| links.talk.as_ref())?;
+        Some(talk.follow(&request_room(trade), symbol))
     }
 
     /// 지켜보는 종목마다 아직 논의하지 않은 공시가 있으면 논의한다.
@@ -194,6 +204,7 @@ impl Crew {
             consensus_required: self.wiring.consensus_required,
             limits: DiscussionLimits::default(),
         };
+        let following = self.follow_talk(trade.id, symbol);
         let result = {
             // (17차 5번) 취소 · panic에도 자리 표시가 내려가게 가드의 정리로 건다.
             let lowered = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -208,6 +219,9 @@ impl Crew {
             }
             result
         };
+        if let Some(following) = following {
+            following.finish().await;
+        }
         if let Some(news) = news.filter(|news| news.dropped > 0) {
             self.log_dropped(&request_room(trade.id), news.dropped);
         }

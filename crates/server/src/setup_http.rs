@@ -17,8 +17,8 @@ use zeroize::Zeroize;
 
 use crate::desk::Desk;
 use crate::{
-    REMOTE_KEYS_PATH, SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH, SETUP_PROVIDERS_PATH,
-    SETUP_SLOTS_PATH, SETUP_SYMBOLS_PATH, SetupRefusal,
+    REMOTE_KEYS_PATH, SETUP_AI_DAILY_LIMIT, SETUP_AI_PATH, SETUP_KEYS_PATH, SETUP_PATH,
+    SETUP_PROVIDERS_PATH, SETUP_SLOTS_PATH, SETUP_SYMBOLS_PATH, SetupRefusal,
 };
 
 /// 등록 요청 본문의 크기 상한(바이트). 키 몇 개나 종목 200개에는 넉넉하다. 넘으면 더 읽지 않고
@@ -94,7 +94,12 @@ async fn body_of(request: Request) -> Result<Vec<u8>, SetupRefusal> {
 }
 
 async fn status(State(desk): State<Arc<Desk>>) -> Response {
-    reply(StatusCode::OK, desk.status().to_json())
+    let mut body = desk.status().to_json();
+    // (22차 6번) 하루 AI 호출 상한(지금 쓰는 값, 없으면 null). 팀이 없는 서버는 쓰이지 않는 값이라 싣지 않는다.
+    if let Some(limit) = desk.shown_ai_limit() {
+        body[SETUP_AI_DAILY_LIMIT] = json!(limit);
+    }
+    reply(StatusCode::OK, body)
 }
 
 /// (8차) 바깥 키 칸별 등록 여부([`crate::slots`]).
@@ -141,10 +146,18 @@ async fn register_symbols(State(desk): State<Arc<Desk>>, request: Request) -> Re
 
 /// (6차) AI 연결 고르기. 갖춰졌는지(`{"registered": bool}`)나 까닭만 돌려준다.
 async fn choose_ai(State(desk): State<Arc<Desk>>, request: Request) -> Response {
-    let outcome = match body_of(request).await {
-        Ok(body) => desk.choose_ai(&body).await,
-        Err(why) => Err(why),
+    let body = match body_of(request).await {
+        Ok(body) => body,
+        Err(why) => return registered(Err(why)),
     };
+    // (22차 6번) `daily_limit` 칸이 있으면 AI 연결 고르기는 그대로 두고 하루 AI 호출 상한만 바꾼다.
+    if let Some(request) = crate::desk::limit_request(&body) {
+        return match desk.change_ai_limit(&request) {
+            Ok(limit) => reply(StatusCode::OK, json!({ SETUP_AI_DAILY_LIMIT: limit })),
+            Err(why) => registered(Err(why)),
+        };
+    }
+    let outcome = desk.choose_ai(&body).await;
     match outcome {
         Ok(registered) => reply(StatusCode::OK, json!({ "registered": registered })),
         Err(why) => registered(Err(why)),
