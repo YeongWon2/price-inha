@@ -965,3 +965,15 @@ N1이 알아냈다: 알림음 설정(1번 (바))은 `localStorage`를 쓰는데,
 
 - 원본 동작 근거: `docs/research/metaverse-office-refs.md`(이동 · 카메라 따라가기 · 가까이 가면 안내 · 누르면 걸어가기), `docs/research/deskrpg.md` 10 · 11절(방향키만 · 대각선 보정 · 내 이름표 녹색 · 2칸 안내 글 · `/` 대화). 자리 저장을 띄엄띄엄 · 사용자 한 명(멀티플레이 없음)은 결정 17 · M8.
 - 시험으로 확인할 것(V56): Rust — 내 캐릭터 읽기 기본값 / 이름 · 외형 바꾸기와 범위 밖 400 / 자리 저장과 다시 읽기 · 범위 밖 400 · 저장 안 됨 / 원격 세션 없으면 401 / 서버를 다시 만들어도 자리가 남는다. 화면(vitest, 순수 함수 위주) — 방향키 상태 → 이동 벡터(대각선 보정 · WASD 무시) / 막힌 칸 앞에서 멈춤 / 글 칸 초점 · 조합 중이면 무시 / 길 찾기(돌아가는 길 · 길 없음 · 담당 옆 빈 칸) / 누르기와 끌기 구분 / 따라가기 켜짐 · 꺼짐 전이(끌기 · 돌리기 · 확대에 꺼짐, 단추에 켜짐, 켜져 있으면 발언자 카메라가 끼어들지 않음) / 2칸 안 담당 고르기와 안내 글(받침 조사) · 둘 이상이면 목록 / 멀어지면 닫힘 / 자리 보내기 띄엄띄엄(가짜 시계) · 실패해도 던지지 않음 / 도구 줄 8개 · 조작 안내 DOM / 경로 표에 새 경로.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/screen-paths.test.ts`에서 사무실 화면의 경로 목록 | 고침 | 지시서 32차 1번: 사무실 화면이 `/api/office/me` · `/api/office/me/position`을 더 부른다 — 그 경로만 더한다 |
+| `crates/server/tests/web/office-speaker-camera.test.ts` | 고침 | 지시서 32차 6번: 따라가기가 켜져 있으면 발언자 카메라가 끼어들지 않는다 — 발언자 카메라가 도는 것을 보는 단언은 "따라가기 꺼짐"을 앞에 두는 만큼만 고친다. 각도 · 속도 · 순함(결정 18)은 그대로 |
+| `crates/server/tests/web/office-camera.test.ts` | 고침 | 지시서 32차 6번: 도구 줄이 8개가 되고 끌기 · 돌리기 · 확대가 따라가기를 푼다 — 도구 줄 개수 · 이름을 정확히 비교하는 단언이 있으면 그것만 고친다. 카메라 계산은 그대로 |
+| `crates/server/tests/web/office-name-tags.test.ts` · `office-actor` · `office-layout` · `office-map` | 유지 | 담당의 이름표 · 걷기 · 자리는 그대로(내 캐릭터가 더해질 뿐). 내 이름표 색은 새 시험으로 |
+| 사무실 대화 · 승인 · 말풍선 · 회의 시험(`office-chat-lines` · `office-approval*` · `office-speech` · `office-caption` · `office-team-feed` · `office-smalltalk` · `office-bubble-place` · `office-trim`) | 유지 | 1:1 대화를 여는 길이 하나 더 생길 뿐 지금 동작은 그대로 |
+| Rust의 사무실 시험(office API · 이벤트 · 스냅샷) | 유지 | 내 캐릭터 API는 새 경로다. 지금 경로의 모양은 그대로 |
+| 그 밖의 server 시험 | 유지 | 32차와 무관 |
