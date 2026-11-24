@@ -18,8 +18,7 @@ use rust_decimal::Decimal;
 
 use crate::loss::{day_loss_reached, drawdown_reached};
 use crate::sizing::{
-    align_down_to_tick, align_up_to_tick, net_expected_value, percent_of, risk_quantity,
-    weight_quantity,
+    align_down_to_tick, align_up_to_tick, net_expected_value, percent_of, size_stages,
 };
 use crate::{
     CheckContext, Funding, OrderDraft, ProductKind, Purpose, Rationale, RationaleField,
@@ -152,43 +151,69 @@ fn buy_quantity(
     stop_ok: bool,
     found: &mut Vec<Violation>,
 ) -> Decimal {
+    let (request, sector_known) = buy_size_request(draft, ctx, entry, stop);
+    if !sector_known {
+        found.push(Violation::UnknownSector);
+    }
+    let [risk, symbol, sector] = size_stages(&request);
+    if stop_ok && risk <= Decimal::ZERO {
+        found.push(Violation::RiskTooLarge);
+    }
+    if symbol <= Decimal::ZERO {
+        found.push(Violation::SymbolWeightFull);
+    }
+    if sector_known && sector <= Decimal::ZERO {
+        found.push(Violation::SectorWeightFull);
+    }
+    size(&request)
+}
+
+/// 살 수량을 정하는 입력([`SizeRequest`])과 업종을 아는지. 점검([`buy_quantity`])과 한도 적용 기록
+/// ([`buy_size_stages`])이 함께 쓴다(같은 셈을 따로 짜지 않는다). 업종을 모르면 같은 종목의 금액을
+/// 업종 금액으로 둔다(위반은 부른 쪽이 더한다).
+fn buy_size_request(
+    draft: &OrderDraft,
+    ctx: &CheckContext<'_>,
+    entry: Decimal,
+    stop: Decimal,
+) -> (SizeRequest, bool) {
     let caps = AbsoluteCaps::FIXED;
     let params = ctx.params;
-    let equity = ctx.book.equity;
     let held_symbol = held_value(ctx, |p| {
         p.market == draft.market && p.symbol == draft.symbol
     });
     let sector = ctx.config.sectors.get(&draft.symbol);
     let held_sector = match sector {
         Some(name) => held_value(ctx, |p| ctx.config.sectors.get(&p.symbol) == Some(name)),
-        None => {
-            found.push(Violation::UnknownSector);
-            held_symbol
-        }
+        None => held_symbol,
     };
-    let symbol_pct = params.symbol_weight_pct.min(caps.symbol_weight_pct);
-    let sector_pct = params.sector_weight_pct.min(caps.sector_weight_pct);
-    if stop_ok && risk_quantity(equity, params.risk_per_trade_pct, entry, stop) <= Decimal::ZERO {
-        found.push(Violation::RiskTooLarge);
-    }
-    if weight_quantity(equity, symbol_pct, held_symbol, entry) <= Decimal::ZERO {
-        found.push(Violation::SymbolWeightFull);
-    }
-    if sector.is_some() && weight_quantity(equity, sector_pct, held_sector, entry) <= Decimal::ZERO
-    {
-        found.push(Violation::SectorWeightFull);
-    }
-    size(&SizeRequest {
-        equity,
+    let request = SizeRequest {
+        equity: ctx.book.equity,
         risk_pct: params.risk_per_trade_pct,
         entry,
         stop,
-        symbol_weight_pct: symbol_pct,
-        sector_weight_pct: sector_pct,
+        symbol_weight_pct: params.symbol_weight_pct.min(caps.symbol_weight_pct),
+        sector_weight_pct: params.sector_weight_pct.min(caps.sector_weight_pct),
         held_symbol_value: held_symbol,
         held_sector_value: held_sector,
         ai_quantity: draft.ai_quantity,
-    })
+    };
+    (request, sector.is_some())
+}
+
+/// 사는 주문의 한도별 수량 `[1회 위험, 종목 비중, 업종 비중]`과 AI 수량의 내림.
+/// [`crate::limit_clamps`]가 점검이 실제로 쓰는 셈을 단계별로 읽는 길이다.
+pub(crate) fn buy_size_stages(
+    draft: &OrderDraft,
+    ctx: &CheckContext<'_>,
+) -> ([Decimal; 3], Option<Decimal>) {
+    let (_, entry) = buy_price(draft, ctx);
+    let stop = draft.rationale.stop.unwrap_or(entry);
+    let (request, _) = buy_size_request(draft, ctx, entry, stop);
+    (
+        size_stages(&request),
+        request.ai_quantity.map(|ai| ai.floor()),
+    )
 }
 
 /// 고른 보유 종목들의 평가 금액(수량 × 지금 값).

@@ -36,29 +36,38 @@ pub struct SizeRequest {
 ///
 /// 셈이 넘치면(값이 너무 크면) 그 한도의 수량은 0이다(막는 쪽).
 pub fn size(request: &SizeRequest) -> Decimal {
-    let caps = AbsoluteCaps::FIXED;
-    let mut quantity = risk_quantity(
-        request.equity,
-        request.risk_pct,
-        request.entry,
-        request.stop,
-    )
-    .min(weight_quantity(
-        request.equity,
-        request.symbol_weight_pct.min(caps.symbol_weight_pct),
-        request.held_symbol_value,
-        request.entry,
-    ))
-    .min(weight_quantity(
-        request.equity,
-        request.sector_weight_pct.min(caps.sector_weight_pct),
-        request.held_sector_value,
-        request.entry,
-    ));
+    let [risk, symbol, sector] = size_stages(request);
+    let mut quantity = risk.min(symbol).min(sector);
     if let Some(ai) = request.ai_quantity {
         quantity = quantity.min(ai.floor());
     }
     quantity.max(Decimal::ZERO)
+}
+
+/// [`size`]가 `min`으로 합치는 한도별 수량 `[1회 위험, 종목 비중, 업종 비중]`. 한도 적용 기록
+/// ([`crate::limit_clamps`])이 같은 셈을 단계별로 읽는 길이다.
+pub(crate) fn size_stages(request: &SizeRequest) -> [Decimal; 3] {
+    let caps = AbsoluteCaps::FIXED;
+    [
+        risk_quantity(
+            request.equity,
+            request.risk_pct,
+            request.entry,
+            request.stop,
+        ),
+        weight_quantity(
+            request.equity,
+            request.symbol_weight_pct.min(caps.symbol_weight_pct),
+            request.held_symbol_value,
+            request.entry,
+        ),
+        weight_quantity(
+            request.equity,
+            request.sector_weight_pct.min(caps.sector_weight_pct),
+            request.held_sector_value,
+            request.entry,
+        ),
+    ]
 }
 
 /// P1의 수량: `floor(평가액 × min(R, 2) / 100 / (진입 − 손절))`. 진입 ≤ 손절이면 0.
