@@ -10,6 +10,7 @@ mod execute;
 mod handling;
 mod inner;
 mod record;
+mod shown;
 mod subject;
 
 pub use approvals::{
@@ -18,6 +19,7 @@ pub use approvals::{
 };
 pub use error::{Error, RejectReason};
 pub use handling::DueHandling;
+pub use shown::{ClampNote, ShownExtras};
 pub use subject::{
     Fingerprint, OrderSubject, OrderType, Side, SignalKind, Subject, canonical_json, fingerprint,
 };

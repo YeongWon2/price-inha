@@ -12,4 +12,5 @@ mod promote_gap;
 mod proposal_approval;
 mod request;
 mod restart;
+mod shown_extras;
 mod voided;
