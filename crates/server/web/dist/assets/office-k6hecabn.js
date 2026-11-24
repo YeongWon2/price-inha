@@ -762,7 +762,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-nwq9w7uj.js");
+		const { webglAvailable, createScene } = await import("./scene3d-b80lic7d.js");
 		return {
 			webglAvailable,
 			createScene
@@ -778,9 +778,13 @@ async function show3d() {
 		names: state.names,
 		looks: state.looks,
 		onPick: (id) => selectConversation(id),
-		onLost: () => showLight("lost")
+		onLost: () => showLight("lost"),
+		onFollow: (following) => {
+			$("recenter").hidden = following;
+		}
 	});
 	state.view = scene;
+	$("recenter").hidden = true;
 	for (const [id, view] of state.agents) scene.setAgent(id, view, { snap: true });
 }
 function applyAgent(view, snap) {
@@ -1142,6 +1146,9 @@ async function main() {
 	} catch {
 		showLight("lost");
 	}
+	$("recenter").addEventListener("click", () => {
+		state.view?.recenter();
+	});
 	toggle.addEventListener("click", async () => {
 		if (state.view) {
 			showLight("chosen");

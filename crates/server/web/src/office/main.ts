@@ -112,8 +112,10 @@ async function show3d(): Promise<void> {
     looks: state.looks,
     onPick: (id: string) => selectConversation(id),
     onLost: () => showLight("lost"),
+    onFollow: (following: boolean) => { $("recenter").hidden = following; },
   });
   state.view = scene;
+  $("recenter").hidden = true;
   for (const [id, view] of state.agents) { scene.setAgent(id, view, { snap: true }); }
 }
 
@@ -461,6 +463,7 @@ async function main(): Promise<void> {
       showLight("lost");
     }
   }
+  $("recenter").addEventListener("click", () => { state.view?.recenter(); });
   toggle.addEventListener("click", async () => {
     if (state.view) {
       showLight("chosen");

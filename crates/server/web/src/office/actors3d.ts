@@ -263,6 +263,8 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     update(dt: number, t: number, now: number): void {
       for (const actor of actors.values()) { step(actor, dt, now); animate(actor, dt, t); }
     },
+    /** 담당들의 지금 자리(desk · meeting · bed). */
+    places(): string[] { return [...actors.values()].map((a) => a.view.place); },
     snapAll(): void {
       for (const actor of actors.values()) { if (actor.target) { placeAt(actor, actor.target); } }
     },

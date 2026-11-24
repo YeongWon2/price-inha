@@ -1,4 +1,4 @@
-import { n as LOOKS, t as DEFAULT_LOOKS } from "./office-i19ekij8.js";
+import { n as LOOKS, t as DEFAULT_LOOKS } from "./office-k6hecabn.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -39927,32 +39927,91 @@ function buildFloor(floor) {
 	return root;
 }
 // src/office/camera.ts
-/** 처음 잡기에서 경계 가로 둘레에 남기는 여백(가로의 4%). 15% 안이다. */
-var FRAME_MARGIN = 1.04;
 /** 가장 가까이: 처음 거리의 이만큼. */
 var ZOOM_IN_LIMIT = .3;
 /** 가장 멀리: 처음 거리의 이만큼. */
 var ZOOM_OUT_LIMIT = 2.2;
-function tanHalf(fovDeg) {
-	return Math.tan(fovDeg / 2 * Math.PI / 180);
-}
-/** 처음 잡기: 경계의 가로가 화면 가로를 꽉 채우는(넘치지 않고 15% 안으로 남는) 거리와 가운데 점. */
-function frameCamera(bounds, viewport, fovDeg) {
-	const aspect = Math.max(viewport.width, 1) / Math.max(viewport.height, 1);
-	return {
-		distance: Math.max(bounds.maxX - bounds.minX, .001) * FRAME_MARGIN / aspect / (2 * tanHalf(fovDeg)),
-		target: {
-			x: (bounds.minX + bounds.maxX) / 2,
-			z: (bounds.minZ + bounds.maxZ) / 2
-		}
-	};
-}
 /** 확대 · 축소 범위 제한: 처음 잡은 거리 `framed`를 기준으로 가까이 · 멀리 모두 막는다. */
 function clampDistance(distance, framed) {
 	const lo = framed * ZOOM_IN_LIMIT;
 	const hi = framed * ZOOM_OUT_LIMIT;
 	if (!Number.isFinite(distance)) return hi;
 	return Math.min(hi, Math.max(lo, distance));
+}
+// src/office/framing.ts
+/** 화면에 담을 높이(서 있는 캐릭터 머리까지). */
+var TOP = 1.9;
+/** 가장자리 여유(NDC). */
+var EDGE = .94;
+/** 경계 여유(칸). */
+var MARGIN = 1.5;
+/** 따라 비출 때의 경계 여유(칸). */
+var FOCUS_MARGIN = 2.5;
+function around(points, margin) {
+	const xs = points.map((p) => p.x + .5);
+	const zs = points.map((p) => p.y + .5);
+	return {
+		minX: Math.min(...xs) - margin,
+		maxX: Math.max(...xs) + margin,
+		minZ: Math.min(...zs) - margin,
+		maxZ: Math.max(...zs) + margin
+	};
+}
+/** 비출 곳의 경계. */
+function focusBounds(map, focus) {
+	const agents = Object.values(map.agents);
+	if (focus === "meeting" && map.meeting_seats.length > 0) return around(map.meeting_seats, FOCUS_MARGIN);
+	if (focus === "rest") return around(agents.map((a) => a.rest), FOCUS_MARGIN);
+	return around([...agents.flatMap((a) => [a.desk, a.rest]), ...map.meeting_seats], MARGIN);
+}
+/** 담당들의 자리로 비출 곳을 정한다. */
+function focusOf(places) {
+	const count = (p) => places.filter((x) => x === p).length;
+	if (count("meeting") >= 3) return "meeting";
+	if (count("bed") >= 4) return "rest";
+	return "all";
+}
+/**
+* 경계 `b`가 내려다보는 각 `polar`의 카메라 화면에 다 들어오는 가장 가까운 자리. `centered`면 경계 가운데를 바라보고
+* (따라 비추기 — 그쪽이 화면 가운데), 아니면 바라보는 점을 앞뒤로 옮겨 가장 가깝게 잡는다(처음 화면 — 캐릭터를 크게).
+*/
+function fitView(b, polar, aspect, fov, centered = false) {
+	const cam = new PerspectiveCamera(fov, aspect, .1, 400);
+	const tx = (b.minX + b.maxX) / 2;
+	const pts = [];
+	for (const x of [b.minX, b.maxX]) for (const z of [b.minZ, b.maxZ]) for (const y of [0, TOP]) pts.push(new Vector3(x, y, z));
+	const q = new Vector3();
+	const fits = (d, tz) => {
+		cam.position.set(tx, d * Math.cos(polar), tz + d * Math.sin(polar));
+		cam.lookAt(tx, 0, tz);
+		cam.updateMatrixWorld();
+		return pts.every((p) => {
+			q.copy(p).project(cam);
+			return Math.abs(q.x) <= EDGE && Math.abs(q.y) <= EDGE && q.z < 1;
+		});
+	};
+	let best = {
+		distance: 80,
+		tx,
+		tz: (b.minZ + b.maxZ) / 2
+	};
+	const mid = (b.minZ + b.maxZ) / 2;
+	for (let tz = centered ? mid : b.minZ; tz <= (centered ? mid : b.maxZ) + 1e-6; tz += .5) {
+		let lo = 2;
+		let hi = best.distance;
+		if (!fits(hi, tz)) continue;
+		for (let i = 0; i < 30; i++) {
+			const m = (lo + hi) / 2;
+			if (fits(m, tz)) hi = m;
+			else lo = m;
+		}
+		if (hi < best.distance) best = {
+			distance: hi,
+			tx,
+			tz
+		};
+	}
+	return best;
 }
 var ACTOR_RADIUS = .22;
 /** 지도 정의에서 걸을 수 없는 칸의 표를 만든다. */
@@ -40549,6 +40608,10 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 				animate(actor, dt, t);
 			}
 		},
+		/** 담당들의 지금 자리(desk · meeting · bed). */
+		places() {
+			return [...actors.values()].map((a) => a.view.place);
+		},
 		snapAll() {
 			for (const actor of actors.values()) if (actor.target) placeAt(actor, actor.target);
 		},
@@ -40584,7 +40647,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 var FOV = 38;
 var MIN_POLAR = .15;
 var MAX_POLAR = .46 * Math.PI;
-var START_POLAR = .72;
+var START_POLAR = .95;
 var PRESS_SLOP_PX = 5;
 var MAX_PIXEL_RATIO = 1.75;
 var MIN_PIXEL_RATIO = .75;
@@ -40649,7 +40712,7 @@ function roomTags(labels, map) {
 		};
 	});
 }
-function createScene({ host, labels, map, names, looks, onPick, onLost }) {
+function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
 	host.appendChild(renderer.domElement);
@@ -40671,12 +40734,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost }) {
 		looks,
 		grid: buildGrid(map)
 	});
-	const frame = map.frame ?? {
-		minX: 0,
-		maxX: map.cols,
-		minZ: 0,
-		maxZ: map.rows
-	};
+	let focus = "all";
 	const want = {
 		radius: 30,
 		polar: START_POLAR,
@@ -40688,19 +40746,24 @@ function createScene({ host, labels, map, names, looks, onPick, onLost }) {
 	let framed = 30;
 	let userMoved = false;
 	const target = new Vector3();
+	function aspect() {
+		return (host.clientWidth || 1) / (host.clientHeight || 1);
+	}
 	function reframe() {
-		const f = frameCamera(frame, {
-			width: host.clientWidth || 1,
-			height: host.clientHeight || 1
-		}, FOV);
-		framed = f.distance;
+		framed = fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV).distance;
+		const view = (focus === "all" ? null : fitView(focusBounds(map, focus), START_POLAR, aspect(), FOV, true)) ?? fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV);
 		Object.assign(want, {
-			radius: f.distance,
+			radius: view.distance,
 			polar: START_POLAR,
 			theta: 0,
-			tx: f.target.x,
-			tz: f.target.z
+			tx: view.tx,
+			tz: view.tz
 		});
+	}
+	function setFollowing(on) {
+		if (userMoved === !on) return;
+		userMoved = !on;
+		onFollow?.(on);
 	}
 	function clampWant() {
 		want.radius = clampDistance(want.radius, framed);
@@ -40723,10 +40786,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost }) {
 		camera.aspect = w / h;
 		camera.updateProjectionMatrix();
 		if (!userMoved) reframe();
-		else framed = frameCamera(frame, {
-			width: w,
-			height: h
-		}, FOV).distance;
+		else framed = fitView(focusBounds(map, "all"), START_POLAR, w / h, FOV).distance;
 	}
 	const observer = new ResizeObserver(resize);
 	observer.observe(host);
@@ -40751,7 +40811,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost }) {
 			want.theta -= angle;
 		},
 		moved() {
-			userMoved = true;
+			setFollowing(false);
 			clampWant();
 		},
 		pick(x, y) {
@@ -40840,9 +40900,24 @@ function createScene({ host, labels, map, names, looks, onPick, onLost }) {
 		canvas.remove();
 		for (const tag of rooms) tag.el.remove();
 	}
+	/** 담당 자리가 바뀌면(걸어서 옮길 때) 비출 곳을 다시 정한다. 접속 스냅샷(snap)은 처음 화면 그대로. */
+	function setAgent(id, view, options) {
+		const before = actors.places().join();
+		actors.setAgent(id, view, options);
+		if (options?.snap || actors.places().join() === before) return;
+		const next = focusOf(actors.places());
+		if (next === focus) return;
+		focus = next;
+		if (!userMoved) reframe();
+	}
+	function recenter() {
+		setFollowing(true);
+		reframe();
+	}
 	return {
-		setAgent: actors.setAgent,
+		setAgent,
 		setLook: actors.setLook,
+		recenter,
 		dispose
 	};
 }

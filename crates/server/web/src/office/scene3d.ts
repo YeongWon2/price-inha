@@ -9,7 +9,8 @@
 
 import * as THREE from "three";
 import { buildFloor, type Floor } from "./architecture";
-import { clampDistance, frameCamera, type Bounds } from "./camera";
+import { clampDistance } from "./camera";
+import { fitView, focusBounds, focusOf, type Focus } from "./framing";
 import { placeFurniture, type Furniture } from "./furniture";
 import { disposeLoaded } from "./gltf";
 import { buildGrid, type NavMap, type Point } from "./nav";
@@ -28,7 +29,6 @@ export interface OfficeMap extends NavMap, Floor {
   rooms: { id: string; label: string; x: number; y: number; w: number; h: number }[];
   agents: Record<string, { name?: string; desk: Point; desk_facing?: string; rest: Point; rest_facing?: string }>;
   meeting_seats: Seat[];
-  frame?: Bounds;
 }
 
 /** 담당 하나의 자리 · 일. */
@@ -38,6 +38,8 @@ export interface AgentLook { place: string; work: string }
 export interface Scene {
   setAgent(id: string, view: AgentLook, options?: { snap?: boolean }): void;
   setLook(id: string, look: string): void;
+  /** 처음 화면으로: 다시 따라 비춘다. */
+  recenter(): void;
   dispose(): void;
 }
 
@@ -50,12 +52,15 @@ export interface SceneOptions {
   looks: Record<string, string>;
   onPick?: (id: string) => void;
   onLost?: () => void;
+  /** 따라 비추기가 켜지거나(사용자 조작 없음) 꺼질 때. */
+  onFollow?: (following: boolean) => void;
 }
 
 const FOV = 38;
 const MIN_POLAR = 0.15;
 const MAX_POLAR = 0.46 * Math.PI;
-const START_POLAR = 0.72;
+// 내려다보는 각(연직에서 약 54도): 쓰는 공간의 앞뒤(미팅룸 ~ 라운지)를 담으면서 캐릭터 키가 잘 보이게.
+const START_POLAR = 0.95;
 const PRESS_SLOP_PX = 5;
 const MAX_PIXEL_RATIO = 1.75;
 const MIN_PIXEL_RATIO = 0.75;
@@ -112,7 +117,7 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
   });
 }
 
-export function createScene({ host, labels, map, names, looks, onPick, onLost }: SceneOptions): Scene {
+export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
   host.appendChild(renderer.domElement);
@@ -128,17 +133,25 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost }:
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
 
-  // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음 잡기는 사무 공간(map.frame)이 가로를 채운다.
-  const frame: Bounds = map.frame ?? { minX: 0, maxX: map.cols, minZ: 0, maxZ: map.rows };
+  // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음에는 쓰는 자리 모두(framing.ts), 다수가 미팅룸 · 쉼 자리로
+  // 옮기면 그쪽을 비춘다. 사용자가 끌기 · 확대를 하면 따라가지 않는다(recenter로 다시 켠다).
+  let focus: Focus = "all";
   const want = { radius: 30, polar: START_POLAR, theta: 0, tx: 0, tz: 0 };
   const cur = { ...want };
   let framed = 30;
   let userMoved = false;
   const target = new THREE.Vector3();
+  function aspect(): number { return (host.clientWidth || 1) / (host.clientHeight || 1); }
   function reframe(): void {
-    const f = frameCamera(frame, { width: host.clientWidth || 1, height: host.clientHeight || 1 }, FOV);
-    framed = f.distance;
-    Object.assign(want, { radius: f.distance, polar: START_POLAR, theta: 0, tx: f.target.x, tz: f.target.z });
+    framed = fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV).distance;
+    const v = focus === "all" ? null : fitView(focusBounds(map, focus), START_POLAR, aspect(), FOV, true);
+    const view = v ?? fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV);
+    Object.assign(want, { radius: view.distance, polar: START_POLAR, theta: 0, tx: view.tx, tz: view.tz });
+  }
+  function setFollowing(on: boolean): void {
+    if (userMoved === !on) { return; }
+    userMoved = !on;
+    onFollow?.(on);
   }
   function clampWant(): void {
     want.radius = clampDistance(want.radius, framed);
@@ -161,7 +174,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost }:
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    if (!userMoved) { reframe(); } else { framed = frameCamera(frame, { width: w, height: h }, FOV).distance; }
+    if (!userMoved) { reframe(); } else { framed = fitView(focusBounds(map, "all"), START_POLAR, w / h, FOV).distance; }
   }
   const observer = new ResizeObserver(resize);
   observer.observe(host);
@@ -179,7 +192,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost }:
     rotate(dx: number, dy: number) { want.theta -= dx * 0.006; want.polar -= dy * 0.005; },
     zoom(factor: number) { want.radius *= factor; },
     twist(angle: number) { want.theta -= angle; },
-    moved() { userMoved = true; clampWant(); },
+    moved() { setFollowing(false); clampWant(); },
     pick(x: number, y: number) { const id = actors.pick(x, y, camera, canvas); if (id) { onPick?.(id); } },
   });
 
@@ -258,7 +271,22 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost }:
     for (const tag of rooms) { tag.el.remove(); }
   }
 
-  return { setAgent: actors.setAgent, setLook: actors.setLook, dispose };
+  /** 담당 자리가 바뀌면(걸어서 옮길 때) 비출 곳을 다시 정한다. 접속 스냅샷(snap)은 처음 화면 그대로. */
+  function setAgent(id: string, view: AgentLook, options?: { snap?: boolean }): void {
+    const before = actors.places().join();
+    actors.setAgent(id, view, options);
+    if (options?.snap || actors.places().join() === before) { return; }
+    const next = focusOf(actors.places());
+    if (next === focus) { return; }
+    focus = next;
+    if (!userMoved) { reframe(); }
+  }
+  function recenter(): void {
+    setFollowing(true);
+    reframe();
+  }
+
+  return { setAgent, setLook: actors.setLook, recenter, dispose };
 }
 
 /** 누르기 · 끌기 · 바퀴 · 두 손가락. */
