@@ -16,6 +16,7 @@
 mod anomaly;
 mod approval;
 mod check;
+mod clamp;
 pub mod error;
 mod loss;
 mod model;
@@ -30,6 +31,7 @@ pub use anomaly::{
 };
 pub use approval::{ApprovalGrant, approved, reduce_within_limit};
 pub use check::{check, issue, issue_for_trade};
+pub use clamp::{LimitClamp, LimitKind, limit_clamps, reduce_within_limit_recorded};
 pub use error::Error;
 pub use loss::{StopContext, StopTransition, day_loss_pct, drawdown_pct, evaluate_stops};
 pub use model::{
