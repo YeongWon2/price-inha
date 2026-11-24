@@ -291,6 +291,18 @@ pub enum StoreError {
         /// 지금 판.
         actual: u32,
     },
+    /// 통과 기록의 판과 템플릿의 지금 판이 달라 실전으로 옮길 수 없다. 템플릿도 승인도 그대로다. (16차)
+    #[error(
+        "템플릿 {id:?}의 통과 기록 판 {pass_revision:?}이 지금 판 {revision}과 달라 실전으로 옮길 수 없다"
+    )]
+    TemplatePassStale {
+        /// 템플릿 번호.
+        id: TemplateId,
+        /// 통과 기록의 판(기록이 없으면 `None`).
+        pass_revision: Option<u32>,
+        /// 지금 판.
+        revision: u32,
+    },
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

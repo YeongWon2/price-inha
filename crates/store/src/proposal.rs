@@ -218,12 +218,12 @@ impl Store {
     }
 
     /// 냉각중인 사용자 변경 개선안을 반영됨으로 옮기고 같은 쓰기 안에서 그 템플릿에 새 리비전(`value`)을
-    /// 쓴다(15차 2번, 잠금의 예외). 템플릿이 실전중이어도 된다. 템플릿이 멈춤이거나 냉각중이 아니거나
-    /// 복기 개선안이면 거부하고 개선안도 템플릿도 그대로다.
+    /// 쓴다(15차 2번, 잠금의 예외). 템플릿이 실전중 · 모의중이어도 된다. 템플릿이 멈춤 · 승격대기(16차: 통과 기록과
+    /// 다른 리비전이 실전이 되지 못하게)이거나 냉각중이 아니거나 복기 개선안이면 거부하고 개선안도 템플릿도 그대로다.
     ///
     /// - 냉각중이 아니면 [`StoreError::TransitionDenied`].
     /// - 복기 개선안이면 [`StoreError::ProposalLocked`].
-    /// - 템플릿이 멈춤이면 [`StoreError::TemplateLocked`].
+    /// - 템플릿이 멈춤이나 승격대기면 [`StoreError::TemplateLocked`].
     pub fn apply_cooled_user_proposal(
         &self,
         id: ProposalId,
@@ -239,7 +239,10 @@ impl Store {
                 });
             };
             let target = crate::template::get(conn, template)?;
-            if target.state == TemplateState::Stopped {
+            if matches!(
+                target.state,
+                TemplateState::Stopped | TemplateState::PromotionPending
+            ) {
                 return Err(StoreError::TemplateLocked {
                     state: target.state,
                 });

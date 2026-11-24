@@ -136,6 +136,9 @@ fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     if let Some(boundary) = boundary {
         v4::seal(&tx, boundary)?;
     }
+    if version < 10 {
+        v10::integrity_ok(&tx)?;
+    }
     if version < SCHEMA_VERSION {
         tx.pragma_update(None, "application_id", APPLICATION_ID)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;

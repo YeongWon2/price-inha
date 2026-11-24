@@ -421,12 +421,20 @@ fn promote(
     approval: &ApprovalUse,
     at: UnixMillis,
 ) -> Result<Template, StoreError> {
-    expect(
+    let now = expect(
         conn,
         id,
         TemplateState::PromotionPending,
         TemplateState::Live,
     )?;
+    let pass_revision = now.criteria_pass.as_ref().map(|pass| pass.revision);
+    if pass_revision != Some(now.revision) {
+        return Err(StoreError::TemplatePassStale {
+            id,
+            pass_revision,
+            revision: now.revision,
+        });
+    }
     approval::consume(conn, approval, at)?;
     conn.execute(
         "UPDATE templates SET state = 'live', approval_id = ?2, updated_at = ?3 WHERE id = ?1",

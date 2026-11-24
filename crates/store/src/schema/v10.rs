@@ -7,7 +7,9 @@
 //!   세어 새 표를 받아들이지 않는다.)
 //! - `office_looks`: 담당 → 외형 id.
 //! - 템플릿 표의 `pass_revision = revision` 검사를 뺀다. 사용자 변경 반영 뒤에는 통과 기록(옛 리비전 기준)과
-//!   현재 리비전이 다를 수 있다. 통과 기록 자체는 그대로 굳어 있다(`templates_pass_fixed`).
+//!   현재 리비전이 다를 수 있다. (16차: 그래서 승격대기 템플릿에는 사용자 변경 리비전을 쓰지 못하게 하고, 실전으로
+//!   옮기는 전이는 `pass_revision = revision`일 때만 되게 하는 트리거를 이 판에 둔다 — 판 번호는 시험이 10으로 못 박아
+//!   새 판을 더하지 못한다. 옮기기 끝에는 `PRAGMA integrity_check`를 본다.) 통과 기록 자체는 그대로 굳어 있다(`templates_pass_fixed`).
 
 use rusqlite::Connection;
 
@@ -38,6 +40,18 @@ pub(super) fn relax_template_check(tx: &Connection) -> Result<(), StoreError> {
     tx.pragma_update(None, "writable_schema", false)?;
     changed?;
     tx.pragma_update(None, "schema_version", version + 1)?;
+    Ok(())
+}
+
+/// 옮기기 끝에 파일이 온전한지 본다(`PRAGMA integrity_check`). 정의 글자를 직접 고친 뒤이므로 꼭 본다.
+/// ok가 아니면 옮기기는 실패하고(묶음이 돌아간다) 파일은 판 9 그대로다.
+pub(super) fn integrity_ok(tx: &Connection) -> Result<(), StoreError> {
+    let result: String = tx.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if result != "ok" {
+        return Err(StoreError::Incompatible(format!(
+            "판 10으로 옮긴 뒤 무결성 검사가 실패했다: {result}"
+        )));
+    }
     Ok(())
 }
 
@@ -78,8 +92,7 @@ WHEN NEW.revision <> (SELECT COALESCE(MAX(revision), 0) + 1 FROM template_revisi
                       WHERE template_id = NEW.template_id)
   OR ((SELECT state FROM templates WHERE id = NEW.template_id) IS NOT 'simulating'
       AND NOT (
-        (SELECT state FROM templates WHERE id = NEW.template_id)
-            IN ('promotion_pending', 'live')
+        (SELECT state FROM templates WHERE id = NEW.template_id) = 'live'
         AND EXISTS (SELECT 1 FROM user_revisions u
                     JOIN proposals p ON p.id = u.proposal_id
                     WHERE u.template_id = NEW.template_id AND u.revision = NEW.revision
@@ -95,13 +108,19 @@ BEGIN SELECT RAISE(ABORT, 'criteria pass must be for the current revision'); END
 DROP TRIGGER templates_revision_step;
 CREATE TRIGGER templates_revision_step BEFORE UPDATE ON templates
 WHEN NEW.revision IS NOT OLD.revision
-  AND ((OLD.state <> 'simulating'
-        AND NOT EXISTS (SELECT 1 FROM user_revisions
-                        WHERE template_id = NEW.id AND revision = NEW.revision))
+  AND ((OLD.state = 'promotion_pending'
+        OR (OLD.state <> 'simulating'
+            AND NOT EXISTS (SELECT 1 FROM user_revisions
+                        WHERE template_id = NEW.id AND revision = NEW.revision)))
        OR NEW.revision <> OLD.revision + 1
        OR NOT EXISTS (SELECT 1 FROM template_revisions
                       WHERE template_id = NEW.id AND revision = NEW.revision))
 BEGIN SELECT RAISE(ABORT, 'template value is locked'); END;
+
+-- 16차: 실전으로 옮기는 전이는 통과 기록의 리비전이 지금 리비전일 때만 된다(뺀 CHECK의 뜻을 승격 시점에 지킨다).
+CREATE TRIGGER templates_live_needs_current_pass BEFORE UPDATE ON templates
+WHEN NEW.state = 'live' AND OLD.state <> 'live' AND NEW.pass_revision IS NOT NEW.revision
+BEGIN SELECT RAISE(ABORT, 'live template needs a criteria pass for the current revision'); END;
 
 CREATE TABLE office_looks (
     agent TEXT    PRIMARY KEY CHECK (length(agent) > 0),
