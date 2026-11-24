@@ -192,8 +192,9 @@ async fn 상한_2를_채운_뒤에는_scout_깨우기도_ai를_부르지_않고_
         "상한 알림은 그날 한 번이다(깨우기가 더해 알리지 않는다)"
     );
 
-    // 한국 시각 자정이 지나면 다시 깨운다.
-    bench.set(kst(tuesday(), 0, 10));
+    // 한국 시각 자정이 지나면 다시 센다. 장 밖 자료 사건은 장이 열릴 때까지 보관되므로
+    // 다음 날 장 안(10:00)에서 깨우기를 본다.
+    bench.set(kst(tuesday(), 10, 0));
     bench.advance(40).await;
     assert!(
         woke_ai(&bench, "20261116000903", calls(&bench)).await,
