@@ -1,5 +1,6 @@
-import { a as approvalPath, n as API, o as decidePath, s as templateStopPath, t as mountMenu } from "./menu-myat6qpc.js";
+import { a as approvalPath, n as API, o as decidePath, s as templateStopPath, t as mountMenu } from "./menu-fj8wu6yl.js";
 import { a as errorLine, i as emptyState, n as button, o as loading, r as card, s as table, t as badge } from "./parts-c9wvtg59.js";
+import { a as isObject, c as call, i as formatValue, l as el, n as changeRow, o as numberLabel, r as fieldLabel, s as LOAD_FAILED, t as capText } from "./fields-ewltt10g.js";
 // src/templates/model.ts
 /** 스타일 고르기 단추 차례와 보이는 이름: 단타 · 스윙 · 중장기. */
 var STYLES = [
@@ -12,38 +13,6 @@ var STYLES = [
 * 실제 증권사로 주문은 나가지 않는다는 뜻이다.
 */
 var LIVE_NOTICE = "실전 운용을 시작해도 실제 증권사로 주문은 나가지 않습니다. 이 시스템의 주문은 언제나 직접 만든 모의계좌로만 갑니다.";
-/**
-* 칸 이름(서버 키) → 보이는 이름. 용어는 principles.md "템플릿에서 조정하는 값" · template 지시서의 칸 표를 따른다.
-* `template_view`의 26칸 순서와 같다.
-*/
-var FIELD_LABELS = {
-	risk_per_trade_pct: "1회 위험 비율",
-	daily_loss_limit_pct: "일일 손실 한도",
-	max_drawdown_pct: "최대 낙폭 한도",
-	symbol_weight_pct: "종목 비중",
-	conviction_weight_pct: "확신 종목 비중",
-	sector_weight_pct: "업종 비중",
-	auto_order_limit_pct: "자동 주문 금액 한도",
-	min_cash_pct: "최소 현금 비중",
-	max_positions: "최대 동시 보유 종목 수",
-	max_trades_per_day: "일일 최대 매매 횟수",
-	loss_streak: "연속 손실 정지",
-	"stop.fixed_loss_pct": "고정 손절 폭",
-	"stop.atr": "ATR 손절",
-	"stop.thesis_break": "논리 손절",
-	"stop.flatten_before_close": "장 마감 청산",
-	max_holding: "최대 보유 기간",
-	chase_limit_pct: "추격 허용 폭",
-	promotion: "승격 기준",
-	universe: "유니버스",
-	trading_window: "거래 시간대",
-	entry_signals: "진입 신호",
-	triggers: "구독 트리거",
-	rebalance: "리밸런싱 주기",
-	take_profit: "익절 방식",
-	approval_wait: "승인 대기 시간",
-	unfilled_cancel: "미체결 취소 시간"
-};
 /**
 * 값 맞추기 경로(`POST /api/templates/adjust`)가 받는 칸(서버 `change_of`와 같은 일곱 칸). 그 밖의 칸은 이 화면에서
 * 보기만 한다(입력 칸은 있으나 읽기 전용).
@@ -76,136 +45,6 @@ var CRITERION_LABELS = {
 	max_drawdown: "최대 낙폭",
 	out_of_sample: "표본 밖 성과"
 };
-/** 나열 값(서버의 snake_case 글자) → 보이는 이름. */
-var WORDS = {
-	breakout: "돌파",
-	pullback: "눌림목",
-	value_range: "가치 구간",
-	event: "이벤트",
-	quote: "시세",
-	disclosure: "공시",
-	news: "뉴스",
-	schedule: "정해진 시각",
-	kr: "국내",
-	us: "미국",
-	day: "일봉",
-	minute: "분봉",
-	same_day: "당일",
-	unlimited: "제한 없음",
-	rest_of_day: "그날 남은 시간",
-	at_close: "장 마감까지 둠"
-};
-var NONE = "없음";
-function isObject(value) {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-/** 십진수 글자 · 수 → 수 글(천 단위 쉼표). 수가 아니면 없음. */
-function numberText(value) {
-	if (typeof value === "number" && Number.isFinite(value)) return value.toLocaleString("ko-KR", { maximumFractionDigits: 4 });
-	if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) {
-		const [whole, fraction] = value.trim().split(".");
-		return (whole.startsWith("-") ? "-" : "") + whole.replace("-", "").replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (fraction !== void 0 ? "." + fraction : "");
-	}
-	return null;
-}
-/** 십진수 글자 → 수 글(천 단위 쉼표). 수가 아니면 받은 글 그대로. */
-function numberLabel(value) {
-	return numberText(value) ?? value;
-}
-/** 큰 금액(원) →"3,000억" · "30억"처럼 짧게. 수가 아니면 없음. */
-function wonText(value) {
-	const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-	if (!Number.isFinite(number)) return null;
-	const EOK = 1e8;
-	if (Math.abs(number) >= EOK) return (number / EOK).toLocaleString("ko-KR", { maximumFractionDigits: 1 }) + "억 원";
-	return number.toLocaleString("ko-KR") + "원";
-}
-function word(value) {
-	return typeof value === "string" ? WORDS[value] ?? value : generic(value);
-}
-/** 기간 `{secs, nanos}` → "1분" · "30초". */
-function durationText(value) {
-	if (!isObject(value) || typeof value.secs !== "number") return generic(value);
-	const secs = value.secs;
-	if (secs >= 60 && secs % 60 === 0) return `${secs / 60}분`;
-	return `${secs}초`;
-}
-/** 모양을 모르는 값의 글(키: 값 · 키: 값). */
-function generic(value) {
-	if (value === null || value === void 0) return NONE;
-	if (typeof value === "boolean") return value ? "켬" : "끔";
-	const number = numberText(value);
-	if (number !== null) return number;
-	if (typeof value === "string") return WORDS[value] ?? value;
-	if (Array.isArray(value)) return value.length === 0 ? NONE : value.map(word).join(" · ");
-	if (isObject(value)) return Object.entries(value).map(([key, inner]) => `${WORDS[key] ?? key} ${generic(inner)}`).join(" · ");
-	return String(value);
-}
-function percent(value) {
-	const number = numberText(value);
-	return number === null ? generic(value) : `${number}%`;
-}
-/** 모양이 정해진 칸의 글. 모양이 다르면 일반 글로. */
-var SHAPED = {
-	max_positions: (v) => v.low === v.high ? `${generic(v.low)}종목` : `${generic(v.low)}~${generic(v.high)}종목`,
-	loss_streak: (v) => {
-		const cooldown = v.cooldown;
-		const rest = isObject(cooldown) && typeof cooldown.trading_days === "number" ? `${cooldown.trading_days}거래일 쉼` : `${word(cooldown)} 쉼`;
-		return `${generic(v.losses)}번 연속 손실이면 ${rest}`;
-	},
-	"stop.fixed_loss_pct": (v) => v.low === v.high ? percent(v.low) : `${generic(v.low)}~${percent(v.high)}`,
-	"stop.atr": (v) => `ATR × ${generic(v.multiple)}(${word(v.bar)})`,
-	max_holding: (v) => typeof v.trading_days === "number" ? `${v.trading_days}거래일` : null,
-	promotion: (v) => {
-		const parts = [
-			`매매 ${generic(v.min_trades)}건 이상`,
-			`${generic(v.min_trading_days)}거래일 이상`,
-			`손익 ${generic(v.net_pnl_above)} 초과`,
-			`낙폭 ${percent(v.max_drawdown_pct)} 이하`
-		];
-		if (v.out_of_sample_pnl_above !== null && v.out_of_sample_pnl_above !== void 0) parts.push(`표본 밖 ${generic(v.out_of_sample_pnl_above)} 초과`);
-		return parts.join(" · ");
-	},
-	universe: (v) => {
-		const parts = [
-			Array.isArray(v.markets) ? v.markets.map(word).join(" · ") : generic(v.markets),
-			`시가총액 ${wonText(v.min_market_cap) ?? generic(v.min_market_cap)} 이상`,
-			`거래대금 ${wonText(v.min_turnover) ?? generic(v.min_turnover)} 이상`
-		];
-		if (Array.isArray(v.excluded_sectors) && v.excluded_sectors.length > 0) parts.push(`제외 업종 ${v.excluded_sectors.map(word).join(" · ")}`);
-		return parts.join(" · ");
-	},
-	trading_window: (v) => `장 시작 ${generic(v.skip_open_minutes)}분 건너뜀 · 시간외 ${v.after_market ? "거래" : "안 함"}`,
-	rebalance: (v) => `${generic(v.every_trading_days)}거래일마다 · 이탈 ${percent(v.drift_pct)}p 넘으면`,
-	take_profit: (v) => {
-		const parts = [`목표 ${generic(v.r_target)}R`];
-		if (v.partial_at_target) parts.push("목표에서 일부 익절");
-		if (v.trailing) parts.push("추적 익절");
-		if (v.valuation_exit) parts.push("가치 도달 청산");
-		if (v.rebalance_exit) parts.push("리밸런싱 청산");
-		return parts.join(" · ");
-	},
-	approval_wait: (v) => `사기 ${durationText(v.buy)} · 손절 ${durationText(v.stop_loss)} · 익절 ${durationText(v.take_profit)}`,
-	unfilled_cancel: (v) => v.after !== void 0 ? `${durationText(v.after)} 뒤 취소` : null
-};
-/** 칸 이름 → 보이는 이름. 모르는 키는 키 그대로. */
-function fieldLabel(key) {
-	return FIELD_LABELS[key] ?? key;
-}
-/** 칸 값 → 글. 퍼센트 칸(`_pct`로 끝나는 키)의 수는 `%`를 붙이고, 없음은 "없음". */
-function formatValue(key, value) {
-	if (value === null || value === void 0) return NONE;
-	if (isObject(value)) {
-		const shaped = SHAPED[key]?.(value);
-		if (shaped) return shaped;
-	}
-	if (key.endsWith("_pct")) return percent(value);
-	return generic(value);
-}
-/** 상한 글자 → 안내 글("상한 2%"). 상한이 없으면 없음. */
-function capText(cap) {
-	return cap === null || cap === void 0 ? null : `상한 ${percent(cap)}`;
-}
 /** 응답에서 쓰는 템플릿(`current`의 번호). 없으면 없음. */
 function currentTemplate(reply) {
 	if (reply.current === null) return null;
@@ -238,13 +77,7 @@ function revisionRows(entry) {
 		revision: revision.revision,
 		at: revision.at,
 		proposal: revision.proposal,
-		changes: revision.changes.map((change) => ({
-			key: change.key,
-			label: fieldLabel(change.key),
-			before: formatValue(change.key, change.before),
-			after: formatValue(change.key, change.after),
-			widened: change.widened
-		}))
+		changes: revision.changes.map(changeRow)
 	}));
 }
 /** 상태 글자 → 배지 글(모의중 · 승격대기 · 실전중 · 멈춤). */
@@ -305,13 +138,6 @@ function saveMessage(reply, rows) {
 	};
 }
 // src/templates/view.ts
-/** 태그 · 클래스 · 글로 요소 하나. */
-function el$1(tag, className, text) {
-	const node = document.createElement(tag);
-	if (className) node.className = className;
-	if (text !== void 0) node.textContent = text;
-	return node;
-}
 /** 글을 수로(쉼표 · `%` · 공백을 뺀다). 수가 아니면 NaN. */
 function numberOf(text) {
 	const cleaned = text.replace(/[,%\s]/g, "");
@@ -321,15 +147,15 @@ function numberOf(text) {
 function fieldRow(row) {
 	const tr = document.createElement("tr");
 	tr.dataset.key = row.key;
-	const name = el$1("th", "tpl-name", row.label);
+	const name = el("th", "tpl-name", row.label);
 	name.scope = "row";
-	const value = el$1("td", "tpl-value", row.value);
+	const value = el("td", "tpl-value", row.value);
 	value.dataset.role = "value";
-	const cap = el$1("td", "tpl-cap", row.cap ?? "—");
+	const cap = el("td", "tpl-cap", row.cap ?? "—");
 	cap.dataset.role = "cap";
 	if (row.cap === null) cap.setAttribute("aria-label", "상한 없음");
-	const entry = el$1("td", "tpl-entry");
-	const input = el$1("input", "ui-input tpl-input");
+	const entry = el("td", "tpl-entry");
+	const input = el("input", "ui-input tpl-input");
 	input.type = "text";
 	input.inputMode = "decimal";
 	input.autocomplete = "off";
@@ -343,7 +169,7 @@ function fieldRow(row) {
 		input.placeholder = row.locked ? "잠김" : "새 값";
 		input.setAttribute("aria-label", `${row.label} 새 값`);
 	}
-	const note = el$1("span", "tpl-note");
+	const note = el("span", "tpl-note");
 	note.dataset.role = "field-note";
 	note.setAttribute("aria-live", "polite");
 	entry.append(input, note);
@@ -352,11 +178,11 @@ function fieldRow(row) {
 }
 /** 칸 표의 묶음 머리 줄. */
 function groupRow(title, hint) {
-	const tr = el$1("tr", "tpl-group");
-	const th = el$1("th", "");
+	const tr = el("tr", "tpl-group");
+	const th = el("th", "");
 	th.colSpan = 4;
 	th.scope = "colgroup";
-	th.append(el$1("span", "tpl-group-title", title), el$1("span", "tpl-group-hint", hint));
+	th.append(el("span", "tpl-group-title", title), el("span", "tpl-group-hint", hint));
 	tr.append(th);
 	return tr;
 }
@@ -454,11 +280,11 @@ function renderPromotion(rows) {
 		const tr = document.createElement("tr");
 		tr.dataset.criterion = row.criterion;
 		tr.dataset.short = row.short ? "true" : "false";
-		const name = el$1("th", "tpl-name", row.label);
+		const name = el("th", "tpl-name", row.label);
 		name.scope = "row";
-		const verdict = el$1("td", "tpl-verdict");
+		const verdict = el("td", "tpl-verdict");
 		verdict.append(badge(row.met ? "채움" : "모자람", row.met ? "success" : "warning"));
-		tr.append(name, el$1("td", "tpl-num", needText(row.criterion, row.need)), el$1("td", "tpl-num", haveText(row.criterion, row.have)), verdict);
+		tr.append(name, el("td", "tpl-num", needText(row.criterion, row.need)), el("td", "tpl-num", haveText(row.criterion, row.have)), verdict);
 		body.append(tr);
 	}
 	return node;
@@ -476,28 +302,28 @@ function timeText(at) {
 }
 /** 판 이력. 판마다 바뀐 칸과 넓힘 표시. */
 function renderRevisions(rows) {
-	const list = el$1("ol", "tpl-revisions");
+	const list = el("ol", "tpl-revisions");
 	list.dataset.role = "revisions";
 	for (const row of rows) {
-		const item = el$1("li", "tpl-revision");
+		const item = el("li", "tpl-revision");
 		item.dataset.revision = String(row.revision);
-		const head = el$1("div", "tpl-revision-head");
-		head.append(el$1("strong", "tpl-revision-no", `판 ${row.revision}`));
-		const time = el$1("time", "tpl-revision-at", timeText(row.at));
+		const head = el("div", "tpl-revision-head");
+		head.append(el("strong", "tpl-revision-no", `판 ${row.revision}`));
+		const time = el("time", "tpl-revision-at", timeText(row.at));
 		time.dateTime = new Date(row.at).toISOString();
 		head.append(time);
 		if (row.proposal !== null) head.append(badge(`개선안 ${row.proposal}번`));
 		item.append(head);
-		if (row.changes.length === 0) item.append(el$1("p", "tpl-revision-empty", row.revision === 1 ? "처음 값(고른 스타일의 기본값)" : "바뀐 칸 없음"));
+		if (row.changes.length === 0) item.append(el("p", "tpl-revision-empty", row.revision === 1 ? "처음 값(고른 스타일의 기본값)" : "바뀐 칸 없음"));
 		else {
-			const changes = el$1("ul", "tpl-changes");
+			const changes = el("ul", "tpl-changes");
 			for (const change of row.changes) {
-				const line = el$1("li", "tpl-change");
+				const line = el("li", "tpl-change");
 				line.dataset.key = change.key;
 				if (change.widened) line.dataset.widened = "true";
-				const values = el$1("span", "tpl-change-values");
-				values.append(el$1("span", "tpl-before", change.before), el$1("span", "tpl-arrow", " → "), el$1("span", "tpl-after", change.after));
-				line.append(el$1("span", "tpl-change-name", change.label), values);
+				const values = el("span", "tpl-change-values");
+				values.append(el("span", "tpl-before", change.before), el("span", "tpl-arrow", " → "), el("span", "tpl-after", change.after));
+				line.append(el("span", "tpl-change-name", change.label), values);
 				if (change.widened) line.append(badge("넓힘", "warning"));
 				changes.append(line);
 			}
@@ -509,14 +335,12 @@ function renderRevisions(rows) {
 }
 /** 실전 안내 줄(`LIVE_NOTICE`). */
 function liveNotice() {
-	const node = el$1("p", "tpl-live-notice", LIVE_NOTICE);
+	const node = el("p", "tpl-live-notice", LIVE_NOTICE);
 	node.dataset.role = "live-notice";
 	node.setAttribute("role", "note");
 	return node;
 }
 // src/templates/screen.ts
-/** 읽기 실패 글(E57). */
-var LOAD_FAILED = "불러오지 못함 · 다시 시도해 주세요. 서버와 연결되지 않았거나 잠시 응답하지 않습니다.";
 /** 상태 배지 색. */
 var STATE_TONES = {
 	simulating: "neutral",
@@ -524,36 +348,6 @@ var STATE_TONES = {
 	live: "success",
 	stopped: "danger"
 };
-/** 같은 출처 경로를 부른다. 몸통을 JSON으로 읽고, 읽을 수 없으면 `null`. */
-async function call(method, url, body) {
-	const init = {
-		method,
-		credentials: "same-origin",
-		cache: "no-store"
-	};
-	if (body !== void 0) {
-		init.headers = { "Content-Type": "application/json" };
-		init.body = JSON.stringify(body);
-	}
-	const reply = await fetch(url, init);
-	let parsed = null;
-	try {
-		parsed = await reply.json();
-	} catch {
-		parsed = null;
-	}
-	return {
-		status: reply.status,
-		ok: reply.ok,
-		body: parsed
-	};
-}
-function el(tag, className, text) {
-	const node = document.createElement(tag);
-	if (className) node.className = className;
-	if (text !== void 0) node.textContent = text;
-	return node;
-}
 /** 결과 문구 줄. `tone`은 글의 색(토큰)만 바꾼다. */
 function resultLine(role, message) {
 	const node = el("p", "tpl-result");
@@ -650,7 +444,8 @@ var TemplatesScreen = class {
 			notice.dataset.tone = "warning";
 			parts.push(notice);
 		} else if (entry.state === "promotion_pending" || entry.state === "stopped") {
-			const notice = el("p", "tpl-notice", entry.state === "stopped" ? "멈춘 템플릿은 값이 잠겨 있습니다. 바꾸려면 스타일을 새로 고르세요." : "승격대기 중에는 기준을 통과한 값이 잠겨 있습니다.");
+			const why = entry.state === "stopped" ? "멈춘 템플릿은 값이 잠겨 있습니다. 바꾸려면 스타일을 새로 고르세요." : "승격대기 중에는 기준을 통과한 값이 잠겨 있습니다.";
+			const notice = el("p", "tpl-notice", why);
 			notice.dataset.role = "locked-notice";
 			parts.push(notice);
 		}

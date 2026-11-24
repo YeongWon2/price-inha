@@ -16,8 +16,10 @@ use serde_json::{Map, Value, json};
 
 use super::demo_ai::REVIEW_HEAD;
 use super::{Crew, KIND_PROPOSAL, Reviewed};
-use crate::TeamError;
-use crate::trading::{change_of, reject_word};
+use crate::trading::{
+    Answered as CardAnswer, PROPOSAL_UNAVAILABLE, change_of, reject_word, rejected,
+};
+use crate::{TeamError, TradingError};
 
 /// 이벤트를 한 번에 읽는 개수.
 const READ_PAGE: usize = 1_000;
@@ -237,7 +239,7 @@ impl Crew {
         all.sort_by_key(|proposal| proposal.id);
         Ok(all
             .iter()
-            .map(|proposal| view(proposal, &notices))
+            .map(|proposal| view(proposal, &notices, self.proposal_changes(proposal)))
             .collect())
     }
 
@@ -251,6 +253,41 @@ impl Crew {
         let number = ApprovalNumber::new(body["number"].as_str().unwrap_or_default());
         let fingerprint = body["fingerprint"].as_str().unwrap_or_default();
         let decision = Decision::from_wire(body["answer"].as_str().unwrap_or_default());
+        self.answer_improvement(id, &number, fingerprint, decision)
+    }
+
+    /// (28차 3번) 폰 · 사무실의 승인 카드 길로 개선안의 승인 번호에 답한다: [`Crew::answer_proposal`]와 같은
+    /// 함수를 타고 결과를 그 길의 말로 바꾼다 — 반영 · 냉각중이면 승인됨, 그 밖은 거절과 같은 이유.
+    /// 쓰는 템플릿 값을 읽을 수 없으면(503의 경우) 승인 번호를 건드리지 않은 채 거절(`unavailable`)이다.
+    pub(crate) fn answer_by_card(
+        &self,
+        id: ProposalId,
+        number: &ApprovalNumber,
+        fingerprint: &str,
+        decision: Decision,
+    ) -> Result<CardAnswer, TradingError> {
+        match self.answer_improvement(id, number, fingerprint, decision) {
+            Ok(done) => Ok(match done.reason {
+                Some(reason) => rejected(reason),
+                None => CardAnswer {
+                    approved: true,
+                    reason: None,
+                },
+            }),
+            Err(TeamError::Unavailable) => Ok(rejected(PROPOSAL_UNAVAILABLE)),
+            Err(TeamError::Trading(error)) => Err(error),
+            Err(error) => Err(TradingError::Exec(error.to_string())),
+        }
+    }
+
+    /// 개선안 하나에 답한다(두 길이 함께 쓰는 한 함수).
+    fn answer_improvement(
+        &self,
+        id: ProposalId,
+        number: &ApprovalNumber,
+        fingerprint: &str,
+        decision: Decision,
+    ) -> Result<Answered, TeamError> {
         let source = match self.store.proposal_source(id) {
             Ok(source) => source,
             // 없는 개선안은 복기 길로 보낸다(승인 모듈 · 복기가 지금처럼 거절한다).
@@ -258,7 +295,7 @@ impl Crew {
             Err(error) => return Err(error.into()),
         };
         if let ProposalSource::User { .. } = source {
-            return self.answer_user_change(id, &number, fingerprint, decision);
+            return self.answer_user_change(id, number, fingerprint, decision);
         }
         // 복기 개선안의 반영 판정 · 거절은 쓰는 템플릿 값으로 한다. 읽을 수 없으면 아무것도 쓰기 전에 멈춘다.
         let current = match self.trading.params() {
@@ -272,7 +309,7 @@ impl Crew {
         let approval_error = |error: pi_approval::Error| TeamError::Approval(error.to_string());
         if decision == Decision::Reject {
             self.approvals
-                .answer(&number, fingerprint, Decision::Reject)
+                .answer(number, fingerprint, Decision::Reject)
                 .map_err(approval_error)?;
             let now = millis(self.clock.now());
             return match self.journal.reject(id, &current, now) {
@@ -285,14 +322,14 @@ impl Crew {
         }
         // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 닫거나 소비하기 전에 거절한다(V21 · E28):
         // 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다. 잠김이 풀린 뒤 같은 번호로 다시 답할 수 있다.
-        let waiting = self.approvals.get(&number).map_err(approval_error)?;
+        let waiting = self.approvals.get(number).map_err(approval_error)?;
         let waiting = waiting.is_some_and(|view| view.status == ApprovalStatus::Pending);
         if waiting && self.trading.template_locked()? {
             return Ok(answered("rejected", Some(PROPOSAL_TEMPLATE_LOCKED)));
         }
         let answer = self
             .approvals
-            .answer(&number, fingerprint, Decision::Approve)
+            .answer(number, fingerprint, Decision::Approve)
             .map_err(approval_error)?;
         if let Answer::Rejected(reason) = answer {
             return Ok(answered("rejected", Some(reject_word(reason))));
@@ -300,7 +337,7 @@ impl Crew {
         // 승인 소비는 승인 모듈이 하고, 반영 판정(지금 규칙으로 위험을 다시 본다)은 journal이 한다.
         let outcome = self
             .approvals
-            .with_proposal_approval(&number, id, |using, at| {
+            .with_proposal_approval(number, id, |using, at| {
                 self.journal
                     .approve(id, Some(using), &current, at)
                     .map_err(ApproveFail::Journal)
@@ -372,7 +409,7 @@ fn state_word(state: ProposalState) -> &'static str {
     }
 }
 
-fn view(proposal: &Proposal, notices: &[Value]) -> Value {
+fn view(proposal: &Proposal, notices: &[Value], changes: Vec<Value>) -> Value {
     let notice = notices
         .iter()
         .find(|notice| notice["id"] == json!(proposal.id.0));
@@ -388,5 +425,6 @@ fn view(proposal: &Proposal, notices: &[Value]) -> Value {
         "evidence": proposal.evidence.iter().map(|trade| trade.0).collect::<Vec<_>>(),
         "number": field("number"),
         "fingerprint": field("fingerprint"),
+        "changes": changes,
     })
 }

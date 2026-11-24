@@ -218,7 +218,7 @@ fn open_crew(
         return Ok(None);
     };
     let (store, offline, demo_ai_pause) = stored;
-    Ok(Some(Crew::open(CrewParts {
+    let crew = Crew::open(CrewParts {
         store: store.clone(),
         clock: Arc::clone(&wiring.clock),
         trading: Arc::clone(trading),
@@ -227,7 +227,10 @@ fn open_crew(
         wiring: team,
         offline,
         demo_ai_pause,
-    })?))
+    })?;
+    // (28차 3번) 승인 카드 길로 온 개선안 답이 개선안 답하기와 같은 함수를 타게 잇는다.
+    trading.hook_proposals(link::proposal_hook(Arc::downgrade(&crew)));
+    Ok(Some(crew))
 }
 
 /// 보관 폴더의 비밀 보관소(부르는 쪽이 연 것이 있으면 그것)와 저장소를 연다. 밖의 주소로 열면 경고를 남긴다.

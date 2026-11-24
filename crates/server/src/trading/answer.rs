@@ -31,7 +31,7 @@ pub(crate) struct Answered {
     pub(crate) reason: Option<&'static str>,
 }
 
-pub(super) fn rejected(reason: &'static str) -> Answered {
+pub(crate) fn rejected(reason: &'static str) -> Answered {
     Answered {
         approved: false,
         reason: Some(reason),
@@ -91,6 +91,11 @@ impl Trading {
         // 실전 승격을 묻는 번호면 주문이 아니라 템플릿을 올린다(10차 10a 7번).
         if let Some(template) = self.promotion_of(&number)? {
             return self.answer_promotion(&number, template, shown, decision);
+        }
+        // (28차 3번) 규칙 개선안을 묻는 번호면 승인 모듈에 답하기 전에 개선안 답하기 길로 보낸다:
+        // 승인 소비 · 반영 · 냉각 · 거절이 그 한 길에서 난다(승인만 닫히고 개선안이 남지 않게).
+        if let Some(proposal) = self.proposal_of(&number)? {
+            return self.answer_proposal_card(proposal, &number, shown, decision);
         }
         let answered = self
             .approvals

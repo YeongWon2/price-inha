@@ -8,16 +8,9 @@
 // - 승격 기준 표 `[data-role="promotion"]`: 줄 `tr[data-criterion=기준]`, 모자란 줄은 `data-short="true"`.
 // - 판 이력 `[data-role="revisions"]`: 판 `[data-revision=번호]`, 바뀐 칸 `[data-key=키]`, 넓힘은 `data-widened="true"`와 "넓힘" 글.
 // - 실전 안내 `[data-role="live-notice"]`(글은 `LIVE_NOTICE`).
+import { el } from "../ui/call";
 import { badge, table } from "../ui/parts";
 import { LIVE_NOTICE, isAdjustable, numberLabel, type CriterionName, type FieldRow, type PromotionRow, type RevisionRow } from "./model";
-
-/** 태그 · 클래스 · 글로 요소 하나. */
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** 글을 수로(쉼표 · `%` · 공백을 뺀다). 수가 아니면 NaN. */
 function numberOf(text: string): number {

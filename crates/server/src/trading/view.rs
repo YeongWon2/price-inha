@@ -54,7 +54,8 @@ fn field_json(field: ViewField, editable: bool) -> Value {
     })
 }
 
-fn change_json(change: FieldChange) -> Value {
+/// 판 이력 · 개선안의 바뀐 칸 하나(`{"key", "before", "after", "widened"}`).
+pub(crate) fn change_json(change: FieldChange) -> Value {
     json!({
         "key": change.key,
         "before": change.before,

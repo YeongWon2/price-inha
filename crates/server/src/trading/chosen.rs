@@ -10,7 +10,7 @@
 //! - 값은 모의중일 때만 바꿀 수 있다(V21). 그 밖의 상태는 잠긴 것이고, 개선안 반영은 쓰는 템플릿에만 한다.
 
 use pi_rules::Purpose;
-use pi_store::TemplateState;
+use pi_store::{TemplateId, TemplateState};
 use pi_template::{RiskParams, Template, TriggerKind};
 
 use super::Trading;
@@ -63,6 +63,13 @@ impl Trading {
     pub(super) fn live_in_use(&self) -> Result<bool, TradingError> {
         let template = self.template_in_use()?;
         Ok(template.is_some_and(|template| template.state == TemplateState::Live))
+    }
+
+    /// (28차 1번) 쓰는 템플릿의 번호와 값(값을 읽을 수 없으면 값은 없음). 하나도 없으면 없음.
+    pub(crate) fn in_use(&self) -> Result<Option<(TemplateId, Option<RiskParams>)>, TradingError> {
+        Ok(self
+            .template_in_use()?
+            .map(|template| (template.id, params_of(&template))))
     }
 
     /// 쓰는 템플릿의 값(멈춤이어도 — 파는 주문 · 손절 감시 · 손실 판단 · 복기가 쓴다). 없거나 읽을 수 없으면 없음.

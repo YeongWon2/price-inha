@@ -55,14 +55,16 @@ use base::{Calendars, DayLog};
 use marks::Marks;
 use watch::Watch;
 
-pub(crate) use answer::reject_word;
+pub(crate) use answer::{Answered, reject_word, rejected};
 pub(crate) use base::{TradingParts, default_wiring};
 pub(crate) use chosen::CHOOSE_TEMPLATE_NOTICE;
 pub(crate) use http::routes;
 pub(crate) use link::{
-    AnsweredHook, ApprovalHook, CloseHook, DataHaltHook, Hooks, StuckStopHook, approval_status_word,
+    AnsweredHook, ApprovalHook, CloseHook, DataHaltHook, Hooks, PROPOSAL_UNAVAILABLE, ProposalHook,
+    StuckStopHook, approval_status_word,
 };
 pub(crate) use templates::change_of;
+pub(crate) use view::change_json;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
 /// `{"state": 팀 상태 글자, "plan": "trade" | "rest" | null, "reason": 쉬는 이유 | null}`.
@@ -299,6 +301,8 @@ pub struct Trading {
     publisher: OnceLock<Publisher>,
     /// (W5 3차) 승인 요청 · 하루 마감을 알리는 자리(3차 조립이 붙인다).
     hooks: OnceLock<Hooks>,
+    /// (28차 3번) 승인 카드 길로 온 개선안 답을 개선안 답하기 길로 보내는 자리(팀을 연 조립이 붙인다).
+    proposal_hook: OnceLock<ProposalHook>,
 }
 
 impl Trading {

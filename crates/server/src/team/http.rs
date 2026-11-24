@@ -1,4 +1,4 @@
-//! 투자 팀의 경로(세션이 있어야 열린다): 담당 명단 · 매매 근거 · 개선안 목록 · 개선안 답하기.
+//! 투자 팀의 경로(세션이 있어야 열린다): 담당 명단 · 매매 근거 · 개선안 목록 · 개선안 답하기 · 규칙 읽기.
 //! 모양은 [`super`]의 경로 상수 문서에 있다.
 
 use std::sync::Arc;
@@ -15,7 +15,10 @@ use pi_store::{StoreError, TradeId};
 use serde_json::{Value, json};
 
 use super::build::role_name;
-use super::{Crew, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH, TEAM_MEMBERS_PATH, TRADE_BASIS_PATH};
+use super::{
+    Crew, PROPOSAL_ANSWER_PATH, PROPOSALS_PATH, RULES_VIEW_PATH, TEAM_MEMBERS_PATH,
+    TRADE_BASIS_PATH,
+};
 use crate::TeamError;
 
 /// `GateBuilder::protected_routes`에 끼운다.
@@ -25,6 +28,7 @@ pub(crate) fn routes(crew: Arc<Crew>) -> Router {
         .route(TRADE_BASIS_PATH, get(basis))
         .route(PROPOSALS_PATH, get(proposals))
         .route(PROPOSAL_ANSWER_PATH, post(answer))
+        .route(RULES_VIEW_PATH, get(rules))
         .with_state(crew)
 }
 
@@ -64,6 +68,13 @@ async fn basis(State(crew): State<Arc<Crew>>, Path(id): Path<String>) -> Respons
 async fn proposals(State(crew): State<Arc<Crew>>) -> Response {
     match crew.proposal_list() {
         Ok(list) => reply(StatusCode::OK, json!({ "proposals": list })),
+        Err(error) => failed(&error),
+    }
+}
+
+async fn rules(State(crew): State<Arc<Crew>>) -> Response {
+    match crew.rules_view() {
+        Ok(view) => reply(StatusCode::OK, view),
         Err(error) => failed(&error),
     }
 }

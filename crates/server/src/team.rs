@@ -31,6 +31,7 @@ mod notes;
 mod poll;
 mod quota;
 mod review;
+mod rules;
 mod scout;
 mod seen;
 mod talk;

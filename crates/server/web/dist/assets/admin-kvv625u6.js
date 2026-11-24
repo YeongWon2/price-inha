@@ -1,5 +1,5 @@
 import { a as errorLine, i as emptyState } from "./parts-c9wvtg59.js";
-import { n as API } from "./menu-myat6qpc.js";
+import { n as API } from "./menu-fj8wu6yl.js";
 // src/ui/admin.ts
 /** 빈 상태 글. */
 var PREPARING = "준비 중 — 이 화면의 내용은 다음 단계에서 채워집니다.";

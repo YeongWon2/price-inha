@@ -16,6 +16,7 @@
 import "../ui/admin.css";
 import "./templates.css";
 import { API, approvalPath, decidePath, templateStopPath } from "../paths";
+import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, button, card, emptyState, errorLine, loading, type BadgeTone } from "../ui/parts";
 import {
   LIVE_NOTICE,
@@ -38,9 +39,6 @@ import {
 } from "./model";
 import { changedValues, liveNotice, renderFields, renderPromotion, renderRevisions, showFieldNotes } from "./view";
 
-/** 읽기 실패 글(E57). */
-const LOAD_FAILED = "불러오지 못함 · 다시 시도해 주세요. 서버와 연결되지 않았거나 잠시 응답하지 않습니다.";
-
 /** 상태 배지 색. */
 const STATE_TONES: Readonly<Record<TemplateState, BadgeTone>> = {
   simulating: "neutral",
@@ -48,37 +46,6 @@ const STATE_TONES: Readonly<Record<TemplateState, BadgeTone>> = {
   live: "success",
   stopped: "danger",
 };
-
-/** 서버 답(상태 · JSON 몸통). */
-interface Reply {
-  status: number;
-  ok: boolean;
-  body: unknown;
-}
-
-/** 같은 출처 경로를 부른다. 몸통을 JSON으로 읽고, 읽을 수 없으면 `null`. */
-async function call(method: "GET" | "POST", url: string, body?: unknown): Promise<Reply> {
-  const init: RequestInit = { method, credentials: "same-origin", cache: "no-store" };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
-  const reply = await fetch(url, init);
-  let parsed: unknown = null;
-  try {
-    parsed = await reply.json();
-  } catch {
-    parsed = null;
-  }
-  return { status: reply.status, ok: reply.ok, body: parsed };
-}
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** 결과 문구 줄. `tone`은 글의 색(토큰)만 바꾼다. */
 function resultLine(role: string, message: SaveMessage | null): HTMLElement {

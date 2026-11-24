@@ -36,7 +36,10 @@ var API = {
 	approvals: "/api/approvals/",
 	templatesView: "/api/templates/current",
 	templates: "/api/templates",
-	templatesAdjust: "/api/templates/adjust"
+	templatesAdjust: "/api/templates/adjust",
+	rules: "/api/rules",
+	proposals: "/api/proposals",
+	proposalAnswer: "/api/proposals/answer"
 };
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
 function templateStopPath(id) {
@@ -69,7 +72,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.session;
+], API.session, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));

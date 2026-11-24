@@ -295,6 +295,7 @@ impl Trading {
             held_back: Mutex::new(HashMap::new()),
             publisher: OnceLock::new(),
             hooks: OnceLock::new(),
+            proposal_hook: OnceLock::new(),
         });
         let now = trading.clock.now();
         trading.books(now).await?;

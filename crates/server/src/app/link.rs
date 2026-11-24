@@ -24,7 +24,7 @@ use crate::reach::{
     looks_routes, office_routes, phone_routes, semantic_routes, talk_routes,
 };
 use crate::team::CrewLinks;
-use crate::trading::{Hooks, approval_status_word};
+use crate::trading::{Hooks, PROPOSAL_UNAVAILABLE, ProposalHook, approval_status_word, rejected};
 use crate::{
     AppError, Crew, KIND_OFFICE_APPROVAL, Launch, Reach, SecretsRedactor, Settings, Trading, Wiring,
 };
@@ -218,6 +218,17 @@ fn close_hook(
             }
         });
     })
+}
+
+/// (28차 3번) 폰 · 사무실의 승인 카드 길로 온 규칙 개선안 답을 팀의 개선안 답하기 함수로 보낸다(두 길이 한
+/// 함수를 탄다). 팀이 이미 닫혔으면 승인 번호를 건드리지 않고 거절한다.
+pub(super) fn proposal_hook(crew: Weak<Crew>) -> ProposalHook {
+    Box::new(
+        move |proposal, number, shown, decision| match crew.upgrade() {
+            Some(crew) => crew.answer_by_card(proposal, number, shown, decision),
+            None => Ok(rejected(PROPOSAL_UNAVAILABLE)),
+        },
+    )
 }
 
 /// 관문이 뜬 뒤에 붙인다: 사무실 이벤트 포트, 팀의 지식 검색 · 사무실, 주문 길의 알림 자리.

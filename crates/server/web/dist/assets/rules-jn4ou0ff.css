@@ -1,0 +1,101 @@
+/*
+ * 규칙 화면 모양(server 28차 2번): 지금 규칙 표 · 절대 상한 · 개선안 목록. 토큰(var(--…))만 쓴다.
+ * 폰 폭에서는 규칙 표가 줄마다 접혀 화면을 가로로 밀지 않는다.
+ */
+.rul-body { display: grid; gap: var(--space-4); min-width: 0; }
+.rul-body > .ui-card { margin: 0; min-width: 0; }
+.ui-card > .rul-hint { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: var(--font-size-sm); }
+.ui-card > .ui-empty { margin-top: var(--space-2); padding: var(--space-4); }
+
+/* 지금 규칙 표 */
+.rul-table-wrap { min-width: 0; }
+.rul-rules td, .rul-rules th { vertical-align: top; }
+.rul-rules thead th:nth-child(n + 2) { text-align: right; }
+.rul-rules .rul-name { width: 1%; white-space: nowrap; padding-right: var(--space-5); color: var(--text); font-size: var(--font-size-md); font-weight: 600; }
+.rul-rules .rul-value { text-align: right; }
+.rul-now { display: block; color: var(--text); }
+.rul-rules .rul-cap { width: 1%; white-space: nowrap; text-align: right; color: var(--text-muted); font-size: var(--font-size-sm); }
+.rul-changed, .rul-cooling {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.rul-changed { background: var(--accent-soft); color: var(--text); }
+.rul-cooling { border: 1px solid var(--warning); color: var(--text); }
+.rul-rules tr[data-changed="true"] .rul-now { font-weight: 700; }
+
+/* 절대 상한 */
+.rul-caps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+.rul-cap-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+  font-size: var(--font-size-sm);
+}
+.rul-cap-value { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* 개선안 목록 */
+.rul-proposals { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+.rul-proposal {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.rul-proposal[data-state="proposed"] { border-left: 3px solid var(--warning); }
+.rul-proposal-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
+.rul-mistake { color: var(--text); font-size: var(--font-size-sm); }
+.rul-risk { color: var(--text-muted); font-size: var(--font-size-sm); }
+.rul-risk[data-risky="true"] { color: var(--warning); font-weight: 600; }
+.rul-changes { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-1); }
+.rul-change { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); font-size: var(--font-size-sm); }
+.rul-change-name { min-width: 9em; font-weight: 600; }
+.rul-change-values { font-variant-numeric: tabular-nums; }
+.rul-before, .rul-arrow, .rul-change-empty { color: var(--text-muted); }
+.rul-change[data-widened="true"] .rul-after { color: var(--warning); font-weight: 700; }
+.rul-proposal-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.rul-result { margin: 0; font-size: var(--font-size-sm); color: var(--text-muted); }
+.rul-result:empty { display: none; }
+.rul-result[data-tone="applied"] { color: var(--success); font-weight: 600; }
+.rul-result[data-tone="cooling"] { color: var(--warning); font-weight: 600; }
+.rul-result[data-tone="rejected"], .rul-result[data-tone="failed"] { color: var(--danger); font-weight: 600; }
+
+/* 읽기 실패 */
+.rul-failed { display: grid; gap: var(--space-3); justify-items: start; }
+
+/* 폰 폭: 규칙 표는 줄마다 접는다(가로로 밀지 않는다). */
+@media (max-width: 600px) {
+  .rul-rules thead { display: none; }
+  .rul-rules, .rul-rules tbody { display: block; width: 100%; }
+  .rul-rules tr[data-key] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "name name" "value cap";
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .rul-rules tr[data-key] > * { display: block; padding: 0; border: 0; }
+  .rul-rules .rul-name { grid-area: name; width: auto; white-space: normal; padding: 0; }
+  .rul-rules .rul-value { grid-area: value; text-align: left; }
+  .rul-rules .rul-cap { grid-area: cap; align-self: start; }
+  .rul-rules .rul-cap[aria-label] { display: none; }
+  .rul-change-name { min-width: 0; width: 100%; }
+  .rul-proposal-foot .ui-button { flex: 1 1 0; }
+}

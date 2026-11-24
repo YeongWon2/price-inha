@@ -1,13 +1,14 @@
 //! (W5 3차) 주문 길이 3차 조립(알림 · 하루 정리 · 지식 검색)에 내주는 것.
 
 use chrono::NaiveDate;
-use pi_approval::{ApprovalNumber, ApprovalView, Notice};
+use pi_approval::{ApprovalNumber, ApprovalView, Decision, Notice, Subject};
 use pi_knowledge::TradeRecord;
 use pi_paper::{Broker, Order, OrderGroup, OrderStatus, Side};
-use pi_store::{ApprovalStatus, TradeId, TradeState};
+use pi_store::{ApprovalStatus, ProposalId, TradeId, TradeState};
 use rust_decimal::Decimal;
 
 use super::Trading;
+use super::answer::{Answered, rejected};
 use super::base::exec_text;
 use crate::TradingError;
 
@@ -23,6 +24,17 @@ pub(crate) type DataHaltHook = Box<dyn Fn() + Send + Sync>;
 
 /// (10b 보강 5번) 손절 대기가 막힌 채 오래 이어질 때 부른다(종목, 수량 — 까닭 글은 싣지 않는다). 오래 붙잡지 않는다.
 pub(crate) type StuckStopHook = Box<dyn Fn(String, String) + Send + Sync>;
+
+/// (28차 3번) 규칙 개선안의 승인 번호에 승인 카드 길로 답이 왔을 때 부른다(개선안 번호, 승인 번호, 보인 지문,
+/// 답). 개선안 답하기([`crate::PROPOSAL_ANSWER_PATH`])와 같은 함수를 타고, 결과를 승인 카드 길의 말로 돌려준다.
+pub(crate) type ProposalHook = Box<
+    dyn Fn(ProposalId, &ApprovalNumber, &str, Decision) -> Result<Answered, TradingError>
+        + Send
+        + Sync,
+>;
+
+/// (28차 3번) 개선안에 답할 팀이 없다(팀을 열지 않았다 · 이미 닫혔다): 승인 번호를 건드리지 않고 거절한다.
+pub(crate) const PROPOSAL_UNAVAILABLE: &str = "unavailable";
 
 /// 주문 길이 알리는 자리.
 pub(crate) struct Hooks {
@@ -68,6 +80,38 @@ impl Trading {
     /// 알리는 자리를 붙인다(한 번만).
     pub(crate) fn hook(&self, hooks: Hooks) {
         let _ = self.hooks.set(hooks);
+    }
+
+    /// (28차 3번) 개선안에 답하는 자리를 붙인다(한 번만). 팀을 연 조립이 붙인다.
+    pub(crate) fn hook_proposals(&self, hook: ProposalHook) {
+        let _ = self.proposal_hook.set(hook);
+    }
+
+    /// 그 승인 번호가 규칙 개선안(복기 · 사용자 변경)을 묻는 것이면 그 개선안 번호.
+    pub(super) fn proposal_of(
+        &self,
+        number: &ApprovalNumber,
+    ) -> Result<Option<ProposalId>, TradingError> {
+        let view = self.approvals.get(number).map_err(exec_text)?;
+        Ok(match view.map(|view| view.subject) {
+            Some(Subject::RuleImprovement { proposal }) => Some(proposal),
+            _ => None,
+        })
+    }
+
+    /// (28차 3번) 개선안의 승인 번호에 온 승인 카드 답을 개선안 답하기와 같은 길로 보낸다. 답할 팀이 없으면
+    /// 승인 번호를 건드리지 않고 [`PROPOSAL_UNAVAILABLE`]로 거절한다(승인만 닫히고 개선안이 남지 않게).
+    pub(super) fn answer_proposal_card(
+        &self,
+        proposal: ProposalId,
+        number: &ApprovalNumber,
+        shown: &str,
+        decision: Decision,
+    ) -> Result<Answered, TradingError> {
+        match self.proposal_hook.get() {
+            Some(hook) => hook(proposal, number, shown, decision),
+            None => Ok(rejected(PROPOSAL_UNAVAILABLE)),
+        }
     }
 
     pub(super) fn announce_approval(&self, number: &ApprovalNumber, summary: &str) {
