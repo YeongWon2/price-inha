@@ -1,4 +1,4 @@
-import { a as bubbleCandidates, c as bubbleWidth, l as insideScreen, n as DEFAULT_LOOKS, o as bubbleText, r as LOOKS, s as bubbleWhere, t as easeInOut, u as overlap } from "./office-gfqoxuxi.js";
+import { a as bubbleCandidates, c as bubbleWidth, l as insideScreen, n as DEFAULT_LOOKS, o as bubbleText, r as LOOKS, s as bubbleWhere, t as easeInOut, u as overlap } from "./office-hmtmnsx9.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40533,6 +40533,7 @@ function disposeBody(body) {
 function createActors({ scene, labels, map, names, looks, grid }) {
 	const actors = /* @__PURE__ */ new Map();
 	const ids = Object.keys(map.agents);
+	const fixedSeats = map.meeting_seats.length >= ids.length;
 	const meetingCenter = (() => {
 		const s = map.meeting_seats;
 		const n = Math.max(1, s.length);
@@ -40649,7 +40650,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			facing: facingYaw(a.desk_facing)
 		};
 		if (actor.view.place === "meeting" && map.meeting_seats.length > 0) {
-			const order = ids.filter((id) => actors.get(id)?.view.place === "meeting");
+			const order = fixedSeats ? ids : ids.filter((id) => actors.get(id)?.view.place === "meeting");
 			const seat = map.meeting_seats[Math.max(0, order.indexOf(actor.id)) % map.meeting_seats.length];
 			const yaw = seat.facing ? facingYaw(seat.facing) : Math.atan2(meetingCenter.x - (seat.x + .5), meetingCenter.y - (seat.y + .5));
 			return {
@@ -40697,7 +40698,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		actor.speed = view.place === "meeting" ? SUMMON_SPEED : WALK_SPEED;
 		if (placeChanged || snap || !actor.target) {
 			retarget(actor, snap);
-			for (const other of actors.values()) if (other !== actor && other.view.place === "meeting") retarget(other, snap);
+			for (const other of actors.values()) if (!fixedSeats && other !== actor && other.view.place === "meeting") retarget(other, snap);
 		}
 	}
 	function step(actor, dt, now) {
@@ -41075,9 +41076,13 @@ function createBubbleLayer(labels, board, names) {
 			const el = document.createElement("div");
 			el.className = "bubble";
 			el.dataset.agent = id;
+			const body = document.createElement("span");
+			body.className = "bubble-text";
+			el.appendChild(body);
 			labels.appendChild(el);
 			one = {
 				el,
+				body,
 				text: "",
 				maxWidth: 0,
 				size: {
@@ -41111,13 +41116,14 @@ function createBubbleLayer(labels, board, names) {
 		if (one.el.parentElement === rail) labels.appendChild(one.el);
 		one.text = text;
 		one.maxWidth = maxWidth;
-		one.el.textContent = text;
+		one.body.textContent = text;
 		one.el.title = text;
 		one.el.style.maxWidth = `${maxWidth}px`;
 		one.el.style.display = "";
+		const box = one.el.getBoundingClientRect();
 		one.size = {
-			width: one.el.offsetWidth || maxWidth,
-			height: one.el.offsetHeight || 24
+			width: box.width || one.el.offsetWidth || maxWidth,
+			height: box.height || one.el.offsetHeight || 24
 		};
 	}
 	function update(now, spots, walkers, canSee, width, height, placeTag) {
@@ -41333,7 +41339,8 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 	let gathered = false;
 	function goalOrbit(goal) {
 		const polar = (90 - goal.elevationDeg) * Math.PI / 180;
-		if (goal.shot === "table") {
+		const pose = goal.shot === "speaker" && goal.agent ? actors.pose(goal.agent) : null;
+		if (!pose) {
 			const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
 			return {
 				radius: v.distance,
@@ -41344,8 +41351,6 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 				tz: v.tz
 			};
 		}
-		const pose = goal.agent ? actors.pose(goal.agent) : null;
-		if (!pose) return null;
 		const span = pose.height * UPPER_BODY;
 		const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
 		return {
@@ -41357,14 +41362,23 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 			tz: pose.z
 		};
 	}
-	/** 이번 프레임 발언자 카메라를 따른다. 쥐고 있으면 참. */
-	function driveSpeaker(wall) {
-		if (!speaker) return false;
+	/**
+	* 미팅룸에 모였는지를 발언자 카메라에 알린다. 프레임마다만 알리면 소집(`office.agent`)과 첫 논의 글(`office.talk`)이
+	* 같은 틈에 오거나 탭이 숨어 있을 때 첫 글을 "아직 안 모임"으로 버려, 발언자 샷 없이 미팅룸 전체 보기(거리 약 18 —
+	* 상반신이 화면 높이의 8%쯤)에 머문다. 그래서 담당 자리가 바뀌는 그 자리에서도 바로 알린다.
+	*/
+	function syncGather(wall) {
+		if (!speaker) return;
 		const meeting = actors.places().filter((p) => p === "meeting").length >= GATHERED;
 		if (meeting !== gathered) {
 			gathered = meeting;
 			speaker.gather(meeting, wall);
 		}
+	}
+	/** 이번 프레임 발언자 카메라를 따른다. 쥐고 있으면 참. */
+	function driveSpeaker(wall) {
+		if (!speaker) return false;
+		syncGather(wall);
 		const goal = speaker.goal(wall);
 		if (!goal) {
 			if (tween) {
@@ -41553,6 +41567,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 	function setAgent(id, view, options) {
 		const before = actors.places().join();
 		actors.setAgent(id, view, options);
+		syncGather(Date.now());
 		if (options?.snap || actors.places().join() === before) return;
 		const next = focusOf(actors.places());
 		if (next === focus) return;

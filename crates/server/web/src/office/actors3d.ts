@@ -113,6 +113,7 @@ function disposeBody(body: Body): void {
 export function createActors({ scene, labels, map, names, looks, grid }: ActorsOptions) {
   const actors = new Map<string, Actor>();
   const ids = Object.keys(map.agents);
+  const fixedSeats = map.meeting_seats.length >= ids.length;
   const meetingCenter = (() => {
     const s = map.meeting_seats;
     const n = Math.max(1, s.length);
@@ -182,7 +183,9 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     const a = map.agents[actor.id];
     if (actor.view.place === "desk") { return { x: a.desk.x, y: a.desk.y, facing: facingYaw(a.desk_facing) }; }
     if (actor.view.place === "meeting" && map.meeting_seats.length > 0) {
-      const order = ids.filter((id) => actors.get(id)?.view.place === "meeting");
+      // 자리가 담당 수만큼 있으면 담당마다 제 자리(지도 순서 = 담당 순서, 팀장은 탁자 머리)에 앉는다 — 누가 오가도
+      // 다른 담당이 자리를 바꿔 걷지 않는다(발언자 샷 도중 발언자가 옮겨 가지 않게). 모자라면 온 순서로 앉는다.
+      const order = fixedSeats ? ids : ids.filter((id) => actors.get(id)?.view.place === "meeting");
       const seat = map.meeting_seats[Math.max(0, order.indexOf(actor.id)) % map.meeting_seats.length];
       const yaw = seat.facing ? facingYaw(seat.facing)
         : Math.atan2(meetingCenter.x - (seat.x + 0.5), meetingCenter.y - (seat.y + 0.5));
@@ -218,7 +221,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     if (placeChanged || snap || !actor.target) {
       retarget(actor, snap);
       for (const other of actors.values()) {
-        if (other !== actor && other.view.place === "meeting") { retarget(other, snap); }
+        if (!fixedSeats && other !== actor && other.view.place === "meeting") { retarget(other, snap); }
       }
     }
   }

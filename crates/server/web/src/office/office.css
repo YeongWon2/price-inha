@@ -111,8 +111,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
 .bubble { position: absolute; left: 0; top: 0; max-width: 190px; padding: 7px 11px; border: 1px solid #cdd7c7;
   border-radius: 12px 12px 12px 3px; background: #fffdf4; color: #3e513f; font-size: 12px; line-height: 1.4;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .16); white-space: normal; word-break: break-word; pointer-events: none;
-  will-change: transform; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
-  max-height: 66px; overflow: hidden; }
+  will-change: transform; display: block; }
+/* 3줄 말줄임은 안쪽 글 요소에 건다: 바깥에 걸면 padding 안으로 넷째 줄 윗부분이 비친다. 글 높이 = 3줄(12px × 1.4 × 3)
+   이하라 말풍선 높이는 padding · 테두리를 더해 원본 최대 66px를 넘지 않는다. */
+.bubble-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  max-height: calc(12px * 1.4 * 3); }
 .bubble[data-working="true"] { border-color: #b6c896; }
 .speech-rail { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
   padding: 5px; overflow-y: auto; border-radius: 12px; background: #eef2e9ed; pointer-events: auto; will-change: transform; }

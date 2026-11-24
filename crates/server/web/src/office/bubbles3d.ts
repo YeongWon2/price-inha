@@ -33,7 +33,7 @@ export interface BubbleLayer {
   dispose(): void;
 }
 
-interface Shown { el: HTMLElement; text: string; maxWidth: number; size: Size }
+interface Shown { el: HTMLElement; body: HTMLElement; text: string; maxWidth: number; size: Size }
 
 export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names: Record<string, string>): BubbleLayer {
   const smalltalk = new Smalltalk();
@@ -49,8 +49,12 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
       const el = document.createElement("div");
       el.className = "bubble";
       el.dataset.agent = id;
+      // 글은 안쪽 요소에 담아 거기서 3줄로 자른다(바깥 padding 안으로 넷째 줄이 비치지 않게 — office.css `.bubble-text`).
+      const body = document.createElement("span");
+      body.className = "bubble-text";
+      el.appendChild(body);
       labels.appendChild(el);
-      one = { el, text: "", maxWidth: 0, size: { width: 0, height: 0 } };
+      one = { el, body, text: "", maxWidth: 0, size: { width: 0, height: 0 } };
       shown.set(id, one);
     }
     return one;
@@ -82,11 +86,13 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
     if (one.el.parentElement === rail) { labels.appendChild(one.el); }
     one.text = text;
     one.maxWidth = maxWidth;
-    one.el.textContent = text;
+    one.body.textContent = text;
     one.el.title = text;
     one.el.style.maxWidth = `${maxWidth}px`;
     one.el.style.display = "";
-    one.size = { width: one.el.offsetWidth || maxWidth, height: one.el.offsetHeight || 24 };
+    // 자리 잡기에 쓰는 크기는 화면에 실제로 그려지는 상자(잘린 3줄 + padding + 테두리)다.
+    const box = one.el.getBoundingClientRect();
+    one.size = { width: box.width || one.el.offsetWidth || maxWidth, height: box.height || one.el.offsetHeight || 24 };
   }
 
   function update(now: number, spots: readonly ActorSpot[], walkers: readonly Walker[],

@@ -195,12 +195,12 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   let gathered = false;
   function goalOrbit(goal: CameraGoal): Orbit | null {
     const polar = (90 - goal.elevationDeg) * Math.PI / 180;
-    if (goal.shot === "table") {
+    const pose = goal.shot === "speaker" && goal.agent ? actors.pose(goal.agent) : null;
+    if (!pose) {
+      // 탁자 샷. 몸이 없는 발언자(사무실 담당이 아닌 id)도 카메라를 놓지 않고 탁자를 본다.
       const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
       return { radius: v.distance, polar, theta: 0, tx: v.tx, ty: 0, tz: v.tz };
     }
-    const pose = goal.agent ? actors.pose(goal.agent) : null;
-    if (!pose) { return null; }
     // 상반신(머리 기준점에서 몸 높이의 50% 아래까지)의 가운데를 보고, 그 높이가 화면의 절반쯤이 되는 거리.
     const span = pose.height * UPPER_BODY;
     const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
@@ -208,11 +208,20 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     // 발언자가 보는 쪽(앞)에서 본다.
     return { radius, polar, theta: pose.yaw, tx: pose.x, ty: pose.headY - span / 2, tz: pose.z };
   }
+  /**
+   * 미팅룸에 모였는지를 발언자 카메라에 알린다. 프레임마다만 알리면 소집(`office.agent`)과 첫 논의 글(`office.talk`)이
+   * 같은 틈에 오거나 탭이 숨어 있을 때 첫 글을 "아직 안 모임"으로 버려, 발언자 샷 없이 미팅룸 전체 보기(거리 약 18 —
+   * 상반신이 화면 높이의 8%쯤)에 머문다. 그래서 담당 자리가 바뀌는 그 자리에서도 바로 알린다.
+   */
+  function syncGather(wall: number): void {
+    if (!speaker) { return; }
+    const meeting = actors.places().filter((p) => p === "meeting").length >= GATHERED;
+    if (meeting !== gathered) { gathered = meeting; speaker.gather(meeting, wall); }
+  }
   /** 이번 프레임 발언자 카메라를 따른다. 쥐고 있으면 참. */
   function driveSpeaker(wall: number): boolean {
     if (!speaker) { return false; }
-    const meeting = actors.places().filter((p) => p === "meeting").length >= GATHERED;
-    if (meeting !== gathered) { gathered = meeting; speaker.gather(meeting, wall); }
+    syncGather(wall);
     const goal = speaker.goal(wall);
     if (!goal) {
       if (tween) {
@@ -378,6 +387,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   function setAgent(id: string, view: AgentLook, options?: { snap?: boolean }): void {
     const before = actors.places().join();
     actors.setAgent(id, view, options);
+    syncGather(Date.now());
     if (options?.snap || actors.places().join() === before) { return; }
     const next = focusOf(actors.places());
     if (next === focus) { return; }
