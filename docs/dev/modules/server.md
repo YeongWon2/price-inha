@@ -588,3 +588,4 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | `crates/server/tests/web/office-approval-lock.test.ts` | 유지 | 기존 두 시험은 그대로, 6번 보강은 새 시험 |
 | `crates/server/tests/web/key-screens.test.ts::키_화면_·_설정_화면은_submitKeyFields를_쓰고…`(소스 글자 시험) | 유지 | 그대로 두고, 설정 화면 행동 시험을 새로 더한다 |
 | 그 밖의 server 시험 | 유지 | 19차와 무관 |
+- 19차 N3 참고: 사무실 승인 카드는 승인 번호마다 따로라 5번 해당 없음(N2 판단 맞음). 설정 화면에 AI 상한 보이기는 쓰기 화면과 함께 다음 차수.
