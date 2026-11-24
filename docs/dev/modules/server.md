@@ -994,3 +994,14 @@ office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_
 
 - 원본 동작 근거: `docs/research/metaverse-office-refs.md` F · H 4 · 5(부르기 상태 기계 · 멘션 걸어오기 · 10초 복귀 · 방 바꾸면 복귀 — 원본과 같게), `docs/research/deskrpg.md` 10절(멘션 글 모양 `@[이름]` · 가림 · 멘션 없으면 아무도 답하지 않음 · 없는 상대 안내 글). 공지는 원본에 없음 — additions.md R17 · F11, 결정 17 · 19.
 - 시험으로 확인할 것(V58~V60 · V71~V74): Rust(가짜 AI) — 멘션된 담당만 답함 · 여럿이면 차례 · 멘션 없으면 `no_mention` · 없는 이름 안내 · `agent`를 주면 지금처럼 / 멘션 답 시작에 `office.summon` called(mention) · 방 바꾸면 returning / 공지: 저장 · 여섯 확인 · `office.notice` · `office.notice_ack` · `notices` 읽기 · 같은 sourceMessageId 한 번 · 상한이면 limit 상태 · 공지가 다음 논의 자료에 들어감(판단 뒤에 보낸 공지는 안 들어감) / 부르기: called → arrived → waiting → 10초 뒤 returning · 30초 도착 없음 → idle · 회의 중 409 · 모르는 담당 400 / 관문 401 · 가짜 서버 밖 요청 0건. 화면(vitest) — 멘션 칩: `@` 목록 · 고르기 · 칩 통째 지우기 · 보낼 글 모양과 가림 · 조합 중 / 멘션 없음 안내 / 공지 모드 · 공지 띠 · 확인 상태 그리기 · 지난 공지 채우기 / 부르기 단추 → 요청 · 단계별 그리기 정보(걸어올 칸은 32차 `besideCell`) · 도착 알림 · 회의 중 안내 / 방 바꿈 알림 / 경로 표.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/screen-paths.test.ts`에서 사무실 화면의 경로 목록 | 고침 | 지시서 33차 3 · 4번: 사무실 화면이 공지 · 부르기 경로를 더 부른다 — 그 경로만 더한다 |
+| Rust의 사무실 대화 시험 가운데 "`agent` 없이 보낸 글은 거절(400)" 같이 팀 방 글을 막는 단언 | 고침 | 지시서 33차 1번: `room: "team"` 글을 받는다 — 그 단언만 새 계약(C18)으로 고친다. `agent`를 준 글의 동작 · 응답 모양은 그대로 |
+| Rust의 `office.agent` 이벤트 · 스냅샷 칸을 정확히 비교하는 단언 | 고침 | 지시서 33차 4번: 부르기 단계가 실려 칸이 늘 수 있다 — 칸을 정확히 세는 단언이 있으면 새 칸만 더한다(옛 칸의 값은 그대로) |
+| `crates/server/tests/web/office-chat-lines.test.ts` · `office-team-feed` · `office-speech` | 유지 | 담당 글 · 논의 글을 그리는 방식은 그대로. 공지 띠 · 멘션 칩은 새 시험으로 |
+| 32차 시험(`office-player-*` · `round34`) · 발언자 카메라 · 승인 · 이름표 시험 | 유지 | 내 캐릭터 · 카메라 동작은 그대로(부른 담당이 걸어올 뿐) |
+| 그 밖의 server 시험 | 유지 | 33차와 무관 |
