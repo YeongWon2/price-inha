@@ -19,6 +19,7 @@ mod presets;
 mod promotion;
 mod risk;
 mod state;
+mod view;
 
 pub use caps::{AbsoluteCaps, CappedField, Change, adjust};
 pub use error::{Error, Invalid, InvalidReason, OverCap, ParamField, Violation};
@@ -31,3 +32,6 @@ pub use params::{
 pub use promotion::{Criterion, PromotionCriteria, PromotionStats, Verdict};
 pub use risk::{AdjustPlan, RiskField, increases_risk, plan_adjust, widened_fields};
 pub use state::{ALLOWED_TRANSITIONS, TemplateState, Transition, TransitionReason};
+pub use view::{
+    CriterionLine, FieldChange, ViewField, diff_params, promotion_lines, template_view,
+};
