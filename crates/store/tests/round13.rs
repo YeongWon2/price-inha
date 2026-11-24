@@ -75,16 +75,16 @@ fn rejected(path: &Path, sql: &str) -> bool {
 // 검증: D6 M2
 #[test]
 fn 버전_8_파일을_9로_올려도_있던_줄이_글자까지_그대로다() {
-    assert_eq!(SCHEMA_VERSION, 9);
+    assert_eq!(SCHEMA_VERSION, 10);
     let (_dir, path) = copy_of_v8();
     assert_eq!(count(&path, "PRAGMA user_version"), 8);
     let names = tables(&path);
     let before = dump(&path, &names);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 9);
+    assert_eq!(store.info().unwrap().schema_version, 10);
     drop(store);
-    assert_eq!(count(&path, "PRAGMA user_version"), 9);
+    assert_eq!(count(&path, "PRAGMA user_version"), 10);
     assert_eq!(dump(&path, &names), before);
     assert_eq!(count(&path, "SELECT count(*) FROM knowledge_fts"), 2);
 

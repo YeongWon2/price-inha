@@ -8,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::approval::{self, ApprovalId, ApprovalUse};
 use crate::error::{DenyReason, Transition};
 use crate::model::{TradeId, UnixMillis};
+use crate::template::TemplateId;
 use crate::{Store, StoreError};
 
 /// 개선안을 내는 데 필요한 근거 매매의 가장 적은 수(M4 "2건 이상이어야 제안된다").
@@ -60,6 +61,29 @@ pub struct NewProposal {
     pub increases_risk: bool,
     /// 낸 시각.
     pub at: UnixMillis,
+}
+
+/// 새 사용자 변경 개선안(15차 1번, 스펙 R14-1 · E28 · V15). 근거 매매가 없다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewUserProposal {
+    /// 바꾸려는 템플릿.
+    pub template: TemplateId,
+    /// 바꾸려는 새 값(JSON). 승인되고 냉각을 지나면 새 리비전의 값이 된다.
+    pub content: serde_json::Value,
+    /// 낸 시각.
+    pub at: UnixMillis,
+}
+
+/// 개선안이 어디서 왔는가(15차). 옛 행은 모두 [`ProposalSource::Review`]다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProposalSource {
+    /// 복기가 낸 개선안.
+    Review,
+    /// 사용자가 템플릿을 바꾸자고 한 개선안.
+    User {
+        /// 바꾸려는 템플릿.
+        template: TemplateId,
+    },
 }
 
 /// 저장된 규칙 개선안.
@@ -153,6 +177,40 @@ impl Store {
             }
             get(conn, id)
         })
+    }
+
+    /// 사용자 변경 개선안을 제안됨으로 만든다(15차 1번). 근거 매매 없이 되고(최소 근거 수 검사 없음),
+    /// `increases_risk`는 늘 참이다. 출처는 [`ProposalSource::User`]로 남는다.
+    ///
+    /// 템플릿이 없으면 오류이고 아무것도 만들지 않는다. (뼈대: 몸통은 아직 없다)
+    pub fn create_user_proposal(&self, new: NewUserProposal) -> Result<Proposal, StoreError> {
+        let _ = (self, new);
+        Err(StoreError::Incompatible(
+            "create_user_proposal 미구현".to_owned(),
+        ))
+    }
+
+    /// 개선안의 출처(15차 1번). 없으면 [`StoreError::ProposalNotFound`].
+    pub fn proposal_source(&self, id: ProposalId) -> Result<ProposalSource, StoreError> {
+        let _ = (self, id);
+        Err(StoreError::Incompatible(
+            "proposal_source 미구현".to_owned(),
+        ))
+    }
+
+    /// 냉각중인 사용자 변경 개선안을 반영됨으로 옮기고 같은 쓰기 안에서 그 템플릿에 새 리비전(`value`)을
+    /// 쓴다(15차 2번, 잠금의 예외). 템플릿이 실전중이어도 된다. 템플릿이 멈춤이거나 냉각중이 아니거나
+    /// 복기 개선안이면 거부하고 개선안도 템플릿도 그대로다.
+    pub fn apply_cooled_user_proposal(
+        &self,
+        id: ProposalId,
+        value: &serde_json::Value,
+        at: UnixMillis,
+    ) -> Result<Proposal, StoreError> {
+        let _ = (self, id, value, at);
+        Err(StoreError::Incompatible(
+            "apply_cooled_user_proposal 미구현".to_owned(),
+        ))
     }
 
     /// 냉각중 → 반영됨(`applied_at = at`). 냉각중이 아니면 [`StoreError::TransitionDenied`]이고 그대로다.

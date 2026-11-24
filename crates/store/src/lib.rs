@@ -20,6 +20,7 @@ mod keep;
 mod knowledge;
 mod log;
 mod model;
+mod office;
 mod plan;
 mod proposal;
 mod push;
@@ -52,7 +53,10 @@ pub use model::{
     UnixMillis,
 };
 pub use plan::{TradeSide, TradeStateChange};
-pub use proposal::{NewProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalState};
+pub use proposal::{
+    NewProposal, NewUserProposal, PROPOSAL_MIN_EVIDENCE, Proposal, ProposalId, ProposalSource,
+    ProposalState,
+};
 pub use push::{NewPushSubscription, PushSubscription};
 pub use receipt::{
     OpenTriggerReceipt, TriggerDelivery, TriggerJob, TriggerReceipt, TriggerReceiptKey,

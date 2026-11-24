@@ -146,12 +146,12 @@ fn assert_new_tables_empty_and_usable(store: &Store, label: &str) {
 // 검증: D6, V6, M1, M2, M5, M6, C2, E3
 #[test]
 fn 스키마_버전은_5이고_새_저장소는_5로_만들어진다() {
-    assert_eq!(SCHEMA_VERSION, 9);
+    assert_eq!(SCHEMA_VERSION, 10);
     let (_dir, path, store) = temp_store();
     assert_eq!(store.info().unwrap().schema_version, SCHEMA_VERSION);
     assert_new_tables_empty_and_usable(&store, "새 파일");
     drop(store);
-    assert_eq!(raw_user_version(&path), 9);
+    assert_eq!(raw_user_version(&path), 10);
 }
 
 // 검증: D6, V6, M1, M2, M5, M6, C2, E3
@@ -161,9 +161,9 @@ fn 옛_파일을_열면_지우지_않고_5로_올라가고_옛_표가_남는다(
         let (_dir, path) = copy_of(name);
         let before_tables = tables(&path);
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 9, "{name}");
+        assert_eq!(store.info().unwrap().schema_version, 10, "{name}");
         drop(store);
-        assert_eq!(raw_user_version(&path), 9, "{name}");
+        assert_eq!(raw_user_version(&path), 10, "{name}");
         let after_tables = tables(&path);
         for table in &before_tables {
             assert!(after_tables.contains(table), "{name}: {table}");
@@ -180,7 +180,7 @@ fn 버전_4_파일을_5로_올려도_있던_줄이_글자까지_그대로다() {
     let names = tables(&path);
     let before = dump(&path, &names);
     drop(Store::open(&path).unwrap());
-    assert_eq!(raw_user_version(&path), 9);
+    assert_eq!(raw_user_version(&path), 10);
     assert_eq!(dump(&path, &names), before);
 }
 
@@ -244,7 +244,7 @@ fn 올린_파일을_다시_열어도_5이고_새_표의_자료가_그대로다()
     let before = dump(&path, &names);
     for _ in 0..2 {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.info().unwrap().schema_version, 9);
+        assert_eq!(store.info().unwrap().schema_version, 10);
         assert_eq!(store.get_template(template.id).unwrap(), template);
         assert_eq!(
             store.latest_paper_snapshot().unwrap().unwrap().state,
