@@ -176,3 +176,11 @@ N3가 `account_snapshot`을 일부러 잠금을 나눈 변이로 바꿔 보니 `
 | 그 밖의 paper 시험 | 유지 | 보강과 무관 |
 
 (R, 다시 연 뒤 확정 — 위 초안 표와 같다. GR은 다시 연 뒤에 더해진 표를 본다.)
+
+## 10차 작업 (2026-11-24 조정자, 결정 14 — 승인 증표 표시, exec 6차 검토 참고)
+
+1. `CheckPermit`이 "승인 증표로 낸 표시인지"를 담는다: `CheckPermit::granted() -> bool`. 지금의 `CheckAuthority::approve` · `approve_for_trade`는 `false`로 낸다(지금 동작 그대로). 승인으로 지난 주문용으로 `CheckAuthority::approve_granted_for_trade(trade, approved) -> CheckPermit`(`granted() == true`, 매매에 묶임)을 더한다. 매매에 묶이지 않은 승인 표시는 만들지 않는다(승인은 늘 매매 하나에 대한 것).
+2. 주문 대조(`verify` 등 지금 표시를 확인하는 곳)는 `granted`와 무관하게 지금처럼 본다 — 이 표는 받는 쪽(exec)이 길을 고를 때만 쓴다.
+
+- 원본 동작 근거: 원본에 없음 — 스펙 E21 · E22 · E33, 결정 14.
+- 시험으로 확인할 것: `approve` · `approve_for_trade`는 `granted()`가 거짓, `approve_granted_for_trade`는 참이고 `trade()`가 그 번호, 모의계좌가 세 표시 모두로 주문을 받는다.
