@@ -5,13 +5,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use crate::progress::{CallBudget, DiscussionOptions, ProgressSignal, ProgressSink};
+use crate::progress::{CallBudget, DiscussionOptions, NoticeNote, ProgressSignal, ProgressSink};
 
 /// 논의 하나의 옵션 상태.
 pub(super) struct Run {
     signals: Option<Arc<dyn ProgressSink>>,
     budget: Option<CallBudget>,
     retries: u32,
+    /// 사용자 공지(보낸 시각 순서, 11차).
+    notices: Vec<NoticeNote>,
     /// 이 논의에서 쓴 호출 수(담당 턴 · 다시 시도 · 점수 턴 · 팀장 턴).
     used: AtomicU32,
     /// 정리 모드에 들어갔는가.
@@ -28,6 +30,7 @@ impl Run {
             signals: options.signals,
             budget: options.budget,
             retries: options.turn_retries,
+            notices: options.notices,
             used: AtomicU32::new(0),
             wrapping: AtomicBool::new(false),
             abstained: AtomicBool::new(false),
@@ -100,6 +103,11 @@ impl Run {
     /// 기권한 담당이 있는가.
     pub(super) fn abstained(&self) -> bool {
         self.abstained.load(Ordering::Relaxed)
+    }
+
+    /// 사용자 공지(보낸 시각 순서). 넘기지 않았으면 비어 있다.
+    pub(super) fn notices(&self) -> &[NoticeNote] {
+        &self.notices
     }
 }
 

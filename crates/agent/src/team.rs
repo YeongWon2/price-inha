@@ -21,6 +21,8 @@
 //!      지켜보기([`WatchReason::DiscussionBounded`]).
 //! 4. 점수 턴(결정 15번): 팀장을 뺀 참가 담당마다 점수 JSON([`crate::parse_score`])을 받는다.
 //!    점수 턴은 방 로그에 쓰지 않고 담당 세션에만 남는다. 담당 하나라도 실패하면 합의 불가로 지켜보기.
+//!    답에 의견 칸(`stance` · `conviction` · `opinion_reason` · `horizon_days`)이 온전하면 그 담당의
+//!    의견도 받는다(11차, `opinion.rs`). 없거나 틀리면 점수만 받는다(점수 턴 실패가 아니다).
 //! 5. 합의 점수([`crate::consensus`])가 기준을 넘지 못하면 지켜보기([`WatchReason::ConsensusBelow`], E27).
 //! 6. 팀장 판단 턴. 답은 `decision` 칸이 있는 객체 하나다:
 //!    - 사기 · 팔기: `{"decision": "buy"|"sell", "hypothesis": 글, "trigger": 글, "entry": 정수,
@@ -28,6 +30,9 @@
 //!      사기 · 팔기 모두 근거 칸이 하나라도 비었거나 금액 칸이 0 · 음수면 지켜보기([`WatchReason::RationaleIncomplete`], P9).
 //!      아니면 `judge_trade_with_side`로 근거 · 자료(요청의 자료 이름과 알게 된 시각) · 담당 점수 · 합의 점수와
 //!      방향을 함께 남긴다(판단 시각은 시계). 매매는 판단됨이 된다(V3, M2).
+//!    - 사기 · 팔기 답에 `summary` · `reversal`이 둘 다 공백 아닌 글이면(11차) `judge_trade_with_opinions`로
+//!      판단 · 방향과 함께 담당 의견들과 팀장 요약을 한 쓰기로 남긴다. 아니면 위처럼 `judge_trade_with_side`.
+//!    - 사용자 공지를 넘겼으면 자료 목록에 [`crate::NOTICE_SOURCE_NAME`] 한 줄(가장 늦은 보낸 시각)이 더 든다.
 //!    - 지켜보기: `{"decision": "watch", "reason": 글, "revisit": 글}` → [`WatchReason::LeaderWatch`].
 //!    - 모양이 틀리면 팀장 응답 실패로 지켜보기.
 //!    - 판단은 방 로그 `message.member`(쓴 쪽 팀장)로 남고 내용에 `"decision": "buy"|"sell"|"watch"`가 있다.
@@ -41,12 +46,13 @@
 //! 하나 남긴다. 방 로그 · 판단 · 주문 안에 남는 글은 모두 가린 것이다(E38).
 //! 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
 
-use pi_store::{RoleScore, TradeId, TradeSide, TradeState};
+use pi_store::{RoleOpinion, RoleScore, TradeId, TradeSide, TradeState};
 use serde_json::json;
 
 use crate::discussion::{Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
 use crate::error::{Error, TurnFailure};
 use crate::floor::{Floor, is_pass, mentions};
+use crate::opinion::parse_opinion;
 use crate::ports::{OrderDraft, Side};
 use crate::progress::DiscussionOptions;
 use crate::prompt;
@@ -78,6 +84,9 @@ enum Spoken {
     /// 답하지 못했다(E6). 그 까닭.
     Failed(TurnFailure),
 }
+
+/// 점수 턴의 결과: 담당 점수와 새 칸이 온전한 담당의 의견(11차).
+type Scored = (Vec<RoleScore>, Vec<RoleOpinion>);
 
 /// 논의 하나를 도는 동안 함께 들고 다니는 것.
 struct Session<'a> {
@@ -172,7 +181,8 @@ impl Team {
                 &request.room,
                 request.trade,
             )?,
-            briefing: prompt::briefing(request, &trade.symbol),
+            briefing: prompt::briefing(request, &trade.symbol)
+                + &prompt::notices(run.notices(), self.ports.redactor.as_ref()),
         };
         let missing: Vec<String> = request
             .data
@@ -192,8 +202,8 @@ impl Team {
         if let Some(reason) = self.converse(&session, &mut floor).await? {
             return watched(&session, reason, Vec::new(), None);
         }
-        let scores = match self.score_all(&session).await? {
-            Ok(scores) => scores,
+        let (scores, opinions) = match self.score_all(&session, &floor).await? {
+            Ok(scored) => scored,
             Err(role) => {
                 return watched(
                     &session,
@@ -223,7 +233,8 @@ impl Team {
             }
             Some(total) => Some(total),
         };
-        self.judge(&session, floor.said(), scores, total).await
+        self.judge(&session, floor.said(), scores, opinions, total)
+            .await
     }
 
     /// 매매 담당이 주문 안을 만들어 도구 포트로 넘긴다(V4).
@@ -386,11 +397,16 @@ impl Team {
     }
 
     /// 점수 턴(결정 15번): 팀장을 뺀 참가 담당마다. 하나라도 실패하면 그 담당을 준다.
+    /// 점수와 함께 새 칸이 온전한 담당의 의견(11차, D13)을 준다.
+    /// 논의 턴이 없어 안내를 받지 못한 담당은 점수 턴 글 앞에 안내(자료 · 사용자 공지)를 받는다(11차).
     async fn score_all(
         &self,
         session: &Session<'_>,
-    ) -> Result<Result<Vec<RoleScore>, Role>, Error> {
+        floor: &Floor,
+    ) -> Result<Result<Scored, Role>, Error> {
+        let redactor = self.ports.redactor.as_ref();
         let mut scores = Vec::new();
+        let mut opinions = Vec::new();
         for role in session.request.members.iter().copied() {
             if role == Role::Leader {
                 continue;
@@ -401,24 +417,30 @@ impl Team {
                 continue;
             }
             session.run.signal(ProgressSignal::ScoreTurn { role });
-            let parsed = match self.speak(session, role, &prompt::score_turn()).await? {
+            let briefing = floor.is_new(role).then_some(session.briefing.as_str());
+            let score_input = prompt::score_turn(briefing);
+            let parsed = match self.speak(session, role, &score_input).await? {
                 Spoken::Text(text) => parse_score(&text)
+                    .map(|scored| (scored, parse_opinion(&text, role, redactor)))
                     .ok_or_else(|| TurnFailure::InvalidStructuredReply.to_string()),
                 Spoken::Failed(cause) => Err(cause.to_string()),
             };
             match parsed {
-                Ok((score, reason)) => scores.push(RoleScore {
-                    role: role.id().to_string(),
-                    score,
-                    reason,
-                }),
+                Ok(((score, reason), opinion)) => {
+                    scores.push(RoleScore {
+                        role: role.id().to_string(),
+                        score,
+                        reason,
+                    });
+                    opinions.extend(opinion);
+                }
                 Err(reason) => {
                     session.room.failed(role, &reason)?;
                     return Ok(Err(role));
                 }
             }
         }
-        Ok(Ok(scores))
+        Ok(Ok((scores, opinions)))
     }
 }
 

@@ -105,6 +105,8 @@ pub struct DiscussionOptions {
     pub(crate) budget: Option<CallBudget>,
     pub(crate) signals: Option<Arc<dyn ProgressSink>>,
     pub(crate) turn_retries: u32,
+    /// 사용자 공지(보낸 시각 순서). 비어 있으면 공지 없음이다.
+    pub(crate) notices: Vec<NoticeNote>,
 }
 
 impl DiscussionOptions {
@@ -131,7 +133,10 @@ impl DiscussionOptions {
     /// 담당 브리핑의 자료 뒤에 "사용자 공지" 묶음으로 들어간다(가린 글, 보낸 시각 순서).
     /// 자료 완전성(E32)에는 들지 않는다. 판단의 자료 목록에는 이름 [`NOTICE_SOURCE_NAME`]과
     /// 가장 늦은 보낸 시각으로 한 줄 들어간다. 빈 목록이면 넘기지 않은 것과 같다.
-    pub fn with_notices(mut self, notices: Vec<NoticeNote>) -> DiscussionOptions {
-        todo!()
+    pub fn with_notices(mut self, mut notices: Vec<NoticeNote>) -> DiscussionOptions {
+        // 보낸 시각이 같으면 받은 순서를 지킨다(안정 정렬).
+        notices.sort_by_key(|note| note.sent_at.0);
+        self.notices = notices;
+        self
     }
 }

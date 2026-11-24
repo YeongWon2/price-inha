@@ -8,6 +8,7 @@ mod action;
 mod discussion;
 pub mod error;
 mod floor;
+mod opinion;
 mod ports;
 mod progress;
 mod prompt;

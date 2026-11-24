@@ -1,8 +1,10 @@
 //! 담당에게 보내는 글: 시스템 글 세 층(공통 · 담당 SOUL · 팀 규칙)과 턴마다의 입력 글.
 
+use pi_ai::Redactor;
 use pi_store::{Amount, RoleScore, Trade, TradeId};
 
 use crate::discussion::DiscussionRequest;
+use crate::progress::{NOTICE_SOURCE_NAME, NoticeNote};
 use crate::role::{Role, RoleConfig};
 
 /// 공통 층: 행동 JSON 형식(결정 12번).
@@ -66,6 +68,19 @@ pub(crate) fn briefing(request: &DiscussionRequest, symbol: &str) -> String {
     out
 }
 
+/// 브리핑의 자료 뒤에 붙이는 "사용자 공지" 묶음(11차, R17-2). 공지는 보낸 시각 순서로 받고
+/// 글은 가린다. 공지가 없으면 빈 글이다.
+pub(crate) fn notices(notes: &[NoticeNote], redactor: &dyn Redactor) -> String {
+    if notes.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("{NOTICE_SOURCE_NAME}:\n");
+    for note in notes {
+        out.push_str(&format!("- {}\n", redactor.redact(&note.text)));
+    }
+    out
+}
+
 /// 논의 턴의 입력 글.
 pub(crate) fn discussion_turn(
     briefing: Option<&str>,
@@ -84,11 +99,13 @@ pub(crate) fn discussion_turn(
     out
 }
 
-/// 점수 턴의 입력 글.
-pub(crate) fn score_turn() -> String {
-    "[점수] 논의를 바탕으로 이 매매를 0~100 점수로 매긴다. \
-     답은 JSON 객체 하나다: {\"score\": <정수>, \"reason\": \"<근거>\"}"
-        .to_string()
+/// 점수 턴의 입력 글. 아직 안내를 받지 못한 담당이면 `briefing`을 앞에 붙인다(11차).
+pub(crate) fn score_turn(briefing: Option<&str>) -> String {
+    let head = briefing.map(|text| format!("{text}\n")).unwrap_or_default();
+    head + "[점수] 논의를 바탕으로 이 매매를 0~100 점수로 매긴다. \
+     답은 JSON 객체 하나다: {\"score\": <정수>, \"reason\": \"<근거>\", \
+     \"stance\": \"bullish\"|\"bearish\"|\"neutral\", \"conviction\": \"low\"|\"medium\"|\"high\", \
+     \"opinion_reason\": \"<한 줄 이유>\", \"horizon_days\": <보는 기간 거래일 수, 생략 가능>}"
 }
 
 /// 팀장 판단 턴의 입력 글.
@@ -113,7 +130,8 @@ pub(crate) fn leader_turn(
          국내 종목은 원, 미국 종목은 센트.\n\
          사기 · 팔기: {{\"decision\": \"buy\"|\"sell\", \"hypothesis\": \"<가설>\", \
          \"trigger\": \"<계기>\", \"entry\": <정수>, \"stop\": <정수>, \"target\": <정수>, \
-         \"expected_value\": <정수>}}\n\
+         \"expected_value\": <정수>, \"summary\": \"<요약 2~4문장>\", \
+         \"reversal\": \"<이러면 뒤집힌다 한 줄>\"}}\n\
          지켜보기: {{\"decision\": \"watch\", \"reason\": \"<이유>\", \"revisit\": \"<다시 볼 조건>\"}}"
     ));
     out
