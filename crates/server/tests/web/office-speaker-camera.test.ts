@@ -23,6 +23,8 @@ const T0 = 1_000_000;
 
 function gathered(now = T0 - 10_000): SpeakerCamera {
   const cam = new SpeakerCamera();
+  // 32차 6번: 따라가기가 켜져 있으면 발언자 카메라가 끼어들지 않는다 — 발언자 카메라는 따라가기를 끈 뒤에 본다.
+  cam.setFollowing(false, now);
   cam.gather(true, now);
   return cam;
 }

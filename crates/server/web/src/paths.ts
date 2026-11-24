@@ -48,6 +48,10 @@ export const API = {
   officeChat: "/api/office/chat",
   officeLooks: "/api/office/looks",
   officeLook: "/api/office/look",
+  // 내 캐릭터(server 32차 1번, C17): 읽기 `GET` · 이름 · 외형 바꾸기 `POST` `{"name"?, "look"?}` ·
+  // 자리 남기기 `POST` `{"x", "y", "dir"}`(띄엄띄엄 — `office/player-sync.ts`).
+  officeMe: "/api/office/me",
+  officeMePosition: "/api/office/me/position",
   pushKey: "/api/push/key",
   pushSubscribe: "/api/push/subscribe",
   notices: "/api/notices",
@@ -114,7 +118,18 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.setupSound,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
-  office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],
+  office: [
+    API.session,
+    API.office,
+    API.officeChat,
+    API.officeLooks,
+    API.officeLook,
+    // server 32차 1번: 내 캐릭터 읽기 · 바꾸기 · 자리 남기기.
+    API.officeMe,
+    API.officeMePosition,
+    API.socket,
+    ...APPROVALS,
+  ],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
   // 계좌 · 운용 화면(server 30차 2번 · 3번): 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결.
   account: [API.session, API.account, API.team, API.teamRestart, API.socket],

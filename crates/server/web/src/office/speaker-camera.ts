@@ -96,6 +96,23 @@ export class SpeakerCamera {
     if (!on) this.reset();
   }
 
+  /**
+   * (32차 6번) 카메라가 내 캐릭터를 따라가는 중인가. 기본 켜짐(사무실의 따라가기 기본값과 같다).
+   */
+  following(): boolean {
+    throw new Error("todo");
+  }
+
+  /**
+   * (32차 6번) 따라가기 켜짐 · 꺼짐을 알린다. 켜져 있으면 목표를 내지 않고 논의 글에도 움직이지 않는다(내 캐릭터가
+   * 우선 — 지금 샷이 있으면 곧바로 손을 뗀다). 꺼지면 다음 논의 글부터 지금처럼 돈다. 단추(`enabled`)는 그대로다.
+   */
+  setFollowing(on: boolean, now: number): void {
+    void on;
+    void now;
+    throw new Error("todo");
+  }
+
   /** 담당들이 미팅룸에 모여 있는가. `false`면 논의가 끝난 것이다(손 조작으로 꺼진 것도 풀린다). */
   gather(gathered: boolean, now: number): void {
     void now;

@@ -98,6 +98,38 @@ pub const OFFICE_LOOKS_PATH: &str = "/api/office/looks";
 /// 저장은 서버 쪽이라 서버를 다시 켜도, 다른 기기에서도 같다.
 pub const OFFICE_LOOK_PATH: &str = "/api/office/look";
 
+/// (32차 1번, C17 · M8) 내 캐릭터. 사용자가 한 명이라 하나뿐이다. 저장은 저장소의 `player_profile`
+/// (`pi_store::Store::player` · `set_player_profile` · `set_player_spot`)에 한다 — 서버를 다시 켜도 남고 백업에 따라간다.
+///
+/// - `GET` → 200 `{"name", "look", "x", "y", "dir"}`. 정한 적이 없으면 이름 [`pi_store::PLAYER_DEFAULT_NAME`],
+///   외형 [`PLAYER_DEFAULT_LOOK`], 저장된 자리가 없으면 입구 [`OFFICE_ENTRANCE`] · [`OFFICE_ENTRANCE_DIR`].
+///   `dir`는 `"up"` · `"down"` · `"left"` · `"right"`.
+/// - `POST` `{"name"?, "look"?}` → 200 `GET`과 같은 모양. 빠진 칸은 지금 값 그대로다. 이름의 한도는 저장소가 정한 그대로
+///   (1~[`pi_store::PLAYER_NAME_MAX_CHARS`]자 — server는 한도를 새로 정하지 않고 저장소의 거부를 400으로 옮긴다).
+///   외형은 원본 외형 목록([`OFFICE_LOOKS_PATH`]의 `available`)에 있어야 한다. 틀리면(글이 아님 포함) 400
+///   `{"error": `[`OFFICE_BAD_INPUT`]`}`이고 아무것도 저장하지 않는다(E3). 자리는 그대로다.
+/// - 관문은 사무실의 다른 API와 같다: 세션이 없으면(원격 포함) 401, 쓰기는 같은 출처(`Origin`)만.
+/// - 두 화면이 따로 남기면 마지막에 온 것이 이긴다. 다른 화면에 중계하지 않는다(E59).
+pub const OFFICE_ME_PATH: &str = "/api/office/me";
+
+/// (32차 1번 · 2번, C17) 내 캐릭터 자리 남기기. `POST` `{"x", "y", "dir"}` → 200 [`OFFICE_ME_PATH`]의 `GET`과 같은 모양.
+/// `x`는 0 이상 [`OFFICE_COLS`] 미만, `y`는 0 이상 [`OFFICE_ROWS`] 미만의 정수, `dir`는 방향 넷 가운데 하나다.
+/// 벗어나거나 빠지거나 모양이 틀리면 400 `{"error": `[`OFFICE_BAD_INPUT`]`}`이고 저장하지 않는다(E3). 이름 · 외형은
+/// 그대로다. 화면은 걷는 동안 매 칸 보내지 않고 1초에 많아야 한 번 · 멈춘 뒤 · 떠날 때 보낸다. 관문은 [`OFFICE_ME_PATH`]와 같다.
+pub const OFFICE_ME_POSITION_PATH: &str = "/api/office/me/position";
+
+/// 사무실 지도의 칸 수(가로). 화면 지도 `web/public/office/office-map.json`의 `cols`와 같다.
+pub const OFFICE_COLS: u32 = 44;
+/// 사무실 지도의 칸 수(세로). 화면 지도의 `rows`와 같다.
+pub const OFFICE_ROWS: u32 = 30;
+/// 내 캐릭터의 기본 자리(입구, 칸 `(x, y)`): 화면 지도 `entrance`의 가운데 열, 입구 줄 바로 안쪽(한 줄 위).
+/// 화면 `office/pathfind.ts`의 `entranceCell`과 같다.
+pub const OFFICE_ENTRANCE: (u32, u32) = (37, 28);
+/// 입구에서 바라보는 방향(사무실 안쪽).
+pub const OFFICE_ENTRANCE_DIR: &str = "up";
+/// 내 캐릭터의 기본 외형(원본 DeskRPG 기본 외형 `office-jun`, 원본 외형 목록 안).
+pub const PLAYER_DEFAULT_LOOK: &str = "office-jun";
+
 /// (22차 1번) 사무실 팀 대화의 최근 줄. `GET` → 200 `[{"room", "agent", "text", "at", "topic"}, …]`: 저장된
 /// [`KIND_OFFICE_TALK`] 이벤트 가운데 최근 [`OFFICE_TALK_RECENT`]줄을 시각 순서(오래된 것 먼저)로 준다. 이벤트 내용
 /// 그대로다. 세션이 있어야 열린다(없으면 401).

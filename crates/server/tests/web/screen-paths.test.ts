@@ -52,6 +52,9 @@ describe("화면이 부르는 경로", () => {
         "/api/office/chat",
         "/api/office/looks",
         "/api/office/look",
+        // 32차 1번: 내 캐릭터 읽기 · 바꾸기 · 자리 남기기.
+        "/api/office/me",
+        "/api/office/me/position",
         "/ws",
         ...APPROVALS,
       ]),
