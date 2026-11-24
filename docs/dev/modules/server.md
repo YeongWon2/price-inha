@@ -589,3 +589,27 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | `crates/server/tests/web/key-screens.test.ts::키_화면_·_설정_화면은_submitKeyFields를_쓰고…`(소스 글자 시험) | 유지 | 그대로 두고, 설정 화면 행동 시험을 새로 더한다 |
 | 그 밖의 server 시험 | 유지 | 19차와 무관 |
 - 19차 N3 참고: 사무실 승인 카드는 승인 번호마다 따로라 5번 해당 없음(N2 판단 맞음). 설정 화면에 AI 상한 보이기는 쓰기 화면과 함께 다음 차수.
+
+## 20차 사무실을 원본 자산으로 (2026-11-24 조정자, 결정 13 · 사용자 "원본 캐릭터 · 사무실 · 배경을 그대로")
+
+지금 3D 사무실은 캐릭터 · 가구를 코드 도형으로 그린다. 원본 DeskRPG는 외형 50종 GLB 캐릭터(서기 · 걷기 · 앉기 애니메이션)와 배경 · 가구 GLB로 그리고, 담당마다 외형을 고른다. 원본 자산을 그대로 들여 원본과 같게 보이게 한다.
+
+1. **자산 들이기**: 원본 커밋 5d80963의 `public/assets/` 가운데 `characters/office/*.glb`(50) · `characters/LICENSES.md` · `environments/` · `furniture/` · `shared/`를 `crates/server/web/public/office/deskrpg/` 아래 같은 경로로 그대로 둔다(파일을 고치지 않는다). 원본 `LICENSE.md`와, 출처 · 커밋 · 들인 날짜를 적은 `SOURCE.md`를 함께 둔다. `brand/` · `eunchae-mpfb.glb`는 들이지 않는다. 받는 곳: 조정자가 받아 둔 사본(scratchpad `deskrpg-src/`) 또는 GitHub 원본 같은 커밋. 화면은 이 자산을 같은 출처 경로로만 부른다(바깥 주소 0 — 기존 시험 그대로).
+2. **캐릭터는 원본 GLB로**: 담당 여섯을 외형 GLB로 그린다. 원본 동작(`docs/research/office-deep.md` 2-6절): 클립 idle · walk · sit, 바꿀 때 0.22초 교차, 앉음은 상태가 아니라 걷지 않고 좌석 가까우면 앉은 모습, 걷기/달리기는 관찰한 속도로, 쉬는 손짓. 불러오기에 실패하면 지금의 코드 인형으로 바꿔 그린다(원본도 같음). 침대에서 자는 모습은 GLB를 눕혀 그린다(원본에 없는 자세 — 스펙 R5-3).
+3. **배경은 원본 "종합상사"(trading)**: 사무 공간(담당 책상 · 팀장 자리 · 회의 탁자)을 원본 trading 배경의 배치 · 가구 GLB로 그린다(원본 `trading-layout` · `trading-scene` 동작을 보고 새로 쓴다). 침실 구역(담당마다 방 하나 · 침대 하나)은 스펙 R5-3대로 남기고, 바닥 · 벽 재질은 원본 공유 재질(`shared/surfaces` 등)에 맞춘다. `office-map.json`의 자리 규칙(여섯 명 모두 책상 · 침대, 겹치지 않음, 회의 자리 6개 이상)은 그대로 지킨다.
+4. **담당마다 외형 고르기**: 담당별 기본 외형을 정해 두고(서로 다르게), 사무실 화면에서 담당을 골라 50종 가운데 외형을 바꿀 수 있다. 고른 외형은 서버에 저장되어 다시 켜도, 다른 기기에서도 같다(원본: 외형의 정본은 프로필 쪽에 저장). 외형 이름 · 분류는 원본 외형 목록(`office-looks` · `office-look-labels`)의 이름을 데이터로 쓴다. 바꾸기는 세션이 있는 같은 출처 요청만(기존 관문 그대로).
+5. **가벼운 화면 · 폰은 그대로**: 카드 화면과 폰 묶음은 3D · 자산을 불러오지 않는다(기존 시험 그대로).
+
+- 원본 동작 근거: `docs/research/deskrpg.md` 118 · 466 · 470줄(외형 50종 GLB, GLTFLoader, 압축 안 씀), `docs/research/office-deep.md` 2절(캐릭터 · 애니메이션 · 앉음), 원본 소스 사본 `src/game/three/{gltf-actor,office-looks,office-look-labels,trading-layout,trading-scene,office-environments}.ts`(동작만 본다, 코드를 옮기지 않는다). 결정 13.
+- 시험으로 확인할 것: dist에 외형 GLB 50개 · 라이선스 파일 · SOURCE.md가 있고 원본과 바이트가 같다(해시 표) / 사무실 묶음이 외형 GLB를 같은 출처 경로로 부르고 바깥 주소가 없다 / 폰 · 가벼운 화면 묶음은 GLB를 부르지 않는다 / 담당 외형 저장 API: 고르면 저장되고 다시 켜도 같다, 목록에 없는 외형은 거부, 세션 없거나 다른 출처면 거부 / 기본 외형은 여섯 모두 다르다 / GLB를 못 불러오면 코드 인형으로 그린다(jsdom에서 불러오기 실패 흉내) / 지도 자리 규칙은 그대로.
+6. **화면 정책**: GLB 안의 그림(텍스처)을 풀 때 `blob:` 그림이 필요하면 `img-src`에 `blob:`만 더한다(망을 타지 않는 출처 — round20 바깥 원천 검사가 이미 허용). 다른 바깥 출처는 더하지 않는다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `crates/server/tests/web/office-map.test.ts` | 유지 | 지시서 20차 3번: 자리 규칙(책상 · 침대 · 회의 자리)은 그대로 지킨다 — 지도가 바뀌어도 이 시험이 맞아야 한다 |
+| `crates/server/tests/round20/dist.rs` · `round20/pages.rs` | 유지 | 폰 묶음에 three 없음 · 바깥 주소 없음은 그대로, `blob:`은 이미 허용 |
+| `crates/server/src/page.rs` 단위 시험 · `round4` CSP 시험 | 유지 | `contains`만 본다 — `img-src`에 `blob:`을 더해도 맞다 |
+| `crates/server/tests/web/phone-*.test.ts` · `office-approval*.test.ts` · `office-trim.test.ts` | 유지 | 20차와 무관(승인 · 채팅 · 폰) |
+| 그 밖의 server 시험 | 유지 | 20차와 무관 |
