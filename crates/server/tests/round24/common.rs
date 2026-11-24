@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -20,14 +20,14 @@ use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc, Weekday};
 use pi_ai::AnthropicConfig;
 use pi_approval::{Approvals, WaitTimes};
-use pi_data::{CorpCode, DataConfig, NAVER_NEWS_KEYS, NaverNewsConfig};
+use pi_data::{CorpCode, DataConfig, NaverNewsConfig};
 use pi_market::{
     Clock, Currency, Market, MarketCalendar, Quote, Session, SessionKind, StalePolicy, Symbol,
     TossConfig, TradingDay,
 };
 use pi_paper::{
-    Broker, InitialCash, LimitFillPrice, MarketRules, MaxFill, MoneyRounding, Order, OrderGroup,
-    OrderType, PaperConfig, ProceedsUsable, RoundingMode, SessionRules, Settlement, Side, TickBand,
+    InitialCash, LimitFillPrice, MarketRules, MaxFill, MoneyRounding, OrderType, PaperConfig,
+    ProceedsUsable, RoundingMode, SessionRules, Settlement, TickBand,
 };
 use pi_rules::{
     Funding, OrderDraft, ProductKind, Purpose, Rationale, RulesConfig, SourceStamp, SymbolStatus,
@@ -37,13 +37,13 @@ use pi_secrets::{
     Credentials, KeyKind, KeySlot, ProviderKeys, SecretStore, SecretString, Verifier, VerifyFailure,
 };
 use pi_store::{
-    AccountKind, Amount, Judgment, NewTrade, RoleScore, SourceRef, Store, TeamCause, TeamChange,
-    TeamState, TradeId, TradeState, UnixMillis,
+    AccountKind, Amount, Judgment, NewTrade, RoleScore, SourceRef, Store, TeamState, TradeId,
+    TradeState, UnixMillis,
 };
 use price_inha::{
-    App, BackupWiring, CalendarFn, Crew, DEFAULT_DART_DAILY_LIMIT, DayPlan, DemoTurn, Launch,
-    OrderRequest, Placed, Reach, Settings, TEMPLATE_ADJUST_PATH, TEMPLATE_PATH, TeamWiring,
-    Trading, TradingWiring, Upstreams, Wiring, save_watchlist,
+    App, BackupWiring, CalendarFn, DayPlan, Launch, OrderRequest, Placed, Reach, Settings,
+    TEMPLATE_ADJUST_PATH, TEMPLATE_PATH, TeamWiring, Trading, TradingWiring, Upstreams, Wiring,
+    save_watchlist,
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
