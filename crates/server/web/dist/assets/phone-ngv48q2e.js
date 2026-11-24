@@ -1,4 +1,4 @@
-import { a as decidePath, i as approvalPath, r as SCREEN_ROOTS, t as API } from "./paths-sc36b57o.js";
+import { a as decidePath, i as approvalPath, r as SCREEN_ROOTS, t as API } from "./paths-k6oehq1x.js";
 // src/phone/main.ts
 var OFFICE_PATH = SCREEN_ROOTS.office;
 var $ = (selector) => document.querySelector(selector);

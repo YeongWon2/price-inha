@@ -126,8 +126,20 @@ impl Feed {
                 tracing::warn!(%error, "받은 시세를 주문 길에 넘기지 못했습니다");
             }
         }
-        let asked = self.symbols.iter().filter(|s| !self.rejected.contains(s));
-        trading.after_feed(ok, &asked.cloned().collect::<Vec<_>>());
+        // (21차 3번) 증권사가 거절한 종목은 빼고 보되, 보유 중인 종목은 거절돼도 남긴다(거절은 그 종목 시세
+        // 끊김으로 센다 — 끊기면 이상 감지 멈춤). 시연은 보유 종목을 받지 않으므로 더하지 않는다.
+        let held = if self.desk.demo() {
+            Vec::new()
+        } else {
+            trading.held_symbols()
+        };
+        let watching: Vec<_> = self
+            .symbols
+            .iter()
+            .filter(|s| !self.rejected.contains(s) || held.contains(s))
+            .cloned()
+            .collect();
+        trading.after_feed(ok, &watching);
     }
 
     /// 시세 상태를 알린다. 마지막으로 알린 것과 같으면 다시 알리지 않는다.

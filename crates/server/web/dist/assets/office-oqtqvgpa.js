@@ -1,4 +1,4 @@
-import { a as decidePath, i as approvalPath, n as OFFICE_LOOK_PATHS, t as API } from "./paths-sc36b57o.js";
+import { a as decidePath, i as approvalPath, n as OFFICE_LOOK_PATHS, t as API } from "./paths-k6oehq1x.js";
 var PENDING = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -762,7 +762,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-b80lic7d.js");
+		const { webglAvailable, createScene } = await import("./scene3d-lom4h7qd.js");
 		return {
 			webglAvailable,
 			createScene

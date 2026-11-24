@@ -6,7 +6,10 @@ use chrono::{DateTime, Utc};
 use pi_agent::Role;
 use pi_approval::{Answer, ApprovalNumber, Ask, Decision, Subject};
 use pi_journal::{Improvement, Mistake};
-use pi_store::{ApprovalStatus, Proposal, ProposalId, ProposalState, Trade, UnixMillis};
+use pi_store::{
+    ApprovalStatus, Proposal, ProposalId, ProposalSource, ProposalState, StoreError, Trade,
+    UnixMillis,
+};
 use pi_template::Change;
 use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
@@ -239,17 +242,46 @@ impl Crew {
     }
 
     /// 개선안에 답한다([`super::PROPOSAL_ANSWER_PATH`]).
+    ///
+    /// (21차 4번) 쓰는 템플릿 값을 읽을 수 없으면(없음 · 오류) 승인을 쓰지 않은 채
+    /// [`TeamError::Unavailable`](503)로 답한다 — 승인 요청은 기다림 그대로다. 거절을 저장하지 못하면 실패(5xx)다.
+    /// (21차 1번) 사용자 변경 개선안은 템플릿 잠금과 상관없이 승인하면 냉각중이 된다.
     pub(super) fn answer_proposal(&self, body: &Value) -> Result<Answered, TeamError> {
         let id = ProposalId(body["id"].as_i64().unwrap_or_default());
         let number = ApprovalNumber::new(body["number"].as_str().unwrap_or_default());
         let fingerprint = body["fingerprint"].as_str().unwrap_or_default();
         let decision = Decision::from_wire(body["answer"].as_str().unwrap_or_default());
+        let source = match self.store.proposal_source(id) {
+            Ok(source) => source,
+            // 없는 개선안은 복기 길로 보낸다(승인 모듈 · 복기가 지금처럼 거절한다).
+            Err(StoreError::ProposalNotFound(..)) => ProposalSource::Review,
+            Err(error) => return Err(error.into()),
+        };
+        if let ProposalSource::User { .. } = source {
+            return self.answer_user_change(id, &number, fingerprint, decision);
+        }
+        // 복기 개선안의 반영 판정 · 거절은 쓰는 템플릿 값으로 한다. 읽을 수 없으면 아무것도 쓰기 전에 멈춘다.
+        let current = match self.trading.params() {
+            Ok(Some(current)) => current,
+            Ok(None) => return Err(TeamError::Unavailable),
+            Err(error) => {
+                tracing::warn!(%error, "쓰는 템플릿 값을 읽지 못해 개선안 답을 미룬다");
+                return Err(TeamError::Unavailable);
+            }
+        };
         let approval_error = |error: pi_approval::Error| TeamError::Approval(error.to_string());
         if decision == Decision::Reject {
             self.approvals
                 .answer(&number, fingerprint, Decision::Reject)
                 .map_err(approval_error)?;
-            return Ok(self.reject(id));
+            let now = millis(self.clock.now());
+            return match self.journal.reject(id, &current, now) {
+                Ok(_) => Ok(answered("rejected", Some("user_rejected"))),
+                Err(pi_journal::Error::Store(
+                    StoreError::TransitionDenied { .. } | StoreError::ProposalNotFound(..),
+                )) => Ok(answered("rejected", Some("already_resolved"))),
+                Err(error) => Err(TeamError::Journal(error.to_string())),
+            };
         }
         // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 닫거나 소비하기 전에 거절한다(V21 · E28):
         // 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다. 잠김이 풀린 뒤 같은 번호로 다시 답할 수 있다.
@@ -265,9 +297,6 @@ impl Crew {
         if let Answer::Rejected(reason) = answer {
             return Ok(answered("rejected", Some(reject_word(reason))));
         }
-        let Ok(Some(current)) = self.trading.params() else {
-            return Ok(answered("rejected", Some("not_found")));
-        };
         // 승인 소비는 승인 모듈이 하고, 반영 판정(지금 규칙으로 위험을 다시 본다)은 journal이 한다.
         let outcome = self
             .approvals
@@ -291,15 +320,45 @@ impl Crew {
         Ok(answered("cooling", None))
     }
 
-    fn reject(&self, id: ProposalId) -> Answered {
-        let now = millis(self.clock.now());
-        let current = match self.trading.params() {
-            Ok(Some(current)) => current,
-            _ => return answered("rejected", Some("not_found")),
-        };
-        match self.journal.reject(id, &current, now) {
-            Ok(_) => answered("rejected", Some("user_rejected")),
-            Err(_) => answered("rejected", Some("already_resolved")),
+    /// (21차 1번) 사용자 변경 개선안(실전중 템플릿의 위험을 키우는 값 바꾸기)에 답한다. 템플릿 잠금으로
+    /// 거절하지 않는다: 승인하면 승인을 소비하고 냉각중(늘 위험을 키운다), 반영은 다음 거래일 시작이다.
+    fn answer_user_change(
+        &self,
+        id: ProposalId,
+        number: &ApprovalNumber,
+        fingerprint: &str,
+        decision: Decision,
+    ) -> Result<Answered, TeamError> {
+        let approval_error = |error: pi_approval::Error| TeamError::Approval(error.to_string());
+        if decision == Decision::Reject {
+            self.approvals
+                .answer(number, fingerprint, Decision::Reject)
+                .map_err(approval_error)?;
+            let now = millis(self.clock.now());
+            return match self.store.reject_proposal(id, now) {
+                Ok(_) => Ok(answered("rejected", Some("user_rejected"))),
+                Err(StoreError::TransitionDenied { .. }) => {
+                    Ok(answered("rejected", Some("already_resolved")))
+                }
+                Err(error) => Err(error.into()),
+            };
+        }
+        let answer = self
+            .approvals
+            .answer(number, fingerprint, Decision::Approve)
+            .map_err(approval_error)?;
+        if let Answer::Rejected(reason) = answer {
+            return Ok(answered("rejected", Some(reject_word(reason))));
+        }
+        match self.approvals.approve_proposal(number, id) {
+            Ok(proposal) if proposal.state == ProposalState::Applied => {
+                Ok(answered("applied", None))
+            }
+            Ok(_) => Ok(answered("cooling", None)),
+            Err(pi_approval::Error::Denied(reason)) => {
+                Ok(answered("rejected", Some(reject_word(reason))))
+            }
+            Err(error) => Err(approval_error(error)),
         }
     }
 }

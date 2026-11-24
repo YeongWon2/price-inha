@@ -349,7 +349,12 @@ impl Trading {
             if is_abnormal(&probe) {
                 // 비정상이 한 번이라도 생기면 정상 시간을 지운다.
                 watch.healthy_since = None;
-                watch.abnormal_rounds = watch.abnormal_rounds.saturating_add(1);
+                // (21차 3번) 이상 감지 멈춤 중에는 비정상 바퀴를 세지 않는다(풀린 뒤 새로 센다).
+                watch.abnormal_rounds = if team == TeamState::AnomalyHalt {
+                    0
+                } else {
+                    watch.abnormal_rounds.saturating_add(1)
+                };
             } else {
                 watch.abnormal_rounds = 0;
                 watch.healthy_since.get_or_insert(now);
@@ -362,6 +367,7 @@ impl Trading {
                 let cause = TeamCause::AnomalyDetected;
                 let detail = "시세가 늦거나 자료 · 연결에 이상이 있음";
                 self.change_team(TeamState::AnomalyHalt, cause, false, detail)?;
+                lock(&self.watch).abnormal_rounds = 0;
                 if probe.health.data_anomaly {
                     self.data_halted(now);
                 }

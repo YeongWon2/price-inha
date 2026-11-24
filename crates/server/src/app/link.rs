@@ -268,9 +268,18 @@ pub(super) fn open_memory(
 }
 
 /// 세션 경로에 뜻 검색 설정 화면([`crate::SETUP_SEMANTIC_PATH`])을 더한다.
-/// (20차 4번) 담당 외형 경로를 더한다. 사무실 잇기가 없어도(시연 · 2차 조립) 단다 — 보관 폴더의 파일만 쓴다.
-pub(super) fn with_looks(extra: Option<Router>, home: &Path) -> Option<Router> {
-    let routes = looks_routes(Arc::new(Looks::open(home)));
+/// (20차 4번) 담당 외형 경로를 더한다. 사무실 잇기가 없어도(시연 · 2차 조립) 단다 — (21차 6번) 저장소에 남긴다.
+pub(super) fn with_looks(
+    extra: Option<Router>,
+    home: &Path,
+    store: &Store,
+    clock: &Arc<dyn Clock>,
+) -> Option<Router> {
+    let routes = looks_routes(Arc::new(Looks::open(
+        home,
+        store.clone(),
+        Arc::clone(clock),
+    )));
     Some(match extra {
         Some(extra) => extra.merge(routes),
         None => routes,

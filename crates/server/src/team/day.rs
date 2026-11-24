@@ -2,7 +2,10 @@
 
 use chrono::{DateTime, Utc};
 use pi_agent::Role;
-use pi_store::{NewRoomEvent, ProposalState, RoomActorKind, UnixMillis};
+use pi_store::{
+    NewRoomEvent, Proposal, ProposalSource, ProposalState, RoomActorKind, StoreError, TemplateId,
+    UnixMillis,
+};
 use serde_json::{Value, json};
 
 use super::demo_ai::DAY_PLAN_HEAD;
@@ -113,12 +116,20 @@ impl Crew {
         if now < start {
             return Ok(());
         }
-        let cooled: Vec<_> = self
+        let mut cooled = Vec::new();
+        for proposal in self
             .store
             .proposals_in_state(ProposalState::Cooling)?
             .into_iter()
             .filter(|proposal| proposal.updated_at < millis(start))
-            .collect();
+        {
+            match self.store.proposal_source(proposal.id)? {
+                ProposalSource::User { template } => {
+                    self.apply_cooled_user(&proposal, template, millis(now))?;
+                }
+                ProposalSource::Review => cooled.push(proposal),
+            }
+        }
         // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 반영을 건너뛰고 냉각중으로 둔다(V21). 하루 판단은
         // 그대로 간다. 잠김이 풀린 뒤의 거래일 시작에 반영한다.
         if !cooled.is_empty() && self.trading.template_locked()? {
@@ -139,5 +150,30 @@ impl Crew {
             self.trading.apply_params(outcome.rules)?;
         }
         Ok(())
+    }
+
+    /// (21차 1번) 냉각이 끝난 사용자 변경 개선안을 그 템플릿에 반영한다(실전중이어도 — 저장소가 한 쓰기로
+    /// 개선안 반영됨과 새 리비전을 남긴다). 템플릿이 멈춤이라 거부되면 냉각중으로 두고 기록만 한다.
+    fn apply_cooled_user(
+        &self,
+        proposal: &Proposal,
+        template: TemplateId,
+        at: UnixMillis,
+    ) -> Result<(), TeamError> {
+        match self
+            .store
+            .apply_cooled_user_proposal(proposal.id, &proposal.content, at)
+        {
+            Ok(_) => Ok(()),
+            Err(StoreError::TemplateLocked { .. }) => {
+                tracing::info!(
+                    proposal = proposal.id.0,
+                    template = template.0,
+                    "템플릿이 멈춤이라 냉각이 끝난 사용자 변경을 반영하지 않았습니다"
+                );
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }

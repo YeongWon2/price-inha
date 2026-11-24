@@ -1,4 +1,4 @@
-import { n as LOOKS, t as DEFAULT_LOOKS } from "./office-k6hecabn.js";
+import { n as LOOKS, t as DEFAULT_LOOKS } from "./office-oqtqvgpa.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors

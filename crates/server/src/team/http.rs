@@ -75,6 +75,10 @@ async fn answer(State(crew): State<Arc<Crew>>, body: Bytes) -> Response {
             StatusCode::OK,
             json!({ "result": done.result, "reason": done.reason }),
         ),
+        Err(TeamError::Unavailable) => reply(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "error": "unavailable" }),
+        ),
         Err(error) => failed(&error),
     }
 }

@@ -116,6 +116,7 @@ fn template_reply(outcome: Result<Value, Refusal>) -> Response {
             json!({ "error": TEMPLATE_OVER_CAP, "fields": fields }),
         ),
         Err(Refusal::Store(error)) => failed(&TradingError::Store(error)),
+        Err(Refusal::Failed(error)) => failed(&error),
     }
 }
 
@@ -124,5 +125,5 @@ async fn choose(State(trading): State<Arc<Trading>>, body: Bytes) -> Response {
 }
 
 async fn adjust(State(trading): State<Arc<Trading>>, body: Bytes) -> Response {
-    template_reply(trading.adjust_template(&json_of(&body)))
+    template_reply(trading.adjust_template(&json_of(&body)).await)
 }

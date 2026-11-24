@@ -1,4 +1,4 @@
-import { t as API } from "./paths-sc36b57o.js";
+import { t as API } from "./paths-k6oehq1x.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/setup/main.ts
 /** 이 화면의 요소. 칸 · 단추 · 글 자리를 같은 모양(value · checked · disabled · hidden · textContent)으로 다룬다. */

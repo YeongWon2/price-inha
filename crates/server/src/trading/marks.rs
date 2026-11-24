@@ -136,15 +136,34 @@ impl Marks {
         books.iter().any(|book| !book.positions.is_empty())
     }
 
-    /// 저장할 내용: 날짜 · 통화별 그날 시작 · 최고. 이것으로 남긴 것으로 친다.
-    pub(super) fn take_payload(&mut self) -> Value {
-        self.saved_day = self.day;
-        self.saved_peak = self.peak.clone();
+    /// 저장할 내용: 날짜 · 통화별 그날 시작 · 최고. 아직 남긴 것으로 치지 않는다 — 저장이 성공한 뒤
+    /// [`Marks::note_saved`]에 돌려준 표시를 넘겨야 남긴 것으로 친다(21차 2번: 저장이 실패하면 다음 셈이 다시 남긴다).
+    pub(super) fn take_payload(&self) -> (Value, SavedMark) {
         let date = self.day.map(|d| d.format("%Y-%m-%d").to_string());
-        json!({
+        let payload = json!({
             "date": date,
             "day_start": write_map(&self.day_start),
             "peak": write_map(&self.peak),
-        })
+        });
+        let saved = SavedMark {
+            day: self.day,
+            peak: self.peak.clone(),
+        };
+        (payload, saved)
     }
+
+    /// 저장이 성공한 내용을 남긴 것으로 친다.
+    pub(super) fn note_saved(&mut self, saved: SavedMark) {
+        self.saved_day = saved.day;
+        for (currency, peak) in saved.peak {
+            let entry = self.saved_peak.entry(currency).or_insert(peak);
+            *entry = (*entry).max(peak);
+        }
+    }
+}
+
+/// 저장한 기준(날짜 · 최고). 저장이 성공한 뒤에만 [`Marks::note_saved`]로 남긴 것으로 친다.
+pub(super) struct SavedMark {
+    day: Option<NaiveDate>,
+    peak: HashMap<Currency, Decimal>,
 }

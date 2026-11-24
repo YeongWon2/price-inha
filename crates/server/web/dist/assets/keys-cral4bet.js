@@ -1,4 +1,4 @@
-import { t as API } from "./paths-sc36b57o.js";
+import { t as API } from "./paths-k6oehq1x.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/keys/main.ts
 var SLOT_FIELDS = {

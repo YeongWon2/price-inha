@@ -117,8 +117,13 @@ impl Trading {
     /// 하루 시작: 남기고, 그날 시작 평가액을 새로 잡고, 하루 한도 멈춤을 쉬는 중으로 푼다.
     async fn day_start(&self, date: NaiveDate, now: DateTime<Utc>) -> Result<(), TradingError> {
         self.books_for_day_start(now, date).await?;
-        self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
-            .await?;
+        // (21차 5번) 이미 남겼으면(앞의 다음 단계가 실패해 다시 하는 중) 남기지 않고 다음 단계만 한다.
+        if lock(&self.days).recorded_start != Some(date) {
+            self.record(KIND_DAY_START, json!({ "date": date_text(date) }))
+                .await?;
+            let mut days = lock(&self.days);
+            days.recorded_start = days.recorded_start.max(Some(date));
+        }
         // 세션이 시작되면 손절 · 청산의 물러서기를 비워 곧바로 다시 낸다(10b 보강 2 1번 다).
         self.forget_urgent_backoff(now);
         let _turn = lock(&self.team_turn);
@@ -131,8 +136,13 @@ impl Trading {
 
     /// 하루 마감: 남기고, 운용 중이었으면 쉬는 중으로 바꾼다.
     async fn day_close(&self, date: NaiveDate) -> Result<(), TradingError> {
-        self.record(KIND_DAY_CLOSE, json!({ "date": date_text(date) }))
-            .await?;
+        // (21차 5번) 이미 남겼으면 남기지 않고 다음 단계만 다시 한다.
+        if lock(&self.days).recorded_close != Some(date) {
+            self.record(KIND_DAY_CLOSE, json!({ "date": date_text(date) }))
+                .await?;
+            let mut days = lock(&self.days);
+            days.recorded_close = days.recorded_close.max(Some(date));
+        }
         // 오늘 정규장의 마지막 시세가 다음 거래일의 기준가다(결정 2026-11-21 11번).
         self.save_references(date)?;
         {

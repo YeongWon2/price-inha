@@ -99,6 +99,10 @@ pub(super) struct DayLog {
     pub(super) basis: Option<Value>,
     /// (10차 10a) 마지막으로 남긴 정규장 마지막 시세들([`KIND_REFERENCE_PRICES`]).
     pub(super) references: Option<Value>,
+    /// (21차 5번) 이벤트를 남긴 하루 시작 · 마감의 날짜. 이벤트를 남긴 뒤 다음 단계가 실패해 잡은 일을
+    /// 되돌려도 다시 할 때 이벤트를 또 남기지 않는다(다음 단계만 다시 한다).
+    pub(super) recorded_start: Option<NaiveDate>,
+    pub(super) recorded_close: Option<NaiveDate>,
 }
 
 /// 잠금 안에서 잡은 하루 일과 되돌릴 때 쓸 앞의 값.
@@ -167,8 +171,14 @@ impl DayLog {
             return;
         };
         match kind {
-            KIND_DAY_START => self.started = self.started.max(Some(date)),
-            KIND_DAY_CLOSE => self.closed = self.closed.max(Some(date)),
+            KIND_DAY_START => {
+                self.started = self.started.max(Some(date));
+                self.recorded_start = self.recorded_start.max(Some(date));
+            }
+            KIND_DAY_CLOSE => {
+                self.closed = self.closed.max(Some(date));
+                self.recorded_close = self.recorded_close.max(Some(date));
+            }
             KIND_DAY_PLAN => {
                 let plan = match payload["plan"].as_str() {
                     Some("trade") => DayPlan::Trade,
@@ -434,8 +444,10 @@ impl Trading {
         }
         let payload = changed.then(|| marks.take_payload());
         drop(marks);
-        if let Some(payload) = payload {
+        if let Some((payload, saved)) = payload {
+            // (21차 2번) 저장이 성공한 뒤에만 남긴 것으로 친다. 저장 잠금(`_save_turn`)을 쥔 채라 순서가 섞이지 않는다.
             self.save_basis(&payload)?;
+            lock(&self.marks).note_saved(saved);
         }
         Ok(books)
     }

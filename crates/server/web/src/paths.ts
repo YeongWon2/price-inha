@@ -32,6 +32,8 @@ export const API = {
   remoteKeys: "/api/remote/keys",
   office: "/api/office",
   officeChat: "/api/office/chat",
+  officeLooks: "/api/office/looks",
+  officeLook: "/api/office/look",
   pushKey: "/api/push/key",
   pushSubscribe: "/api/push/subscribe",
   notices: "/api/notices",
@@ -41,11 +43,11 @@ export const API = {
 
 /**
  * 사무실 담당 외형(server 20차 4번): 읽기 `GET` · 바꾸기 `POST`. 사무실 경로([`API.office`]) 아래에 둔다.
- * 잠긴 경로 표 시험(screen-paths, 11차)이 사무실 목록을 옛 목록으로 묶어 두어 `SCREEN_PATHS`에는 아직 넣지 않았다.
+ * (21차 6번) 정식 상수([`API.officeLooks`] · [`API.officeLook`])이고 `SCREEN_PATHS.office`에 들어 있다.
  */
 export const OFFICE_LOOK_PATHS = {
-  list: `${API.office}/looks`,
-  choose: `${API.office}/look`,
+  list: API.officeLooks,
+  choose: API.officeLook,
 } as const;
 
 const APPROVALS = ["/api/approvals/{id}", "/api/approvals/{id}/approve", "/api/approvals/{id}/reject"] as const;
@@ -67,7 +69,7 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.accessLog,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
-  office: [API.session, API.office, API.officeChat, API.socket, ...APPROVALS],
+  office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
 };
 
