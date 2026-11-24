@@ -10,6 +10,22 @@ use serde_json::{Value, json};
 
 use crate::common::{Bench, events, has_phase, stays_false, summons, team_text, wait_for};
 
+/// 서버가 켜지며 뒤에서 도는 하루 판단(깨우기 엔진의 첫 tick)의 AI 부름이 잦아든 뒤의 부름 수.
+/// 그 부름이 "글을 보낸 뒤 늘어난 부름"으로 세어지지 않게, 부름 수가 300ms 동안 그대로일 때까지 기다린다
+/// (가장 길게 3초).
+async fn settled_prompts(bench: &Bench) -> usize {
+    let mut seen = bench.prompts().len();
+    for _ in 0..10 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let now = bench.prompts().len();
+        if now == seen {
+            break;
+        }
+        seen = now;
+    }
+    seen
+}
+
 /// 그 사용자 글에 붙은 응답 이벤트(`office.chat`) 가운데 그 담당의 것.
 fn replies_of(bench: &Bench, source: &str, agent: &str) -> Vec<Value> {
     events(&bench.store(), pi_office::EVENT_CHAT)
@@ -88,7 +104,7 @@ async fn 멘션된_담당만_답하고_여럿이면_멘션한_차례대로_답�
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 멘션이_없는_팀_방_글은_아무도_답하지_않고_no_mention이며_글은_남는다() {
     let bench = Bench::start().await;
-    let before = bench.prompts().len();
+    let before = settled_prompts(&bench).await;
     // 괄호 없는 `@이름`은 멘션이 아니다(원본).
     let text = "@리스크 오늘 시장 어때요?";
     let reply = bench.post(OFFICE_CHAT_PATH, &team_text(text, "n-1")).await;
@@ -120,7 +136,7 @@ async fn 멘션이_없는_팀_방_글은_아무도_답하지_않고_no_mention�
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 명단과_맞지_않는_이름이면_no_match이고_보낸_사람에게만_알린다() {
     let bench = Bench::start().await;
-    let before = bench.prompts().len();
+    let before = settled_prompts(&bench).await;
     let message_events = events(&bench.store(), KIND_OFFICE_MESSAGE).len();
     // 부분 일치("리스")와 없는 이름은 멘션이 맞지 않는다(정확 일치만).
     for (i, text) in ["@[없는사람] 안녕하세요", "@[리스] 안녕하세요"]
