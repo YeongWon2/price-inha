@@ -253,3 +253,4 @@ server 10b 참고에 남은 실행기 쪽 두 틈을 막는다. 공개 API는 �
 | `crates/exec/tests/suite/reduced.rs` · `reduced/` | 유지 | 줄임 길은 `reduce_within_limit` 표시(granted 거짓)만 넘긴다 — 승인 표시 거부는 새 시험 |
 | `crates/exec/tests/suite/ledger.rs` · `restart.rs` · `resume.rs` | 유지 | 보유 맞추기는 같은 시장 사례뿐 — 다른 시장 섞임은 새 시험 |
 | 그 밖의 exec 시험 | 유지 | 10차와 무관 |
+- 10차 걸음 메모(조정자): 저장소 매매에 시장 칸이 없어 장부 없는 매매의 시장은 종목 글자 모양(숫자 여섯 자리 = 국내, 그 밖 = 미국)으로 정했다. 다음 후보: store 매매에 시장 칸을 두면 이 추정을 버린다.
