@@ -1,0 +1,131 @@
+/* 사무실 화면 모양. 위 줄 · 채팅 · 목록은 공통 토큰(ui/tokens.css)을 쓰고(server 26차 5번), 3D 층(이름표 · 말풍선 · 줄 · 자막)은 원본 고정 색 그대로다. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--font-sans); font-size: var(--font-size-md); line-height: 1.45; }
+#app { display: flex; flex-direction: column; height: 100%; }
+#bar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4) 0 0; border-bottom: 1px solid var(--border);
+  background: var(--surface); box-shadow: var(--shadow-sm); position: relative; z-index: 10; }
+/* 공통 메뉴는 위 줄 맨 앞(다른 화면의 메뉴 띠와 같은 자리 · 같은 모양). 띠 모양은 위 줄이 맡는다. */
+#bar #menu { flex: 0 1 auto; min-width: 0; background: transparent; border: 0; box-shadow: none; }
+#bar strong { padding-left: var(--space-3); border-left: 1px solid var(--border); font-size: var(--font-size-md); white-space: nowrap; }
+#bar button { margin-left: auto; min-height: 32px; padding: 0 var(--space-3); font: inherit; font-size: var(--font-size-sm); font-weight: 600;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
+#bar button:hover { background: var(--bg); }
+#bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conn { font-size: var(--font-size-sm); color: var(--text-muted); white-space: nowrap; }
+.conn[data-state="ok"] { color: var(--success); }
+.conn[data-state="bad"] { color: var(--danger); }
+#main { flex: 1; display: flex; min-height: 0; }
+#stage { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+#canvas-host, #canvas-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* 23차 1번: 이름표는 발 아래, 안은 이름뿐(원본 DeskRPG 수치 — docs/research/deskrpg.md 11절). 다크 모드에서도 원본 색 고정. */
+.tag { position: absolute; left: 0; top: 0; max-width: 150px; padding: 3px 9px; border: 1px solid #cfd9c8; border-radius: 4px;
+  background: #fcfcf4eb; color: #344b3c; font-size: 12px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 6px rgba(0, 0, 0, .16); will-change: transform; }
+.note { position: absolute; left: 16px; bottom: 16px; padding: 6px 10px; border-radius: 6px; background: var(--surface); color: var(--text-muted); font-size: 13px; }
+#light { flex: 1; overflow: auto; padding: 16px; }
+#light-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+#light-list button { width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+#light-list .where { display: block; color: var(--text-muted); font-size: 13px; }
+#chat { width: 388px; max-width: 45vw; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); }
+#chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+#chat-tabs button { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+#chat-tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+#chat-log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
+/* 23차 8번: 내 글은 오른쪽 녹색 말풍선(흰 글자), 담당 글 · 논의 줄은 왼쪽에 굵은 이름 + 글, 기다림은 `○○: 생각 중` 한 줄. */
+.msg.me { align-self: flex-end; background: #4e745b; color: #fff; border-radius: 12px 12px 3px 12px; }
+.msg.agent { align-self: flex-start; background: var(--bg); border-radius: 12px 12px 12px 3px; }
+.msg .who { display: block; font-size: 12px; color: var(--text-muted); }
+.msg .who strong { color: var(--text); font-weight: 700; font-size: 13px; }
+.msg .who .to { font-size: 11px; }
+.msg.me .who { color: rgba(255,255,255,.8); }
+.msg.agent.pending { background: transparent; padding: 2px 10px; color: var(--text-muted); font-size: 13px; font-style: italic; }
+.msg.failed { color: var(--danger); }
+.speaking { padding: 4px 12px; border-bottom: 1px solid var(--border); color: var(--accent); font-size: 13px; font-weight: 600; }
+.speaking[hidden] { display: none; }
+.msg .retry { margin-left: 8px; font: inherit; font-size: 12px; }
+#chat-form { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px; border-top: 1px solid var(--border); }
+#chat-to-wrap { grid-column: 1 / -1; font-size: 13px; color: var(--text-muted); }
+#chat-input { resize: none; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+#chat-form[aria-disabled="true"] { opacity: .6; }
+@media (max-width: 760px) {
+  /* 좁은 폭: 메뉴가 위 줄 첫 줄을 다 쓰고(안에서만 가로로 민다), 제목 · 연결 · 단추는 그 아래 줄. */
+  #bar { flex-wrap: wrap; row-gap: 0; padding: 0 var(--space-3) var(--space-2); }
+  #bar #menu { flex: 1 0 100%; margin: 0 calc(var(--space-3) * -1); border-bottom: 1px solid var(--border); }
+  #bar strong { padding-left: 0; border-left: 0; }
+  #main { flex-direction: column; }
+  #chat { width: auto; max-width: none; height: 45%; border-left: 0; border-top: 1px solid var(--border); }
+}
+
+/* 승인 카드(10c 14번): 폰 카드와 같은 내용 · 같은 길. 카드가 없으면 자리를 차지하지 않는다. */
+#approvals:empty { display: none; }
+#approvals { padding: 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.approval-card { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px; }
+.approval-card h2 { font-size: 14px; margin: 0 0 4px; }
+.approval-card p { margin: 4px 0; white-space: pre-wrap; }
+.approval-card .muted { color: var(--text-muted); font-size: 13px; }
+.approval-card .row { display: flex; gap: 8px; }
+.approval-card button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; }
+.approval-card button[data-verb="approve"] { background: var(--success); border-color: var(--success); color: var(--on-accent); }
+.approval-card button[data-verb="reject"] { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
+
+/* 20차: 방 이름표 · 담당 외형 고르기 */
+#bar #view-toggle { margin-left: 0; }
+.room-tag { position: absolute; left: 0; top: 0; padding: 2px 8px; border-radius: 4px; background: rgba(38, 62, 89, .78); color: #fff;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+#looks { position: fixed; z-index: 20; top: 56px; left: 16px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 72px);
+  overflow: auto; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+#looks[hidden] { display: none; }
+.looks-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.looks-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.looks-agents button, .looks-head button { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 999px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+.looks-agents button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.looks-note { min-height: 1.2em; margin: 8px 0; color: var(--text-muted); font-size: 13px; }
+.looks-group h3 { margin: 10px 0 6px; font-size: 13px; color: var(--text-muted); }
+.looks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.look { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.look span { color: var(--text-muted); font-size: 12px; }
+.look[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.look:disabled { opacity: .6; cursor: wait; }
+#recenter { position: absolute; right: 12px; bottom: 12px; z-index: 6; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
+#recenter[hidden] { display: none; }
+
+/* 23차 2 · 5번: 머리 위 말풍선 · 말풍선 줄(원본 DeskRPG 수치). 글은 "이름 · 글" 한 줄 글자, 꼬리 없음. 다크 모드에서도 원본 색 고정. */
+.bubble { position: absolute; left: 0; top: 0; max-width: 190px; padding: 7px 11px; border: 1px solid #cdd7c7;
+  border-radius: 12px 12px 12px 3px; background: #fffdf4; color: #3e513f; font-size: 12px; line-height: 1.4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .16); white-space: normal; word-break: break-word; pointer-events: none;
+  will-change: transform; display: block; }
+/* 3줄 말줄임은 안쪽 글 요소에 건다: 바깥에 걸면 padding 안으로 넷째 줄 윗부분이 비친다. 글 높이 = 3줄(12px × 1.4 × 3)
+   이하라 말풍선 높이는 padding · 테두리를 더해 원본 최대 66px를 넘지 않는다. */
+.bubble-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  max-height: calc(12px * 1.4 * 3); }
+.bubble[data-working="true"] { border-color: #b6c896; }
+.speech-rail { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 5px; overflow-y: auto; border-radius: 12px; background: #eef2e9ed; pointer-events: auto; will-change: transform; }
+.speech-rail[data-corner$="right"] { align-items: flex-end; }
+.speech-rail .bubble { position: static; flex: none; max-width: 100% !important; transform: none !important; box-shadow: none; }
+/* 23차 6번: 장면 아래 가운데 알약 모양 한 줄 자막(가장 최근 말 "이름: 글"). */
+.caption { position: absolute; left: 50%; bottom: 12px; z-index: 5; transform: translateX(-50%); max-width: min(720px, calc(100% - 340px));
+  padding: 6px 16px; border: 1px solid #cfd9c8; border-radius: 999px; background: #fcfcf4eb; color: #344b3c; font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 8px rgba(0, 0, 0, .16); pointer-events: none; }
+.caption[hidden] { display: none; }
+/* 23차 7번 (나): 자동 카메라 단추. */
+#auto-camera { position: absolute; left: 12px; bottom: 12px; z-index: 6; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
+#auto-camera[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#auto-camera[hidden] { display: none; }
+.msg.talk .topic { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+#light-list .said { display: block; margin-top: 4px; color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 26차 5번: 채팅 받는 담당 · 보내기 단추도 토큰 모양으로(브라우저 기본 회색이 다크에서 튀지 않게). */
+#chat-to { font: inherit; font-size: var(--font-size-sm); padding: 2px var(--space-2); color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#chat-send { min-width: 64px; padding: 0 var(--space-3); font: inherit; font-weight: 600; color: var(--on-accent); background: var(--accent);
+  border: 1px solid var(--accent); border-radius: var(--radius-sm); cursor: pointer; }
+#chat-send:disabled { opacity: .55; cursor: not-allowed; }
+#chat-send:focus-visible, #chat-to:focus-visible, #chat-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

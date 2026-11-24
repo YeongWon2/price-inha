@@ -9,6 +9,7 @@
 // - GET  /api/office/looks · POST /api/office/look   담당 외형(20차 4번): 처음에 읽어 외형을 정하고, 고르면 바꾼다.
 // - 스냅샷의 `talk` 칸 · WS 이벤트 `office.talk`   팀의 대화(22차): 팀 탭 · 머리 위 말풍선 · 가벼운 화면의 최근 말.
 // 스냅샷과 말하기 길은 조립(price-inha)이 Office에 잇는다. 없으면 이벤트만으로 그린다.
+import { mountMenu } from "../ui/menu";
 import "./office.css";
 import { API, OFFICE_LOOK_PATHS } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
@@ -523,6 +524,8 @@ function wireAutoCamera(): void {
 // ---------- 시작 ----------
 
 async function main(): Promise<void> {
+  // 공통 메뉴(server 26차 3번): 위 줄(#bar) 맨 앞 자리에 단다. 3D 층 · 채팅은 그대로다.
+  mountMenu(document.getElementById("menu"), "office");
   try {
     const reply = await fetch(MAP_PATH, { cache: "no-store" });
     state.map = (await reply.json()) as OfficeMap;

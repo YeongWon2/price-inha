@@ -1,2 +1,6 @@
-// 관리 화면 · 히스토리(server 26차 4번): 메뉴 · 제목 · "준비 중" 빈 상태만 그린다(내용은 뒤 차수). 뼈대: 구현이 채운다.
-export {};
+// 관리 화면 · 히스토리(server 26차 4번): 메뉴 · 제목 · "준비 중" 빈 상태만 그린다(내용은 뒤 차수).
+import { mountMenu } from "../ui/menu";
+import { mountAdminFrame } from "../ui/admin";
+
+mountMenu(document.getElementById("menu"), "history");
+void mountAdminFrame(document.getElementById("screen"));

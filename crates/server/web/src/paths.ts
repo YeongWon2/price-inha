@@ -16,11 +16,11 @@ export const SCREEN_ROOTS: Readonly<Record<ScreenName, string>> = {
   keys: "/keys",
   office: "/office/",
   phone: "/phone/",
-  // 뼈대(server 26차): 관리 화면 넷의 주소는 구현이 채운다.
-  account: "",
-  templates: "",
-  rules: "",
-  history: "",
+  // 관리 화면 넷(server 26차 4번).
+  account: "/account/",
+  templates: "/templates/",
+  rules: "/rules/",
+  history: "/history/",
 };
 
 /** 화면들이 부르는 경로 이름 → 경로. */
@@ -79,11 +79,11 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
-  // 뼈대(server 26차): 관리 화면 넷이 부르는 경로는 구현이 채운다.
-  account: [],
-  templates: [],
-  rules: [],
-  history: [],
+  // 관리 화면 넷(server 26차 4번): 이 차수의 틀은 세션만 얻는다(내용은 뒤 차수).
+  account: [API.session],
+  templates: [API.session],
+  rules: [API.session],
+  history: [API.session],
 };
 
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */

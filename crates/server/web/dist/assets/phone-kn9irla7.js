@@ -1,5 +1,6 @@
-import { a as decidePath, i as approvalPath, r as SCREEN_ROOTS, t as API } from "./paths-k6oehq1x.js";
+import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-cq7sacdp.js";
 // src/phone/main.ts
+mountMenu(document.getElementById("menu"), "phone");
 var OFFICE_PATH = SCREEN_ROOTS.office;
 var $ = (selector) => document.querySelector(selector);
 var lastSeq = 0;

@@ -1,4 +1,4 @@
-import { t as API } from "./paths-k6oehq1x.js";
+import { n as API, t as mountMenu } from "./menu-cq7sacdp.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
@@ -38,6 +38,7 @@ function aiLimitRequest(limit) {
 	};
 }
 // src/setup/main.ts
+mountMenu(document.getElementById("menu"), "setup");
 /** 이 화면의 요소. 칸 · 단추 · 글 자리를 같은 모양(value · checked · disabled · hidden · textContent)으로 다룬다. */
 function byId(id) {
 	return document.getElementById(id);

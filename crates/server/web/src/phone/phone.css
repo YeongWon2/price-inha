@@ -1,18 +1,36 @@
-:root { color-scheme: light dark; --bg: #f8fafc; --fg: #0f172a; --card: #ffffff; --line: #e2e8f0; --accent: #1e293b; --ok: #15803d; --no: #b91c1c; }
-@media (prefers-color-scheme: dark) { :root { --bg: #0f172a; --fg: #e2e8f0; --card: #1e293b; --line: #334155; --accent: #f5c518; } }
+/* 폰 화면 모양. 색 · 간격은 공통 토큰(ui/tokens.css)만 쓴다(server 26차 5번). */
 * { box-sizing: border-box; }
-body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 16px; }
-h1 { font-size: 1.2rem; margin: 0; }
-h2 { font-size: 1rem; margin: 0 0 8px; }
-section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-button { font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-button[data-action="approve"] { background: var(--ok); color: #fff; border-color: var(--ok); }
-button[data-action="reject"] { background: var(--no); color: #fff; border-color: var(--no); }
-input[data-field="code"] { font: inherit; font-size: 1.4rem; letter-spacing: 0.3em; width: 8em; padding: 8px; text-align: center; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
-.muted { opacity: 0.7; font-size: 0.9rem; }
+body {
+  margin: 0; padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  font-family: var(--font-sans); font-size: var(--font-size-md); line-height: 1.5; background: var(--bg); color: var(--text);
+}
+/* 메뉴 띠는 화면 폭 그대로, 나머지 내용은 가운데 한 줄(40rem). */
+#menu { padding-top: env(safe-area-inset-top, 0px); }
+body > :not(#menu) { margin-inline: max(var(--space-4), calc((100% - 40rem) / 2)); }
+header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); margin-block: var(--space-4); }
+h1 { font-size: var(--font-size-xl); margin: 0; letter-spacing: -.01em; }
+h2 { font-size: var(--font-size-md); margin: 0 0 var(--space-2); }
+h3 { font-size: var(--font-size-sm); margin: var(--space-2) 0 var(--space-1); color: var(--text-muted); }
+section {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3);
+}
+button {
+  font: inherit; font-weight: 600; min-height: 44px; padding: 0 var(--space-4); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .55; }
+button[data-action="enable-push"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+button[data-action="approve"] { background: var(--success); color: var(--on-accent); border-color: var(--success); }
+button[data-action="reject"] { background: var(--danger); color: var(--on-accent); border-color: var(--danger); }
+input[data-field="code"] {
+  font: inherit; font-size: var(--font-size-xl); letter-spacing: 0.3em; width: 8em; padding: var(--space-2); text-align: center;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; margin-top: var(--space-2); }
+.muted { color: var(--text-muted); font-size: var(--font-size-sm); }
 ul { list-style: none; margin: 0; padding: 0; }
-li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
 li:last-child { border-bottom: 0; }
 [hidden] { display: none !important; }

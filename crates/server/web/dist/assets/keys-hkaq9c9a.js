@@ -1,6 +1,7 @@
-import { t as API } from "./paths-k6oehq1x.js";
+import { n as API, t as mountMenu } from "./menu-cq7sacdp.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/keys/main.ts
+mountMenu(document.getElementById("menu"), "keys");
 var SLOT_FIELDS = {
 	dart: "api_key",
 	ecos: "api_key",

@@ -1,7 +1,11 @@
 // 폰 화면: 알림 켜기(웹 푸시 구독), 승인 카드, 알림 목록, 하루 정리.
 // 3D 사무실은 단추로 따로 연다(이 묶음은 3D를 불러오지 않는다).
+import { mountMenu } from "../ui/menu";
 import "./phone.css";
 import { API, SCREEN_ROOTS, approvalPath, decidePath, type Verb } from "../paths";
+
+// 공통 메뉴(server 26차 3번): 폰 화면은 메뉴 항목이 아니라 지금 화면 표시가 없다.
+mountMenu(document.getElementById("menu"), "phone");
 
 const OFFICE_PATH = SCREEN_ROOTS.office;
 

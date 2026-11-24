@@ -1,10 +1,73 @@
 /*
- * 디자인 토큰 한 벌(server 26차 1번 · R18-2 · N21 · V76). 뼈대: 값은 구현이 채운다.
+ * 디자인 토큰 한 벌(server 26차 1번 · R18-2 · N21 · V76).
  * 라이트는 :root, 다크는 @media (prefers-color-scheme: dark) 안의 :root에 같은 이름으로 둔다.
+ * 화면 CSS는 이 이름(var(--…))만 쓰고 색 값을 따로 적지 않는다.
  *
  * 색: --bg --surface --text --text-muted --border --accent --danger --warning --success
+ *     (덧붙임) --surface-sunk 가라앉은 면 · --accent-soft 옅은 강조 면 · --on-accent 진한 색 면 위 글자
+ *     · --up 오름(빨강) · --down 내림(파랑)
  * 글자 크기 단계: --font-size-sm --font-size-md --font-size-lg --font-size-xl
  * 간격 단계: --space-1 --space-2 --space-3 --space-4 --space-5
- * 둥글기: --radius-sm --radius-md
+ * 둥글기: --radius-sm --radius-md (--radius-pill 알약)
  * 그림자: --shadow-sm --shadow-md
+ * 대비: 본문 · 흐린 글자는 바탕 · 면 위에서 4.5:1 이상(라이트 · 다크 모두).
  */
+:root {
+  color-scheme: light dark;
+
+  --bg: #fcfcf4;
+  --surface: #fffdf4;
+  --surface-sunk: #eef2e9;
+  --text: #344b3c;
+  --text-muted: #5a6b5e;
+  --border: #cfd9c8;
+  --accent: #4e745b;
+  --accent-soft: #e3ebdf;
+  --on-accent: #ffffff;
+  --danger: #b3412f;
+  --warning: #8a5a00;
+  --success: #2f6b47;
+  --up: #c0362c;
+  --down: #1f5fbf;
+
+  --font-sans: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font-size-sm: 13px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 21px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px #344b3c14, 0 1px 1px #344b3c0d;
+  --shadow-md: 0 6px 20px #344b3c1f, 0 2px 6px #344b3c14;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121814;
+    --surface: #1a221d;
+    --surface-sunk: #222d26;
+    --text: #e6ece3;
+    --text-muted: #a3b2a6;
+    --border: #34443a;
+    --accent: #8cc09c;
+    --accent-soft: #24352a;
+    --on-accent: #0f1a13;
+    --danger: #f0897b;
+    --warning: #e2b65e;
+    --success: #7fcb9b;
+    --up: #f0776c;
+    --down: #7cb0ff;
+
+    --shadow-sm: 0 1px 2px #00000066;
+    --shadow-md: 0 8px 24px #00000080, 0 2px 6px #00000059;
+  }
+}

@@ -1,4 +1,5 @@
-// 화면 빌드(결정 1 · server 11차): 설정(`/`) · 키(`/keys`) · 사무실(`/office/`) · 폰(`/phone/`) 네 쪽의 다중 페이지.
+// 화면 빌드(결정 1 · server 11차 · 26차): 설정(`/`) · 키(`/keys`) · 사무실(`/office/`) · 폰(`/phone/`)과
+// 관리 화면 넷(`/account/` · `/templates/` · `/rules/` · `/history/`)의 다중 페이지.
 // 경로는 이 폴더 기준이다(npm 스크립트는 이 폴더에서 돈다). 빌드 결과 `dist/`는 커밋하고 server가 실행 파일에 넣는다.
 // 같은 소스에서 늘 같은 결과(이름의 해시는 내용 해시)가 나와야 한다(verify.sh 3w가 다시 빌드해 대조한다).
 import { defineConfig, type Plugin } from "vitest/config";
@@ -37,6 +38,11 @@ export default defineConfig({
         keys: "keys.html",
         office: "office/index.html",
         phone: "phone/index.html",
+        // 관리 화면 넷(server 26차 4번): 3D 없이 메뉴 · 공통 부품만 싣는다.
+        account: "account/index.html",
+        templates: "templates/index.html",
+        rules: "rules/index.html",
+        history: "history/index.html",
       },
       output: {
         // 이름의 해시는 내용 해시. `-`가 해시 안에 끼지 않게 글자를 좁힌다(`/assets/<이름>-<해시>.js`).

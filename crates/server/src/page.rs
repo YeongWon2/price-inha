@@ -1,8 +1,10 @@
 //! 화면 파일. 화면 빌드 결과(`web/dist`, Vite — server 11차)를 build.rs가 실행 파일에 넣은 표에서 내준다
-//! (바깥에서 아무것도 불러오지 않는다). 설정(`GET /`) · 키(`GET` [`crate::KEYS_PAGE_PATH`])는 여기서,
+//! (바깥에서 아무것도 불러오지 않는다). 설정(`GET /`) · 키(`GET` [`crate::KEYS_PAGE_PATH`]) ·
+//! 관리 화면 넷(`GET` [`ADMIN_PAGE_PATHS`] — 26차 4번)은 여기서,
 //! 사무실 · 폰 · 묶음(`/office/` · `/phone/` · `/assets/`)은 `reach::assets`가 이 표로 내준다.
 
 use axum::Router;
+use axum::extract::Path;
 use axum::http::header::{
     CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, REFERRER_POLICY,
     X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
@@ -43,9 +45,38 @@ pub(crate) const NO_CACHE: &str = "no-cache";
 /// 캐시: 내용 해시가 이름에 붙은 묶음(`/assets/`)은 오래 둔다(내용이 바뀌면 이름이 바뀐다).
 pub(crate) const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
-/// 공개 경로: `GET /`.
+/// 관리 화면 넷의 주소와 dist 안의 HTML(26차 4번, [`ADMIN_PAGE_PATHS`] 차례).
+const ADMIN_PAGES: [(&str, &str); 4] = [
+    (ACCOUNT_PAGE_PATH, "account/index.html"),
+    (TEMPLATES_PAGE_PATH, "templates/index.html"),
+    (RULES_PAGE_PATH, "rules/index.html"),
+    (HISTORY_PAGE_PATH, "history/index.html"),
+];
+
+/// 공개 경로: `GET /`과 관리 화면 넷(`GET` [`ADMIN_PAGE_PATHS`], 그 폴더 아래 dist 파일 포함 — 사무실 · 폰과 같다).
+/// 공개 경로라 관문 규칙이 설정 · 사무실 화면과 같다: 그 컴퓨터는 세션 없이, 다른 기기는 원격 세션이 있어야 열린다.
 pub(crate) fn routes() -> Router {
-    Router::new().route("/", get(index))
+    ADMIN_PAGES
+        .into_iter()
+        .fold(Router::new().route("/", get(index)), admin_routes)
+}
+
+/// 관리 화면 하나: 주소(`/account/`)는 그 HTML을, 그 아래(`/account/<파일>`)는 dist의 같은 경로 파일을 내준다.
+fn admin_routes(router: Router, (path, rel): (&'static str, &'static str)) -> Router {
+    let dir = path.trim_matches('/');
+    router
+        .route(
+            path,
+            get(move |headers: HeaderMap| async move { serve(&headers, rel, NO_STORE) }),
+        )
+        .route(
+            &format!("{path}{{*rest}}"),
+            get(
+                move |headers: HeaderMap, Path(rest): Path<String>| async move {
+                    serve(&headers, &format!("{dir}/{rest}"), NO_CACHE)
+                },
+            ),
+        )
 }
 
 /// dist 안의 파일(`/` 구분 상대 경로).

@@ -1,10 +1,14 @@
 // 설정 화면(`/`): 시세 · 이벤트 · 설정(키 · 종목 · AI · 백업 · 접속 키)을 같은 출처로만 읽고 보낸다.
 // 옛 한 장 화면(web/index.html)의 인라인 스크립트를 그대로 옮긴 모듈이다(server 11차 — 하는 일 · 보내는 요청 ·
 // 화면 글은 같다). 서버가 준 글자는 언제나 textContent로만 넣는다.
+import { mountMenu } from "../ui/menu";
 import "./setup.css";
 import { API } from "../paths";
 import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
 import { aiLimitRequest, formatAiLimit, parseAiLimit, readAiLimit } from "./ai-limit";
+
+// 공통 메뉴(server 26차 3번): 화면 맨 위 자리에 단다.
+mountMenu(document.getElementById("menu"), "setup");
 
 /** 서버가 보낸 JSON 또는 그 조각. 모양은 쓰는 자리에서 확인한다(옛 화면과 같은 확인). */
 type Data = any;
