@@ -204,7 +204,8 @@ impl Team {
             }
         };
         let total = match consensus(&scores) {
-            // 호출이 모자라 아무도 점수를 내지 못했으면 합의 기준을 건너뛴다(10차).
+            // 호출이 모자라 아무도 점수를 내지 못했으면 합의 기준을 건너뛰고 팀장이 정리만 한다(10차).
+            // 이때 팀장의 사기 · 팔기 답은 판단으로 받지 않는다(`judge.rs` — 기권이 있으면 지켜보기).
             None if run.abstained() => None,
             None => {
                 let reason = WatchReason::ConsensusBelow {

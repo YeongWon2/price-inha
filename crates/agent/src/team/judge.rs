@@ -52,6 +52,9 @@ impl Team {
             }
             Verdict::Trade { side, rationale } => (side, rationale),
         };
+        if let Some(reason) = partial_consensus(session, total) {
+            return watched(session, reason, scores, total);
+        }
         if !is_complete(&rationale) {
             return watched(session, WatchReason::RationaleIncomplete, scores, total);
         }
@@ -104,6 +107,18 @@ impl Team {
             Err(other) => Err(other),
         }
     }
+}
+
+/// (10차 검토) 호출이 모자라 점수를 내지 못한 담당이 있으면 합의가 온전하지 않다. 팀장이 사기 · 팔기로
+/// 답해도 판단을 저장하지 않고 지켜보기로 끝낼 까닭을 준다(E27 — 적은 표나 표 없이 매매가 나가지 않게).
+fn partial_consensus(session: &Session<'_>, total: Option<i32>) -> Option<WatchReason> {
+    session
+        .run
+        .abstained()
+        .then(|| WatchReason::ConsensusBelow {
+            consensus: total.unwrap_or(0),
+            required: session.request.consensus_required,
+        })
 }
 
 /// 판단의 자료: 요청의 자료 이름(가린 것)과 알게 된 시각.
