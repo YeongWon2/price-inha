@@ -96,8 +96,10 @@ pub(crate) fn leader_turn(
     briefing: &str,
     said: &[(Role, String)],
     scores: &[RoleScore],
-    consensus: i32,
+    consensus: Option<i32>,
 ) -> String {
+    // 합의 점수가 없음은 호출 예산이 모자라 아무도 점수를 내지 못한 때뿐이다(10차).
+    let consensus = consensus.map_or_else(|| "없음".to_string(), |total| total.to_string());
     let mut out = format!("{briefing}\n[논의]\n{}\n[담당 점수]\n", transcript(said));
     for scored in scores {
         out.push_str(&format!(

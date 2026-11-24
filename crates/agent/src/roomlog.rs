@@ -66,6 +66,12 @@ impl<'a> RoomLog<'a> {
         self.append("room.activity", RoomActorKind::Gateway, GATEWAY_ID, payload)
     }
 
+    /// 호출이 얼마 남지 않아 정리 모드로 들어감(`room.activity`, 10차 E52).
+    pub(crate) fn wrap_up(&self) -> Result<(), pi_store::StoreError> {
+        let payload = json!({"status": "wrap_up"});
+        self.append("room.activity", RoomActorKind::Gateway, GATEWAY_ID, payload)
+    }
+
     /// 팔기로 판단됐지만 팔 보유가 없음(`room.activity`, 9차).
     pub(crate) fn nothing_held(&self, trade: TradeId) -> Result<(), pi_store::StoreError> {
         let payload = json!({"status": "nothing_held", "trade": trade.0});

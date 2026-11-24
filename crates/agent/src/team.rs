@@ -41,10 +41,10 @@
 //! 하나 남긴다. 방 로그 · 판단 · 주문 안에 남는 글은 모두 가린 것이다(E38).
 //! 실행기는 승인을 붙이거나 매매를 승인대기 · 주문됨으로 옮기지 않는다(P21).
 
-use pi_store::{Judgment, RoleScore, SourceRef, TradeId, TradeSide, TradeState};
+use pi_store::{RoleScore, TradeId, TradeSide, TradeState};
 use serde_json::json;
 
-use crate::discussion::{DataItem, Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
+use crate::discussion::{Decision, DiscussionOutcome, DiscussionRequest, WatchReason};
 use crate::error::{Error, TurnFailure};
 use crate::floor::{Floor, is_pass, mentions};
 use crate::ports::{OrderDraft, Side};
@@ -55,8 +55,12 @@ use crate::roomlog::{RoomLog, Writer};
 use crate::score::{consensus, exceeds_threshold, parse_score};
 use crate::turn::{Ports, TurnOutcome, TurnRunner};
 
+mod judge;
+mod run;
 mod sell;
-use crate::verdict::{Verdict, is_complete, parse_draft, parse_verdict};
+use crate::progress::{ProgressSignal, Stage};
+use crate::verdict::parse_draft;
+use run::Run;
 
 /// 투자 팀. 담당 6명의 설정과 실행기를 가진다.
 #[derive(Clone)]
@@ -80,6 +84,7 @@ struct Session<'a> {
     request: &'a DiscussionRequest,
     room: RoomLog<'a>,
     briefing: String,
+    run: &'a Run,
 }
 
 impl Team {
@@ -107,11 +112,57 @@ impl Team {
     }
 
     /// 논의 하나를 끝까지 돈다(모듈 문서의 순서).
+    /// [`Team::discuss_with`]에 기본 옵션을 넘긴 것과 같다.
     pub async fn discuss(&self, request: DiscussionRequest) -> Result<DiscussionOutcome, Error> {
+        self.discuss_with(request, DiscussionOptions::default())
+            .await
+    }
+
+    /// 논의 하나를 옵션(진행 신호 포트 · 호출 예산 · 다시 시도)과 함께 돈다(10차).
+    ///
+    /// - 옵션이 기본이면 [`Team::discuss`]와 똑같다.
+    /// - 신호는 [`crate::ProgressSignal`] 순서로 낸다. 포트가 실패해도 논의는 그대로 간다.
+    /// - 예산이 있으면 담당 턴은 `remaining - reserve`까지만 쓴다(예비분은 팀장 몫).
+    ///   남은 호출이 `wrap_up_at` 이하이면 새 라운드를 열지 않고 점수 턴 · 팀장 판단으로 넘어간다.
+    ///   그때 방 로그에 `room.activity`(`{"status": "wrap_up"}`)를 남기고 팀장 턴 글에
+    ///   [`crate::WRAP_UP_LINE`]을 넣는다. 담당 턴을 쓸 호출이 없으면 그 담당은 기권이다
+    ///   (점수 턴을 하지 않고, 합의 점수는 점수를 낸 담당만으로 따진다. 아무도 못 냈으면
+    ///   합의 기준을 건너뛰고 팀장 판단 턴으로 간다).
+    ///
+    /// 정해 둔 것(시험이 덮지 않는 곳):
+    /// - 논의 중 담당 턴을 쓸 호출이 떨어지면 그 자리에서 논의를 끝내고 점수 턴으로 간다
+    ///   (기권한 담당은 신호를 내지 않는다). 문턱에 닿은 것이 아니므로 정리 모드는 아니다.
+    /// - 다시 시도는 논의 턴에만 한다(점수 턴 · 팀장 턴은 지금처럼 한 번). 다시 시도도 호출 하나를
+    ///   쓰고, 쓸 호출이 없으면 그만둔다. `Retry`의 `max`는 옵션으로 받은 다시 시도 수다.
+    /// - 빈 답을 다 써서 넘김이 된 턴([`TurnFailure::EmptyReply`])은 실패가 아니라 완료다.
+    /// - 팀장 턴은 예비분에서 나가므로 막지 않는다. 판단 뒤 매매 담당의 주문 안 턴은 세지 않는다.
+    /// - 요청이 틀리면([`Error::InvalidMembers`]) 신호를 내지 않는다. 그 밖에는 오류로 끝나도
+    ///   마지막에 `Closed`를 한 번 낸다.
+    pub async fn discuss_with(
+        &self,
+        request: DiscussionRequest,
+        options: DiscussionOptions,
+    ) -> Result<DiscussionOutcome, Error> {
         check_members(&request)?;
+        let run = Run::new(options);
+        run.signal(ProgressSignal::Opened {
+            members: request.members.clone(),
+        });
+        let result = self.discuss_run(&request, &run).await;
+        run.signal(ProgressSignal::Closed);
+        result
+    }
+
+    /// 확인된 요청으로 논의를 끝까지 돈다(모듈 문서 2번부터).
+    async fn discuss_run(
+        &self,
+        request: &DiscussionRequest,
+        run: &Run,
+    ) -> Result<DiscussionOutcome, Error> {
         let trade = self.ports.store.get_trade(request.trade)?;
         let session = Session {
-            request: &request,
+            request,
+            run,
             room: RoomLog::new(
                 Writer {
                     store: &self.ports.store,
@@ -121,7 +172,7 @@ impl Team {
                 &request.room,
                 request.trade,
             )?,
-            briefing: prompt::briefing(&request, &trade.symbol),
+            briefing: prompt::briefing(request, &trade.symbol),
         };
         let missing: Vec<String> = request
             .data
@@ -152,39 +203,26 @@ impl Team {
                 );
             }
         };
-        let Some(total) = consensus(&scores) else {
-            let reason = WatchReason::ConsensusBelow {
-                consensus: 0,
-                required: request.consensus_required,
-            };
-            return watched(&session, reason, scores, None);
+        let total = match consensus(&scores) {
+            // 호출이 모자라 아무도 점수를 내지 못했으면 합의 기준을 건너뛴다(10차).
+            None if run.abstained() => None,
+            None => {
+                let reason = WatchReason::ConsensusBelow {
+                    consensus: 0,
+                    required: request.consensus_required,
+                };
+                return watched(&session, reason, scores, None);
+            }
+            Some(total) if !exceeds_threshold(total, request.consensus_required) => {
+                let reason = WatchReason::ConsensusBelow {
+                    consensus: total,
+                    required: request.consensus_required,
+                };
+                return watched(&session, reason, scores, Some(total));
+            }
+            Some(total) => Some(total),
         };
-        if !exceeds_threshold(total, request.consensus_required) {
-            let reason = WatchReason::ConsensusBelow {
-                consensus: total,
-                required: request.consensus_required,
-            };
-            return watched(&session, reason, scores, Some(total));
-        }
         self.judge(&session, floor.said(), scores, total).await
-    }
-
-    /// 논의 하나를 옵션(진행 신호 포트 · 호출 예산 · 다시 시도)과 함께 돈다(10차).
-    ///
-    /// - 옵션이 기본이면 [`Team::discuss`]와 똑같다.
-    /// - 신호는 [`crate::ProgressSignal`] 순서로 낸다. 포트가 실패해도 논의는 그대로 간다.
-    /// - 예산이 있으면 담당 턴은 `remaining - reserve`까지만 쓴다(예비분은 팀장 몫).
-    ///   남은 호출이 `wrap_up_at` 이하이면 새 라운드를 열지 않고 점수 턴 · 팀장 판단으로 넘어간다.
-    ///   그때 방 로그에 `room.activity`(`{"status": "wrap_up"}`)를 남기고 팀장 턴 글에
-    ///   [`crate::WRAP_UP_LINE`]을 넣는다. 담당 턴을 쓸 호출이 없으면 그 담당은 기권이다
-    ///   (점수 턴을 하지 않고, 합의 점수는 점수를 낸 담당만으로 따진다. 아무도 못 냈으면
-    ///   합의 기준을 건너뛰고 팀장 판단 턴으로 간다).
-    pub async fn discuss_with(
-        &self,
-        request: DiscussionRequest,
-        options: DiscussionOptions,
-    ) -> Result<DiscussionOutcome, Error> {
-        todo!()
     }
 
     /// 매매 담당이 주문 안을 만들어 도구 포트로 넘긴다(V4).
@@ -247,6 +285,45 @@ impl Team {
         }
     }
 
+    /// 논의 턴 하나: 진행 신호를 내고, 실패하면 옵션의 수만큼 다시 시도한다(10차, E51).
+    /// 첫 호출은 부르는 쪽이 이미 셌다. 다시 시도는 호출 하나씩을 더 쓴다.
+    async fn discussion_turn(
+        &self,
+        session: &Session<'_>,
+        role: Role,
+        input: &str,
+    ) -> Result<Spoken, Error> {
+        let run = session.run;
+        let mut attempt = 0;
+        loop {
+            run.signal(ProgressSignal::Member {
+                role,
+                stage: Stage::Running,
+            });
+            let spoken = self.speak(session, role, input).await;
+            let failed = match &spoken {
+                Ok(Spoken::Failed(cause)) => *cause != TurnFailure::EmptyReply,
+                Ok(Spoken::Text(_)) => false,
+                Err(_) => true,
+            };
+            let stage = if failed { Stage::Error } else { Stage::Done };
+            run.signal(ProgressSignal::Member { role, stage });
+            let retry = matches!(spoken, Ok(Spoken::Failed(_)))
+                && failed
+                && attempt < run.retries()
+                && run.member_call();
+            if !retry {
+                return spoken;
+            }
+            attempt += 1;
+            run.signal(ProgressSignal::Retry {
+                role,
+                attempt,
+                max: run.retries(),
+            });
+        }
+    }
+
     /// 논의(결정 14번). 지켜보기로 끝나면 그 까닭을 준다.
     async fn converse(
         &self,
@@ -266,15 +343,24 @@ impl Team {
             if round >= limits.max_rounds {
                 return Ok(Some(WatchReason::DiscussionBounded));
             }
+            if session.run.wrap_up_due() {
+                session.run.enter_wrap_up();
+                session.room.wrap_up()?;
+                return Ok(None);
+            }
             let shift = usize::try_from(round).unwrap_or(0) % responders.len();
             responders.rotate_left(shift);
             for role in responders {
                 if floor.count() >= usize::try_from(limits.max_messages).unwrap_or(usize::MAX) {
                     return Ok(Some(WatchReason::DiscussionBounded));
                 }
+                if !session.run.member_call() {
+                    // 담당 턴을 쓸 호출이 없다: 기권하고 논의를 끝낸다(예비분은 팀장 몫).
+                    return Ok(None);
+                }
                 let briefing = floor.is_new(role).then_some(session.briefing.as_str());
                 let input = prompt::discussion_turn(briefing, round, &floor.unseen(role));
-                let text = match self.speak(session, role, &input).await? {
+                let text = match self.discussion_turn(session, role, &input).await? {
                     Spoken::Text(text) => text,
                     Spoken::Failed(TurnFailure::EmptyReply) => String::new(),
                     Spoken::Failed(cause) => return failed(session, role, &cause.to_string()),
@@ -308,6 +394,12 @@ impl Team {
             if role == Role::Leader {
                 continue;
             }
+            if !session.run.member_call() {
+                // 호출이 모자라 점수 턴을 기권한다(10차). 신호도 내지 않는다.
+                session.run.abstain();
+                continue;
+            }
+            session.run.signal(ProgressSignal::ScoreTurn { role });
             let parsed = match self.speak(session, role, &prompt::score_turn()).await? {
                 Spoken::Text(text) => parse_score(&text)
                     .ok_or_else(|| TurnFailure::InvalidStructuredReply.to_string()),
@@ -327,97 +419,6 @@ impl Team {
         }
         Ok(Ok(scores))
     }
-
-    /// 팀장 판단 턴과 그 뒤(판단 저장 · 주문 안).
-    async fn judge(
-        &self,
-        session: &Session<'_>,
-        said: &[(Role, String)],
-        scores: Vec<RoleScore>,
-        total: i32,
-    ) -> Result<DiscussionOutcome, Error> {
-        let input = prompt::leader_turn(&session.briefing, said, &scores, total);
-        let verdict = match self.speak(session, Role::Leader, &input).await? {
-            Spoken::Text(text) => match parse_verdict(&text) {
-                Some(verdict) => {
-                    let payload = json!({"text": text, "decision": verdict.code()});
-                    session.room.member(Role::Leader, payload)?;
-                    verdict
-                }
-                None => {
-                    let reason = TurnFailure::InvalidStructuredReply.to_string();
-                    return failed_scored(session, Role::Leader, &reason, scores, total);
-                }
-            },
-            Spoken::Failed(cause) => {
-                let reason = cause.to_string();
-                return failed_scored(session, Role::Leader, &reason, scores, total);
-            }
-        };
-        let (side, rationale) = match verdict {
-            Verdict::Watch { reason, revisit } => {
-                let reason = WatchReason::LeaderWatch { reason, revisit };
-                return watched(session, reason, scores, Some(total));
-            }
-            Verdict::Trade { side, rationale } => (side, rationale),
-        };
-        if !is_complete(&rationale) {
-            return watched(
-                session,
-                WatchReason::RationaleIncomplete,
-                scores,
-                Some(total),
-            );
-        }
-        let judgment = Judgment {
-            decided_at: self.ports.clock.now(),
-            rationale,
-            sources: sources(&session.request.data, self.ports.redactor.as_ref()),
-            scores: scores.clone(),
-            consensus_score: total,
-        };
-        let stored_side = match side {
-            Side::Buy => TradeSide::Buy,
-            Side::Sell => TradeSide::Sell,
-        };
-        self.ports
-            .store
-            .judge_trade_with_side(session.request.trade, judgment, stored_side)?;
-        let (decision, order, sells) = match side {
-            Side::Sell => (
-                Decision::Sell,
-                None,
-                self.sells_after_judgment(session).await?,
-            ),
-            Side::Buy => (
-                Decision::Buy,
-                self.order_after_judgment(session).await?,
-                Vec::new(),
-            ),
-        };
-        Ok(DiscussionOutcome {
-            decision,
-            scores,
-            consensus: Some(total),
-            order,
-            sells,
-        })
-    }
-
-    /// 사기로 판단된 뒤 매매 담당의 주문 안. 매매 담당이 답하지 못하면 주문 안 없이 둔다.
-    async fn order_after_judgment(
-        &self,
-        session: &Session<'_>,
-    ) -> Result<Option<OrderDraft>, Error> {
-        match self.draft_order(session.request.trade).await {
-            Ok(draft) => Ok(Some(draft)),
-            Err(Error::RoleUnavailable { role, cause }) => {
-                session.room.failed(role, &cause.to_string())?;
-                Ok(None)
-            }
-            Err(other) => Err(other),
-        }
-    }
 }
 
 /// 요청 확인(모듈 문서 1번).
@@ -434,16 +435,6 @@ fn check_members(request: &DiscussionRequest) -> Result<(), Error> {
         return Err(Error::InvalidMembers);
     }
     Ok(())
-}
-
-/// 판단의 자료: 요청의 자료 이름(가린 것)과 알게 된 시각.
-fn sources(data: &[DataItem], redactor: &dyn pi_ai::Redactor) -> Vec<SourceRef> {
-    data.iter()
-        .map(|item| SourceRef {
-            name: redactor.redact(&item.name),
-            known_at: item.known_at,
-        })
-        .collect()
 }
 
 /// 지켜보기로 끝낸다: 방 로그에 까닭 코드를 남긴다. 매매는 그대로다.
@@ -467,21 +458,4 @@ fn watched(
 fn failed(session: &Session<'_>, role: Role, reason: &str) -> Result<Option<WatchReason>, Error> {
     session.room.failed(role, reason)?;
     Ok(Some(WatchReason::RoleUnavailable(role)))
-}
-
-/// 점수 뒤(팀장 턴) 응답 실패로 지켜보기.
-fn failed_scored(
-    session: &Session<'_>,
-    role: Role,
-    reason: &str,
-    scores: Vec<RoleScore>,
-    total: i32,
-) -> Result<DiscussionOutcome, Error> {
-    session.room.failed(role, reason)?;
-    watched(
-        session,
-        WatchReason::RoleUnavailable(role),
-        scores,
-        Some(total),
-    )
 }
