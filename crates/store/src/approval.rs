@@ -149,7 +149,7 @@ impl Store {
 const COLUMNS: &str =
     "id, fingerprint, summary, status, created_at, expires_at, resolved_at, consumed_at";
 
-fn status_code(status: ApprovalStatus) -> &'static str {
+pub(crate) fn status_code(status: ApprovalStatus) -> &'static str {
     match status {
         ApprovalStatus::Pending => "pending",
         ApprovalStatus::Approved => "approved",
@@ -159,7 +159,7 @@ fn status_code(status: ApprovalStatus) -> &'static str {
     }
 }
 
-fn status_from(code: &str) -> Result<ApprovalStatus, StoreError> {
+pub(crate) fn status_from(code: &str) -> Result<ApprovalStatus, StoreError> {
     ApprovalStatus::ALL
         .into_iter()
         .find(|status| status_code(*status) == code)
