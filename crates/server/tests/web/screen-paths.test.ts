@@ -1,10 +1,19 @@
 // 화면이 부르는 경로 목록(server 11차 2번 · 5번): 지금 화면과 같은 경로, 같은 출처만, 바깥 주소 없음.
 import { describe, expect, it } from "vitest";
-import { SCREEN_PATHS, approvalPath, decidePath } from "../../web/src/paths";
+import { SCREEN_PATHS, SCREEN_ROOTS, approvalPath, decidePath } from "../../web/src/paths";
 
 const sources = import.meta.glob<string>("../../web/src/**/*.ts", { query: "?raw", import: "default", eager: true });
 const entries = import.meta.glob<string>(
-  ["../../web/index.html", "../../web/keys.html", "../../web/office/index.html", "../../web/phone/index.html"],
+  [
+    "../../web/index.html",
+    "../../web/keys.html",
+    "../../web/office/index.html",
+    "../../web/phone/index.html",
+    "../../web/account/index.html",
+    "../../web/templates/index.html",
+    "../../web/rules/index.html",
+    "../../web/history/index.html",
+  ],
   { query: "?raw", import: "default", eager: true },
 );
 
@@ -45,6 +54,27 @@ describe("화면이 부르는 경로", () => {
     expect(sorted(SCREEN_PATHS.phone)).toEqual(
       sorted(["/api/push/key", "/api/push/subscribe", "/api/notices", "/api/daily-summary", ...APPROVALS]),
     );
+    // 26차 4번: 관리 화면 넷(틀만)은 세션 경로만 부른다.
+    for (const screen of ["account", "templates", "rules", "history"] as const) {
+      expect(sorted(SCREEN_PATHS[screen]), screen).toEqual(["/api/session"]);
+    }
+    expect(Object.keys(SCREEN_PATHS).sort()).toEqual(
+      ["setup", "keys", "office", "phone", "account", "templates", "rules", "history"].sort(),
+    );
+  });
+
+  it("화면 주소 표는 여덟 화면의 주소다", () => {
+    // 검증: D11 V75
+    expect(SCREEN_ROOTS).toEqual({
+      setup: "/",
+      keys: "/keys",
+      office: "/office/",
+      phone: "/phone/",
+      account: "/account/",
+      templates: "/templates/",
+      rules: "/rules/",
+      history: "/history/",
+    });
   });
 
   it("모든 경로는 같은 출처의 절대 경로다(바깥 주소 없음)", () => {
@@ -64,9 +94,9 @@ describe("화면이 부르는 경로", () => {
     expect(decidePath("a/b", "reject")).toBe("/api/approvals/a%2Fb/reject");
   });
 
-  it("네 쪽의 HTML이 있고 화면 소스 어디에도 바깥 주소가 없다", () => {
+  it("여덟 쪽의 HTML이 있고 화면 소스 어디에도 바깥 주소가 없다", () => {
     // 검증: D11 D1
-    expect(Object.keys(entries).length).toBe(4);
+    expect(Object.keys(entries).length).toBe(8);
     const all = { ...sources, ...entries };
     for (const [name, text] of Object.entries(all)) {
       for (const outside of ["http://", "https://", 'src="//', 'href="//', "url(//"]) {

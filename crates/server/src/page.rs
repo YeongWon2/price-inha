@@ -19,6 +19,23 @@ const INDEX_FILE: &str = "index.html";
 /// 다른 기기의 키 입력 화면(dist 안의 이름).
 const KEYS_FILE: &str = "keys.html";
 
+/// 관리 화면(26차 4번): 계좌 화면 주소(`GET`). 관문은 설정 · 사무실 화면과 같다(그 컴퓨터는 세션 없이,
+/// 다른 기기는 원격 세션이 있어야 열린다). dist의 `account/index.html`을 내준다.
+pub const ACCOUNT_PAGE_PATH: &str = "/account/";
+/// 관리 화면(26차 4번): 템플릿 화면 주소(`GET`). dist의 `templates/index.html`.
+pub const TEMPLATES_PAGE_PATH: &str = "/templates/";
+/// 관리 화면(26차 4번): 규칙 화면 주소(`GET`). dist의 `rules/index.html`.
+pub const RULES_PAGE_PATH: &str = "/rules/";
+/// 관리 화면(26차 4번): 히스토리 화면 주소(`GET`). dist의 `history/index.html`.
+pub const HISTORY_PAGE_PATH: &str = "/history/";
+/// 관리 화면 넷의 주소(계좌 · 템플릿 · 규칙 · 히스토리 차례).
+pub const ADMIN_PAGE_PATHS: [&str; 4] = [
+    ACCOUNT_PAGE_PATH,
+    TEMPLATES_PAGE_PATH,
+    RULES_PAGE_PATH,
+    HISTORY_PAGE_PATH,
+];
+
 /// 캐시: 설정 · 키 화면은 남기지 않는다(지금처럼).
 pub(crate) const NO_STORE: &str = "no-store";
 /// 캐시: 사무실 · 폰 쪽 파일(HTML · `sw.js` · manifest 포함)은 늘 다시 확인한다(지금처럼).

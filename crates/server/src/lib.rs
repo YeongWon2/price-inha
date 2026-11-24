@@ -55,6 +55,9 @@ pub use error::{
 };
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
 pub use log::{RedactedLine, RedactingWriter};
+pub use page::{
+    ACCOUNT_PAGE_PATH, ADMIN_PAGE_PATHS, HISTORY_PAGE_PATH, RULES_PAGE_PATH, TEMPLATES_PAGE_PATH,
+};
 pub use reach::{
     APPROVAL_DECIDE_PATH, APPROVAL_PATH, BACKUP_SETTINGS_FILE, BackupWiring, CHAT_IDLE_TIMEOUT,
     CHAT_TOTAL_TIMEOUT, DAILY_SUMMARY_PATH, DEFAULT_EMBED_MODEL, DEFAULT_PUSH_SUBJECT,

@@ -1,8 +1,11 @@
 // 화면이 부르는 같은 출처 경로의 표(server 11차). 화면 코드는 이 표 · 함수의 값으로만 서버를 부른다.
 // 바깥 주소는 없다. 번호가 들어가는 자리는 표에서 `{id}`로 적는다.
 
-/** 화면 이름: 설정(`/`) · 키(`/keys`) · 사무실(`/office/`) · 폰(`/phone/`). */
-export type ScreenName = "setup" | "keys" | "office" | "phone";
+/**
+ * 화면 이름: 설정(`/`) · 키(`/keys`) · 사무실(`/office/`) · 폰(`/phone/`),
+ * 관리 화면(server 26차 4번) 계좌(`/account/`) · 템플릿(`/templates/`) · 규칙(`/rules/`) · 히스토리(`/history/`).
+ */
+export type ScreenName = "setup" | "keys" | "office" | "phone" | "account" | "templates" | "rules" | "history";
 
 /** 승인 카드의 답. */
 export type Verb = "approve" | "reject";
@@ -13,6 +16,11 @@ export const SCREEN_ROOTS: Readonly<Record<ScreenName, string>> = {
   keys: "/keys",
   office: "/office/",
   phone: "/phone/",
+  // 뼈대(server 26차): 관리 화면 넷의 주소는 구현이 채운다.
+  account: "",
+  templates: "",
+  rules: "",
+  history: "",
 };
 
 /** 화면들이 부르는 경로 이름 → 경로. */
@@ -71,6 +79,11 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [API.session, API.office, API.officeChat, API.officeLooks, API.officeLook, API.socket, ...APPROVALS],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
+  // 뼈대(server 26차): 관리 화면 넷이 부르는 경로는 구현이 채운다.
+  account: [],
+  templates: [],
+  rules: [],
+  history: [],
 };
 
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
