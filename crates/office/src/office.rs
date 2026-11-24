@@ -3,13 +3,13 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use pi_store::UnixMillis;
+use pi_store::{NoticeId, UnixMillis};
 use serde_json::Value;
 
 use crate::chat::{ChatResponse, ChatStatus, Room};
 use crate::error::Error;
 use crate::place::{Activity, Agent, AgentView, TeamState, Work, place_of};
-use crate::port::{Clock, EventSink};
+use crate::port::{AiBudget, Clock, EventSink};
 use crate::summon::{SummonPhase, SummonReason};
 use crate::{CHAT_QUEUE_MAX, EVENT_AGENT, EVENT_CHAT};
 
@@ -46,6 +46,10 @@ pub struct Office {
     state: Mutex<State>,
     /// 응답 번호의 앞머리(만든 시각). 다시 켜도 번호가 앞서 낸 것과 겹치지 않게 한다.
     id_prefix: i64,
+    /// 공지 저장소와 가리기(6차). 끼우지 않으면 공지를 받지 않는다.
+    notices: Option<notice_flow::NoticeDesk>,
+    /// 하루 AI 호출 상한 판정(6차). 끼우지 않으면 늘 허용한다.
+    ai_budget: Option<Arc<dyn AiBudget>>,
 }
 
 struct State {
@@ -75,6 +79,8 @@ struct State {
     work_override: [Option<Work>; 6],
     /// 이미 반영한 일 소식의 시각. 이보다 크지 않은 늦은 소식은 버린다(E55).
     work_floor: [Option<UnixMillis>; 6],
+    /// 사용자 글마다 남은 이어 말하기 횟수(6차).
+    relay: mention_flow::RelayBudgets,
 }
 
 impl State {
@@ -162,6 +168,7 @@ impl Office {
             work_since: [UnixMillis(id_prefix); 6],
             work_override: [None; 6],
             work_floor: [None; 6],
+            relay: mention_flow::RelayBudgets::default(),
         };
         Office {
             sink,
@@ -169,6 +176,8 @@ impl Office {
             turn: tokio::sync::Mutex::new(()),
             state: Mutex::new(state),
             id_prefix,
+            notices: None,
+            ai_budget: None,
         }
     }
 
@@ -267,25 +276,48 @@ impl Office {
             return Err(Error::EmptyMessage);
         }
         let _turn = self.turn.lock().await;
-        let response = {
+        self.enqueue(room, agent, source_message_id, None).await
+    }
+
+    /// 새 응답 객체(queued). 번호를 하나 쓴다.
+    fn new_response(
+        &self,
+        room: Room,
+        agent: Agent,
+        source_message_id: &str,
+        notice: Option<NoticeId>,
+    ) -> ChatResponse {
+        let n = {
             let mut state = self.state();
-            if state.queues[agent.index()].len() >= CHAT_QUEUE_MAX {
-                return Err(Error::QueueFull { agent });
-            }
-            let n = state.next_id;
             state.next_id += 1;
-            ChatResponse {
-                request_id: format!("chat-{}-{n}", self.id_prefix),
-                source_message_id: source_message_id.to_owned(),
-                agent,
-                room,
-                status: ChatStatus::Queued,
-                content: String::new(),
-                updated_at: self.clock.now(),
-                error: None,
-                notice: None,
-            }
+            state.next_id - 1
         };
+        ChatResponse {
+            request_id: format!("chat-{}-{n}", self.id_prefix),
+            source_message_id: source_message_id.to_owned(),
+            agent,
+            room,
+            status: ChatStatus::Queued,
+            content: String::new(),
+            updated_at: self.clock.now(),
+            error: None,
+            notice,
+        }
+    }
+
+    /// 응답 객체를 queued로 만들어 내고 담당 모습을 맞춘다. `turn`을 쥔 채로 부른다.
+    /// 그 담당의 대기열이 차 있으면 [`Error::QueueFull`]이고 아무것도 바꾸지 않는다.
+    async fn enqueue(
+        &self,
+        room: Room,
+        agent: Agent,
+        source_message_id: &str,
+        notice: Option<NoticeId>,
+    ) -> Result<ChatResponse, Error> {
+        if self.state().queues[agent.index()].len() >= CHAT_QUEUE_MAX {
+            return Err(Error::QueueFull { agent });
+        }
+        let response = self.new_response(room, agent, source_message_id, notice);
         self.publish_response(&response).await?;
         self.sync_views_after(&[agent]).await;
         Ok(response)
@@ -348,6 +380,15 @@ impl Office {
     ///   `office.notice_ack`를 낸다(6차).
     pub async fn complete(&self, request_id: &str, content: &str) -> Result<ChatResponse, Error> {
         let _turn = self.turn.lock().await;
+        self.complete_locked(request_id, content).await
+    }
+
+    /// [`Office::complete`]의 몸통. `turn`을 쥔 채로 부른다.
+    async fn complete_locked(
+        &self,
+        request_id: &str,
+        content: &str,
+    ) -> Result<ChatResponse, Error> {
         let mut response = self.open_response(request_id)?;
         if response.status != ChatStatus::Thinking {
             return Err(Error::InvalidTransition(request_id.to_owned()));
@@ -361,7 +402,9 @@ impl Office {
             response.content = content.to_owned();
             response.error = None;
         }
-        self.finish(response).await
+        let done = self.finish(response).await?;
+        self.settle_notice(&done).await;
+        Ok(done)
     }
 
     /// 응답을 실패로 끝낸다(E6). queued · thinking에서 갈 수 있다.
@@ -377,7 +420,9 @@ impl Office {
         } else {
             reason.to_owned()
         });
-        self.finish(response).await
+        let done = self.finish(response).await?;
+        self.settle_notice(&done).await;
+        Ok(done)
     }
 
     /// 응답 하나.
@@ -398,62 +443,4 @@ impl Office {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn 시각은_지금과_이전_더하기_하나_중_큰_것() {
-        assert_eq!(next_stamp(UnixMillis(10), UnixMillis(3)), UnixMillis(10));
-        assert_eq!(next_stamp(UnixMillis(3), UnixMillis(3)), UnixMillis(4));
-        assert_eq!(next_stamp(UnixMillis(1), UnixMillis(5)), UnixMillis(6));
-        assert_eq!(
-            next_stamp(UnixMillis(0), UnixMillis(i64::MAX)),
-            UnixMillis(i64::MAX)
-        );
-    }
-
-    struct Fixed;
-    impl Clock for Fixed {
-        fn now(&self) -> UnixMillis {
-            UnixMillis(7)
-        }
-    }
-
-    struct Counter(std::sync::atomic::AtomicU64);
-    #[async_trait::async_trait]
-    impl EventSink for Counter {
-        async fn publish(
-            &self,
-            _kind: &str,
-            _payload: Value,
-        ) -> Result<u64, crate::error::SinkError> {
-            Ok(self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
-        }
-    }
-
-    #[tokio::test]
-    async fn 끝난_응답은_정해진_개수만_남긴다() {
-        let office = Office::new(
-            TeamState::Operating,
-            Arc::new(Counter(std::sync::atomic::AtomicU64::new(1))),
-            Arc::new(Fixed),
-        );
-        let mut first = None;
-        for n in 0..(FINISHED_KEEP + 5) {
-            let r = office
-                .ask(Room::Direct, Agent::Risk, "q", &format!("m-{n}"))
-                .await
-                .unwrap();
-            first.get_or_insert(r.request_id.clone());
-            let failed = office.fail(&r.request_id, " ").await.unwrap();
-            assert_eq!(failed.error.as_deref(), Some(UNKNOWN_FAILURE));
-        }
-        let state = office.state();
-        assert_eq!(state.finished.len(), FINISHED_KEEP);
-        assert_eq!(state.responses.len(), FINISHED_KEEP);
-        drop(state);
-        assert!(office.response(&first.unwrap()).is_none());
-        let pending = office.pending_responses();
-        assert!(pending.is_empty());
-    }
-}
+mod tests;

@@ -85,7 +85,7 @@ pub struct ChatResponse {
 impl ChatResponse {
     /// 이벤트 `office.chat`의 내용: 객체 전체.
     pub(crate) fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut json = serde_json::json!({
             "requestId": self.request_id,
             "sourceMessageId": self.source_message_id,
             "agent": self.agent.id(),
@@ -94,6 +94,10 @@ impl ChatResponse {
             "content": self.content,
             "updatedAt": self.updated_at.0,
             "error": self.error,
-        })
+        });
+        if let (Some(notice), Some(map)) = (self.notice, json.as_object_mut()) {
+            map.insert("notice".to_owned(), serde_json::json!(notice.0));
+        }
+        json
     }
 }

@@ -23,8 +23,33 @@ pub struct Member {
 /// 글 속 `@[이름]`의 이름들(가림 `\`을 푼 것). 글에 나온 순서이고 같은 이름은 한 번만.
 /// 괄호 없는 `@이름`은 멘션이 아니다.
 pub fn mentioned_names(text: &str) -> Vec<String> {
-    let _ = text;
-    todo!()
+    let mut names: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("@[") {
+        rest = &rest[at + 2..];
+        if let Some((name, used)) = read_name(rest) {
+            rest = &rest[used..];
+            if !name.is_empty() && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+/// `@[` 바로 뒤에서 이름을 읽는다: 가림을 푼 이름과 닫는 `]`까지 쓴 바이트 수.
+/// 닫는 `]`가 없으면 멘션이 아니다(`None`).
+fn read_name(text: &str) -> Option<(String, usize)> {
+    let mut name = String::new();
+    let mut chars = text.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            ']' => return Some((name, i + 1)),
+            '\\' => name.push(chars.next()?.1),
+            _ => name.push(c),
+        }
+    }
+    None
 }
 
 /// 글 속 멘션을 명단의 담당으로 바꾼다.
@@ -33,14 +58,28 @@ pub fn mentioned_names(text: &str) -> Vec<String> {
 /// - 같은 담당을 여러 번 불러도 한 번. 명단에 없는 이름은 무시한다.
 /// - 순서는 글에 처음 나온 순서.
 pub fn parse_mentions(text: &str, roster: &[Member]) -> Vec<Agent> {
-    let _ = (text, roster);
-    todo!()
+    let mut agents = Vec::new();
+    for name in mentioned_names(text) {
+        let found = roster.iter().find(|m| m.name == name).map(|m| m.agent);
+        if let Some(agent) = found.filter(|a| !agents.contains(a)) {
+            agents.push(agent);
+        }
+    }
+    agents
 }
 
 /// 이름을 멘션 글자로 바꾼다: `@[이름]`, 이름 속 `\` `[` `]` 앞에 `\`를 붙인다(원본 직렬화).
 pub fn mention_tag(name: &str) -> String {
-    let _ = name;
-    todo!()
+    let mut tag = String::with_capacity(name.len() + 3);
+    tag.push_str("@[");
+    for c in name.chars() {
+        if matches!(c, '\\' | '[' | ']') {
+            tag.push('\\');
+        }
+        tag.push(c);
+    }
+    tag.push(']');
+    tag
 }
 
 /// 팀 방 글에 아무도 답하지 않은 까닭(화면 안내용).
@@ -81,4 +120,22 @@ pub struct Relayed {
     pub response: ChatResponse,
     /// 이어 말하기로 새로 만든 응답 객체(queued, 팀 방, 같은 사용자 글 번호). 멘션 순서.
     pub follow_ups: Vec<ChatResponse>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 닫는_괄호가_없거나_빈_이름은_멘션이_아니다() {
+        assert!(mentioned_names("@[전략 닫지 않음").is_empty());
+        assert!(mentioned_names("@[] 빈 이름").is_empty());
+        assert!(mentioned_names("끝이 가림 @[a\\").is_empty());
+    }
+
+    #[test]
+    fn 이어_붙은_멘션도_따로_읽는다() {
+        assert_eq!(mentioned_names("@[가]@[나]"), ["가", "나"]);
+        assert_eq!(mentioned_names("@@[가]"), ["가"]);
+    }
 }
