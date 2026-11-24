@@ -3,14 +3,18 @@
 // - 클립: 걸으면 walk, 걷지 않고 자기 좌석(업무 · 쉼 · 논의 자리) 가까우면 sit, 아니면 idle. 바꿀 때 0.22초 교차.
 //   원본처럼 달리기 클립은 없고, 빠르게 움직이면(논의 소집) 걷기 클립을 빨리 돌리고 앞으로 기울이고 튄다.
 // - 길: A*(nav.ts), 걷기 150px/s · 소집 300px/s(칸 32px), 길을 못 찾으면 1초마다 다시.
-// - 쉼 자리(`place: "bed"`)는 라운지 · 탕비실 의자다(💤, 누운 자세 없음).
+// - 쉼 자리(`place: "bed"`)는 라운지 · 탕비실 의자다(누운 자세 없음).
+// - (23차 1 · 2번) 이름표는 발 아래(안은 이름뿐), 말풍선 기준점은 머리 위. 자리는 bubbles3d가 layout.ts로 정한다.
+//   머리 기준점은 원본(키 2.7에 서 있음 2.7 · 앉음 2.0)을 우리 캐릭터의 실제 키(불러온 모델의 높이)에 비례해 맞춘다.
 
 import * as THREE from "three";
 import { CROSSFADE_SECONDS, clipName, defaultLook, makeActor, type AgentId } from "./actor";
 import { poseDoll, makeDoll, removeDoll, type Doll } from "./doll";
 import { instance, loadLook } from "./gltf";
 import { clearLine, findPath, type Grid, type Point } from "./nav";
-import type { Head } from "./bubbles3d";
+import type { ActorSpot } from "./bubbles3d";
+import { nameTagText } from "./layout";
+import type { Rect } from "./speech";
 import type { Walker } from "./smalltalk";
 import { facingYaw } from "./furniture";
 import type { AgentLook, OfficeMap } from "./scene3d";
@@ -25,9 +29,27 @@ const SEAT_RADIUS = 0.22;              // 좌석에서 이만큼 안이면 앉�
 const RETRY_MS = 1000;
 const RUN_LEAN = 0.18;                 // 원본 달리기 기울기 · 튐
 const RUN_BOUNCE = 0.05;
-const HEAD_Y = 2.05;                   // 이름표 높이(서기)
-const SIT_HEAD_Y = 1.6;
-const GLYPH: Record<string, string> = { idle: "", queued: "⏳", thinking: "💭", failed: "❗" };
+// 원본 캐릭터 키 2.7에서 말풍선 기준점: 서 있음 2.7 · 앉음 2.0(docs/research/deskrpg.md 11절). 우리 키에 비례해 쓴다.
+const ORIGIN_HEIGHT = 2.7;
+const ORIGIN_HEAD_STAND = 2.7;
+const ORIGIN_HEAD_SIT = 2.0;
+// 키를 아직 못 쟀을 때(원본 외형 · 코드 인형 모두 약 1.85 — framing.ts의 머리 높이 1.9와 같은 크기).
+const DEFAULT_HEIGHT = 1.85;
+const MIN_HEIGHT = 1.0;
+const MAX_HEIGHT = 4.0;
+
+/** 몸의 키(세계 단위)를 잰다. 못 재면 `null`. */
+function measureHeight(obj: Obj): number | null {
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const h = box.max.y - Math.max(0, box.min.y);
+  return Number.isFinite(h) && h >= MIN_HEIGHT && h <= MAX_HEIGHT ? h : null;
+}
+
+/** 머리 기준점의 높이: 원본 비율(서 있음 2.7/2.7 · 앉음 2.0/2.7) × 우리 키. */
+function headHeight(height: number, sitting: boolean): number {
+  return (height * (sitting ? ORIGIN_HEAD_SIT : ORIGIN_HEAD_STAND)) / ORIGIN_HEIGHT;
+}
 
 interface Anchor extends Point { facing: number }
 
@@ -57,9 +79,10 @@ interface Actor {
   retryAt: number;
   walking: boolean;
   label: string;
+  /** 몸의 키(세계 단위, 몸이 바뀔 때 잰다). */
+  height: number;
   headY: number;
-  /** (22차) 이름표의 화면 자리(이번 프레임) · 크기(글이 바뀔 때 잰다). */
-  screen: { x: number; y: number; visible: boolean };
+  /** 이름표 크기(글이 바뀔 때 잰다). */
   tagSize: { width: number; height: number } | null;
   /** (22차 4번) 지나가며 잡담으로 멈춰 있다. */
   paused: boolean;
@@ -109,8 +132,8 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       id, root, doll: makeDoll(root, id), body: null, wanted: "", tag, phase: i * 1.7,
       x: rest.x + 0.5, y: rest.y + 0.5, yaw: facingYaw(map.agents[id].rest_facing),
       view: { place: "bed", work: "idle" },
-      target: null, path: null, speed: WALK_SPEED, retryAt: 0, walking: false, label: "", headY: HEAD_Y,
-      screen: { x: 0, y: 0, visible: false }, tagSize: null, paused: false,
+      target: null, path: null, speed: WALK_SPEED, retryAt: 0, walking: false, label: "", height: DEFAULT_HEIGHT,
+      headY: DEFAULT_HEIGHT, tagSize: null, paused: false,
     };
     tagTree(actor);
     actors.set(id, actor);
@@ -129,6 +152,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       if (actor.body) { disposeBody(actor.body); actor.body = null; }
       if (made.kind === "doll") {
         if (!actor.doll) { actor.doll = makeDoll(actor.root, id); tagTree(actor); }
+        actor.height = measureHeight(actor.root) ?? DEFAULT_HEIGHT;
         return;
       }
       const model = instance(made.model.scene, true);
@@ -138,6 +162,7 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
       actor.root.add(model);
       if (actor.doll) { removeDoll(actor.doll); actor.doll = null; }
       actor.body = { look, model, mixer, actions, current: null };
+      actor.height = measureHeight(model) ?? DEFAULT_HEIGHT;
       tagTree(actor);
     });
   }
@@ -250,17 +275,22 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     const clip = clipName(moving, !moving && seated(actor));
     if (actor.body) { animateBody(actor, actor.body, clip, dt); }
     if (actor.doll) { poseDoll(actor.doll, clip, actor.view.work, t + actor.phase); }
-    actor.headY = clip === "sit" ? SIT_HEAD_Y : HEAD_Y;
-    const work = actor.view.work;
-    const glyph = actor.view.place === "bed" && work === "idle" ? "💤" : GLYPH[work] ?? "";
-    const label = `${glyph ? glyph + " " : ""}${names[actor.id] ?? actor.id}`;
+    actor.headY = headHeight(actor.height, clip === "sit");
+    // (23차 1번) 이름표 안은 이름뿐(💭 · 💤 같은 아이콘은 붙이지 않는다).
+    const label = nameTagText(names[actor.id] ?? actor.id, actor.view.work, actor.view.place);
     if (label !== actor.label) {
       actor.tag.textContent = label;
+      actor.tag.title = label;
       actor.label = label;
       actor.tagSize = null;
     }
-    actor.tag.dataset.work = work;
-    actor.tag.dataset.place = actor.view.place;
+  }
+
+  /** 세계 점을 화면 점(px)으로. 카메라 뒤이거나 화면 밖이면 `inside`가 거짓. */
+  function screenPoint(camera: Obj, x: number, y: number, z: number, width: number, height: number) {
+    projected.set(x, y, z).project(camera);
+    const inside = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
+    return { x: (projected.x + 1) / 2 * width, y: (1 - projected.y) / 2 * height, inside };
   }
 
   const projected = new THREE.Vector3();
@@ -278,28 +308,36 @@ export function createActors({ scene, labels, map, names, looks, grid }: ActorsO
     snapAll(): void {
       for (const actor of actors.values()) { if (actor.target) { placeAt(actor, actor.target); } }
     },
-    placeLabels(camera: Obj, width: number, height: number): void {
-      for (const actor of actors.values()) {
-        projected.set(actor.x, actor.headY, actor.y).project(camera);
-        const visible = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
-        const sx = (projected.x + 1) / 2 * width;
-        const sy = (1 - projected.y) / 2 * height;
-        actor.screen = { x: sx, y: sy, visible };
-        if (!visible) { actor.tag.style.display = "none"; continue; }
-        actor.tag.style.display = "";
-        actor.tag.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
-      }
-    },
-    /** (22차 3번) 이번 프레임의 머리 점(이름표 바로 위)과 이름표 자리. [`placeLabels`] 뒤에 부른다. */
-    heads(): Head[] {
+    /**
+     * (23차) 이번 프레임의 발 투영점(월드 y 0, 앉았으면 좌석 자리) · 머리 투영점(원본 비율 × 우리 키) · 이름표 크기.
+     * 발이나 머리 어느 하나라도 화면 안이면 보인다(발언자 샷처럼 발이 화면 아래로 나가도 말풍선은 보인다).
+     */
+    spots(camera: Obj, width: number, height: number): ActorSpot[] {
       return [...actors.values()].map((actor) => {
-        if (!actor.tagSize && actor.screen.visible) {
+        const foot = screenPoint(camera, actor.x, 0, actor.y, width, height);
+        const head = screenPoint(camera, actor.x, actor.headY, actor.y, width, height);
+        if (!actor.tagSize) {
+          actor.tag.style.display = "";
           actor.tagSize = { width: actor.tag.offsetWidth, height: actor.tag.offsetHeight };
         }
-        const size = actor.tagSize ?? { width: 0, height: 0 };
-        const label = { x: actor.screen.x - size.width / 2, y: actor.screen.y - size.height, ...size };
-        return { id: actor.id, x: actor.screen.x, y: label.y, label, visible: actor.screen.visible };
+        return {
+          id: actor.id, visible: foot.inside || head.inside, work: actor.view.work,
+          foot: { x: foot.x, y: foot.y }, head: { x: head.x, y: head.y }, tag: actor.tagSize,
+        };
       });
+    },
+    /** 이름표를 그 자리에 놓는다(`null`이면 숨긴다). */
+    placeTag(id: string, rect: Rect | null): void {
+      const actor = actors.get(id);
+      if (!actor) { return; }
+      if (!rect) { actor.tag.style.display = "none"; return; }
+      actor.tag.style.display = "";
+      actor.tag.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+    },
+    /** 발언자 카메라가 볼 담당의 자세: 세계 자리 · 보는 쪽 · 키 · 머리 높이. */
+    pose(id: string): { x: number; z: number; yaw: number; height: number; headY: number } | null {
+      const actor = actors.get(id);
+      return actor ? { x: actor.x, z: actor.y, yaw: actor.yaw, height: actor.height, headY: actor.headY } : null;
     },
     /** (22차 4번) 잡담을 볼 담당들(세계 좌표 · 한가 · 걷는 중). 바쁨은 말풍선 층이 채운다. */
     walkers(): Walker[] {

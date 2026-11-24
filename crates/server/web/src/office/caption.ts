@@ -1,6 +1,6 @@
 // 화면 아래 자막 · 회의 "발언 중" 표시(server 23차 6번 · 7번 (가), 원본 DeskRPG 화면 — docs/research/deskrpg.md 11절).
 // 시각은 부르는 쪽이 넘기는 밀리초(`now`)다.
-import type { Said } from "./speech";
+import { trimSpeech, type Said } from "./speech";
 
 /** 자막이 보이는 시간(밀리초): 가장 최근 말 뒤 12초. */
 export const CAPTION_LIFE_MS = 12_000;
@@ -12,10 +12,20 @@ export const SPEAKING_LIFE_MS = 4_000;
  * 안이면 `이름: 글`(글은 `trimSpeech`를 거친 것), 아니면 `null`(숨긴다). 이름은 `names`에서 찾고 없으면 id.
  */
 export function caption(said: readonly Said[], names: Readonly<Record<string, string>>, now: number): string | null {
-  void said;
-  void names;
-  void now;
-  throw new Error("todo");
+  const last = latest(said);
+  if (!last || now - last.at >= CAPTION_LIFE_MS) return null;
+  return `${nameOf(names, last.agent)}: ${trimSpeech(last.text)}`;
+}
+
+/** 가장 최근 것(같은 시각이면 뒤에 넘긴 것). */
+function latest<T extends { at: number }>(list: readonly T[]): T | undefined {
+  let found: T | undefined;
+  for (const one of list) if (!found || one.at >= found.at) found = one;
+  return found;
+}
+
+function nameOf(names: Readonly<Record<string, string>>, agent: string): string {
+  return Object.hasOwn(names, agent) ? names[agent] : agent;
 }
 
 /** 논의 글 하나(`office.talk`에서 담당과 시각만). */
@@ -32,8 +42,7 @@ export function speakingLine(
   names: Readonly<Record<string, string>>,
   now: number,
 ): string | null {
-  void talks;
-  void names;
-  void now;
-  throw new Error("todo");
+  const last = latest(talks);
+  if (!last || now - last.at >= SPEAKING_LIFE_MS) return null;
+  return `${nameOf(names, last.agent)} 발언 중…`;
 }

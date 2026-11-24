@@ -173,7 +173,7 @@ export interface Placement {
 /**
  * 말풍선 자리 고르기(넘긴 순서대로). 머리가 화면 밖이면 숨긴다. 첫 자리는 머리 바로 위(가운데 맞춤, 위쪽 끝
  * `max(8, 머리 y - 높이 - 8)`, 23차)이고, 거기서 위아래(`높이 + 6`, 23차 [`BUBBLE_STACK_GAP`]) · 좌우(폭의
- * [`BUBBLE_SIDE_SHIFT`]배)로 비킨 3×3 후보(위아래는 0 · 위 · 아래 순서, 각 줄은 가운데 먼저) 가운데 화면 안이고
+ * [`BUBBLE_SIDE_SHIFT`]배)로 비킨 3×3 후보(위아래는 0 · 위 · 아래 순서, 각 줄은 가운데 · 왼쪽 · 오른쪽 — [`bubbleCandidates`]) 가운데 화면 안이고
  * 앞서 놓은 말풍선 · 모든 이름표와 겹치지 않는 첫 자리를 쓴다. 자리가 없으면 말풍선 줄로 보낸다. 보이는 말풍선
  * 넓이의 합이 화면 넓이의 [`LANE_AREA_RATIO`]를 넘으면 모두 말풍선 줄로 보낸다.
  */
@@ -193,7 +193,7 @@ export function placeBubbles(spots: readonly HeadSpot[], screen: Size): Placemen
   const placed: { agent: string; rect: Rect }[] = [];
   const lane: string[] = [];
   for (const spot of visible) {
-    const rect = candidates(spot).find(
+    const rect = bubbleCandidates(spot.x, spot.y, spot.bubble).find(
       (r) => insideScreen(r, screen) && !placed.some((p) => overlap(p.rect, r)) && !labels.some((l) => overlap(l, r)),
     );
     if (rect) placed.push({ agent: spot.agent, rect });
@@ -202,25 +202,30 @@ export function placeBubbles(spots: readonly HeadSpot[], screen: Size): Placemen
   return { placed, lane, hidden };
 }
 
-/** 3×3 후보(가운데 줄 먼저, 줄 안에서는 가운데 · 오른쪽 · 왼쪽). */
-function candidates(spot: HeadSpot): Rect[] {
-  const { width, height } = spot.bubble;
-  const x0 = spot.x - width / 2;
-  const y0 = spot.y - height - BUBBLE_HEAD_GAP;
+/**
+ * (23차 2번) 머리 위 말풍선의 3×3 후보(원본 `label-layout` 순서): 위아래 0 · 위로 `높이 + 6` · 아래로 `높이 + 6`,
+ * 각 줄 안에서 좌우 0 · -0.55폭 · +0.55폭. 첫 자리는 가운데 맞춤, 위쪽 끝 `max(8, 머리 y - 높이 - 8)`.
+ */
+export function bubbleCandidates(headX: number, headY: number, size: Size): Rect[] {
+  const { width, height } = size;
+  const x0 = headX - width / 2;
+  const y0 = Math.max(BUBBLE_TOP_MARGIN, headY - height - BUBBLE_HEAD_GAP);
   const shift = width * BUBBLE_SIDE_SHIFT;
-  const step = height + BUBBLE_HEAD_GAP;
+  const step = height + BUBBLE_STACK_GAP;
   const out: Rect[] = [];
   for (const dy of [0, -step, step]) {
-    for (const dx of [0, shift, -shift]) out.push({ x: x0 + dx, y: y0 + dy, width, height });
+    for (const dx of [0, -shift, shift]) out.push({ x: x0 + dx, y: y0 + dy, width, height });
   }
   return out;
 }
 
-function insideScreen(r: Rect, screen: Size): boolean {
+/** 사각형이 화면 안에 다 들어오는가. */
+export function insideScreen(r: Rect, screen: Size): boolean {
   return r.x >= 0 && r.y >= 0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
 }
 
-function overlap(a: Rect, b: Rect): boolean {
+/** 두 사각형이 겹치는가(맞닿음은 겹침이 아니다). */
+export function overlap(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
@@ -252,9 +257,7 @@ export const NAME_SEPARATOR = " · ";
  * `이름 · ···`, 글 없는 상태 말풍선이면 `이름 · 💭`. `shown`은 [`SpeechBoard.shown`]이 낸 것이다.
  */
 export function bubbleText(name: string, shown: Bubble): string {
-  void name;
-  void shown;
-  throw new Error("todo");
+  return `${name}${NAME_SEPARATOR}${shown.text}`;
 }
 
 /** 말풍선이 그려지는 곳: 머리 위 · 말풍선 줄 · 아무 데도. */
@@ -265,6 +268,6 @@ export type BubbleWhere = "head" | "rail" | "none";
  * 기다림 · 실패 표시만)은 말풍선 줄, 말풍선이 없으면(쉬는 중 포함) 아무 데도.
  */
 export function bubbleWhere(shown: Bubble | undefined): BubbleWhere {
-  void shown;
-  throw new Error("todo");
+  if (!shown) return "none";
+  return shown.kind === "status" ? "rail" : "head";
 }

@@ -20,6 +20,8 @@
       <div id="labels" aria-hidden="true"></div>
       <div id="stage-note" class="note" hidden></div>
       <button id="recenter" type="button" hidden>처음 화면으로</button>
+      <div id="caption" class="caption" role="status" aria-live="polite" hidden></div>
+      <button id="auto-camera" type="button" aria-pressed="true" hidden>자동 카메라 켜짐</button>
     </section>
     <section id="looks" aria-label="담당 외형 고르기" hidden></section>
     <section id="light" aria-label="담당 목록" hidden>
@@ -28,6 +30,7 @@
     <aside id="chat" aria-label="사무실 채팅">
       <section id="approvals" aria-label="승인 요청" aria-live="polite"></section>
       <nav id="chat-tabs" role="tablist"></nav>
+      <div id="speaking" class="speaking" role="status" aria-live="polite" hidden></div>
       <div id="chat-log" role="log" aria-live="polite"></div>
       <form id="chat-form" autocomplete="off">
         <label id="chat-to-wrap" for="chat-to">받는 담당

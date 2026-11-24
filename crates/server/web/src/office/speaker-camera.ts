@@ -36,47 +36,105 @@ export interface CameraGoal {
  * - 목표가 없으면(논의 글 전 · 모이지 않음 · 꺼짐) [`goal`]은 `null`이고 장면은 평소 카메라를 쓴다.
  */
 export class SpeakerCamera {
+  private on = true;
+  private gathered = false;
+  /** 사용자가 손으로 움직여 이 논의 동안 꺼졌다. */
+  private handOff = false;
+  /** 지금 샷(없으면 `null`). */
+  private shot: { kind: "speaker" | "table"; agent: string | null; since: number } | null = null;
+  /** 최소 머무름이 끝나면 넘어갈 다음 발언자. */
+  private next: string | null = null;
+  private lastTalkAt = 0;
+
   /** 자동 카메라 단추가 켜져 있는가. */
   enabled(): boolean {
-    throw new Error("todo");
+    return this.on;
   }
 
   /** 단추: 켜고 끈다. */
   setEnabled(on: boolean, now: number): void {
-    void on;
     void now;
-    throw new Error("todo");
+    this.on = on;
+    if (!on) this.reset();
   }
 
   /** 담당들이 미팅룸에 모여 있는가. `false`면 논의가 끝난 것이다(손 조작으로 꺼진 것도 풀린다). */
   gather(gathered: boolean, now: number): void {
-    void gathered;
     void now;
-    throw new Error("todo");
+    if (gathered === this.gathered) return;
+    this.gathered = gathered;
+    if (!gathered) {
+      this.handOff = false;
+      this.reset();
+    }
   }
 
   /** 논의 글이 왔다. */
   talk(agent: string, now: number): void {
-    void agent;
-    void now;
-    throw new Error("todo");
+    if (!this.active()) return;
+    this.advance(now);
+    this.lastTalkAt = now;
+    const shot = this.shot;
+    if (!shot || shot.kind === "table") {
+      this.shot = { kind: "speaker", agent, since: now };
+      this.next = null;
+    } else if (shot.agent === agent) {
+      this.next = null;
+    } else if (now >= shot.since + MIN_DWELL_MS) {
+      this.shot = { kind: "speaker", agent, since: now };
+      this.next = null;
+    } else {
+      this.next = agent;
+    }
   }
 
   /** 사용자가 카메라를 손으로 움직였다. */
   manual(now: number): void {
     void now;
-    throw new Error("todo");
+    if (!this.gathered) return;
+    this.handOff = true;
+    this.reset();
   }
 
   /** `now`의 목표(없으면 `null`). */
   goal(now: number): CameraGoal | null {
-    void now;
-    throw new Error("todo");
+    if (!this.active()) return null;
+    this.advance(now);
+    const shot = this.shot;
+    if (!shot) return null;
+    return shot.kind === "speaker"
+      ? { shot: "speaker", agent: shot.agent, elevationDeg: SPEAKER_ELEVATION_DEG, transitionMs: SPEAKER_TRANSITION_MS, since: shot.since }
+      : { shot: "table", agent: null, elevationDeg: TABLE_ELEVATION_DEG, transitionMs: TABLE_TRANSITION_MS, since: shot.since };
+  }
+
+  private active(): boolean {
+    return this.on && this.gathered && !this.handOff;
+  }
+
+  private reset(): void {
+    this.shot = null;
+    this.next = null;
+  }
+
+  /** `now`까지 시간이 흐른 만큼 샷을 넘긴다: 기다리던 발언자(최소 머무름 뒤) → 탁자 샷(말 뒤 1.5초 · 최소 머무름 뒤). */
+  private advance(now: number): void {
+    const shot = this.shot;
+    if (!shot || shot.kind !== "speaker") return;
+    if (this.next !== null) {
+      const at = shot.since + MIN_DWELL_MS;
+      if (now < at) return;
+      this.shot = { kind: "speaker", agent: this.next, since: at };
+      this.next = null;
+      this.advance(now);
+      return;
+    }
+    const tableAt = Math.max(this.lastTalkAt + HOLD_AFTER_TALK_MS, shot.since + MIN_DWELL_MS);
+    if (now >= tableAt) this.shot = { kind: "table", agent: null, since: tableAt };
   }
 }
 
 /** ease-in-out 보간(0 → 0, 1 → 1, 가운데 0.5, 양 끝이 느리다). 0~1 밖은 끝값으로 자른다. */
 export function easeInOut(t: number): number {
-  void t;
-  throw new Error("todo");
+  const x = Math.max(0, Math.min(1, t));
+  return x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
 }

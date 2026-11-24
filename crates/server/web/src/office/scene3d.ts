@@ -5,7 +5,9 @@
 // - 원근 카메라 38도, 처음에는 사무 공간이 화면 가로를 채운다(camera.ts). 끌어 돌리기 · 바퀴/두 손가락 확대 ·
 //   오른쪽 끌기/Shift 끌기/두 손가락 끌기로 옮기기(범위 제한). 5px 미만 누름만 고르기.
 // - 해 하나만 그림자, 바닥은 인스턴스 메시, 탭이 숨으면 그리지 않음, 자동 해상도 낮춤.
-// - 담당 자리: desk(업무 자리) · meeting(미팅룸 탁자) · bed(쉼 자리 — 라운지 · 탕비실, 💤). 이름표 · 방 이름표는 DOM.
+// - 담당 자리: desk(업무 자리) · meeting(미팅룸 탁자) · bed(쉼 자리 — 라운지 · 탕비실). 이름표 · 방 이름표는 DOM.
+// - (23차 7번 (나)) 발언자 카메라: 담당 셋 이상이 미팅룸에 모이면 speaker-camera.ts의 목표(발언자 샷 · 탁자 샷)를
+//   ease-in-out으로 따라간다. 목표가 없으면 평소의 따라 비추기 카메라로 돌아간다. 손으로 움직이면 그 논의 동안 끈다.
 
 import * as THREE from "three";
 import { buildFloor, type Floor } from "./architecture";
@@ -16,6 +18,8 @@ import { disposeLoaded } from "./gltf";
 import { buildGrid, type NavMap, type Point } from "./nav";
 import { createActors } from "./actors3d";
 import { createBubbleLayer } from "./bubbles3d";
+import { actorPriority, layoutOffice } from "./layout";
+import { easeInOut, type CameraGoal, type SpeakerCamera } from "./speaker-camera";
 import type { SpeechBoard } from "./speech";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
@@ -58,6 +62,8 @@ export interface SceneOptions {
   onFollow?: (following: boolean) => void;
   /** (22차 3번) 머리 위 말풍선 판(있으면 말풍선 층을 그린다 — 지나가며 잡담 포함). */
   speech?: SpeechBoard;
+  /** (23차 7번 (나)) 회의 발언자 카메라(있으면 미팅룸에 모였을 때 목표를 따라간다). */
+  speaker?: SpeakerCamera;
 }
 
 const FOV = 38;
@@ -68,6 +74,24 @@ const START_POLAR = 0.95;
 const PRESS_SLOP_PX = 5;
 const MAX_PIXEL_RATIO = 1.75;
 const MIN_PIXEL_RATIO = 0.75;
+// 발언자 샷(원본 meeting-camera, docs/research/deskrpg.md 11절): 상반신(몸 높이의 50%)이 보이게, 최소 거리 2.2(원본 키 2.7
+// 기준 — 우리 키에 비례해 줄인다). 상반신이 화면 높이의 이만큼을 차지하게 거리를 잡는다.
+const UPPER_BODY = 0.5;
+const UPPER_BODY_FILL = 0.5;
+const ORIGIN_MIN_DISTANCE = 2.2;
+const ORIGIN_HEIGHT = 2.7;
+// 담당이 이만큼 이상 미팅룸에 있으면 "모였다"(framing.ts 따라 비추기와 같은 수).
+const GATHERED = 3;
+
+/** 카메라 궤도 값: 보는 점(tx, ty, tz)에서 거리 · 연직에서 잰 각 · 둘레 각. */
+interface Orbit { radius: number; polar: number; theta: number; tx: number; ty: number; tz: number }
+
+function angleTo(from: number, to: number): number {
+  let d = to - from;
+  while (d > Math.PI) { d -= Math.PI * 2; }
+  while (d < -Math.PI) { d += Math.PI * 2; }
+  return from + d;
+}
 
 /** WebGL을 쓸 수 있는가. */
 export function webglAvailable(): boolean {
@@ -121,7 +145,7 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
   });
 }
 
-export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech }: SceneOptions): Scene {
+export function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech, speaker }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
   host.appendChild(renderer.domElement);
@@ -136,12 +160,14 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
   scene.add(furnitureRoot);
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
+  // 시야각 절반의 tan(발언자 샷 거리 계산).
+  const tanHalfFov = Math.tan((FOV / 2) * Math.PI / 180);
   const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 
   // 카메라: 원하는 값으로 부드럽게 따라간다(감쇠). 처음에는 쓰는 자리 모두(framing.ts), 다수가 미팅룸 · 쉼 자리로
   // 옮기면 그쪽을 비춘다. 사용자가 끌기 · 확대를 하면 따라가지 않는다(recenter로 다시 켠다).
   let focus: Focus = "all";
-  const want = { radius: 30, polar: START_POLAR, theta: 0, tx: 0, tz: 0 };
+  const want: Orbit = { radius: 30, polar: START_POLAR, theta: 0, tx: 0, ty: 0, tz: 0 };
   const cur = { ...want };
   let framed = 30;
   let userMoved = false;
@@ -151,7 +177,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     framed = fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV).distance;
     const v = focus === "all" ? null : fitView(focusBounds(map, focus), START_POLAR, aspect(), FOV, true);
     const view = v ?? fitView(focusBounds(map, "all"), START_POLAR, aspect(), FOV);
-    Object.assign(want, { radius: view.distance, polar: START_POLAR, theta: 0, tx: view.tx, tz: view.tz });
+    Object.assign(want, { radius: view.distance, polar: START_POLAR, theta: 0, tx: view.tx, ty: 0, tz: view.tz });
   }
   function setFollowing(on: boolean): void {
     if (userMoved === !on) { return; }
@@ -164,12 +190,61 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     want.tx = THREE.MathUtils.clamp(want.tx, 0, map.cols);
     want.tz = THREE.MathUtils.clamp(want.tz, 0, map.rows);
   }
-  function updateCamera(dt: number): void {
-    const a = 1 - Math.exp(-12 * dt);
-    for (const key of Object.keys(want) as (keyof typeof want)[]) { cur[key] += (want[key] - cur[key]) * a; }
-    target.set(cur.tx, 0, cur.tz);
+  // 발언자 카메라가 카메라를 쥐고 있는 동안의 전환(시작 값 · 시작 시각 · 길이). 쥐는 동안 want는 cur를 따라간다.
+  let tween: { key: string; from: Orbit; start: number; ms: number; to: Orbit | null } | null = null;
+  let gathered = false;
+  function goalOrbit(goal: CameraGoal): Orbit | null {
+    const polar = (90 - goal.elevationDeg) * Math.PI / 180;
+    if (goal.shot === "table") {
+      const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
+      return { radius: v.distance, polar, theta: 0, tx: v.tx, ty: 0, tz: v.tz };
+    }
+    const pose = goal.agent ? actors.pose(goal.agent) : null;
+    if (!pose) { return null; }
+    // 상반신(머리 기준점에서 몸 높이의 50% 아래까지)의 가운데를 보고, 그 높이가 화면의 절반쯤이 되는 거리.
+    const span = pose.height * UPPER_BODY;
+    const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
+    const radius = Math.max(ORIGIN_MIN_DISTANCE * pose.height / ORIGIN_HEIGHT, fit);
+    // 발언자가 보는 쪽(앞)에서 본다.
+    return { radius, polar, theta: pose.yaw, tx: pose.x, ty: pose.headY - span / 2, tz: pose.z };
+  }
+  /** 이번 프레임 발언자 카메라를 따른다. 쥐고 있으면 참. */
+  function driveSpeaker(wall: number): boolean {
+    if (!speaker) { return false; }
+    const meeting = actors.places().filter((p) => p === "meeting").length >= GATHERED;
+    if (meeting !== gathered) { gathered = meeting; speaker.gather(meeting, wall); }
+    const goal = speaker.goal(wall);
+    if (!goal) {
+      if (tween) {
+        tween = null;
+        Object.assign(want, cur);
+        if (!userMoved) { reframe(); }
+      }
+      return false;
+    }
+    const key = `${goal.shot}:${goal.agent ?? ""}:${goal.since}`;
+    if (!tween || tween.key !== key) {
+      tween = { key, from: { ...cur }, start: wall, ms: goal.transitionMs, to: goal.shot === "table" ? goalOrbit(goal) : null };
+    }
+    const to = tween.to ?? goalOrbit(goal);
+    if (!to) { return false; }
+    const k = easeInOut((wall - tween.start) / tween.ms);
+    const theta = angleTo(tween.from.theta, to.theta);
+    for (const name of Object.keys(cur) as (keyof Orbit)[]) {
+      const end = name === "theta" ? theta : to[name];
+      cur[name] = tween.from[name] + (end - tween.from[name]) * k;
+    }
+    Object.assign(want, cur);
+    return true;
+  }
+  function updateCamera(dt: number, wall: number): void {
+    if (!driveSpeaker(wall)) {
+      const a = 1 - Math.exp(-12 * dt);
+      for (const key of Object.keys(want) as (keyof Orbit)[]) { cur[key] += (want[key] - cur[key]) * a; }
+    }
+    target.set(cur.tx, cur.ty, cur.tz);
     const s = Math.sin(cur.polar);
-    camera.position.set(target.x + cur.radius * s * Math.sin(cur.theta), cur.radius * Math.cos(cur.polar),
+    camera.position.set(target.x + cur.radius * s * Math.sin(cur.theta), target.y + cur.radius * Math.cos(cur.polar),
       target.z + cur.radius * s * Math.cos(cur.theta));
     camera.lookAt(target);
   }
@@ -197,7 +272,13 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     rotate(dx: number, dy: number) { want.theta -= dx * 0.006; want.polar -= dy * 0.005; },
     zoom(factor: number) { want.radius *= factor; },
     twist(angle: number) { want.theta -= angle; },
-    moved() { setFollowing(false); clampWant(); },
+    moved() {
+      // 손으로 움직이면 발언자 카메라는 그 논의 동안 꺼지고, 지금 보이는 자리에서 사용자 조작을 잇는다.
+      tween = null;
+      speaker?.manual(Date.now());
+      setFollowing(false);
+      clampWant();
+    },
     pick(x: number, y: number) { const id = actors.pick(x, y, camera, canvas); if (id) { onPick?.(id); } },
   });
 
@@ -252,11 +333,23 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, o
     const wall = Date.now();
     if (bubbles) { actors.pause((id) => bubbles.paused(id, wall)); }
     actors.update(dt, (now - clock0) / 1000, now);
-    updateCamera(dt);
+    updateCamera(dt, wall);
     renderer.render(scene, camera);
-    actors.placeLabels(camera, host.clientWidth, host.clientHeight);
-    placeRoomTags(host.clientWidth, host.clientHeight);
-    bubbles?.update(wall, actors.heads(), actors.walkers(), actors.canSee, host.clientWidth, host.clientHeight);
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    placeRoomTags(width, height);
+    // (23차) 이름표 · 말풍선 · 말풍선 줄을 layout.ts로 한 번에 놓는다.
+    const spots = actors.spots(camera, width, height);
+    if (bubbles) {
+      bubbles.update(wall, spots, actors.walkers(), actors.canSee, width, height, actors.placeTag);
+    } else {
+      const layout = layoutOffice(spots.map((s) => ({
+        agent: s.id, visible: s.visible, foot: s.foot, head: s.head, tag: s.tag, bubble: null, railed: false,
+        priority: actorPriority(false, s.work),
+      })), { width, height });
+      const tags = new Map(layout.tags.map((t) => [t.agent, t.rect]));
+      for (const s of spots) { actors.placeTag(s.id, tags.get(s.id) ?? null); }
+    }
     measure(now, frameMs);
   }
   raf = requestAnimationFrame(frameStep);

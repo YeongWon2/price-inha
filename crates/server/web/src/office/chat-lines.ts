@@ -29,13 +29,26 @@ export const PENDING_TEXT = "생각 중";
  * (`queued` · `thinking` · 빈 `writing`) [`PENDING_TEXT`] 줄(`pending`)이다. `failed`는 생각 중 줄이 아니다. 이름은 `names`에서 찾고 없으면 id.
  */
 export function chatLine(entry: ChatEntry, names: Readonly<Record<string, string>>): ChatLine {
-  void entry;
-  void names;
-  throw new Error("todo");
+  if (entry.kind === "me") {
+    return { key: entry.key, side: "right", name: null, text: entry.text, tag: null, pending: false };
+  }
+  const name = Object.hasOwn(names, entry.agent) ? names[entry.agent] : entry.agent;
+  if (entry.kind === "talk") {
+    return { key: entry.key, side: "left", name, text: entry.text, tag: entry.topic, pending: false };
+  }
+  const content = entry.content ?? "";
+  const waiting = entry.status !== "complete" && entry.status !== "failed" && !content.trim();
+  return {
+    key: entry.key,
+    side: "left",
+    name,
+    text: waiting ? PENDING_TEXT : content,
+    tag: null,
+    pending: waiting,
+  };
 }
 
 /** 생각 중 줄의 한 줄 글자: `○○: 생각 중`. */
 export function pendingLabel(line: ChatLine): string {
-  void line;
-  throw new Error("todo");
+  return `${line.name ?? ""}: ${PENDING_TEXT}`;
 }

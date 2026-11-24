@@ -1,36 +1,46 @@
-// 3D 사무실의 머리 위 말풍선 층(server 22차 3 · 4번, 원본 DeskRPG 동작 — docs/research/deskrpg.md 10절).
-// 매 프레임 머리 위치를 화면에 투영한 점(actors3d `heads`)으로 자리를 고르고(speech.ts `placeBubbles`), 자리가 없으면
-// 화면 모서리의 세로 말풍선 줄에 쌓는다. 지나가며 잡담(smalltalk.ts)도 여기서 돌린다(화면만, 서버에 보내지 않는다).
+// 3D 사무실의 이름표 · 머리 위 말풍선 · 말풍선 줄 층(server 22차 3 · 4번, 23차 1~5번 — 원본 DeskRPG `label-layout`,
+// docs/research/deskrpg.md 10 · 11절). 매 프레임 담당마다 발 · 머리 투영점(actors3d `spots`)을 받아 layout.ts
+// `layoutOffice`로 이름표 · 말풍선 · 말풍선 줄의 자리를 한 번에 정한다. 말풍선 글은 `이름 · 글`(speech.ts `bubbleText`),
+// 글 없는 상태(생각 중 · 기다림 · 실패 표시만)는 머리 위가 아니라 줄에 `이름 · 💭`, 쉬는 중은 아무것도 없다.
+// 지나가며 잡담(smalltalk.ts)도 여기서 돌린다(화면만, 서버에 보내지 않는다).
 
+import { actorPriority, layoutOffice, type OfficeActor } from "./layout";
 import { Smalltalk, type Walker } from "./smalltalk";
-import { bubbleWidth, placeBubbles, type HeadSpot, type Rect, type SpeechBoard } from "./speech";
+import { bubbleText, bubbleWhere, bubbleWidth, type Rect, type Size, type SpeechBoard } from "./speech";
 
-/** 머리 하나: 투영한 머리 점과 이름표 자리. `visible`이 거짓이면 화면 밖(카메라 뒤 포함)이다. */
-export interface Head {
+/** 담당 하나의 이번 프레임 화면 자리(actors3d가 낸다). */
+export interface ActorSpot {
   id: string;
-  x: number;
-  y: number;
-  label: Rect;
+  /** 발이나 머리가 화면 안인가(아니면 이름표 · 말풍선 모두 숨긴다). */
   visible: boolean;
+  /** 지금 일(`idle` · `queued` · `thinking` · `failed`). */
+  work: string;
+  foot: { x: number; y: number };
+  head: { x: number; y: number };
+  tag: Size;
 }
 
 /** 말풍선 층. */
 export interface BubbleLayer {
-  /** 한 프레임: 잡담을 보고, 보일 말풍선을 놓는다. `now`는 말풍선 판과 같은 밀리초 시계. */
-  update(now: number, heads: readonly Head[], walkers: readonly Walker[], canSee: (a: string, b: string) => boolean,
-    width: number, height: number): void;
+  /**
+   * 한 프레임: 잡담을 보고, 이름표 · 말풍선 · 줄을 놓는다. `now`는 말풍선 판과 같은 밀리초 시계.
+   * 이름표는 `placeTag`(그 자리 또는 `null`이면 숨김)로 놓는다.
+   */
+  update(now: number, spots: readonly ActorSpot[], walkers: readonly Walker[], canSee: (a: string, b: string) => boolean,
+    width: number, height: number, placeTag: (id: string, rect: Rect | null) => void): void;
   /** 잡담 때문에 멈춰 있는가. */
   paused(id: string, now: number): boolean;
   dispose(): void;
 }
 
-interface Shown { el: HTMLElement; text: string; size: { width: number; height: number } }
+interface Shown { el: HTMLElement; text: string; maxWidth: number; size: Size }
 
 export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names: Record<string, string>): BubbleLayer {
   const smalltalk = new Smalltalk();
-  const lane = document.createElement("div");
-  lane.className = "bubble-lane";
-  labels.appendChild(lane);
+  const rail = document.createElement("div");
+  rail.className = "speech-rail";
+  rail.style.display = "none";
+  labels.appendChild(rail);
   const shown = new Map<string, Shown>();
 
   function element(id: string): Shown {
@@ -39,9 +49,8 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
       const el = document.createElement("div");
       el.className = "bubble";
       el.dataset.agent = id;
-      el.dataset.name = names[id] ?? id;
       labels.appendChild(el);
-      one = { el, text: "", size: { width: 0, height: 0 } };
+      one = { el, text: "", maxWidth: 0, size: { width: 0, height: 0 } };
       shown.set(id, one);
     }
     return one;
@@ -49,7 +58,7 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
 
   function hide(one: Shown): void {
     one.el.style.display = "none";
-    if (one.el.parentElement === lane) { labels.appendChild(one.el); }
+    if (one.el.parentElement === rail) { labels.appendChild(one.el); }
   }
 
   function talkSmall(now: number, walkers: readonly Walker[], canSee: (a: string, b: string) => boolean): void {
@@ -67,46 +76,77 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
     }
   }
 
-  function update(now: number, heads: readonly Head[], walkers: readonly Walker[],
-    canSee: (a: string, b: string) => boolean, width: number, height: number): void {
+  /** 말풍선 글을 바꾸고 크기를 잰다(머리 위 자리에서 잰다 — 줄 안이면 잠깐 꺼내 잰다). */
+  function refresh(one: Shown, text: string, maxWidth: number): void {
+    if (one.text === text && one.maxWidth === maxWidth) { return; }
+    if (one.el.parentElement === rail) { labels.appendChild(one.el); }
+    one.text = text;
+    one.maxWidth = maxWidth;
+    one.el.textContent = text;
+    one.el.title = text;
+    one.el.style.maxWidth = `${maxWidth}px`;
+    one.el.style.display = "";
+    one.size = { width: one.el.offsetWidth || maxWidth, height: one.el.offsetHeight || 24 };
+  }
+
+  function update(now: number, spots: readonly ActorSpot[], walkers: readonly Walker[],
+    canSee: (a: string, b: string) => boolean, width: number, height: number,
+    placeTag: (id: string, rect: Rect | null) => void): void {
     talkSmall(now, walkers, canSee);
     const maxWidth = bubbleWidth(width);
-    const spots: HeadSpot[] = [];
-    const visible = new Set<string>();
-    for (const head of heads) {
-      const bubble = board.shown(head.id, now);
-      const one = shown.get(head.id);
-      if (!bubble) { if (one) { hide(one); } continue; }
-      const el = element(head.id);
-      const text = bubble.text;
-      if (el.text !== text || el.el.style.maxWidth !== `${maxWidth}px`) {
-        el.text = text;
-        el.el.textContent = text;
-        el.el.title = `${names[head.id] ?? head.id} · ${text}`;
-        el.el.dataset.kind = bubble.kind;
-        el.el.style.maxWidth = `${maxWidth}px`;
-        el.el.style.display = "";
-        el.size = { width: el.el.offsetWidth || maxWidth, height: el.el.offsetHeight || 24 };
+    const actors: OfficeActor[] = [];
+    const drawn = new Set<string>();
+    for (const spot of spots) {
+      const bubble = board.shown(spot.id, now);
+      const where = bubbleWhere(bubble);
+      if (bubble && where !== "none") {
+        const one = element(spot.id);
+        refresh(one, bubbleText(names[spot.id] ?? spot.id, bubble), maxWidth);
+        one.el.dataset.kind = bubble.kind;
+        one.el.dataset.working = String(spot.work !== "idle");
+        drawn.add(spot.id);
       }
-      if (!head.visible) { hide(el); continue; }
-      visible.add(head.id);
-      spots.push({ agent: head.id, x: head.x, y: head.y, bubble: el.size, label: head.label });
+      actors.push({
+        agent: spot.id,
+        visible: spot.visible,
+        foot: spot.foot,
+        head: spot.head,
+        tag: spot.tag,
+        bubble: where === "head" ? (shown.get(spot.id) as Shown).size : null,
+        railed: where === "rail",
+        priority: actorPriority(where === "head", spot.work),
+      });
     }
-    const placement = placeBubbles(spots, { width, height });
-    for (const { agent, rect } of placement.placed) {
+    const layout = layoutOffice(actors, { width, height });
+    const tags = new Map(layout.tags.map((t) => [t.agent, t.rect]));
+    for (const spot of spots) { placeTag(spot.id, tags.get(spot.id) ?? null); }
+    for (const { agent, rect } of layout.bubbles) {
       const one = element(agent);
-      if (one.el.parentElement === lane) { labels.appendChild(one.el); }
+      if (one.el.parentElement === rail) { labels.appendChild(one.el); }
       one.el.style.display = "";
       one.el.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
     }
-    for (const agent of placement.lane) {
-      const one = element(agent);
-      one.el.style.display = "";
-      one.el.style.transform = "";
-      if (one.el.parentElement !== lane) { lane.appendChild(one.el); }
+    const inRail = new Set(layout.rail?.agents ?? []);
+    if (layout.rail) {
+      const { rect, agents } = layout.rail;
+      rail.style.display = "";
+      rail.dataset.corner = layout.rail.corner;
+      rail.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+      rail.style.width = `${Math.round(rect.width)}px`;
+      rail.style.maxHeight = `${Math.round(rect.height)}px`;
+      agents.forEach((agent, i) => {
+        const one = element(agent);
+        one.el.style.display = "";
+        one.el.style.transform = "";
+        if (one.el.parentElement !== rail || rail.children[i] !== one.el) { rail.insertBefore(one.el, rail.children[i] ?? null); }
+      });
+    } else {
+      rail.style.display = "none";
     }
-    for (const agent of placement.hidden) { hide(element(agent)); }
-    for (const [id, one] of shown) { if (!visible.has(id)) { hide(one); } }
+    const placed = new Set(layout.bubbles.map((b) => b.agent));
+    for (const [id, one] of shown) {
+      if (!drawn.has(id) || (!placed.has(id) && !inRail.has(id))) { hide(one); }
+    }
   }
 
   return {
@@ -115,7 +155,7 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
     dispose(): void {
       for (const one of shown.values()) { one.el.remove(); }
       shown.clear();
-      lane.remove();
+      rail.remove();
     },
   };
 }

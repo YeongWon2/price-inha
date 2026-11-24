@@ -1,6 +1,14 @@
 // 사무실 이름표 · 말풍선 · 말풍선 줄의 자리(server 23차 1 · 2 · 4 · 5번, 원본 DeskRPG `label-layout` 수치 —
 // docs/research/deskrpg.md 11절). 장면 없이 시험할 수 있게 투영한 화면 점(px)만 받는 순수 함수로 둔다.
-import type { Rect, Size } from "./speech";
+import {
+  LANE_AREA_RATIO,
+  bubbleCandidates,
+  bubbleWidth,
+  insideScreen,
+  overlap,
+  type Rect,
+  type Size,
+} from "./speech";
 
 /** 이름표 윗변이 발 투영점에서 내려오는 거리(px). */
 export const TAG_FOOT_GAP = 10;
@@ -63,18 +71,48 @@ export interface Placed {
  * 결과는 놓은 순서다.
  */
 export function placeNameTags(feet: readonly FootSpot[], screen: Size, taken: readonly Rect[] = []): Placed[] {
-  void feet;
-  void screen;
-  void taken;
-  throw new Error("todo");
+  const blocked: Rect[] = [...taken];
+  const out: Placed[] = [];
+  for (const foot of byPriority(feet)) {
+    const candidates = tagCandidates(foot, screen);
+    const rect = candidates.find((r) => !blocked.some((b) => near(r, b, TAG_PADDING))) ?? candidates[0];
+    blocked.push(rect);
+    out.push({ agent: foot.agent, rect });
+  }
+  return out;
+}
+
+/** 우선순위 내림차순, 같으면 id 글자 순(새 배열). */
+function byPriority<T extends { agent: string; priority: number }>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => b.priority - a.priority || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0));
+}
+
+/** 이름표 9후보: 아래로 `높이 + 5`씩 3단, 각 단에서 좌우 0 · -0.4폭 · +0.4폭(가로는 화면 여백 안으로 민다). */
+function tagCandidates(foot: FootSpot, screen: Size): Rect[] {
+  const { width, height } = foot;
+  const left = foot.x - width / 2;
+  const top = foot.y + TAG_FOOT_GAP;
+  const maxX = screen.width - TAG_SCREEN_MARGIN - width;
+  const clampX = (x: number) => Math.max(TAG_SCREEN_MARGIN, Math.min(maxX, x));
+  const out: Rect[] = [];
+  for (let row = 0; row < TAG_ROWS; row += 1) {
+    for (const dx of [0, -width * TAG_SIDE_SHIFT, width * TAG_SIDE_SHIFT]) {
+      out.push({ x: clampX(left + dx), y: top + row * (height + TAG_STACK_GAP), width, height });
+    }
+  }
+  return out;
+}
+
+/** 두 사각형 사이가 `gap`보다 가까운가(겹침 포함). */
+function near(a: Rect, b: Rect, gap: number): boolean {
+  return a.x < b.x + b.width + gap && b.x < a.x + a.width + gap && a.y < b.y + b.height + gap && b.y < a.y + a.height + gap;
 }
 
 /** (23차 1번) 이름표 안 글자: 이름뿐(💭 · 💤 같은 아이콘을 붙이지 않는다). */
 export function nameTagText(name: string, work: string, place: string): string {
-  void name;
   void work;
   void place;
-  throw new Error("todo");
+  return name;
 }
 
 /**
@@ -82,9 +120,8 @@ export function nameTagText(name: string, work: string, place: string): string {
  * `idle`이 아님)이면 [`PRIORITY_WORKING`], 그 밖 [`PRIORITY_OTHER`].
  */
 export function actorPriority(hasSpeech: boolean, work: string): number {
-  void hasSpeech;
-  void work;
-  throw new Error("todo");
+  if (hasSpeech) return PRIORITY_SPEAKING;
+  return work !== "idle" ? PRIORITY_WORKING : PRIORITY_OTHER;
 }
 
 /**
@@ -92,10 +129,16 @@ export function actorPriority(hasSpeech: boolean, work: string): number {
  * (화면폭 - 말풍선폭 - 18, 8)이고, 다른 모서리도 화면 가장자리에서 같은 여백(8px)이다.
  */
 export function railRect(corner: RailCorner, screen: Size, bubbleWidth: number): Rect {
-  void corner;
-  void screen;
-  void bubbleWidth;
-  throw new Error("todo");
+  const width = bubbleWidth + RAIL_EXTRA_WIDTH;
+  const height = Math.min(RAIL_MAX_HEIGHT, screen.height * RAIL_HEIGHT_RATIO);
+  const right = corner === "top-right" || corner === "bottom-right";
+  const bottom = corner === "bottom-left" || corner === "bottom-right";
+  return {
+    x: right ? screen.width - bubbleWidth - RAIL_RIGHT_INSET : RAIL_TOP,
+    y: bottom ? screen.height - height - RAIL_TOP : RAIL_TOP,
+    width,
+    height,
+  };
 }
 
 /** 한 프레임에 자리를 잡을 담당 하나. */
@@ -140,7 +183,51 @@ export interface OfficeLayout {
  * 피한다). 말풍선폭은 `bubbleWidth(화면폭)`이다.
  */
 export function layoutOffice(actors: readonly OfficeActor[], screen: Size): OfficeLayout {
-  void actors;
-  void screen;
-  throw new Error("todo");
+  const hidden = actors.filter((a) => !a.visible).map((a) => a.agent);
+  const shown = byPriority(actors.filter((a) => a.visible));
+  const feet = (list: readonly OfficeActor[]): FootSpot[] =>
+    list.map((a) => ({ agent: a.agent, x: a.foot.x, y: a.foot.y, ...a.tag, priority: a.priority }));
+  // ① 우선순위 80 이상의 이름표.
+  const firstTags = placeNameTags(feet(shown.filter((a) => a.priority >= PRIORITY_SPEAKING)), screen);
+  // ② 말풍선 줄 모서리: ①의 이름표와 안 겹치는 첫 모서리(모두 겹치면 오른쪽 위).
+  const width = bubbleWidth(screen.width);
+  const corner =
+    RAIL_CORNERS.find((c) => !firstTags.some((t) => overlap(t.rect, railRect(c, screen, width)))) ?? RAIL_CORNERS[0];
+  const rect = railRect(corner, screen, width);
+  const railed = shown.filter((a) => a.railed).map((a) => a.agent);
+  // ③ 머리 위 말풍선.
+  const { bubbles, overflow } = placeHeadBubbles(shown, screen, [
+    ...firstTags.map((t) => t.rect),
+    ...(railed.length > 0 ? [rect] : []),
+  ]);
+  const railAgents = [...railed, ...overflow];
+  const rail = railAgents.length > 0 ? { corner, rect, agents: railAgents } : null;
+  // ④ 나머지 이름표: 앞서 놓은 것 모두를 피한다.
+  const taken = [...firstTags.map((t) => t.rect), ...bubbles.map((b) => b.rect), ...(rail ? [rect] : [])];
+  const restTags = placeNameTags(feet(shown.filter((a) => a.priority < PRIORITY_SPEAKING)), screen, taken);
+  return { tags: [...firstTags, ...restTags], bubbles, rail, hidden };
+}
+
+/** ③: 넓이 합이 화면의 24%를 넘으면 모두 줄로, 아니면 9후보 가운데 화면 안이고 막히지 않은 첫 자리(없으면 줄로). */
+function placeHeadBubbles(
+  shown: readonly OfficeActor[],
+  screen: Size,
+  blocked: readonly Rect[],
+): { bubbles: Placed[]; overflow: string[] } {
+  const talkers = shown.filter((a) => a.bubble !== null);
+  const area = talkers.reduce((sum, a) => sum + (a.bubble as Size).width * (a.bubble as Size).height, 0);
+  if (area > screen.width * screen.height * LANE_AREA_RATIO) {
+    return { bubbles: [], overflow: talkers.map((a) => a.agent) };
+  }
+  const bubbles: Placed[] = [];
+  const overflow: string[] = [];
+  for (const a of talkers) {
+    const rect = bubbleCandidates(a.head.x, a.head.y, a.bubble as Size).find(
+      (r) =>
+        insideScreen(r, screen) && !blocked.some((b) => overlap(b, r)) && !bubbles.some((p) => overlap(p.rect, r)),
+    );
+    if (rect) bubbles.push({ agent: a.agent, rect });
+    else overflow.push(a.agent);
+  }
+  return { bubbles, overflow };
 }

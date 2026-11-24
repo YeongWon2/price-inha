@@ -12,10 +12,14 @@
 import "./office.css";
 import { API, OFFICE_LOOK_PATHS } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
-import { Chatter, KIND_OFFICE_TALK, talkElement } from "./chatter";
+import { chatLine } from "./chat-lines";
+import { chatLineElement } from "./chat-view";
+import { Chatter, KIND_OFFICE_TALK, readTalk } from "./chatter";
 import { createLookPicker } from "./look-picker";
 import { DEFAULT_LOOKS } from "./looks";
 import type { OfficeMap, Scene } from "./scene3d";
+import { SpeakerCamera } from "./speaker-camera";
+import { SPEECH_LIFE_MS } from "./speech";
 import { teamFeed, type FeedEntry } from "./team-feed";
 import { trimLines, type Line } from "./trim";
 
@@ -27,6 +31,12 @@ const MAP_PATH = "./office-map.json";
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 10000;
 const FOLLOW_PX = 80;
+// (23차, 22차 N2 걱정) 다시 이을 때 서버가 다시 보내는 옛 office.talk: 이은 뒤 이 시간 안에 온 것 가운데 `at`이
+// 말풍선 수명(12초)보다 오래된 것은 말풍선 · 자막 · 발언자 카메라 없이 팀 탭에만 넣는다. 이 창 밖의 실시간 글은
+// 브라우저와 서버의 시계가 어긋나도 말풍선이 사라지지 않게 `at`을 보지 않는다.
+const REPLAY_WINDOW_MS = 3000;
+// 자막 · 발언 중 표시를 다시 볼 간격.
+const CAPTION_TICK_MS = 500;
 
 const AGENT_IDS = ["news", "strategy", "risk", "review", "trader", "leader"];
 // 20차 고침: 침실은 없다. 일하지 않는 시간(`bed`)은 라운지 · 탕비실 쉼 자리다.
@@ -68,6 +78,10 @@ const state = {
 };
 /** (22차) 팀의 대화: 말풍선 판 · 최근 말 · 팀 탭의 논의 줄. */
 const chatter = new Chatter();
+/** (23차 7번 (나)) 회의 발언자 카메라(기본 켜짐). */
+const speaker = new SpeakerCamera();
+/** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
+let replayUntil = 0;
 
 // ---------- 화면: 3D 또는 가벼운 화면 ----------
 
@@ -127,6 +141,7 @@ async function show3d(): Promise<void> {
     onLost: () => showLight("lost"),
     onFollow: (following: boolean) => { $("recenter").hidden = following; },
     speech: chatter.board,
+    speaker,
   });
   state.view = scene;
   $("recenter").hidden = true;
@@ -180,6 +195,7 @@ function applyChat(resp: ChatResponse | null | undefined): void {
     trimLines(lines, state.responses);
   }
   if (convKeyOf(resp) === state.conversation) { renderLog(false); }
+  renderCaption();
 }
 
 function newId(): string {
@@ -204,6 +220,19 @@ function renderTabs(): void {
     tabs.append(b);
   }
   $("chat-to-wrap").hidden = state.conversation !== ROOM_TEAM;
+  renderCaption();
+}
+
+/** (23차 6번 · 7번 (가)) 화면 아래 자막과 팀 탭 위 `○○ 발언 중…`. 없으면 숨긴다. */
+function renderCaption(): void {
+  const line = chatter.caption(state.names);
+  const cap = $("caption");
+  if (cap.textContent !== (line ?? "")) { cap.textContent = line ?? ""; cap.title = line ?? ""; }
+  cap.hidden = line === null;
+  const speaking = state.conversation === ROOM_TEAM ? chatter.speaking(state.names) : null;
+  const bar = $("speaking");
+  if (bar.textContent !== (speaking ?? "")) { bar.textContent = speaking ?? ""; }
+  bar.hidden = speaking === null;
 }
 
 function selectConversation(key: string): void {
@@ -213,13 +242,10 @@ function selectConversation(key: string): void {
 }
 
 function lineElement(line: Line): HTMLElement | null {
-  const div = document.createElement("div");
   if (line.kind === "me") {
-    div.className = "msg me";
-    const who = document.createElement("span");
-    who.className = "who";
-    who.textContent = line.room === ROOM_TEAM ? `나 → ${nameOf(line.agent)}` : "나";
-    div.append(who, document.createTextNode(line.text));
+    // (23차 8번) 내 글은 오른쪽 녹색 말풍선. 팀 방에서는 받는 담당을 작게 덧붙인다.
+    const view = chatLine({ kind: "me", key: line.id, text: line.text }, state.names);
+    const div = chatLineElement(view, line.room === ROOM_TEAM ? `→ ${nameOf(line.agent)}` : undefined);
     if (line.failed) {
       div.classList.add("failed");
       const retry = document.createElement("button");
@@ -233,20 +259,13 @@ function lineElement(line: Line): HTMLElement | null {
   }
   const resp = state.responses.get(line.requestId);
   if (!resp) { return null; }
-  const who = document.createElement("span");
-  who.className = "who";
-  who.textContent = nameOf(resp.agent);
-  if (resp.status === "complete") {
-    div.className = "msg agent";
-    div.append(who, document.createTextNode(resp.content ?? ""));
-  } else if (resp.status === "failed") {
-    div.className = "msg status failed";
-    div.textContent = `${nameOf(resp.agent)}: 실패 (${resp.error ?? "까닭 모름"})`;
-  } else {
-    div.className = "msg status";
-    div.textContent = `${nameOf(resp.agent)}: ${WORK_LABEL[resp.status] ?? resp.status} …`;
+  // (23차 8번) 담당 답은 왼쪽에 굵은 이름 + 글, 글이 아직 없으면 `○○: 생각 중` 줄.
+  const view = chatLine(
+    { kind: "reply", key: resp.requestId, agent: resp.agent, status: resp.status, content: resp.content }, state.names);
+  if (resp.status === "failed") {
+    return chatLineElement({ ...view, text: `실패 (${resp.error ?? "까닭 모름"})` }, undefined, "failed");
   }
-  return div;
+  return chatLineElement(view);
 }
 
 /** (22차 2번) 팀 탭: 내 글 · 담당 답 · 논의 줄을 시각 순서로. */
@@ -261,9 +280,14 @@ function teamElements(lines: Line[]): (HTMLElement | null)[] {
       ? { kind: "me", key, at: chatter.stamp(key), agent: line.agent, text: line.text }
       : { kind: "reply", key, at: chatter.stamp(key), agent: resp?.agent ?? "", text: resp?.content ?? "" });
   }
-  entries.push(...chatter.talkEntries());
+  const talks = new Map<string, FeedEntry>();
+  for (const talk of chatter.talkEntries()) { talks.set(talk.key, talk); entries.push(talk); }
   return teamFeed(entries, state.names).map((row) => {
-    if (row.kind === "talk") { return talkElement(row); }
+    const talk = talks.get(row.key);
+    if (row.kind === "talk" && talk?.kind === "talk") {
+      const view = chatLine({ kind: "talk", key: talk.key, agent: talk.agent, text: talk.text, topic: talk.topic }, state.names);
+      return chatLineElement(view, undefined, "talk");
+    }
     const line = byKey.get(row.key);
     return line ? lineElement(line) : null;
   });
@@ -360,14 +384,25 @@ function onFrame(text: string): void {
     state.lastSeq = frame.seq;
     if (frame.kind === "office.agent") { applyAgent(frame.payload as AgentEvent, false); }
     else if (frame.kind === "office.chat") { applyChat(frame.payload as ChatResponse); }
-    else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, true); }
+    else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, !replayedOld(frame.payload)); }
     else if (frame.kind === KIND_OFFICE_APPROVAL) { applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init)); }
   }
 }
 
-/** (22차) 팀 대화 한 줄: 팀 탭에 넣고, 실시간이면 말풍선 · 최근 말에도. */
+/** 다시 이은 직후에 다시 받은 옛 논의 글인가(`at`이 말풍선 수명보다 오래됨). */
+function replayedOld(payload: unknown): boolean {
+  const now = Date.now();
+  if (now >= replayUntil) { return false; }
+  const talk = readTalk(payload);
+  return talk !== null && now - talk.at >= SPEECH_LIFE_MS;
+}
+
+/** (22차) 팀 대화 한 줄: 팀 탭에 넣고, 실시간이면 말풍선 · 최근 말 · 자막 · 발언자 카메라에도. */
 function onTalk(payload: unknown, seq: number, live: boolean): void {
   if (!chatter.talk(payload, seq, live)) { return; }
+  const talk = live ? readTalk(payload) : null;
+  if (talk) { speaker.talk(talk.agent, Date.now()); }
+  renderCaption();
   if (state.conversation === ROOM_TEAM) { renderLog(false); }
   if (!$("light").hidden) { renderLight(); }
 }
@@ -437,7 +472,8 @@ function openSocket(): void {
   const scheme = location.protocol.replace("http", "ws");
   let url = `${scheme}//${location.host}${WS_PATH}`;
   // 끊겼다가 다시 이을 때는 마지막으로 받은 번호 뒤부터 받는다(E3).
-  if (state.lastSeq !== null) { url += `?last_seq=${encodeURIComponent(String(state.lastSeq))}`; }
+  const resuming = state.lastSeq !== null;
+  if (resuming) { url += `?last_seq=${encodeURIComponent(String(state.lastSeq))}`; }
   let socket: WebSocket;
   try { socket = new WebSocket(url); } catch { retryLater(); return; }
   let closed = false;
@@ -449,6 +485,7 @@ function openSocket(): void {
   };
   socket.onopen = () => {
     retryMs = RETRY_MIN_MS;
+    if (resuming) { replayUntil = Date.now() + REPLAY_WINDOW_MS; }
     setConn("연결됨", "ok");
   };
   socket.onmessage = (event) => { if (typeof event.data === "string") { onFrame(event.data); } };
@@ -468,6 +505,19 @@ async function start(): Promise<void> {
     setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
     retryLater();
   }
+}
+
+/** (23차 7번 (나)) 단추 "자동 카메라 켜짐/꺼짐"(기본 켜짐). */
+function wireAutoCamera(): void {
+  const button = $<HTMLButtonElement>("auto-camera");
+  const paint = () => {
+    const on = speaker.enabled();
+    button.setAttribute("aria-pressed", String(on));
+    button.textContent = on ? "자동 카메라 켜짐" : "자동 카메라 꺼짐";
+  };
+  button.addEventListener("click", () => { speaker.setEnabled(!speaker.enabled(), Date.now()); paint(); });
+  paint();
+  button.hidden = false;
 }
 
 // ---------- 시작 ----------
@@ -515,6 +565,8 @@ async function main(): Promise<void> {
     }
   }
   $("recenter").addEventListener("click", () => { state.view?.recenter(); });
+  wireAutoCamera();
+  setInterval(renderCaption, CAPTION_TICK_MS);
   // (22차 5번) 가벼운 화면의 최근 말은 12초가 지나면 내린다.
   let lightSaid = "";
   setInterval(() => {

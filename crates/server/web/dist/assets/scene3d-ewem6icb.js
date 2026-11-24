@@ -1,4 +1,4 @@
-import { i as placeBubbles, n as LOOKS, r as bubbleWidth, t as DEFAULT_LOOKS } from "./office-b787iagh.js";
+import { a as bubbleCandidates, c as bubbleWidth, l as insideScreen, n as DEFAULT_LOOKS, o as bubbleText, r as LOOKS, s as bubbleWhere, t as easeInOut, u as overlap } from "./office-gfqoxuxi.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40344,6 +40344,155 @@ function poseDoll(p, clip, work, k) {
 	}
 	p.body.scale.y = 1.45 * (1 + Math.sin(k * 2.3) * .012);
 }
+/** 좌우 후보가 비켜나는 거리(이름표 폭의 배수). */
+var TAG_SIDE_SHIFT = .4;
+var RAIL_HEIGHT_RATIO = .28;
+var RAIL_CORNERS = [
+	"top-right",
+	"top-left",
+	"bottom-left",
+	"bottom-right"
+];
+/**
+* (23차 1번) 이름표 자리. 우선순위 내림차순(같으면 id 글자 순)으로 놓는다. 첫 자리는 발 투영점에서 10px 아래가
+* 윗변, 가로 가운데 맞춤 뒤 화면 여백 8px 안으로 민 자리다. 앞서 놓은 이름표 · `taken`과 [`TAG_PADDING`]보다
+* 가까우면 아래로 `높이 + 5`씩 3단 × 좌우 0 · -0.4폭 · +0.4폭의 9후보 가운데 처음 빈 자리를 쓴다.
+* 결과는 놓은 순서다.
+*/
+function placeNameTags(feet, screen, taken = []) {
+	const blocked = [...taken];
+	const out = [];
+	for (const foot of byPriority(feet)) {
+		const candidates = tagCandidates(foot, screen);
+		const rect = candidates.find((r) => !blocked.some((b) => near(r, b, 4))) ?? candidates[0];
+		blocked.push(rect);
+		out.push({
+			agent: foot.agent,
+			rect
+		});
+	}
+	return out;
+}
+/** 우선순위 내림차순, 같으면 id 글자 순(새 배열). */
+function byPriority(list) {
+	return [...list].sort((a, b) => b.priority - a.priority || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0));
+}
+/** 이름표 9후보: 아래로 `높이 + 5`씩 3단, 각 단에서 좌우 0 · -0.4폭 · +0.4폭(가로는 화면 여백 안으로 민다). */
+function tagCandidates(foot, screen) {
+	const { width, height } = foot;
+	const left = foot.x - width / 2;
+	const top = foot.y + 10;
+	const maxX = screen.width - 8 - width;
+	const clampX = (x) => Math.max(8, Math.min(maxX, x));
+	const out = [];
+	for (let row = 0; row < 3; row += 1) for (const dx of [
+		0,
+		-width * TAG_SIDE_SHIFT,
+		width * TAG_SIDE_SHIFT
+	]) out.push({
+		x: clampX(left + dx),
+		y: top + row * (height + 5),
+		width,
+		height
+	});
+	return out;
+}
+/** 두 사각형 사이가 `gap`보다 가까운가(겹침 포함). */
+function near(a, b, gap) {
+	return a.x < b.x + b.width + gap && b.x < a.x + a.width + gap && a.y < b.y + b.height + gap && b.y < a.y + a.height + gap;
+}
+/** (23차 1번) 이름표 안 글자: 이름뿐(💭 · 💤 같은 아이콘을 붙이지 않는다). */
+function nameTagText(name, work, place) {
+	return name;
+}
+/**
+* (23차 4번) 자리 잡는 우선순위: 머리 위 말풍선(글 · "···")이 있으면 [`PRIORITY_SPEAKING`], 일하는 중(`work`가
+* `idle`이 아님)이면 [`PRIORITY_WORKING`], 그 밖 [`PRIORITY_OTHER`].
+*/
+function actorPriority(hasSpeech, work) {
+	if (hasSpeech) return 80;
+	return work !== "idle" ? 50 : 0;
+}
+/**
+* (23차 5번) 말풍선 줄의 자리: 그 모서리에 폭 = 말풍선폭 + 10, 높이 = min(168, 화면높이 × 0.28). 오른쪽 위는
+* (화면폭 - 말풍선폭 - 18, 8)이고, 다른 모서리도 화면 가장자리에서 같은 여백(8px)이다.
+*/
+function railRect(corner, screen, bubbleWidth) {
+	const width = bubbleWidth + 10;
+	const height = Math.min(168, screen.height * RAIL_HEIGHT_RATIO);
+	const right = corner === "top-right" || corner === "bottom-right";
+	const bottom = corner === "bottom-left" || corner === "bottom-right";
+	return {
+		x: right ? screen.width - bubbleWidth - 18 : 8,
+		y: bottom ? screen.height - height - 8 : 8,
+		width,
+		height
+	};
+}
+/**
+* (23차 4번) 한 프레임의 자리 잡기. 보이는 담당을 우선순위 내림차순(같으면 id 순)으로 두고
+* ① 우선순위 80 이상의 이름표 → ② 말풍선 줄 모서리(①의 이름표와 안 겹치는 첫 모서리) → ③ 머리 위 말풍선
+* (22차 후보 · 간격 `높이 + 6` · 첫 자리 `max(8, 머리 y - 높이 - 8)`, ①의 이름표 · 쓰는 말풍선 줄 · 앞선 말풍선과
+* 안 겹치는 첫 자리, 없으면 줄로; 넓이 합이 화면의 24%를 넘으면 모두 줄로) → ④ 나머지 이름표(앞서 놓은 것 모두를
+* 피한다). 말풍선폭은 `bubbleWidth(화면폭)`이다.
+*/
+function layoutOffice(actors, screen) {
+	const hidden = actors.filter((a) => !a.visible).map((a) => a.agent);
+	const shown = byPriority(actors.filter((a) => a.visible));
+	const feet = (list) => list.map((a) => ({
+		agent: a.agent,
+		x: a.foot.x,
+		y: a.foot.y,
+		...a.tag,
+		priority: a.priority
+	}));
+	const firstTags = placeNameTags(feet(shown.filter((a) => a.priority >= 80)), screen);
+	const width = bubbleWidth(screen.width);
+	const corner = RAIL_CORNERS.find((c) => !firstTags.some((t) => overlap(t.rect, railRect(c, screen, width)))) ?? RAIL_CORNERS[0];
+	const rect = railRect(corner, screen, width);
+	const railed = shown.filter((a) => a.railed).map((a) => a.agent);
+	const { bubbles, overflow } = placeHeadBubbles(shown, screen, [...firstTags.map((t) => t.rect), ...railed.length > 0 ? [rect] : []]);
+	const railAgents = [...railed, ...overflow];
+	const rail = railAgents.length > 0 ? {
+		corner,
+		rect,
+		agents: railAgents
+	} : null;
+	const taken = [
+		...firstTags.map((t) => t.rect),
+		...bubbles.map((b) => b.rect),
+		...rail ? [rect] : []
+	];
+	const restTags = placeNameTags(feet(shown.filter((a) => a.priority < 80)), screen, taken);
+	return {
+		tags: [...firstTags, ...restTags],
+		bubbles,
+		rail,
+		hidden
+	};
+}
+/** ③: 넓이 합이 화면의 24%를 넘으면 모두 줄로, 아니면 9후보 가운데 화면 안이고 막히지 않은 첫 자리(없으면 줄로). */
+function placeHeadBubbles(shown, screen, blocked) {
+	const talkers = shown.filter((a) => a.bubble !== null);
+	if (talkers.reduce((sum, a) => sum + a.bubble.width * a.bubble.height, 0) > screen.width * screen.height * .24) return {
+		bubbles: [],
+		overflow: talkers.map((a) => a.agent)
+	};
+	const bubbles = [];
+	const overflow = [];
+	for (const a of talkers) {
+		const rect = bubbleCandidates(a.head.x, a.head.y, a.bubble).find((r) => insideScreen(r, screen) && !blocked.some((b) => overlap(b, r)) && !bubbles.some((p) => overlap(p.rect, r)));
+		if (rect) bubbles.push({
+			agent: a.agent,
+			rect
+		});
+		else overflow.push(a.agent);
+	}
+	return {
+		bubbles,
+		overflow
+	};
+}
 // src/office/actors3d.ts
 var TILE_PX = 32;
 var WALK_SPEED = 150 / TILE_PX;
@@ -40353,14 +40502,23 @@ var SEAT_RADIUS = .22;
 var RETRY_MS = 1e3;
 var RUN_LEAN = .18;
 var RUN_BOUNCE = .05;
-var HEAD_Y = 2.05;
-var SIT_HEAD_Y = 1.6;
-var GLYPH = {
-	idle: "",
-	queued: "⏳",
-	thinking: "💭",
-	failed: "❗"
-};
+var ORIGIN_HEIGHT$1 = 2.7;
+var ORIGIN_HEAD_STAND = 2.7;
+var ORIGIN_HEAD_SIT = 2;
+var DEFAULT_HEIGHT = 1.85;
+var MIN_HEIGHT = 1;
+var MAX_HEIGHT = 4;
+/** 몸의 키(세계 단위)를 잰다. 못 재면 `null`. */
+function measureHeight(obj) {
+	obj.updateMatrixWorld(true);
+	const box = new Box3().setFromObject(obj);
+	const h = box.max.y - Math.max(0, box.min.y);
+	return Number.isFinite(h) && h >= MIN_HEIGHT && h <= MAX_HEIGHT ? h : null;
+}
+/** 머리 기준점의 높이: 원본 비율(서 있음 2.7/2.7 · 앉음 2.0/2.7) × 우리 키. */
+function headHeight(height, sitting) {
+	return height * (sitting ? ORIGIN_HEAD_SIT : ORIGIN_HEAD_STAND) / ORIGIN_HEIGHT$1;
+}
 function angleDiff(a, b) {
 	let d = a - b;
 	while (d > Math.PI) d -= Math.PI * 2;
@@ -40413,12 +40571,8 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 			retryAt: 0,
 			walking: false,
 			label: "",
-			headY: HEAD_Y,
-			screen: {
-				x: 0,
-				y: 0,
-				visible: false
-			},
+			height: DEFAULT_HEIGHT,
+			headY: DEFAULT_HEIGHT,
 			tagSize: null,
 			paused: false
 		};
@@ -40447,6 +40601,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 					actor.doll = makeDoll(actor.root, id);
 					tagTree(actor);
 				}
+				actor.height = measureHeight(actor.root) ?? DEFAULT_HEIGHT;
 				return;
 			}
 			const model = instance(made.model.scene, true);
@@ -40465,6 +40620,7 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 				actions,
 				current: null
 			};
+			actor.height = measureHeight(model) ?? DEFAULT_HEIGHT;
 			tagTree(actor);
 		});
 	}
@@ -40593,17 +40749,24 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		const clip = clipName(moving, !moving && seated(actor));
 		if (actor.body) animateBody(actor, actor.body, clip, dt);
 		if (actor.doll) poseDoll(actor.doll, clip, actor.view.work, t + actor.phase);
-		actor.headY = clip === "sit" ? SIT_HEAD_Y : HEAD_Y;
-		const work = actor.view.work;
-		const glyph = actor.view.place === "bed" && work === "idle" ? "💤" : GLYPH[work] ?? "";
-		const label = `${glyph ? glyph + " " : ""}${names[actor.id] ?? actor.id}`;
+		actor.headY = headHeight(actor.height, clip === "sit");
+		const label = nameTagText(names[actor.id] ?? actor.id, actor.view.work, actor.view.place);
 		if (label !== actor.label) {
 			actor.tag.textContent = label;
+			actor.tag.title = label;
 			actor.label = label;
 			actor.tagSize = null;
 		}
-		actor.tag.dataset.work = work;
-		actor.tag.dataset.place = actor.view.place;
+	}
+	/** 세계 점을 화면 점(px)으로. 카메라 뒤이거나 화면 밖이면 `inside`가 거짓. */
+	function screenPoint(camera, x, y, z, width, height) {
+		projected.set(x, y, z).project(camera);
+		const inside = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
+		return {
+			x: (projected.x + 1) / 2 * width,
+			y: (1 - projected.y) / 2 * height,
+			inside
+		};
 	}
 	const projected = new Vector3();
 	const raycaster = new Raycaster();
@@ -40624,49 +40787,58 @@ function createActors({ scene, labels, map, names, looks, grid }) {
 		snapAll() {
 			for (const actor of actors.values()) if (actor.target) placeAt(actor, actor.target);
 		},
-		placeLabels(camera, width, height) {
-			for (const actor of actors.values()) {
-				projected.set(actor.x, actor.headY, actor.y).project(camera);
-				const visible = projected.z < 1 && Math.abs(projected.x) <= 1.05 && Math.abs(projected.y) <= 1.05;
-				const sx = (projected.x + 1) / 2 * width;
-				const sy = (1 - projected.y) / 2 * height;
-				actor.screen = {
-					x: sx,
-					y: sy,
-					visible
-				};
-				if (!visible) {
-					actor.tag.style.display = "none";
-					continue;
-				}
-				actor.tag.style.display = "";
-				actor.tag.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
-			}
-		},
-		/** (22차 3번) 이번 프레임의 머리 점(이름표 바로 위)과 이름표 자리. [`placeLabels`] 뒤에 부른다. */
-		heads() {
+		/**
+		* (23차) 이번 프레임의 발 투영점(월드 y 0, 앉았으면 좌석 자리) · 머리 투영점(원본 비율 × 우리 키) · 이름표 크기.
+		* 발이나 머리 어느 하나라도 화면 안이면 보인다(발언자 샷처럼 발이 화면 아래로 나가도 말풍선은 보인다).
+		*/
+		spots(camera, width, height) {
 			return [...actors.values()].map((actor) => {
-				if (!actor.tagSize && actor.screen.visible) actor.tagSize = {
-					width: actor.tag.offsetWidth,
-					height: actor.tag.offsetHeight
-				};
-				const size = actor.tagSize ?? {
-					width: 0,
-					height: 0
-				};
-				const label = {
-					x: actor.screen.x - size.width / 2,
-					y: actor.screen.y - size.height,
-					...size
-				};
+				const foot = screenPoint(camera, actor.x, 0, actor.y, width, height);
+				const head = screenPoint(camera, actor.x, actor.headY, actor.y, width, height);
+				if (!actor.tagSize) {
+					actor.tag.style.display = "";
+					actor.tagSize = {
+						width: actor.tag.offsetWidth,
+						height: actor.tag.offsetHeight
+					};
+				}
 				return {
 					id: actor.id,
-					x: actor.screen.x,
-					y: label.y,
-					label,
-					visible: actor.screen.visible
+					visible: foot.inside || head.inside,
+					work: actor.view.work,
+					foot: {
+						x: foot.x,
+						y: foot.y
+					},
+					head: {
+						x: head.x,
+						y: head.y
+					},
+					tag: actor.tagSize
 				};
 			});
+		},
+		/** 이름표를 그 자리에 놓는다(`null`이면 숨긴다). */
+		placeTag(id, rect) {
+			const actor = actors.get(id);
+			if (!actor) return;
+			if (!rect) {
+				actor.tag.style.display = "none";
+				return;
+			}
+			actor.tag.style.display = "";
+			actor.tag.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+		},
+		/** 발언자 카메라가 볼 담당의 자세: 세계 자리 · 보는 쪽 · 키 · 머리 높이. */
+		pose(id) {
+			const actor = actors.get(id);
+			return actor ? {
+				x: actor.x,
+				z: actor.y,
+				yaw: actor.yaw,
+				height: actor.height,
+				headY: actor.headY
+			} : null;
 		},
 		/** (22차 4번) 잡담을 볼 담당들(세계 좌표 · 한가 · 걷는 중). 바쁨은 말풍선 층이 채운다. */
 		walkers() {
@@ -40892,9 +41064,10 @@ function pairKey(a, b) {
 // src/office/bubbles3d.ts
 function createBubbleLayer(labels, board, names) {
 	const smalltalk = new Smalltalk();
-	const lane = document.createElement("div");
-	lane.className = "bubble-lane";
-	labels.appendChild(lane);
+	const rail = document.createElement("div");
+	rail.className = "speech-rail";
+	rail.style.display = "none";
+	labels.appendChild(rail);
 	const shown = /* @__PURE__ */ new Map();
 	function element(id) {
 		let one = shown.get(id);
@@ -40902,11 +41075,11 @@ function createBubbleLayer(labels, board, names) {
 			const el = document.createElement("div");
 			el.className = "bubble";
 			el.dataset.agent = id;
-			el.dataset.name = names[id] ?? id;
 			labels.appendChild(el);
 			one = {
 				el,
 				text: "",
+				maxWidth: 0,
 				size: {
 					width: 0,
 					height: 0
@@ -40918,7 +41091,7 @@ function createBubbleLayer(labels, board, names) {
 	}
 	function hide(one) {
 		one.el.style.display = "none";
-		if (one.el.parentElement === lane) labels.appendChild(one.el);
+		if (one.el.parentElement === rail) labels.appendChild(one.el);
 	}
 	function talkSmall(now, walkers, canSee) {
 		const ready = walkers.map((w) => ({
@@ -40932,63 +41105,76 @@ function createBubbleLayer(labels, board, names) {
 		}
 		for (const say of smalltalk.speaking(now)) board.smalltalk(say.agent, say.text, now, now + 250);
 	}
-	function update(now, heads, walkers, canSee, width, height) {
+	/** 말풍선 글을 바꾸고 크기를 잰다(머리 위 자리에서 잰다 — 줄 안이면 잠깐 꺼내 잰다). */
+	function refresh(one, text, maxWidth) {
+		if (one.text === text && one.maxWidth === maxWidth) return;
+		if (one.el.parentElement === rail) labels.appendChild(one.el);
+		one.text = text;
+		one.maxWidth = maxWidth;
+		one.el.textContent = text;
+		one.el.title = text;
+		one.el.style.maxWidth = `${maxWidth}px`;
+		one.el.style.display = "";
+		one.size = {
+			width: one.el.offsetWidth || maxWidth,
+			height: one.el.offsetHeight || 24
+		};
+	}
+	function update(now, spots, walkers, canSee, width, height, placeTag) {
 		talkSmall(now, walkers, canSee);
 		const maxWidth = bubbleWidth(width);
-		const spots = [];
-		const visible = /* @__PURE__ */ new Set();
-		for (const head of heads) {
-			const bubble = board.shown(head.id, now);
-			const one = shown.get(head.id);
-			if (!bubble) {
-				if (one) hide(one);
-				continue;
+		const actors = [];
+		const drawn = /* @__PURE__ */ new Set();
+		for (const spot of spots) {
+			const bubble = board.shown(spot.id, now);
+			const where = bubbleWhere(bubble);
+			if (bubble && where !== "none") {
+				const one = element(spot.id);
+				refresh(one, bubbleText(names[spot.id] ?? spot.id, bubble), maxWidth);
+				one.el.dataset.kind = bubble.kind;
+				one.el.dataset.working = String(spot.work !== "idle");
+				drawn.add(spot.id);
 			}
-			const el = element(head.id);
-			const text = bubble.text;
-			if (el.text !== text || el.el.style.maxWidth !== `${maxWidth}px`) {
-				el.text = text;
-				el.el.textContent = text;
-				el.el.title = `${names[head.id] ?? head.id} · ${text}`;
-				el.el.dataset.kind = bubble.kind;
-				el.el.style.maxWidth = `${maxWidth}px`;
-				el.el.style.display = "";
-				el.size = {
-					width: el.el.offsetWidth || maxWidth,
-					height: el.el.offsetHeight || 24
-				};
-			}
-			if (!head.visible) {
-				hide(el);
-				continue;
-			}
-			visible.add(head.id);
-			spots.push({
-				agent: head.id,
-				x: head.x,
-				y: head.y,
-				bubble: el.size,
-				label: head.label
+			actors.push({
+				agent: spot.id,
+				visible: spot.visible,
+				foot: spot.foot,
+				head: spot.head,
+				tag: spot.tag,
+				bubble: where === "head" ? shown.get(spot.id).size : null,
+				railed: where === "rail",
+				priority: actorPriority(where === "head", spot.work)
 			});
 		}
-		const placement = placeBubbles(spots, {
+		const layout = layoutOffice(actors, {
 			width,
 			height
 		});
-		for (const { agent, rect } of placement.placed) {
+		const tags = new Map(layout.tags.map((t) => [t.agent, t.rect]));
+		for (const spot of spots) placeTag(spot.id, tags.get(spot.id) ?? null);
+		for (const { agent, rect } of layout.bubbles) {
 			const one = element(agent);
-			if (one.el.parentElement === lane) labels.appendChild(one.el);
+			if (one.el.parentElement === rail) labels.appendChild(one.el);
 			one.el.style.display = "";
 			one.el.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
 		}
-		for (const agent of placement.lane) {
-			const one = element(agent);
-			one.el.style.display = "";
-			one.el.style.transform = "";
-			if (one.el.parentElement !== lane) lane.appendChild(one.el);
-		}
-		for (const agent of placement.hidden) hide(element(agent));
-		for (const [id, one] of shown) if (!visible.has(id)) hide(one);
+		const inRail = new Set(layout.rail?.agents ?? []);
+		if (layout.rail) {
+			const { rect, agents } = layout.rail;
+			rail.style.display = "";
+			rail.dataset.corner = layout.rail.corner;
+			rail.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+			rail.style.width = `${Math.round(rect.width)}px`;
+			rail.style.maxHeight = `${Math.round(rect.height)}px`;
+			agents.forEach((agent, i) => {
+				const one = element(agent);
+				one.el.style.display = "";
+				one.el.style.transform = "";
+				if (one.el.parentElement !== rail || rail.children[i] !== one.el) rail.insertBefore(one.el, rail.children[i] ?? null);
+			});
+		} else rail.style.display = "none";
+		const placed = new Set(layout.bubbles.map((b) => b.agent));
+		for (const [id, one] of shown) if (!drawn.has(id) || !placed.has(id) && !inRail.has(id)) hide(one);
 	}
 	return {
 		update,
@@ -40996,7 +41182,7 @@ function createBubbleLayer(labels, board, names) {
 		dispose() {
 			for (const one of shown.values()) one.el.remove();
 			shown.clear();
-			lane.remove();
+			rail.remove();
 		}
 	};
 }
@@ -41008,6 +41194,17 @@ var START_POLAR = .95;
 var PRESS_SLOP_PX = 5;
 var MAX_PIXEL_RATIO = 1.75;
 var MIN_PIXEL_RATIO = .75;
+var UPPER_BODY = .5;
+var UPPER_BODY_FILL = .5;
+var ORIGIN_MIN_DISTANCE = 2.2;
+var ORIGIN_HEIGHT = 2.7;
+var GATHERED = 3;
+function angleTo(from, to) {
+	let d = to - from;
+	while (d > Math.PI) d -= Math.PI * 2;
+	while (d < -Math.PI) d += Math.PI * 2;
+	return from + d;
+}
 /** WebGL을 쓸 수 있는가. */
 function webglAvailable() {
 	try {
@@ -41069,7 +41266,7 @@ function roomTags(labels, map) {
 		};
 	});
 }
-function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech }) {
+function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow, speech, speaker }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
 	host.appendChild(renderer.domElement);
@@ -41091,6 +41288,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		looks,
 		grid: buildGrid(map)
 	});
+	const tanHalfFov = Math.tan(FOV / 2 * Math.PI / 180);
 	const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
 	let focus = "all";
 	const want = {
@@ -41098,6 +41296,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		polar: START_POLAR,
 		theta: 0,
 		tx: 0,
+		ty: 0,
 		tz: 0
 	};
 	const cur = { ...want };
@@ -41115,6 +41314,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 			polar: START_POLAR,
 			theta: 0,
 			tx: view.tx,
+			ty: 0,
 			tz: view.tz
 		});
 	}
@@ -41129,12 +41329,78 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		want.tx = MathUtils.clamp(want.tx, 0, map.cols);
 		want.tz = MathUtils.clamp(want.tz, 0, map.rows);
 	}
-	function updateCamera(dt) {
-		const a = 1 - Math.exp(-12 * dt);
-		for (const key of Object.keys(want)) cur[key] += (want[key] - cur[key]) * a;
-		target.set(cur.tx, 0, cur.tz);
+	let tween = null;
+	let gathered = false;
+	function goalOrbit(goal) {
+		const polar = (90 - goal.elevationDeg) * Math.PI / 180;
+		if (goal.shot === "table") {
+			const v = fitView(focusBounds(map, "meeting"), polar, aspect(), FOV, true);
+			return {
+				radius: v.distance,
+				polar,
+				theta: 0,
+				tx: v.tx,
+				ty: 0,
+				tz: v.tz
+			};
+		}
+		const pose = goal.agent ? actors.pose(goal.agent) : null;
+		if (!pose) return null;
+		const span = pose.height * UPPER_BODY;
+		const fit = span / UPPER_BODY_FILL / (2 * tanHalfFov);
+		return {
+			radius: Math.max(ORIGIN_MIN_DISTANCE * pose.height / ORIGIN_HEIGHT, fit),
+			polar,
+			theta: pose.yaw,
+			tx: pose.x,
+			ty: pose.headY - span / 2,
+			tz: pose.z
+		};
+	}
+	/** 이번 프레임 발언자 카메라를 따른다. 쥐고 있으면 참. */
+	function driveSpeaker(wall) {
+		if (!speaker) return false;
+		const meeting = actors.places().filter((p) => p === "meeting").length >= GATHERED;
+		if (meeting !== gathered) {
+			gathered = meeting;
+			speaker.gather(meeting, wall);
+		}
+		const goal = speaker.goal(wall);
+		if (!goal) {
+			if (tween) {
+				tween = null;
+				Object.assign(want, cur);
+				if (!userMoved) reframe();
+			}
+			return false;
+		}
+		const key = `${goal.shot}:${goal.agent ?? ""}:${goal.since}`;
+		if (!tween || tween.key !== key) tween = {
+			key,
+			from: { ...cur },
+			start: wall,
+			ms: goal.transitionMs,
+			to: goal.shot === "table" ? goalOrbit(goal) : null
+		};
+		const to = tween.to ?? goalOrbit(goal);
+		if (!to) return false;
+		const k = easeInOut((wall - tween.start) / tween.ms);
+		const theta = angleTo(tween.from.theta, to.theta);
+		for (const name of Object.keys(cur)) {
+			const end = name === "theta" ? theta : to[name];
+			cur[name] = tween.from[name] + (end - tween.from[name]) * k;
+		}
+		Object.assign(want, cur);
+		return true;
+	}
+	function updateCamera(dt, wall) {
+		if (!driveSpeaker(wall)) {
+			const a = 1 - Math.exp(-12 * dt);
+			for (const key of Object.keys(want)) cur[key] += (want[key] - cur[key]) * a;
+		}
+		target.set(cur.tx, cur.ty, cur.tz);
 		const s = Math.sin(cur.polar);
-		camera.position.set(target.x + cur.radius * s * Math.sin(cur.theta), cur.radius * Math.cos(cur.polar), target.z + cur.radius * s * Math.cos(cur.theta));
+		camera.position.set(target.x + cur.radius * s * Math.sin(cur.theta), target.y + cur.radius * Math.cos(cur.polar), target.z + cur.radius * s * Math.cos(cur.theta));
 		camera.lookAt(target);
 	}
 	function resize() {
@@ -41169,6 +41435,8 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 			want.theta -= angle;
 		},
 		moved() {
+			tween = null;
+			speaker?.manual(Date.now());
 			setFollowing(false);
 			clampWant();
 		},
@@ -41232,11 +41500,30 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, onFollow
 		const wall = Date.now();
 		if (bubbles) actors.pause((id) => bubbles.paused(id, wall));
 		actors.update(dt, (now - clock0) / 1e3, now);
-		updateCamera(dt);
+		updateCamera(dt, wall);
 		renderer.render(scene, camera);
-		actors.placeLabels(camera, host.clientWidth, host.clientHeight);
-		placeRoomTags(host.clientWidth, host.clientHeight);
-		bubbles?.update(wall, actors.heads(), actors.walkers(), actors.canSee, host.clientWidth, host.clientHeight);
+		const width = host.clientWidth;
+		const height = host.clientHeight;
+		placeRoomTags(width, height);
+		const spots = actors.spots(camera, width, height);
+		if (bubbles) bubbles.update(wall, spots, actors.walkers(), actors.canSee, width, height, actors.placeTag);
+		else {
+			const layout = layoutOffice(spots.map((s) => ({
+				agent: s.id,
+				visible: s.visible,
+				foot: s.foot,
+				head: s.head,
+				tag: s.tag,
+				bubble: null,
+				railed: false,
+				priority: actorPriority(false, s.work)
+			})), {
+				width,
+				height
+			});
+			const tags = new Map(layout.tags.map((t) => [t.agent, t.rect]));
+			for (const s of spots) actors.placeTag(s.id, tags.get(s.id) ?? null);
+		}
 		measure(now, frameMs);
 	}
 	raf = requestAnimationFrame(frameStep);

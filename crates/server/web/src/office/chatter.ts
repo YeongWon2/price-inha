@@ -2,8 +2,9 @@
 // 말풍선 판 · 가벼운 화면의 최근 말 · 팀 탭의 논의 줄로 나눠 둔다. 그리기는 부르는 쪽(main.ts · 3D 장면)이 한다.
 // 첫 화면의 최근 줄은 사무실 스냅샷의 `talk` 칸으로, 그 뒤는 실시간 연결의 `office.talk`로 받는다(새 경로 없음).
 
+import { caption, speakingLine, type TalkMark } from "./caption";
 import { SpeechBoard, latestLine, type Said, type SpeechState } from "./speech";
-import { talkEntry, type FeedEntry, type FeedRow, type Talk } from "./team-feed";
+import { talkEntry, type FeedEntry, type Talk } from "./team-feed";
 
 /** 서버 이벤트 이름. */
 export const KIND_OFFICE_TALK = "office.talk";
@@ -44,6 +45,8 @@ export class Chatter {
   readonly board = new SpeechBoard();
   private readonly said: Said[] = [];
   private readonly talks: FeedEntry[] = [];
+  /** (23차 7번 (가)) 실시간으로 받은 논의 글의 담당 · 받은 시각(발언 중 표시). */
+  private readonly marks: TalkMark[] = [];
   /** 팀 탭 줄의 처음 본 시각(내 글 · 담당 답). */
   private readonly stamps = new Map<string, number>();
 
@@ -58,6 +61,8 @@ export class Chatter {
     if (live) {
       this.board.say(talk.agent, talk.text, now);
       this.remember(talk.agent, talk.text, now);
+      this.marks.push({ agent: talk.agent, at: now });
+      if (this.marks.length > KEEP_SAID) this.marks.splice(0, this.marks.length - KEEP_SAID);
     }
     return true;
   }
@@ -106,25 +111,18 @@ export class Chatter {
     return now;
   }
 
+  /** (23차 6번) 화면 아래 자막: 가장 최근 말 `이름: 글`(12초), 없으면 `null`. */
+  caption(names: Readonly<Record<string, string>>, now: number = Date.now()): string | null {
+    return caption(this.said, names, now);
+  }
+
+  /** (23차 7번 (가)) 팀 탭 위 `○○ 발언 중…`(마지막 논의 글 뒤 4초), 없으면 `null`. */
+  speaking(names: Readonly<Record<string, string>>, now: number = Date.now()): string | null {
+    return speakingLine(this.marks, names, now);
+  }
+
   /** 팀 탭에 섞을 논의 줄들. */
   talkEntries(): readonly FeedEntry[] {
     return this.talks;
   }
-}
-
-/** 팀 탭의 논의 줄 하나: "담당 이름 · 글"에 종목(또는 day)을 작게 붙인다. */
-export function talkElement(row: FeedRow): HTMLElement {
-  const div = document.createElement("div");
-  div.className = "msg agent talk";
-  const who = document.createElement("span");
-  who.className = "who";
-  who.textContent = row.who;
-  if (row.tag) {
-    const tag = document.createElement("small");
-    tag.className = "topic";
-    tag.textContent = row.tag === "day" ? "하루 판단" : row.tag;
-    who.append(" · ", tag);
-  }
-  div.append(who, document.createTextNode(row.text));
-  return div;
 }

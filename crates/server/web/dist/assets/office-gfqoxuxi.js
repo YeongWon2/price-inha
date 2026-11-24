@@ -131,6 +131,82 @@ async function send$1(card, number, verb, fetcher) {
 		return "failed";
 	}
 }
+// src/office/chat-lines.ts
+/** 생각 중 줄의 글. */
+var PENDING_TEXT = "생각 중";
+/**
+* 채팅 줄 하나. 담당 답은 상태가 `complete`이면 그 글, 글이 온 쓰는 중이면 지금까지의 글, 글이 아직 없으면
+* (`queued` · `thinking` · 빈 `writing`) [`PENDING_TEXT`] 줄(`pending`)이다. `failed`는 생각 중 줄이 아니다. 이름은 `names`에서 찾고 없으면 id.
+*/
+function chatLine(entry, names) {
+	if (entry.kind === "me") return {
+		key: entry.key,
+		side: "right",
+		name: null,
+		text: entry.text,
+		tag: null,
+		pending: false
+	};
+	const name = Object.hasOwn(names, entry.agent) ? names[entry.agent] : entry.agent;
+	if (entry.kind === "talk") return {
+		key: entry.key,
+		side: "left",
+		name,
+		text: entry.text,
+		tag: entry.topic,
+		pending: false
+	};
+	const content = entry.content ?? "";
+	const waiting = entry.status !== "complete" && entry.status !== "failed" && !content.trim();
+	return {
+		key: entry.key,
+		side: "left",
+		name,
+		text: waiting ? PENDING_TEXT : content,
+		tag: null,
+		pending: waiting
+	};
+}
+/** 생각 중 줄의 한 줄 글자: `○○: 생각 중`. */
+function pendingLabel(line) {
+	return `${line.name ?? ""}: ${PENDING_TEXT}`;
+}
+// src/office/chat-view.ts
+/** 줄 하나. `note`는 이름 옆 작은 덧말(팀 방의 내 글: "→ 받는 담당"), `extra`는 줄에 더 붙일 class. */
+function chatLineElement(line, note, extra) {
+	const div = document.createElement("div");
+	div.className = `msg ${line.side === "right" ? "me" : "agent"}${extra ? ` ${extra}` : ""}`;
+	div.dataset.key = line.key;
+	if (line.pending) {
+		div.classList.add("pending");
+		div.textContent = pendingLabel(line);
+		return div;
+	}
+	if (line.name !== null || note) {
+		const who = document.createElement("span");
+		who.className = "who";
+		if (line.name !== null) {
+			const name = document.createElement("strong");
+			name.textContent = line.name;
+			who.append(name);
+		}
+		if (line.tag) {
+			const tag = document.createElement("small");
+			tag.className = "topic";
+			tag.textContent = line.tag === "day" ? "하루 판단" : line.tag;
+			who.append(" ", tag);
+		}
+		if (note) {
+			const small = document.createElement("small");
+			small.className = "to";
+			small.textContent = note;
+			who.append(small);
+		}
+		div.append(who);
+	}
+	div.append(document.createTextNode(line.text));
+	return div;
+}
 /** 글 말풍선이 마지막으로 바뀐 뒤 보이는 시간(밀리초). */
 var SPEECH_LIFE_MS = 12e3;
 /** 글 없이 "말하는 중"만 알 때의 표시 글. */
@@ -139,6 +215,8 @@ var TYPING_TEXT = "···";
 var TYPING_LIFE_MS = 4e3;
 /** 좌우 후보가 비켜나는 거리(말풍선 폭의 배수). */
 var BUBBLE_SIDE_SHIFT = .55;
+/** 말풍선 넓이의 합이 화면 넓이의 이 비율을 넘으면 모두 말풍선 줄로 보낸다. */
+var LANE_AREA_RATIO = .24;
 /** 상태 표시: 생각 중 💭 · 쓰는 중 💬 · 기다림 ⏳ · 실패 ❗. 글 앞에 붙인다. */
 var STATE_ICONS = {
 	thinking: "💭",
@@ -230,45 +308,15 @@ var SpeechBoard = class {
 	}
 };
 /**
-* 말풍선 자리 고르기(넘긴 순서대로). 머리가 화면 밖이면 숨긴다. 첫 자리는 머리 바로 위(가운데 맞춤, 위쪽 끝
-* `머리 y - 높이 - 8`)이고, 거기서 위아래 · 좌우(폭의 [`BUBBLE_SIDE_SHIFT`]배)로 비킨 3×3 후보 가운데 화면 안이고
-* 앞서 놓은 말풍선 · 모든 이름표와 겹치지 않는 첫 자리를 쓴다. 자리가 없으면 말풍선 줄로 보낸다. 보이는 말풍선
-* 넓이의 합이 화면 넓이의 [`LANE_AREA_RATIO`]를 넘으면 모두 말풍선 줄로 보낸다.
+* (23차 2번) 머리 위 말풍선의 3×3 후보(원본 `label-layout` 순서): 위아래 0 · 위로 `높이 + 6` · 아래로 `높이 + 6`,
+* 각 줄 안에서 좌우 0 · -0.55폭 · +0.55폭. 첫 자리는 가운데 맞춤, 위쪽 끝 `max(8, 머리 y - 높이 - 8)`.
 */
-function placeBubbles(spots, screen) {
-	const hidden = [];
-	const visible = [];
-	for (const spot of spots) if (spot.x >= 0 && spot.x <= screen.width && spot.y >= 0 && spot.y <= screen.height) visible.push(spot);
-	else hidden.push(spot.agent);
-	if (visible.reduce((sum, s) => sum + s.bubble.width * s.bubble.height, 0) > screen.width * screen.height * .24) return {
-		placed: [],
-		lane: visible.map((s) => s.agent),
-		hidden
-	};
-	const labels = spots.map((s) => s.label);
-	const placed = [];
-	const lane = [];
-	for (const spot of visible) {
-		const rect = candidates(spot).find((r) => insideScreen(r, screen) && !placed.some((p) => overlap(p.rect, r)) && !labels.some((l) => overlap(l, r)));
-		if (rect) placed.push({
-			agent: spot.agent,
-			rect
-		});
-		else lane.push(spot.agent);
-	}
-	return {
-		placed,
-		lane,
-		hidden
-	};
-}
-/** 3×3 후보(가운데 줄 먼저, 줄 안에서는 가운데 · 오른쪽 · 왼쪽). */
-function candidates(spot) {
-	const { width, height } = spot.bubble;
-	const x0 = spot.x - width / 2;
-	const y0 = spot.y - height - 8;
+function bubbleCandidates(headX, headY, size) {
+	const { width, height } = size;
+	const x0 = headX - width / 2;
+	const y0 = Math.max(8, headY - height - 8);
 	const shift = width * BUBBLE_SIDE_SHIFT;
-	const step = height + 8;
+	const step = height + 6;
 	const out = [];
 	for (const dy of [
 		0,
@@ -276,8 +324,8 @@ function candidates(spot) {
 		step
 	]) for (const dx of [
 		0,
-		shift,
-		-shift
+		-shift,
+		shift
 	]) out.push({
 		x: x0 + dx,
 		y: y0 + dy,
@@ -286,9 +334,11 @@ function candidates(spot) {
 	});
 	return out;
 }
+/** 사각형이 화면 안에 다 들어오는가. */
 function insideScreen(r, screen) {
 	return r.x >= 0 && r.y >= 0 && r.x + r.width <= screen.width && r.y + r.height <= screen.height;
 }
+/** 두 사각형이 겹치는가(맞닿음은 겹침이 아니다). */
 function overlap(a, b) {
 	return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
@@ -301,6 +351,49 @@ function latestLine(said, agent, now) {
 	for (const one of said) if (one.agent === agent && (!latest || one.at >= latest.at)) latest = one;
 	if (!latest || now - latest.at >= 12e3) return null;
 	return trimSpeech(latest.text);
+}
+/** (23차 2번) 말풍선 글의 이름 구분자(원본: 이름을 따로 굵게 하지 않는 한 줄 글자). */
+var NAME_SEPARATOR = " · ";
+/**
+* (23차 2번 · 3번) 말풍선에 보일 한 줄 글자: `이름 · 글`. 상태가 붙은 글이면 `이름 · 💭 글`, 글 없이 말하는 중이면
+* `이름 · ···`, 글 없는 상태 말풍선이면 `이름 · 💭`. `shown`은 [`SpeechBoard.shown`]이 낸 것이다.
+*/
+function bubbleText(name, shown) {
+	return `${name}${NAME_SEPARATOR}${shown.text}`;
+}
+/**
+* (23차 3번) 보이는 말풍선이 어디에 그려지나: 글 말풍선(대화 · "···" · 잡담)은 머리 위, 글 없는 상태 말풍선(생각 중 ·
+* 기다림 · 실패 표시만)은 말풍선 줄, 말풍선이 없으면(쉬는 중 포함) 아무 데도.
+*/
+function bubbleWhere(shown) {
+	if (!shown) return "none";
+	return shown.kind === "status" ? "rail" : "head";
+}
+/**
+* 장면 아래 가운데 한 줄 자막: 모든 담당의 말 가운데 가장 최근 것(같은 시각이면 뒤에 넘긴 것)이 [`CAPTION_LIFE_MS`]
+* 안이면 `이름: 글`(글은 `trimSpeech`를 거친 것), 아니면 `null`(숨긴다). 이름은 `names`에서 찾고 없으면 id.
+*/
+function caption(said, names, now) {
+	const last = latest(said);
+	if (!last || now - last.at >= 12e3) return null;
+	return `${nameOf$1(names, last.agent)}: ${trimSpeech(last.text)}`;
+}
+/** 가장 최근 것(같은 시각이면 뒤에 넘긴 것). */
+function latest(list) {
+	let found;
+	for (const one of list) if (!found || one.at >= found.at) found = one;
+	return found;
+}
+function nameOf$1(names, agent) {
+	return Object.hasOwn(names, agent) ? names[agent] : agent;
+}
+/**
+* 팀 탭 위 한 줄: 마지막 논의 글이 [`SPEAKING_LIFE_MS`] 안이면 `○○ 발언 중…`(그 글의 담당 이름), 아니면 `null`.
+*/
+function speakingLine(talks, names, now) {
+	const last = latest(talks);
+	if (!last || now - last.at >= 4e3) return null;
+	return `${nameOf$1(names, last.agent)} 발언 중…`;
 }
 // src/office/team-feed.ts
 /** `office.talk` 하나를 팀 탭 것으로. `key`는 이벤트 번호로 만든다(같은 번호는 같은 줄). */
@@ -369,6 +462,8 @@ var Chatter = class {
 	board = new SpeechBoard();
 	said = [];
 	talks = [];
+	/** (23차 7번 (가)) 실시간으로 받은 논의 글의 담당 · 받은 시각(발언 중 표시). */
+	marks = [];
 	/** 팀 탭 줄의 처음 본 시각(내 글 · 담당 답). */
 	stamps = /* @__PURE__ */ new Map();
 	/** `office.talk` 하나. `live`면(실시간으로 온 것) 말풍선 · 최근 말에도 올린다. */
@@ -382,6 +477,11 @@ var Chatter = class {
 		if (live) {
 			this.board.say(talk.agent, talk.text, now);
 			this.remember(talk.agent, talk.text, now);
+			this.marks.push({
+				agent: talk.agent,
+				at: now
+			});
+			if (this.marks.length > KEEP_SAID) this.marks.splice(0, this.marks.length - KEEP_SAID);
 		}
 		return true;
 	}
@@ -427,27 +527,19 @@ var Chatter = class {
 		this.stamps.set(key, now);
 		return now;
 	}
+	/** (23차 6번) 화면 아래 자막: 가장 최근 말 `이름: 글`(12초), 없으면 `null`. */
+	caption(names, now = Date.now()) {
+		return caption(this.said, names, now);
+	}
+	/** (23차 7번 (가)) 팀 탭 위 `○○ 발언 중…`(마지막 논의 글 뒤 4초), 없으면 `null`. */
+	speaking(names, now = Date.now()) {
+		return speakingLine(this.marks, names, now);
+	}
 	/** 팀 탭에 섞을 논의 줄들. */
 	talkEntries() {
 		return this.talks;
 	}
 };
-/** 팀 탭의 논의 줄 하나: "담당 이름 · 글"에 종목(또는 day)을 작게 붙인다. */
-function talkElement(row) {
-	const div = document.createElement("div");
-	div.className = "msg agent talk";
-	const who = document.createElement("span");
-	who.className = "who";
-	who.textContent = row.who;
-	if (row.tag) {
-		const tag = document.createElement("small");
-		tag.className = "topic";
-		tag.textContent = row.tag === "day" ? "하루 판단" : row.tag;
-		who.append(" · ", tag);
-	}
-	div.append(who, document.createTextNode(row.text));
-	return div;
-}
 // src/office/looks.ts
 /** 원본 분류(`LOOK_CATEGORIES`, "전체" 제외). */
 var LOOK_CATEGORIES = [
@@ -883,6 +975,134 @@ function createLookPicker(o) {
 		}
 	};
 }
+/** 탁자 샷으로 가는 전환 시간(밀리초, ease-in-out). */
+var TABLE_TRANSITION_MS = 1e3;
+/** 한 발언자 샷의 최소 머무름(밀리초). */
+var MIN_DWELL_MS = 2e3;
+/** 마지막 말 뒤 발언자 샷을 유지하는 시간(밀리초). */
+var HOLD_AFTER_TALK_MS = 1500;
+/**
+* 발언자 카메라 상태 기계. 기본 켜짐.
+* - 담당들이 미팅룸에 모여 있을 때(`gather(true)`) 논의 글이 오면(`talk`) 그 담당의 발언자 샷(고도 15°, 0.9초).
+* - 다른 담당이 말해도 지금 샷이 시작된 지 2초가 지나기 전에는 바꾸지 않는다(2초가 되는 때 바꾼다).
+* - 마지막 말 뒤 1.5초(그리고 그 샷의 최소 머무름 2초)가 지나면 탁자 샷(고도 30°, 1.0초).
+* - 사용자가 카메라를 손으로 움직이면(`manual`) 그 논의 동안(`gather(false)`가 올 때까지) 꺼진다.
+* - 단추(`setEnabled`)로 켜고 끈다. 꺼져 있으면 목표를 내지 않는다.
+* - 목표가 없으면(논의 글 전 · 모이지 않음 · 꺼짐) [`goal`]은 `null`이고 장면은 평소 카메라를 쓴다.
+*/
+var SpeakerCamera = class {
+	on = true;
+	gathered = false;
+	/** 사용자가 손으로 움직여 이 논의 동안 꺼졌다. */
+	handOff = false;
+	/** 지금 샷(없으면 `null`). */
+	shot = null;
+	/** 최소 머무름이 끝나면 넘어갈 다음 발언자. */
+	next = null;
+	lastTalkAt = 0;
+	/** 자동 카메라 단추가 켜져 있는가. */
+	enabled() {
+		return this.on;
+	}
+	/** 단추: 켜고 끈다. */
+	setEnabled(on, now) {
+		this.on = on;
+		if (!on) this.reset();
+	}
+	/** 담당들이 미팅룸에 모여 있는가. `false`면 논의가 끝난 것이다(손 조작으로 꺼진 것도 풀린다). */
+	gather(gathered, now) {
+		if (gathered === this.gathered) return;
+		this.gathered = gathered;
+		if (!gathered) {
+			this.handOff = false;
+			this.reset();
+		}
+	}
+	/** 논의 글이 왔다. */
+	talk(agent, now) {
+		if (!this.active()) return;
+		this.advance(now);
+		this.lastTalkAt = now;
+		const shot = this.shot;
+		if (!shot || shot.kind === "table") {
+			this.shot = {
+				kind: "speaker",
+				agent,
+				since: now
+			};
+			this.next = null;
+		} else if (shot.agent === agent) this.next = null;
+		else if (now >= shot.since + 2e3) {
+			this.shot = {
+				kind: "speaker",
+				agent,
+				since: now
+			};
+			this.next = null;
+		} else this.next = agent;
+	}
+	/** 사용자가 카메라를 손으로 움직였다. */
+	manual(now) {
+		if (!this.gathered) return;
+		this.handOff = true;
+		this.reset();
+	}
+	/** `now`의 목표(없으면 `null`). */
+	goal(now) {
+		if (!this.active()) return null;
+		this.advance(now);
+		const shot = this.shot;
+		if (!shot) return null;
+		return shot.kind === "speaker" ? {
+			shot: "speaker",
+			agent: shot.agent,
+			elevationDeg: 15,
+			transitionMs: 900,
+			since: shot.since
+		} : {
+			shot: "table",
+			agent: null,
+			elevationDeg: 30,
+			transitionMs: TABLE_TRANSITION_MS,
+			since: shot.since
+		};
+	}
+	active() {
+		return this.on && this.gathered && !this.handOff;
+	}
+	reset() {
+		this.shot = null;
+		this.next = null;
+	}
+	/** `now`까지 시간이 흐른 만큼 샷을 넘긴다: 기다리던 발언자(최소 머무름 뒤) → 탁자 샷(말 뒤 1.5초 · 최소 머무름 뒤). */
+	advance(now) {
+		const shot = this.shot;
+		if (!shot || shot.kind !== "speaker") return;
+		if (this.next !== null) {
+			const at = shot.since + MIN_DWELL_MS;
+			if (now < at) return;
+			this.shot = {
+				kind: "speaker",
+				agent: this.next,
+				since: at
+			};
+			this.next = null;
+			this.advance(now);
+			return;
+		}
+		const tableAt = Math.max(this.lastTalkAt + HOLD_AFTER_TALK_MS, shot.since + MIN_DWELL_MS);
+		if (now >= tableAt) this.shot = {
+			kind: "table",
+			agent: null,
+			since: tableAt
+		};
+	}
+};
+/** ease-in-out 보간(0 → 0, 1 → 1, 가운데 0.5, 양 끝이 느리다). 0~1 밖은 끝값으로 자른다. */
+function easeInOut(t) {
+	const x = Math.max(0, Math.min(1, t));
+	return x < .5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
+}
 /**
 * `lines`가 `keep`줄을 넘으면 앞(오래된 쪽)에서 넘친 만큼 버린다(`lines`를 그 자리에서 고친다).
 * 버린 응답 줄의 응답이 끝난 것(`complete` · `failed`)이면 `responses`에서도 지운다.
@@ -1007,6 +1227,8 @@ var MAP_PATH = "./office-map.json";
 var RETRY_MIN_MS = 1e3;
 var RETRY_MAX_MS = 1e4;
 var FOLLOW_PX = 80;
+var REPLAY_WINDOW_MS = 3e3;
+var CAPTION_TICK_MS = 500;
 var AGENT_IDS = [
 	"news",
 	"strategy",
@@ -1046,6 +1268,10 @@ var state = {
 };
 /** (22차) 팀의 대화: 말풍선 판 · 최근 말 · 팀 탭의 논의 줄. */
 var chatter = new Chatter();
+/** (23차 7번 (나)) 회의 발언자 카메라(기본 켜짐). */
+var speaker = new SpeakerCamera();
+/** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
+var replayUntil = 0;
 function renderLight() {
 	const list = $("light-list");
 	list.replaceChildren();
@@ -1088,7 +1314,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-kk84ga02.js");
+		const { webglAvailable, createScene } = await import("./scene3d-ewem6icb.js");
 		return {
 			webglAvailable,
 			createScene
@@ -1108,7 +1334,8 @@ async function show3d() {
 		onFollow: (following) => {
 			$("recenter").hidden = following;
 		},
-		speech: chatter.board
+		speech: chatter.board,
+		speaker
 	});
 	state.view = scene;
 	$("recenter").hidden = true;
@@ -1160,6 +1387,7 @@ function applyChat(resp) {
 		trimLines(lines, state.responses);
 	}
 	if (convKeyOf(resp) === state.conversation) renderLog(false);
+	renderCaption();
 }
 function newId() {
 	if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -1186,6 +1414,21 @@ function renderTabs() {
 		tabs.append(b);
 	}
 	$("chat-to-wrap").hidden = state.conversation !== ROOM_TEAM;
+	renderCaption();
+}
+/** (23차 6번 · 7번 (가)) 화면 아래 자막과 팀 탭 위 `○○ 발언 중…`. 없으면 숨긴다. */
+function renderCaption() {
+	const line = chatter.caption(state.names);
+	const cap = $("caption");
+	if (cap.textContent !== (line ?? "")) {
+		cap.textContent = line ?? "";
+		cap.title = line ?? "";
+	}
+	cap.hidden = line === null;
+	const speaking = state.conversation === ROOM_TEAM ? chatter.speaking(state.names) : null;
+	const bar = $("speaking");
+	if (bar.textContent !== (speaking ?? "")) bar.textContent = speaking ?? "";
+	bar.hidden = speaking === null;
 }
 function selectConversation(key) {
 	state.conversation = key;
@@ -1193,13 +1436,12 @@ function selectConversation(key) {
 	renderLog(true);
 }
 function lineElement(line) {
-	const div = document.createElement("div");
 	if (line.kind === "me") {
-		div.className = "msg me";
-		const who = document.createElement("span");
-		who.className = "who";
-		who.textContent = line.room === ROOM_TEAM ? `나 → ${nameOf(line.agent)}` : "나";
-		div.append(who, document.createTextNode(line.text));
+		const div = chatLineElement(chatLine({
+			kind: "me",
+			key: line.id,
+			text: line.text
+		}, state.names), line.room === ROOM_TEAM ? `→ ${nameOf(line.agent)}` : void 0);
 		if (line.failed) {
 			div.classList.add("failed");
 			const retry = document.createElement("button");
@@ -1215,20 +1457,18 @@ function lineElement(line) {
 	}
 	const resp = state.responses.get(line.requestId);
 	if (!resp) return null;
-	const who = document.createElement("span");
-	who.className = "who";
-	who.textContent = nameOf(resp.agent);
-	if (resp.status === "complete") {
-		div.className = "msg agent";
-		div.append(who, document.createTextNode(resp.content ?? ""));
-	} else if (resp.status === "failed") {
-		div.className = "msg status failed";
-		div.textContent = `${nameOf(resp.agent)}: 실패 (${resp.error ?? "까닭 모름"})`;
-	} else {
-		div.className = "msg status";
-		div.textContent = `${nameOf(resp.agent)}: ${WORK_LABEL[resp.status] ?? resp.status} …`;
-	}
-	return div;
+	const view = chatLine({
+		kind: "reply",
+		key: resp.requestId,
+		agent: resp.agent,
+		status: resp.status,
+		content: resp.content
+	}, state.names);
+	if (resp.status === "failed") return chatLineElement({
+		...view,
+		text: `실패 (${resp.error ?? "까닭 모름"})`
+	}, void 0, "failed");
+	return chatLineElement(view);
 }
 /** (22차 2번) 팀 탭: 내 글 · 담당 답 · 논의 줄을 시각 순서로. */
 function teamElements(lines) {
@@ -1252,9 +1492,20 @@ function teamElements(lines) {
 			text: resp?.content ?? ""
 		});
 	}
-	entries.push(...chatter.talkEntries());
+	const talks = /* @__PURE__ */ new Map();
+	for (const talk of chatter.talkEntries()) {
+		talks.set(talk.key, talk);
+		entries.push(talk);
+	}
 	return teamFeed(entries, state.names).map((row) => {
-		if (row.kind === "talk") return talkElement(row);
+		const talk = talks.get(row.key);
+		if (row.kind === "talk" && talk?.kind === "talk") return chatLineElement(chatLine({
+			kind: "talk",
+			key: talk.key,
+			agent: talk.agent,
+			text: talk.text,
+			topic: talk.topic
+		}, state.names), void 0, "talk");
 		const line = byKey.get(row.key);
 		return line ? lineElement(line) : null;
 	});
@@ -1358,13 +1609,23 @@ function onFrame(text) {
 		state.lastSeq = frame.seq;
 		if (frame.kind === "office.agent") applyAgent(frame.payload, false);
 		else if (frame.kind === "office.chat") applyChat(frame.payload);
-		else if (frame.kind === "office.talk") onTalk(frame.payload, frame.seq, true);
+		else if (frame.kind === "office.talk") onTalk(frame.payload, frame.seq, !replayedOld(frame.payload));
 		else if (frame.kind === "office.approval") applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
 	}
 }
-/** (22차) 팀 대화 한 줄: 팀 탭에 넣고, 실시간이면 말풍선 · 최근 말에도. */
+/** 다시 이은 직후에 다시 받은 옛 논의 글인가(`at`이 말풍선 수명보다 오래됨). */
+function replayedOld(payload) {
+	const now = Date.now();
+	if (now >= replayUntil) return false;
+	const talk = readTalk(payload);
+	return talk !== null && now - talk.at >= 12e3;
+}
+/** (22차) 팀 대화 한 줄: 팀 탭에 넣고, 실시간이면 말풍선 · 최근 말 · 자막 · 발언자 카메라에도. */
 function onTalk(payload, seq, live) {
 	if (!chatter.talk(payload, seq, live)) return;
+	const talk = live ? readTalk(payload) : null;
+	if (talk) speaker.talk(talk.agent, Date.now());
+	renderCaption();
 	if (state.conversation === ROOM_TEAM) renderLog(false);
 	if (!$("light").hidden) renderLight();
 }
@@ -1429,7 +1690,8 @@ function retryLater() {
 }
 function openSocket() {
 	let url = `${location.protocol.replace("http", "ws")}//${location.host}${WS_PATH}`;
-	if (state.lastSeq !== null) url += `?last_seq=${encodeURIComponent(String(state.lastSeq))}`;
+	const resuming = state.lastSeq !== null;
+	if (resuming) url += `?last_seq=${encodeURIComponent(String(state.lastSeq))}`;
 	let socket;
 	try {
 		socket = new WebSocket(url);
@@ -1446,6 +1708,7 @@ function openSocket() {
 	};
 	socket.onopen = () => {
 		retryMs = RETRY_MIN_MS;
+		if (resuming) replayUntil = Date.now() + REPLAY_WINDOW_MS;
 		setConn("연결됨", "ok");
 	};
 	socket.onmessage = (event) => {
@@ -1473,6 +1736,21 @@ async function start() {
 		setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
 		retryLater();
 	}
+}
+/** (23차 7번 (나)) 단추 "자동 카메라 켜짐/꺼짐"(기본 켜짐). */
+function wireAutoCamera() {
+	const button = $("auto-camera");
+	const paint = () => {
+		const on = speaker.enabled();
+		button.setAttribute("aria-pressed", String(on));
+		button.textContent = on ? "자동 카메라 켜짐" : "자동 카메라 꺼짐";
+	};
+	button.addEventListener("click", () => {
+		speaker.setEnabled(!speaker.enabled(), Date.now());
+		paint();
+	});
+	paint();
+	button.hidden = false;
 }
 async function main() {
 	try {
@@ -1516,6 +1794,8 @@ async function main() {
 	$("recenter").addEventListener("click", () => {
 		state.view?.recenter();
 	});
+	wireAutoCamera();
+	setInterval(renderCaption, CAPTION_TICK_MS);
 	let lightSaid = "";
 	setInterval(() => {
 		if ($("light").hidden) return;
@@ -1539,4 +1819,4 @@ async function main() {
 	});
 }
 main();
-export { placeBubbles as i, LOOKS as n, bubbleWidth as r, DEFAULT_LOOKS as t };
+export { bubbleCandidates as a, bubbleWidth as c, LANE_AREA_RATIO as i, insideScreen as l, DEFAULT_LOOKS as n, bubbleText as o, LOOKS as r, bubbleWhere as s, easeInOut as t, overlap as u };
