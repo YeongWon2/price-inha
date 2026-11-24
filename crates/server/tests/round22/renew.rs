@@ -242,3 +242,43 @@ async fn 지정가_청산_대기가_낡으면_지정가_같은_값으로_남은_
     );
     bench.close().await;
 }
+
+/// 새로 낸 주문이 나가지 못했다는 방 한 줄(19차 2번). "남은 수량" · "새로 냈"을 쓰지 않는다.
+const RENEW_FAILED_LINE: &str = "새로 낸 주문이 나가지 못해 대기를 3주로 바꿔 다시 냅니다";
+
+// 검증: E30 E34 F4
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 낡은_손절을_새로_냈는데_나가지_못하면_방에_대기를_남은_수량으로_바꿔_다시_낸다는_한_줄이_남는다()
+ {
+    let bench = Plan::demo().max_fill(2).start(kst(monday(), 10, 0)).await;
+    let trade = stale_stop(&bench).await;
+
+    // 새로 낼 때 증권사가 받지 않는다. 시도마다 한 줄이 남을 때까지 시계를 옮긴다(가장 길게 STEP).
+    bench.trading().paper().set_fault(Some(Fault::RejectOrders));
+    let deadline = Instant::now() + STEP;
+    while room_lines(&bench, trade, RENEW_FAILED_LINE) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "새로 낸 주문이 나가지 못하면 방에 한 줄이 남아야 한다"
+        );
+        bench.advance(20).await;
+    }
+    let pending = bench.pending_sells(trade);
+    assert_eq!(pending.len(), 1, "대기는 남는다: {pending:?}");
+    assert_eq!(
+        pending[0]["order"]["quantity"],
+        json!("3"),
+        "대기 수량은 지금 남은 수량(3주)으로 바뀐다"
+    );
+    assert_eq!(
+        room_lines(&bench, trade, "새로 냈"),
+        0,
+        "나가기 전에는 새로 냈다는 줄이 없다"
+    );
+    assert_eq!(
+        room_lines(&bench, trade, "남은 수량"),
+        0,
+        "나가기 전에는 남은 수량 줄도 없다"
+    );
+    bench.close().await;
+}

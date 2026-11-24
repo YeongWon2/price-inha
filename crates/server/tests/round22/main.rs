@@ -7,10 +7,12 @@
 //! - `recover`: 2번(이상이 풀린 뒤 장이 열렸을 때만 운용 중으로).
 //! - `ai_cap`: 3번(하루 AI 호출 상한, 기본 꺼짐).
 //! - `renew`: 4번(막힌 손절 대기를 남은 수량으로 새로 낸다).
+//! - `doctor_limit`: 19차 3번(진단의 하루 AI 호출 상한 항목).
 //! - 5번(논의 수 세기 Drop 가드)은 `src/team/talk.rs`의 단위 시험이다.
 
 mod ai_cap;
 mod common;
+mod doctor_limit;
 mod hold_off;
 mod recover;
 mod renew;

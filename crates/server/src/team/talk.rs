@@ -199,7 +199,7 @@ impl Crew {
             let lowered = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let _discussing = DiscussingGuard::enter_with(
                 &self.discussing,
-                self.table_release(Arc::clone(&lowered)),
+                self.table_release(Arc::clone(&lowered), Arc::clone(&self.discussing)),
             );
             self.at_table(true).await;
             let result = self.team.discuss(request).await;
@@ -404,5 +404,98 @@ mod tests {
             "취소로 버려져도 한 번 부른다"
         );
         assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    // 19차 1번의 시험 도움: 가짜 사무실 포트.
+    struct NullSink;
+
+    #[async_trait::async_trait]
+    impl pi_office::EventSink for NullSink {
+        async fn publish(
+            &self,
+            _kind: &str,
+            _payload: serde_json::Value,
+        ) -> Result<u64, pi_office::SinkError> {
+            Ok(1)
+        }
+    }
+
+    struct FixedClock;
+
+    impl pi_office::Clock for FixedClock {
+        fn now(&self) -> UnixMillis {
+            UnixMillis(0)
+        }
+    }
+
+    const TABLE_AGENTS: [pi_office::Agent; 4] = [
+        pi_office::Agent::News,
+        pi_office::Agent::Strategy,
+        pi_office::Agent::Risk,
+        pi_office::Agent::Leader,
+    ];
+
+    fn places(office: &pi_office::Office) -> Vec<pi_office::Place> {
+        office
+            .agents()
+            .into_iter()
+            .filter(|view| TABLE_AGENTS.contains(&view.agent))
+            .map(|view| view.place)
+            .collect()
+    }
+
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // 검증: 19차 1번 — 취소된 논의의 늦은 정리가 다음 논의 중이면 자리를 내리지 않는다(띄운 작업이 실제로 돌 때 본다).
+    #[tokio::test]
+    async fn 취소된_논의의_늦은_자리_내리기는_다음_논의가_열려_있으면_자리를_내리지_않는다() {
+        let office = Arc::new(pi_office::Office::new(
+            pi_office::TeamState::Operating,
+            Arc::new(NullSink),
+            Arc::new(FixedClock),
+        ));
+        let count = count();
+        let old = DiscussingGuard::enter_with(
+            &count,
+            super::super::link::release_table(
+                Some(Arc::clone(&office)),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                Arc::clone(&count),
+            ),
+        );
+        // 앞 논의가 버려지기 전에 다음 논의가 열려 탁자에 모인다.
+        let next = DiscussingGuard::enter(&count);
+        for agent in TABLE_AGENTS {
+            office
+                .set_activity(agent, pi_office::Activity::Discussing)
+                .await
+                .expect("다음 논의가 탁자에 모인다");
+        }
+        drop(old);
+        // 띄운 정리 작업이 이제 돈다.
+        settle().await;
+        assert_eq!(
+            places(&office),
+            vec![pi_office::Place::Meeting; 4],
+            "다음 논의가 열려 있으면 앞 논의의 늦은 정리가 자리를 내리지 않는다"
+        );
+        drop(next);
+        // 같은 정리라도 열린 논의가 없으면 내린다.
+        super::super::link::release_table(
+            Some(Arc::clone(&office)),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::clone(&count),
+        )();
+        settle().await;
+        assert_eq!(
+            places(&office),
+            vec![pi_office::Place::Desk; 4],
+            "열린 논의가 없으면 자리로 돌아간다"
+        );
     }
 }

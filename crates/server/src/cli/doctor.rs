@@ -39,6 +39,8 @@ pub enum CheckItem {
     /// (10차 10c 13번) 뜻 검색(Ollama): 꺼짐이면 문제 아님(바깥 요청 0건), 켜졌으면 그 루프백 주소에 닿는지 ·
     /// 모델을 받아 두었는지.
     Ollama,
+    /// (19차 3번) 하루 AI 호출 상한: 늘 문제 아님. 없으면 "없음", 있으면 "N번".
+    AiDailyLimit,
 }
 
 /// 항목 하나의 결과. 키 값 · 길이 · 앞뒤 글자를 싣지 않는다(N8).
@@ -139,6 +141,7 @@ fn item_name(item: CheckItem) -> &'static str {
         CheckItem::Service => "service",
         CheckItem::Backup => "backup",
         CheckItem::Ollama => "ollama",
+        CheckItem::AiDailyLimit => "ai_daily_limit",
     }
 }
 

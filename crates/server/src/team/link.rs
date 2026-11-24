@@ -85,6 +85,32 @@ fn max_of(input: &Value) -> Option<usize> {
     input["max"].as_u64().and_then(|n| usize::try_from(n).ok())
 }
 
+/// (17차 5번 · 19차 1번) 논의 가드의 자리 내리기 정리를 만든다. 부르면 작업을 띄워 논의 담당들을 자리로 돌려 놓는다.
+pub(super) fn release_table(
+    office: Option<Arc<Office>>,
+    done: Arc<std::sync::atomic::AtomicBool>,
+    _discussing: Arc<std::sync::atomic::AtomicUsize>,
+) -> Box<dyn FnOnce() + Send> {
+    Box::new(move || {
+        if done.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let (Some(office), Ok(runtime)) = (office, tokio::runtime::Handle::try_current()) else {
+            return;
+        };
+        runtime.spawn(async move {
+            for role in MEMBERS {
+                if let Err(error) = office
+                    .set_activity(office_agent(role), Activity::Working)
+                    .await
+                {
+                    tracing::warn!(%error, "사무실 모습을 바꾸지 못했다");
+                }
+            }
+        });
+    })
+}
+
 impl Crew {
     /// 3차 조립의 부품을 붙인다(한 번만).
     pub(crate) fn link(&self, links: CrewLinks) {
@@ -114,30 +140,17 @@ impl Crew {
 
     /// (17차 5번) 논의 가드가 버려질 때 부르는 정리: 자리 표시를 내린다(`at_table(false)`와 같은 일).
     /// `Drop`에서는 기다릴 수 없어 작업을 띄워 한다. `done`이 이미 참이면(정상으로 끝나 내렸으면) 하지 않는다.
+    /// `discussing`은 열려 있는 논의의 수(19차 1번: 띄운 작업이 실제로 돌 때 0이 아니면 내리지 않는다).
     pub(super) fn table_release(
         &self,
         done: Arc<std::sync::atomic::AtomicBool>,
+        discussing: Arc<std::sync::atomic::AtomicUsize>,
     ) -> Box<dyn FnOnce() + Send> {
-        let office = self.links.get().and_then(|l| l.office.clone());
-        Box::new(move || {
-            if done.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                return;
-            }
-            let (Some(office), Ok(runtime)) = (office, tokio::runtime::Handle::try_current())
-            else {
-                return;
-            };
-            runtime.spawn(async move {
-                for role in MEMBERS {
-                    if let Err(error) = office
-                        .set_activity(office_agent(role), Activity::Working)
-                        .await
-                    {
-                        tracing::warn!(%error, "사무실 모습을 바꾸지 못했다");
-                    }
-                }
-            });
-        })
+        release_table(
+            self.links.get().and_then(|l| l.office.clone()),
+            done,
+            discussing,
+        )
     }
 
     /// 종목 · 계기로 지난 매매 기록을 자동 회상해 논의 자료로 만든다(V22). 지금 매매는 뺀다.
