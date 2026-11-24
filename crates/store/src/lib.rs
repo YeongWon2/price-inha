@@ -16,6 +16,7 @@ mod chunkmeta;
 mod codec;
 mod error;
 mod fact;
+mod history;
 mod keep;
 mod knowledge;
 mod log;
@@ -41,6 +42,7 @@ use rusqlite::{Connection, TransactionBehavior};
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, NewApprovalRequest};
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
+pub use history::{ApprovalLine, HISTORY_PAGE_MAX, TemplateHistoryLine, TradeFlow, TradeListItem};
 pub use keep::{ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PaperSnapshot};
 pub use knowledge::{
     ChunkEmbedding, ChunkId, KnowledgeChunk, KnowledgeHit, KnowledgeKind, KnowledgeQuery,
