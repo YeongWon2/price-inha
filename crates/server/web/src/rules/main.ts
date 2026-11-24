@@ -1,6 +1,6 @@
-// 관리 화면 · 규칙(server 26차 4번): 메뉴 · 제목 · "준비 중" 빈 상태만 그린다(내용은 뒤 차수).
+// 관리 화면 · 규칙(server 28차 2번): 메뉴와 규칙 화면(지금 규칙 · 절대 상한 · 개선안과 승인 · 거절).
 import { mountMenu } from "../ui/menu";
-import { mountAdminFrame } from "../ui/admin";
+import { mountRules } from "./screen";
 
 mountMenu(document.getElementById("menu"), "rules");
-void mountAdminFrame(document.getElementById("screen"));
+void mountRules(document.getElementById("screen"));

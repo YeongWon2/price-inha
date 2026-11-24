@@ -69,8 +69,43 @@ pub const TRADE_BASIS_PATH: &str = "/api/trades/{id}/basis";
 
 /// 규칙 개선안 목록. `GET` → `{"proposals": [{"id", "state": "proposed" | "cooling" | "applied" | "rejected",
 /// "mistake": 실수(글자), "increases_risk": bool, "evidence": [매매 번호], "number": 승인 번호 | null,
-/// "fingerprint": 지문 | null}]}`(번호 순서). 세션이 있어야 열린다.
+/// "fingerprint": 지문 | null, "changes": [{"key", "before", "after", "widened"}]}]}`(번호 순서).
+/// 세션이 있어야 열린다.
+///
+/// (28차 2번) `changes`는 개선안의 앞 → 뒤 값 차이다: 복기 개선안이면 내용(`pi_journal::Improvement`)의
+/// `before` → `after`를 `pi_template::diff_params`로 낸 것(칸 순서 · 값 모양이 [`crate::TEMPLATES_VIEW_PATH`]의
+/// 판 이력 `changes`와 같다), 읽을 수 없는 내용이면 빈 목록이다.
 pub const PROPOSALS_PATH: &str = "/api/proposals";
+
+/// (28차 1번 · C29 · V82) 규칙 읽기. `GET` → 200
+///
+/// ```text
+/// {
+///   "template": 지금 쓰는 템플릿 번호 | null,
+///   "fields": [{"key", "value", "cap": 십진수 글자 | null}],
+///   "caps": {"<상한이 있는 칸 키>": 십진수 글자, …},
+///   "cooling": [{"proposal": 개선안 번호, "changes": [{"key", "before", "after", "widened"}],
+///                "applies_on": "next_trading_day"}],
+///   "recent": [{"proposal": 개선안 번호, "applied_at": 유닉스 밀리초,
+///               "changes": [{"key", "before", "after", "widened"}]}]
+/// }
+/// ```
+///
+/// - `fields`는 지금 쓰는 템플릿(가장 나중에 고른 것)의 RiskParams를 `pi_template::template_view`의 칸 순서 ·
+///   키 · 값 · 상한으로 낸 것이다(편집 여부 칸은 없다 — 규칙 화면은 보기만 한다). 템플릿이 없으면 `template`은
+///   `null`이고 `fields`는 빈 목록이다.
+/// - `caps`는 원칙의 절대 상한(`pi_template::AbsoluteCaps::FIXED`)이다: `template_view`에서 상한이 있는 여섯 칸의
+///   키 → 상한. 템플릿이 없어도 늘 있다.
+/// - `cooling`은 냉각중인 개선안(승인됐고 위험을 키워 다음 거래일 시작에 반영된다, E28)의 앞 → 뒤 값이다
+///   (번호 순서). `changes`는 [`PROPOSALS_PATH`]의 것과 같다.
+/// - `recent`는 반영된 개선안을 반영 시각이 늦은 것부터 최대 [`RULES_RECENT_LIMIT`]개 낸다(F5-8 "바뀐 규칙이
+///   보인다"). `applied_at`은 저장소의 반영 시각이다. 제안됨 · 거절됨 개선안은 `cooling` · `recent` 어디에도 없다.
+/// - 세션이 있어야 열린다(원격은 세션 없이 401). 개선안 목록 · 답하기는 [`PROPOSALS_PATH`] ·
+///   [`PROPOSAL_ANSWER_PATH`]를 그대로 쓴다.
+pub const RULES_VIEW_PATH: &str = "/api/rules";
+
+/// 규칙 읽기의 `recent`에 담는 반영된 개선안의 가장 많은 수.
+pub const RULES_RECENT_LIMIT: usize = 5;
 
 /// 규칙 개선안 답하기(V21 · E35). `POST` `{"id": 개선안 번호, "number": 승인 번호, "fingerprint": 지문,
 /// "answer": "approve" | 그 밖}`. 세션과 같은 출처가 있어야 한다. 응답은 언제나 200
@@ -83,6 +118,12 @@ pub const PROPOSALS_PATH: &str = "/api/proposals";
 /// - 거절이면 `"rejected"`, 이유 `"user_rejected"`. 개선안은 거절됨이고 템플릿은 그대로다.
 /// - (10a 보강) 승인인데 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 소비하기 전에 거절한다:
 ///   `"rejected"`, 이유 `"template_locked"`. 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다(V21 · E28).
+///
+/// (28차 3번) 폰 · 사무실의 승인 카드 길([`crate::APPROVAL_DECIDE_PATH`] · [`crate::APPROVAL_ANSWER_PATH`])로
+/// 규칙 개선안의 승인 번호에 답해도 이 경로와 같은 길을 탄다(승인 소비 · 반영 · 냉각 · 거절이 한 길이다).
+/// 승인 카드 길의 응답은 그 길의 말을 쓴다: 반영 · 냉각중이면 200 `{"result": "approved", "reason": null}`,
+/// 거절이면 200 `{"result": "rejected", "reason": "user_rejected"}`, 승인인데 반영되지 않았으면(이미 답함 ·
+/// 지문 다름 · 템플릿 잠김 등) 409 `{"result": "rejected", "reason": 이 경로와 같은 이유}`.
 pub const PROPOSAL_ANSWER_PATH: &str = "/api/proposals/answer";
 
 /// 저장되는 이벤트 종류: 팀장의 하루 운용 판단 논의(V5, 1차에서 넘긴 몫).

@@ -51,6 +51,10 @@ export const API = {
   templatesView: "/api/templates/current",
   templates: "/api/templates",
   templatesAdjust: "/api/templates/adjust",
+  // 규칙 화면(server 28차): 규칙 읽기 `GET` · 개선안 목록 `GET` · 개선안 답하기 `POST`.
+  rules: "/api/rules",
+  proposals: "/api/proposals",
+  proposalAnswer: "/api/proposals/answer",
 } as const;
 
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
@@ -100,7 +104,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     "/api/approvals/{id}",
     "/api/approvals/{id}/approve",
   ],
-  rules: [API.session],
+  // 규칙 화면(server 28차 2번): 규칙 읽기 · 개선안 목록 · 개선안 답하기(번호 · 지문을 그대로 보낸다).
+  rules: [API.session, API.rules, API.proposals, API.proposalAnswer],
   history: [API.session],
 };
 
