@@ -4,6 +4,8 @@
 
 pub mod chat;
 pub mod error;
+pub mod mention;
+pub mod notice;
 pub mod office;
 pub mod place;
 pub mod port;
@@ -13,9 +15,20 @@ pub use summon::{STALE_WORK_MS, SUMMON_ARRIVE_MS, SUMMON_IDLE_MS, SummonPhase, S
 
 pub use chat::{ChatResponse, ChatStatus, Room};
 pub use error::{Error, SinkError};
+pub use mention::{
+    Member, RELAY_BUDGET, Relayed, TeamHint, TeamPost, mention_tag, mentioned_names, parse_mentions,
+};
+pub use notice::{NoticeAckTurn, NoticePost, NoticeTurn};
 pub use office::Office;
 pub use place::{Activity, Agent, AgentView, Place, TeamState, Work, place_of};
-pub use port::{Clock, EventSink};
+pub use port::{AiBudget, Clock, EventSink, Redactor};
+
+/// 공지를 받았을 때 내는 이벤트 종류(6차, C19). 내용: `{"notice", "text", "at"}`(글은 가린 것).
+pub const EVENT_NOTICE: &str = "office.notice";
+
+/// 담당별 공지 확인 상태가 바뀔 때 내는 이벤트 종류(6차, C19).
+/// 내용: `{"notice", "agent", "state"}`, `state`는 `"answered"` · `"limit"` · `"failed"`.
+pub const EVENT_NOTICE_ACK: &str = "office.notice_ack";
 
 /// 담당 모습이 바뀔 때 내는 이벤트 종류. 내용: `{"agent", "place", "work", "phase", "reason", "phaseAt"}`
 /// (앞의 세 칸은 옛 칸, 뒤의 세 칸은 5차에 더한 부르기 단계 칸).

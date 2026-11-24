@@ -3,7 +3,7 @@
 //! 원본 DeskRPG `ChatResponse`와 같은 수명주기: queued → thinking → complete | failed.
 //! 1차는 스트리밍 없음(결정 2026-11-16 13번). 상태가 바뀔 때마다 객체 전체를 이벤트로 낸다.
 
-use pi_store::UnixMillis;
+use pi_store::{NoticeId, UnixMillis};
 
 use crate::place::Agent;
 
@@ -77,6 +77,9 @@ pub struct ChatResponse {
     pub updated_at: UnixMillis,
     /// 실패 까닭(failed일 때만). 빈 답이면 `"empty_response"`.
     pub error: Option<String>,
+    /// 공지 확인 답이면 그 공지 번호(6차, C19). 이벤트에는 있을 때만 `"notice"` 칸으로 붙는다
+    /// (공지와 상관없는 응답의 이벤트 모양은 그대로).
+    pub notice: Option<NoticeId>,
 }
 
 impl ChatResponse {

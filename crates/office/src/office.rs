@@ -13,6 +13,8 @@ use crate::port::{Clock, EventSink};
 use crate::summon::{SummonPhase, SummonReason};
 use crate::{CHAT_QUEUE_MAX, EVENT_AGENT, EVENT_CHAT};
 
+mod mention_flow;
+mod notice_flow;
 mod summon_flow;
 
 /// 끝난 응답을 [`Office::response`]로 다시 볼 수 있게 남겨 두는 개수.
@@ -281,6 +283,7 @@ impl Office {
                 content: String::new(),
                 updated_at: self.clock.now(),
                 error: None,
+                notice: None,
             }
         };
         self.publish_response(&response).await?;
@@ -341,6 +344,8 @@ impl Office {
     ///
     /// - 이미 끝났으면 [`Error::Finished`]이고 아무것도 바뀌지 않는다.
     /// - 아직 queued면 [`Error::InvalidTransition`].
+    /// - 공지 확인 답이면(`notice`가 있음) 저장소의 그 담당 확인을 "답함"(빈 답이면 "실패")으로 한 번 바꾸고
+    ///   `office.notice_ack`를 낸다(6차).
     pub async fn complete(&self, request_id: &str, content: &str) -> Result<ChatResponse, Error> {
         let _turn = self.turn.lock().await;
         let mut response = self.open_response(request_id)?;
@@ -361,6 +366,7 @@ impl Office {
 
     /// 응답을 실패로 끝낸다(E6). queued · thinking에서 갈 수 있다.
     /// 그 담당의 일 상태는 failed로 보인다. 이미 끝났으면 [`Error::Finished`].
+    /// 공지 확인 답이면 저장소의 그 담당 확인을 "실패"로 한 번 바꾸고 `office.notice_ack`를 낸다(6차).
     pub async fn fail(&self, request_id: &str, reason: &str) -> Result<ChatResponse, Error> {
         let _turn = self.turn.lock().await;
         let mut response = self.open_response(request_id)?;

@@ -36,6 +36,15 @@ pub enum Error {
     /// 이벤트를 내보내는 포트가 실패했다.
     #[error("이벤트를 내보내지 못했다: {0}")]
     Publish(#[from] SinkError),
+    /// 공지 글이 0자이거나 [`pi_store::NOTICE_TEXT_MAX_CHARS`]자보다 길다(C19). 아무것도 남지 않는다.
+    #[error("공지 글이 알맞지 않다: {0}")]
+    InvalidNotice(String),
+    /// 공지 저장소를 끼우지 않았다([`crate::Office::with_notices`]).
+    #[error("공지 저장소가 없다")]
+    NoticeUnavailable,
+    /// 저장소가 실패했다.
+    #[error("저장소: {0}")]
+    Store(#[from] pi_store::StoreError),
 }
 
 /// 이벤트 포트([`crate::EventSink`])의 실패.
