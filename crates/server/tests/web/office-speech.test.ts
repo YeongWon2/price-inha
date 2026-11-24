@@ -9,6 +9,7 @@ import {
   SpeechBoard,
   TYPING_LIFE_MS,
   TYPING_TEXT,
+  bubbleWhere,
   bubbleWidth,
   latestLine,
   trimSpeech,
@@ -108,6 +109,9 @@ describe("말풍선 판", () => {
     expect(text.endsWith("손절선은")).toBe(true);
     board.status("trader", "failed", T0);
     expect(board.shown("trader", T0 + 60_000)?.text).toContain("❗");
+    // 23차 3번: 글 없는 상태 말풍선은 머리 위가 아니라 말풍선 줄에 뜬다.
+    expect(bubbleWhere(board.shown("trader", T0 + 60_000))).toBe("rail");
+    expect(bubbleWhere(board.shown("risk", T0))).toBe("head");
   });
 
   it("한 담당에 여러 말풍선이면 대화 > 상태 > 잡담 순서로 하나만 보인다", () => {

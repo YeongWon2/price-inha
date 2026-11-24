@@ -22,6 +22,13 @@ export const BUBBLE_SCREEN_MARGIN = 16;
 export const BUBBLE_HEAD_GAP = 8;
 /** 좌우 후보가 비켜나는 거리(말풍선 폭의 배수). */
 export const BUBBLE_SIDE_SHIFT = 0.55;
+/**
+ * (23차 2번) 위아래 후보가 비켜나는 간격(px): `높이 + 6`(원본 `label-layout`, 22차의 `높이 + 8`을 고친다).
+ * 첫 자리의 위쪽 끝은 `max(8, 머리 y - 높이 - 8)`이다(화면 위 여백 [`BUBBLE_TOP_MARGIN`]).
+ */
+export const BUBBLE_STACK_GAP = 6;
+/** (23차 2번) 첫 자리 위쪽 끝의 하한(px). */
+export const BUBBLE_TOP_MARGIN = 8;
 /** 말풍선 넓이의 합이 화면 넓이의 이 비율을 넘으면 모두 말풍선 줄로 보낸다. */
 export const LANE_AREA_RATIO = 0.24;
 
@@ -165,7 +172,8 @@ export interface Placement {
 
 /**
  * 말풍선 자리 고르기(넘긴 순서대로). 머리가 화면 밖이면 숨긴다. 첫 자리는 머리 바로 위(가운데 맞춤, 위쪽 끝
- * `머리 y - 높이 - 8`)이고, 거기서 위아래 · 좌우(폭의 [`BUBBLE_SIDE_SHIFT`]배)로 비킨 3×3 후보 가운데 화면 안이고
+ * `max(8, 머리 y - 높이 - 8)`, 23차)이고, 거기서 위아래(`높이 + 6`, 23차 [`BUBBLE_STACK_GAP`]) · 좌우(폭의
+ * [`BUBBLE_SIDE_SHIFT`]배)로 비킨 3×3 후보(위아래는 0 · 위 · 아래 순서, 각 줄은 가운데 먼저) 가운데 화면 안이고
  * 앞서 놓은 말풍선 · 모든 이름표와 겹치지 않는 첫 자리를 쓴다. 자리가 없으면 말풍선 줄로 보낸다. 보이는 말풍선
  * 넓이의 합이 화면 넓이의 [`LANE_AREA_RATIO`]를 넘으면 모두 말풍선 줄로 보낸다.
  */
@@ -234,4 +242,29 @@ export function latestLine(said: readonly Said[], agent: string, now: number): s
   }
   if (!latest || now - latest.at >= LATEST_LIFE_MS) return null;
   return trimSpeech(latest.text);
+}
+
+/** (23차 2번) 말풍선 글의 이름 구분자(원본: 이름을 따로 굵게 하지 않는 한 줄 글자). */
+export const NAME_SEPARATOR = " · ";
+
+/**
+ * (23차 2번 · 3번) 말풍선에 보일 한 줄 글자: `이름 · 글`. 상태가 붙은 글이면 `이름 · 💭 글`, 글 없이 말하는 중이면
+ * `이름 · ···`, 글 없는 상태 말풍선이면 `이름 · 💭`. `shown`은 [`SpeechBoard.shown`]이 낸 것이다.
+ */
+export function bubbleText(name: string, shown: Bubble): string {
+  void name;
+  void shown;
+  throw new Error("todo");
+}
+
+/** 말풍선이 그려지는 곳: 머리 위 · 말풍선 줄 · 아무 데도. */
+export type BubbleWhere = "head" | "rail" | "none";
+
+/**
+ * (23차 3번) 보이는 말풍선이 어디에 그려지나: 글 말풍선(대화 · "···" · 잡담)은 머리 위, 글 없는 상태 말풍선(생각 중 ·
+ * 기다림 · 실패 표시만)은 말풍선 줄, 말풍선이 없으면(쉬는 중 포함) 아무 데도.
+ */
+export function bubbleWhere(shown: Bubble | undefined): BubbleWhere {
+  void shown;
+  throw new Error("todo");
 }

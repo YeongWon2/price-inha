@@ -1,6 +1,8 @@
 // 말풍선 자리 고르기(server 22차 3번, 원본 DeskRPG `label-layout` 동작 — docs/research/deskrpg.md 10절): 머리 바로 위부터
 // 위아래 · 좌우(폭의 0.55배) 3×3 후보 가운데 화면 안이고 다른 말풍선 · 이름표와 안 겹치는 첫 자리, 막히거나 넓이가
 // 화면의 24%를 넘으면 말풍선 줄로. 화면 밖 담당은 숨긴다. 장면 없이 `placeBubbles`를 돌려 본다.
+// 23차: 이름표가 발 아래로 간다(시험 담당의 이름표 자리를 고침). 위아래 간격 `높이 + 6` · 첫 자리 `max(8, …)` ·
+// 줄 자리 · 자리 잡는 순서는 office-layout.test.ts.
 import { describe, expect, it } from "vitest";
 import {
   BUBBLE_HEAD_GAP,
@@ -15,9 +17,9 @@ import {
 const SCREEN: Size = { width: 1280, height: 800 };
 const BUBBLE: Size = { width: 120, height: 40 };
 
-/** 머리 아래에 이름표가 있는 담당 하나. */
+/** 발 아래에 이름표가 있는 담당 하나(23차 1번: 이름표는 머리 아래가 아니라 발 투영점 10px 아래). */
 function spot(agent: string, x: number, y: number, bubble: Size = BUBBLE, label?: Rect): HeadSpot {
-  return { agent, x, y, bubble, label: label ?? { x: x - 30, y: y + 4, width: 60, height: 16 } };
+  return { agent, x, y, bubble, label: label ?? { x: x - 30, y: y + 130, width: 60, height: 16 } };
 }
 
 /** 머리 바로 위 첫 자리. */
