@@ -251,12 +251,31 @@ fn pending_with_stale_pass(store: &Store, path: &Path) -> TemplateId {
     store
         .apply_cooled_user_proposal(cooling.id, &new_value(), t(50))
         .unwrap();
-    raw(path)
-        .execute(
-            "UPDATE templates SET state = 'promotion_pending', approval = NULL WHERE id = ?1",
-            [template.id.0],
-        )
+    // 실전중 → 승격대기와 승인 비우기는 전이 · 고정 트리거가 막는 길이라, 그 둘만 잠시 빼고 줄을 옮긴 뒤
+    // 같은 글로 되살린다(옛 파일 · 우회로 생겼을 상태를 흉내 낸다. 다른 트리거는 그대로 둔다).
+    let conn = raw(path);
+    let saved: Vec<String> = ["templates_transition", "templates_fixed"]
+        .iter()
+        .map(|name| {
+            conn.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap()
+        })
+        .collect();
+    conn.execute_batch("DROP TRIGGER templates_transition; DROP TRIGGER templates_fixed;")
         .unwrap();
+    conn.execute(
+        "UPDATE templates SET state = 'promotion_pending', approval_id = NULL WHERE id = ?1",
+        [template.id.0],
+    )
+    .unwrap();
+    for sql in &saved {
+        conn.execute_batch(sql).unwrap();
+    }
+    drop(conn);
     let now = store.get_template(template.id).unwrap();
     assert_eq!(now.state, TemplateState::PromotionPending);
     assert_eq!(now.revision, 2);
