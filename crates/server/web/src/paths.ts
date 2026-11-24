@@ -52,6 +52,14 @@ export const API = {
   // 자리 남기기 `POST` `{"x", "y", "dir"}`(띄엄띄엄 — `office/player-sync.ts`).
   officeMe: "/api/office/me",
   officeMePosition: "/api/office/me/position",
+  // 전체 공지(server 33차 3번, C19): 보내기 `POST` `{"text", "sourceMessageId"}` · 지난 공지 `GET ?limit=`.
+  officeNotice: "/api/office/notice",
+  officeNotices: "/api/office/notices",
+  // 담당 부르기(server 33차 4번 · 2번, C20): 부르기 `POST` `{"agent"}` · 도착 알림 `POST` `{"agent"}` ·
+  // 지금 보는 방 알림 `POST` `{"room": "team" | "direct"}`.
+  officeSummon: "/api/office/summon",
+  officeSummonArrived: "/api/office/summon/arrived",
+  officeSummonView: "/api/office/summon/view",
   pushKey: "/api/push/key",
   pushSubscribe: "/api/push/subscribe",
   notices: "/api/notices",
@@ -127,6 +135,12 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     // server 32차 1번: 내 캐릭터 읽기 · 바꾸기 · 자리 남기기.
     API.officeMe,
     API.officeMePosition,
+    // server 33차 3번 · 4번: 전체 공지 · 지난 공지 · 담당 부르기 · 도착 알림 · 보는 방 알림.
+    API.officeNotice,
+    API.officeNotices,
+    API.officeSummon,
+    API.officeSummonArrived,
+    API.officeSummonView,
     API.socket,
     ...APPROVALS,
   ],

@@ -55,6 +55,12 @@ describe("화면이 부르는 경로", () => {
         // 32차 1번: 내 캐릭터 읽기 · 바꾸기 · 자리 남기기.
         "/api/office/me",
         "/api/office/me/position",
+        // 33차 3번 · 4번: 전체 공지 · 지난 공지 · 담당 부르기 · 도착 알림 · 보는 방 알림.
+        "/api/office/notice",
+        "/api/office/notices",
+        "/api/office/summon",
+        "/api/office/summon/arrived",
+        "/api/office/summon/view",
         "/ws",
         ...APPROVALS,
       ]),

@@ -86,6 +86,12 @@ pub const OFFICE_PATH: &str = "/api/office";
 ///   간격은 [`crate::Wiring::clock`]으로 재고, 거부한 글은 간격에 세지 않는다.
 /// - 담당의 대기열이 차면 429 `{"error": "queue_full"}`.
 /// - 팀 방의 글은 [`KIND_OFFICE_MESSAGE`] 이벤트로도 낸다.
+/// - (33차 1번, C18) `room`이 `"team"`이고 `agent`가 없으면 멘션 글이다: 글 속 `@[이름]`([`OFFICE_ROSTER`]의 이름과
+///   정확히 같은 것)으로 멘션된 담당만 차례로 답한다. 200 `{"responders": [담당 id…], "responses": [응답 객체…]}`.
+///   멘션이 없으면 `{"responders": [], "hint": `[`OFFICE_HINT_NO_MENTION`]`}`, 이름이 맞지 않으면
+///   `{"responders": [], "hint": `[`OFFICE_HINT_NO_MATCH`]`}`이고 AI를 부르지 않는다. 멘션된 담당은 답 턴이 시작되는
+///   순간 [`KIND_OFFICE_SUMMON`] `called`(`reason: "mention"`)로 곁에 온다(논의 중이면 오지 않고 답만 간다).
+///   `agent`를 주면 지금처럼 그 담당 하나다(응답 모양 그대로). 1:1 방(`direct`)은 `agent`가 있어야 한다.
 /// - 답은 뒤에서 그 담당의 AI 턴으로 만든다(시연 모드는 `DemoTurn::Chat`). thinking → complete,
 ///   답하지 못하면 failed(E6). 무응답 [`CHAT_IDLE_TIMEOUT`] · 전체 [`CHAT_TOTAL_TIMEOUT`]이면 failed다.
 pub const OFFICE_CHAT_PATH: &str = "/api/office/chat";
@@ -139,6 +145,94 @@ pub const OFFICE_TALK_PATH: &str = "/api/office/talk";
 
 /// [`OFFICE_TALK_PATH`]가 주는 최근 줄 수.
 pub const OFFICE_TALK_RECENT: usize = 50;
+
+// ───────────── (33차) 멘션 · 전체 공지 · 담당 부르기 (C18 · C19 · C20, 결정 17 · 19) ─────────────
+//
+// 아래 크레이트가 이미 주는 길을 잇는다: 멘션 `pi_office::Office::post_team` · `complete_with_relay`(명단은
+// [`OFFICE_ROSTER`]), 공지 `post_notice`(저장소 `pi_store` 공지 · 확인, 가리기 · 하루 상한 포트를 끼운다),
+// 부르기 `summon` · `summon_arrived` · `summon_returned` · `mention_turn_started` · `user_left_room` · `tick`.
+// 관문은 사무실의 다른 쓰기와 같다(세션이 없으면 원격 포함 401, 쓰기는 같은 출처만). 글은 저장 · 이벤트 전에 가린다.
+
+/// (33차 1번, C18) 사무실 담당의 표시 이름(멘션 `@[이름]`이 정확히 맞아야 하는 이름). 화면 지도
+/// `web/public/office/office-map.json`의 `agents.<id>.name`과 같다. 순서는 `pi_office::Agent::ALL`.
+pub const OFFICE_ROSTER: [(&str, &str); 6] = [
+    ("news", "뉴스 공시 시세"),
+    ("strategy", "전략"),
+    ("risk", "리스크"),
+    ("review", "복기"),
+    ("trader", "매매"),
+    ("leader", "팀장"),
+];
+
+/// (33차 1번, C18 · E44) 팀 방 글에 멘션이 없어 아무도 답하지 않을 때의 `hint`(`pi_office::TeamHint::NoMention`).
+/// 응답 `{"responders": [], "hint": "no_mention"}`. 글은 [`KIND_OFFICE_MESSAGE`]로 남고 AI는 부르지 않는다.
+pub const OFFICE_HINT_NO_MENTION: &str = "no_mention";
+
+/// (33차 1번, E43) 멘션한 이름이 명단과 하나도 맞지 않을 때의 `hint`(`pi_office::TeamHint::NoMatch`).
+/// 응답 `{"responders": [], "hint": "no_match"}` — 보낸 사람에게만 가는 답이다(이벤트로 다른 화면에 알리지 않는다).
+/// 화면은 [`OFFICE_NO_MATCH_TEXT`]를 보인다. AI는 부르지 않는다.
+pub const OFFICE_HINT_NO_MATCH: &str = "no_match";
+
+/// (33차 1번, E43) 멘션한 상대가 없을 때 보낸 사람에게만 보이는 안내 글(원본 DeskRPG 글 그대로).
+pub const OFFICE_NO_MATCH_TEXT: &str = "지목한 상대가 이 방에 없어 아무도 답하지 않았습니다.";
+
+/// (33차 3번, C19 · F11 · M10 · N18) 전체 공지. `POST` `{"text", "sourceMessageId"}` → 200
+/// `{"notice": 번호, "acks": [{"agent": 담당 id, "state": "queued" | "limit"}]}`(담당 여섯, `pi_office::Agent::ALL` 순서).
+///
+/// - 글을 가린 뒤 저장소에 공지로 남기고(담당 여섯 모두 기다림) `office.notice` `{"notice", "text", "at"}`를 낸다.
+///   담당마다 한 줄 확인 답 턴을 대기열에 넣는다(`office.chat`에 `"notice": 번호`). 답이 끝나면 확인은 "답함",
+///   실패면 "실패"로 한 번만 바뀌고 `office.notice_ack` `{"notice", "agent", "state"}`를 낸다.
+/// - 하루 AI 호출 상한(팀장 예비분 제외)에 걸린 담당은 턴을 받지 않고 `"limit"`이다(E45). 공지 자체는 저장된다.
+/// - 같은 `sourceMessageId`를 다시 보내면 처음 답을 그대로 돌려주고 공지 · 턴을 다시 만들지 않는다.
+/// - 글 · 번호의 한도와 보내기 간격은 [`OFFICE_CHAT_PATH`]와 같다(빈 글 400 [`OFFICE_BAD_INPUT`],
+///   [`OFFICE_TEXT_MAX`]자 넘음 400 [`OFFICE_TOO_LONG`], 같은 기기 [`OFFICE_SEND_INTERVAL`] 안 429 [`OFFICE_TOO_FAST`]).
+/// - 공지는 규칙 · 템플릿 값 · 승인 · 팀 상태를 바꾸지 않는다(E46 · V74).
+/// - 공지는 그 뒤 열리는 논의의 담당 자료로 넘어간다(`pi_agent::DiscussionOptions::with_notices`). 보낸 시각이
+///   그 논의의 판단 시각보다 늦은 공지는 넣지 않는다(결정 19).
+pub const OFFICE_NOTICE_PATH: &str = "/api/office/notice";
+
+/// (33차 3번, C19) 지난 공지와 확인 상태. `GET ?limit=<수>` → 200 `[{"notice": 번호, "text": 가린 글,
+/// "at": 보낸 시각(유닉스 밀리초), "acks": [{"agent": 담당 id, "state": "waiting" | "answered" | "limit" | "failed"}]}]`
+/// (최근 것 먼저). `limit`이 없으면 [`OFFICE_NOTICES_DEFAULT`]개, 수가 아니면 400 [`OFFICE_BAD_INPUT`].
+/// 세션이 있어야 열린다(없으면 401).
+pub const OFFICE_NOTICES_PATH: &str = "/api/office/notices";
+
+/// [`OFFICE_NOTICES_PATH`]가 `limit` 없이 주는 공지 수.
+pub const OFFICE_NOTICES_DEFAULT: usize = 20;
+
+/// (33차 4번, C20) 담당 부르기. `POST` `{"agent": 담당 id}` → 200 `{"agent", "phase": "called"}`.
+///
+/// - 모르는 담당(빠짐 포함)이면 400 `{"error": `[`OFFICE_UNKNOWN_AGENT`]`}`.
+/// - 담당이 미팅룸 논의 중이면 409 `{"error": `[`OFFICE_MEETING_RESERVED`]`}`이고 아무것도 바뀌지 않는다(E47).
+/// - 단계가 바뀔 때마다 [`KIND_OFFICE_SUMMON`]을 낸다.
+pub const OFFICE_SUMMON_PATH: &str = "/api/office/summon";
+
+/// (33차 4번, C20) 화면이 "걸어온 담당이 도착했다"를 알린다. `POST` `{"agent"}` → 200 `{"agent", "phase"}`(알린 뒤 단계).
+/// 오는 중(`called`)이면 곁에서 기다림(`waiting`), 돌아가는 중(`returning`)이면 자리(`idle`, 원본 `npc:arrived`가
+/// 두 경우 모두 같은 알림이다). 그 밖의 단계면 그대로다. 모르는 담당이면 400 [`OFFICE_UNKNOWN_AGENT`].
+pub const OFFICE_SUMMON_ARRIVED_PATH: &str = "/api/office/summon/arrived";
+
+/// (33차 2번, C20) 화면이 지금 보는 방을 알린다. `POST` `{"room": "team" | "direct"}` → 200 `{"room"}`.
+/// 팀 방이 아닌 방으로 바꾸면 멘션으로 온 담당은 바로 돌아간다(`returning`, 원본 — 타이머 없음). 부름으로 온 담당은
+/// 그대로다. 모르는 방이면 400 [`OFFICE_BAD_INPUT`].
+pub const OFFICE_SUMMON_VIEW_PATH: &str = "/api/office/summon/view";
+
+/// (33차 4번, C20) 부르기 단계 이벤트(번호 있는 이벤트). 내용 `{"agent": 담당 id, "phase": "called" | "waiting" |
+/// "returning" | "idle", "reason": "call" | "mention" | null, "at": 바뀐 시각(유닉스 밀리초)}`.
+/// 사무실 크레이트가 단계를 실어 내는 `office.agent`(칸 `phase` · `reason` · `phaseAt`)는 그대로 두고, 단계가 바뀐
+/// 담당마다 이것을 하나씩 더 낸다. 멘션된 담당은 답 턴이 시작되는 순간 `called`(`reason: "mention"`)이다.
+pub const KIND_OFFICE_SUMMON: &str = "office.summon";
+
+/// (33차 4번, C20) 모르는 담당을 부를 때의 오류 이름.
+pub const OFFICE_UNKNOWN_AGENT: &str = "unknown_agent";
+
+/// (33차 4번, E47) 논의 중인 담당을 부를 때의 오류 이름(409).
+pub const OFFICE_MEETING_RESERVED: &str = "meeting_reserved";
+
+/// (33차 4번, N10) 서버가 사무실 시계를 굴리는 간격(`pi_office::Office::tick`). 깨우기 엔진과 따로, 가볍게 돈다.
+/// 곁에서 10초(`pi_office::SUMMON_IDLE_MS`) · 도착 없음 30초(`pi_office::SUMMON_ARRIVE_MS`)는 넣어 준 시계로 재고,
+/// 이 간격은 "때가 됐는지 보는" 벽시계 간격이다.
+pub const OFFICE_SUMMON_TICK: Duration = Duration::from_millis(250);
 
 /// (22차 1번) 저장되는 이벤트 종류(번호 있는 이벤트): 논의 방(`trade-<번호>` · [`crate::DAY_ROOM`])에 담당 글
 /// (`message.member`, 팀장 판단 글 포함)이 쌓이면 1초 안에 하나씩 낸다. 내용 `{"room": 방 이름, "agent": 방 로그
