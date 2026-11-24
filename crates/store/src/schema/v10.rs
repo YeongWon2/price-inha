@@ -69,6 +69,9 @@ WHEN (SELECT state FROM proposals WHERE id = NEW.proposal_id) IS NOT 'proposed'
 BEGIN SELECT RAISE(ABORT, 'proposal_sources is set when the proposal is made'); END;
 CREATE TRIGGER proposal_sources_no_update BEFORE UPDATE ON proposal_sources
 BEGIN SELECT RAISE(ABORT, 'proposal_sources is append-only'); END;
+-- 17차: 기록이라 지우지 않는다(다른 기록 표와 같은 글).
+CREATE TRIGGER proposal_sources_no_delete BEFORE DELETE ON proposal_sources
+BEGIN SELECT RAISE(ABORT, 'proposal_sources rows are kept'); END;
 
 CREATE TABLE user_revisions (
     proposal_id INTEGER PRIMARY KEY REFERENCES proposals (id),
@@ -85,6 +88,8 @@ WHEN EXISTS (SELECT 1 FROM user_revisions WHERE proposal_id = NEW.proposal_id)
 BEGIN SELECT RAISE(ABORT, 'user_revisions is append-only'); END;
 CREATE TRIGGER user_revisions_no_update BEFORE UPDATE ON user_revisions
 BEGIN SELECT RAISE(ABORT, 'user_revisions is append-only'); END;
+CREATE TRIGGER user_revisions_no_delete BEFORE DELETE ON user_revisions
+BEGIN SELECT RAISE(ABORT, 'user_revisions rows are kept'); END;
 
 DROP TRIGGER template_revisions_append;
 CREATE TRIGGER template_revisions_append BEFORE INSERT ON template_revisions
