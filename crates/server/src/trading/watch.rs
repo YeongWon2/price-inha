@@ -389,13 +389,30 @@ impl Trading {
         self.announce_data_halt();
     }
 
-    /// 이상이 풀렸다: 이상 감지 멈춤 → 쉬는 중으로 옮긴 뒤 그날 계획(매매면 운용 중)을 적용한다.
+    /// 지금 장이 열려 있나(하루 시작이 보는 것과 같다: 오늘 세션들의 가장 이른 시작 이상, 가장 늦은 끝 미만).
+    /// 달력을 모르거나 오늘 세션이 없으면(휴장) 아니다.
+    fn market_open(&self) -> bool {
+        let now = self.clock.now();
+        let Some(calendar) = self.calendar(now) else {
+            return false;
+        };
+        let sessions = &calendar.today.sessions;
+        let open = sessions.iter().map(|session| session.start).min();
+        let close = sessions.iter().map(|session| session.end).max();
+        matches!((open, close), (Some(open), Some(close)) if now >= open && now < close)
+    }
+
+    /// 이상이 풀렸다: 이상 감지 멈춤 → 쉬는 중으로 옮긴 뒤, 장이 열려 있고 그날 계획이 매매면 운용 중으로 옮긴다.
+    /// 장 밖 · 휴장이면 쉬는 중으로 두고 다음 장 시작의 하루 흐름이 옮긴다(16차 2번).
     /// 팀 상태 줄을 쥐고 부른다.
     fn recovered(&self) -> Result<(), TradingError> {
         let cause = TeamCause::AnomalyCleared;
         let detail = "이상이 풀리고 정상이 이어짐";
         let state = self.change_team(TeamState::Resting, cause, false, detail)?;
-        if state == TeamState::Resting && self.plan_today() == Some(DayPlan::Trade) {
+        if state == TeamState::Resting
+            && self.plan_today() == Some(DayPlan::Trade)
+            && self.market_open()
+        {
             match self.start_trading(state) {
                 // 다시 멈춰야 하면(손실 한도) 그 상태로 둔다.
                 Ok(_) | Err(TradingError::Halted(_)) => {}

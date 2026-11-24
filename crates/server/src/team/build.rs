@@ -156,6 +156,9 @@ impl Crew {
         let keys: Arc<dyn KeySource> = secrets;
         let data = data_adapter(&wiring, keys, &shared, &store, &clock)?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
+        let ai_cap = wiring.ai_daily_limit.map(|limit| {
+            super::quota::DailyQuota::new(store.clone(), super::quota::AI_USED_KEY, limit)
+        });
         let crew = Arc::new(Crew {
             journal: Journal::new(store.clone()),
             store,
@@ -176,6 +179,8 @@ impl Crew {
             scan_turn: tokio::sync::Mutex::new(()),
             links: std::sync::OnceLock::new(),
             discussing: Arc::default(),
+            ai_cap,
+            ai_cap_told: Mutex::new(None),
         });
         let _ = crew.tools.crew.set(Arc::downgrade(&crew));
         Ok(crew)

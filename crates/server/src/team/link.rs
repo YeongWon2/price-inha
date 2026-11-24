@@ -30,6 +30,8 @@ pub(crate) struct CrewLinks {
     pub(crate) office: Option<Arc<Office>>,
     /// (10c 13번) 뜻 검색 설정. 켜져 있으면 뜻 검색은 임베딩을 건 지식 창구로 한다.
     pub(crate) semantic: Option<Arc<Semantic>>,
+    /// (16차 3번) 하루 AI 호출 상한에 닿았을 때 사용자에게 알리는 자리.
+    pub(crate) ai_capped: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 /// 담당 → 사무실의 담당.

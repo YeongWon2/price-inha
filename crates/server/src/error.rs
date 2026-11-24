@@ -223,6 +223,9 @@ pub enum TeamError {
     /// (W5 3차) 지식 검색 오류 · 도구 입력이 잘못됨(가린 글).
     #[error("지식 검색 오류: {0}")]
     Knowledge(String),
+    /// (16차 3번) 하루 AI 호출 상한에 닿아 그날 남은 논의를 쉰다.
+    #[error("오늘 AI 호출 상한에 닿아 논의를 쉽니다")]
+    AiLimit,
 }
 
 /// (9차) 하위 명령(`service` · `doctor` · `access-key` · `restore` 등)의 실패. 비밀 값을 담지 않는다.

@@ -16,6 +16,9 @@ use pi_store::Store;
 /// 그날 DART 요청 수를 남기는 저장소 칸.
 pub(super) const DART_USED_KEY: &str = "data_poll.dart_used";
 
+/// (16차 3번) 그날 팀 논의로 AI를 부른 횟수를 남기는 저장소 칸.
+pub(super) const AI_USED_KEY: &str = "team.ai_used";
+
 /// 한국 날짜(하루 상한은 한국 날짜로 센다).
 pub(super) fn kst_date(at: DateTime<Utc>) -> NaiveDate {
     (at + chrono::Duration::hours(9)).date_naive()

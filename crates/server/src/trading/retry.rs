@@ -13,12 +13,19 @@
 //!   막히면 다음에 볼 때를 다음 세션 시작 시각 이하로 자른다(그 시각을 모르면 5초 뒤), (나) 그 밖의 까닭으로 막히면
 //!   간격 상한이 5초다(익절 · 팀장 팔기는 10분 그대로), (다) 하루가 시작되면 손절 · 청산의 물러서기 간격을 비운다
 //!   (같은 까닭 기록 한 번 · 10분 알림을 위한 까닭 · 처음 막힌 때는 둔다).
+//! - (16차 1번) 팀 상태가 전체 정지면 팀장 팔기(`TeamExit`) 대기를 지운다(정지 전의 팀장 판단이 다시 시작 뒤에 저절로
+//!   나가지 않게). 방 `trade-<번호>`에 매매마다 한 줄. 손절 · 청산 · 익절 대기는 남긴다. 상태 전이 한 곳이 아니라
+//!   tick마다 보므로 저장소를 직접 바꾸는 길 · 백업 복원도 덮는다.
+//! - (16차 4번) 손절 · 청산 대기가 낡았으면(`SellTooLarge` · `PermitMismatch`로 거부, 또는 매매가 보유중이 아니게 됨)
+//!   지운다. 지금 남은 수량이 0보다 크면 그 수량으로 같은 목적의 파는 주문을 새 표시로 낸다. 방 기록에 한 줄.
 
 use chrono::{DateTime, Duration, Utc};
 use pi_exec::{SellPurpose, SellRetry};
 use pi_rules::{Blocked, Outcome, Purpose, Reason, SymbolStatus, Violation};
+use pi_store::{NewRoomEvent, RoomActorKind, TeamState, TradeId, TradeState};
+use rust_decimal::Decimal;
 
-use super::base::lock;
+use super::base::{lock, millis};
 use super::{OrderRequest, Trading};
 use crate::TradingError;
 
@@ -110,6 +117,8 @@ impl Trading {
     /// 막힌 대기는 물러선 간격이 지나야 다시 본다.
     pub(super) async fn retry_sells(&self) {
         let now = self.clock.now();
+        self.withdraw_team_exits();
+        self.drop_ended_urgent();
         let pending = self.executor.pending_sells();
         lock(&self.held_back).retain(|trade, _| pending.iter().any(|p| p.trade_id == *trade));
         for pending in pending {
@@ -252,6 +261,11 @@ impl Trading {
                 Ok(Tried::Done)
             }
             Err(pi_exec::Error::RetryNotDue { .. }) => Ok(Tried::Done),
+            Err(pi_exec::Error::SellTooLarge { .. } | pi_exec::Error::PermitMismatch)
+                if urgent(pending.purpose) =>
+            {
+                self.renew_stale(pending, purpose).await
+            }
             Err(pi_exec::Error::PermitMismatch) => Ok(Tried::Blocked(Hold::other(
                 "표시 내용이 처음 낸 주문과 다릅니다(PermitMismatch)",
             ))),
@@ -260,6 +274,136 @@ impl Trading {
                 Err(TradingError::Broker(error.to_string()))
             }
             Err(error) => Err(super::base::exec_text(error)),
+        }
+    }
+
+    /// (16차 1번) 전체 정지면 팀장 팔기 대기를 지우고 매매마다 방에 한 줄 남긴다. 손절 · 청산 · 익절은 남긴다.
+    fn withdraw_team_exits(&self) {
+        if !matches!(self.store.team_state(), Ok(TeamState::FullStop)) {
+            return;
+        }
+        let exits: Vec<TradeId> = self
+            .executor
+            .pending_sells()
+            .into_iter()
+            .filter(|pending| pending.purpose == SellPurpose::TeamExit)
+            .map(|pending| pending.trade_id)
+            .collect();
+        for trade in exits {
+            if self.executor.forget_pending_sell(trade).is_some() {
+                self.note_in_room(trade, "withdrawn", "전체 정지로 팀장 팔기 다시 내기를 거둠");
+            }
+        }
+    }
+
+    /// (16차 4번) 매매가 더는 보유중이 아닌 손절 · 청산 대기는 낸 것이 없어도 영영 남지 않게 지운다(남은 수량 0).
+    fn drop_ended_urgent(&self) {
+        let ended: Vec<TradeId> = self
+            .executor
+            .pending_sells()
+            .into_iter()
+            .filter(|pending| urgent(pending.purpose))
+            .map(|pending| pending.trade_id)
+            .filter(|trade| {
+                self.store
+                    .get_trade(*trade)
+                    .is_ok_and(|found| found.state != TradeState::Holding)
+            })
+            .collect();
+        for trade in ended {
+            if self.executor.forget_pending_sell(trade).is_some() {
+                self.note_in_room(
+                    trade,
+                    "stale-cleared",
+                    "남은 수량이 0이라 낡은 손절 · 청산 다시 내기를 지움",
+                );
+            }
+        }
+    }
+
+    /// (16차 4번) 낡은 손절 · 청산 대기를 지우고, 지금 남은 수량이 있으면 그 수량으로 같은 목적의 파는 주문을 새로 낸다.
+    /// 감시 자리나 시세가 없어 남은 수량을 모르면 지우지 않고 물러선다.
+    async fn renew_stale(
+        &self,
+        pending: &SellRetry,
+        purpose: Purpose,
+    ) -> Result<Tried, TradingError> {
+        let trade = pending.trade_id;
+        let Some(mut request) = self.retry_request(pending, purpose) else {
+            return Ok(Tried::Blocked(Hold::other("보유 자리나 시세가 없습니다")));
+        };
+        let guard = self
+            .executor
+            .guards()
+            .into_iter()
+            .find(|guard| guard.trade_id == trade);
+        let quote = guard
+            .as_ref()
+            .and_then(|g| self.last_quote(g.symbol.as_str()));
+        let remaining = match (&guard, &quote) {
+            (Some(guard), Some(quote)) => self
+                .executor
+                .stop_draft(guard, quote)
+                .ok()
+                .and_then(|draft| draft.ai_quantity),
+            _ => None,
+        };
+        let Some(remaining) = remaining else {
+            return Ok(Tried::Blocked(Hold::other("남은 수량을 알 수 없습니다")));
+        };
+        self.executor.forget_pending_sell(trade);
+        if remaining <= Decimal::ZERO {
+            self.note_in_room(
+                trade,
+                "stale-cleared",
+                "남은 수량이 0이라 낡은 손절 · 청산 다시 내기를 지움",
+            );
+            return Ok(Tried::Done);
+        }
+        request.draft.order_type = pi_paper::OrderType::Market;
+        request.draft.limit_price = None;
+        request.draft.ai_quantity = Some(remaining);
+        self.note_in_room(
+            trade,
+            "stale-renewed",
+            &format!(
+                "낡은 다시 내기를 지우고 남은 수량 {}주로 새로 냅니다",
+                remaining.normalize()
+            ),
+        );
+        match self.place_order(request).await {
+            Ok(super::Placed::Ordered(id)) => {
+                if purpose == Purpose::StopLoss {
+                    self.note_stop(trade, &super::Placed::Ordered(id));
+                }
+            }
+            Ok(other) => tracing::warn!(
+                trade = trade.0,
+                ?other,
+                "남은 수량으로 새로 내지 못했습니다"
+            ),
+            Err(error) => {
+                tracing::warn!(%error, trade = trade.0, "남은 수량으로 새로 내지 못했습니다")
+            }
+        }
+        Ok(Tried::Done)
+    }
+
+    /// 그 매매의 방 `trade-<번호>`에 서버가 남기는 한 줄(같은 종류는 매매 · 시각마다 겹치지 않는 키).
+    fn note_in_room(&self, trade: TradeId, kind: &str, text: &str) {
+        let now = self.clock.now();
+        let room = format!("{}{}", crate::TRADE_ROOM_PREFIX, trade.0);
+        let event = NewRoomEvent {
+            room: room.clone(),
+            event_id: format!("server-{kind}-{}-{}", trade.0, now.timestamp_millis()),
+            kind: "room.activity".to_string(),
+            actor_kind: RoomActorKind::Gateway,
+            actor_id: "server".to_string(),
+            payload: serde_json::json!({ "text": text }),
+            at: millis(now),
+        };
+        if let Err(error) = self.store.append_room_event(event) {
+            tracing::warn!(%error, trade = trade.0, "방 기록을 남기지 못했습니다");
         }
     }
 

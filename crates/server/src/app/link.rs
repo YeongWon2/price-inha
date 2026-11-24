@@ -168,6 +168,20 @@ fn stuck_stop_hook(linked: &Arc<Linked>) -> crate::trading::StuckStopHook {
     })
 }
 
+/// (16차 3번) 하루 AI 호출 상한에 닿아 논의를 쉬는 알림(N5). 같은 날 한 번은 부르는 쪽이 지킨다.
+fn ai_capped_hook(linked: &Arc<Linked>) -> Box<dyn Fn() + Send + Sync> {
+    let linked = Arc::clone(linked);
+    Box::new(move || {
+        linked.notice_later(
+            NoticeKind::Anomaly,
+            "AI 호출 상한".to_string(),
+            "오늘 AI 호출 상한에 닿아 논의를 쉽니다. 손절 · 청산은 그대로 돕니다. 내일 다시 엽니다"
+                .to_string(),
+            None,
+        );
+    })
+}
+
 /// 하루 마감 뒤: 백업(있으면) → 하루 정리 알림(V48 · V12 · E15).
 fn close_hook(
     linked: &Arc<Linked>,
@@ -219,6 +233,7 @@ pub(super) fn attach(
             knowledge: Arc::clone(&memory.knowledge),
             office: Some(Arc::clone(&linked.office)),
             semantic: Some(Arc::clone(&memory.semantic)),
+            ai_capped: Some(ai_capped_hook(linked)),
         });
     }
     trading.hook(Hooks {

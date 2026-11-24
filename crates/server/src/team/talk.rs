@@ -1,8 +1,7 @@
 //! 매매 논의(T9 · T10): 새 공시 보기와 종목 하나의 논의.
 
-use std::sync::atomic::Ordering;
-#[cfg(test)]
-use std::sync::{Arc, atomic::AtomicUsize};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pi_agent::{DiscussionLimits, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
@@ -18,31 +17,28 @@ use crate::TeamError;
 /// 논의에 나오는 담당(명단 순서). 매매 담당은 판단 뒤 주문 안 턴에만 나온다.
 pub(super) const MEMBERS: [Role; 4] = [Role::Scout, Role::Strategy, Role::Risk, Role::Leader];
 
-/// (16차 5번 뼈대) N2: `#[cfg(test)]`를 지우고 `Crew::discuss_symbol`의 `fetch_add` · `fetch_sub`를 이 가드로 바꾼다.
-///
 /// 열려 있는 논의의 수를 세는 가드: 만들면 수가 하나 늘고, 버려지면(끝 · panic · 취소) 하나 준다.
 /// 뜻 검색 다시 만들기는 이 수가 0일 때만 돈다([`crate::Crew::discussing`]). `fetch_add` → 논의 → `fetch_sub`를
 /// 손으로 짝지으면 논의가 panic · 취소됐을 때 수가 영영 줄지 않아 다시 만들기가 쉬지 않는다.
-#[cfg(test)]
 pub(super) struct DiscussingGuard {
     /// 세는 수(지켜보는 쪽과 함께 쓴다).
     count: Arc<AtomicUsize>,
 }
 
-#[cfg(test)]
 impl DiscussingGuard {
     /// 논의 하나를 열었다고 세고, 버려지면 되돌리는 가드를 돌려준다.
     pub(super) fn enter(count: &Arc<AtomicUsize>) -> Self {
-        todo!()
+        count.fetch_add(1, Ordering::SeqCst);
+        Self {
+            count: Arc::clone(count),
+        }
     }
 }
 
-#[cfg(test)]
 impl Drop for DiscussingGuard {
     /// 센 것을 되돌린다(panic · 취소로 버려져도).
     fn drop(&mut self) {
-        let _count = &self.count;
-        todo!()
+        self.count.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -54,6 +50,35 @@ fn request_room(trade: TradeId) -> String {
 impl Crew {
     fn now_millis(&self) -> UnixMillis {
         UnixMillis(self.clock.now().timestamp_millis())
+    }
+
+    /// (16차 3번) 하루 AI 호출 상한이 켜져 있으면 논의 한 번을 한 번으로 센다(한국 시각 날짜별, 저장).
+    /// 상한에 닿았으면 그날 남은 논의를 쉬고(오류) 사용자에게 그날 한 번 알린다. 손절 등은 AI를 부르지 않아 상관없다.
+    fn take_ai_call(&self) -> Result<(), TeamError> {
+        let Some(cap) = &self.ai_cap else {
+            return Ok(());
+        };
+        let now = self.clock.now();
+        if cap.take(now) {
+            return Ok(());
+        }
+        let today = super::quota::kst_date(now);
+        let first_today = {
+            let mut told = self
+                .ai_cap_told
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let first = *told != Some(today);
+            *told = Some(today);
+            first
+        };
+        if first_today {
+            tracing::warn!("오늘 AI 호출 상한에 닿아 논의를 쉽니다");
+            if let Some(notify) = self.links.get().and_then(|links| links.ai_capped.as_ref()) {
+                notify();
+            }
+        }
+        Err(TeamError::AiLimit)
     }
 
     /// 지켜보는 종목마다 아직 논의하지 않은 공시가 있으면 논의한다.
@@ -112,6 +137,7 @@ impl Crew {
         if Symbol::parse(symbol).is_err() {
             return Err(TeamError::UnknownSymbol(symbol.to_string()));
         }
+        self.take_ai_call()?;
         let now = self.clock.now();
         let trade = self.store.create_trade(NewTrade {
             symbol: symbol.to_string(),
@@ -154,11 +180,13 @@ impl Crew {
             consensus_required: self.wiring.consensus_required,
             limits: DiscussionLimits::default(),
         };
-        self.discussing.fetch_add(1, Ordering::SeqCst);
-        self.at_table(true).await;
-        let result = self.team.discuss(request).await;
-        self.at_table(false).await;
-        self.discussing.fetch_sub(1, Ordering::SeqCst);
+        let result = {
+            let _discussing = DiscussingGuard::enter(&self.discussing);
+            self.at_table(true).await;
+            let result = self.team.discuss(request).await;
+            self.at_table(false).await;
+            result
+        };
         if let Some(news) = news.filter(|news| news.dropped > 0) {
             self.log_dropped(&request_room(trade.id), news.dropped);
         }
@@ -244,12 +272,18 @@ mod tests {
     #[test]
     fn 가드를_쥔_채_panic해도_수가_줄어든다() {
         let count = count();
+        let reached = std::sync::atomic::AtomicBool::new(false);
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             let _guard = DiscussingGuard::enter(&count);
             assert_eq!(count.load(Ordering::SeqCst), 1);
+            reached.store(true, Ordering::SeqCst);
             panic!("논의 도중 panic");
         }));
         assert!(outcome.is_err());
+        assert!(
+            reached.load(Ordering::SeqCst),
+            "가드를 만든 뒤 panic까지 갔어야 한다"
+        );
         assert_eq!(
             count.load(Ordering::SeqCst),
             0,

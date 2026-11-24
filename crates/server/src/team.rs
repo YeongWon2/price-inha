@@ -259,6 +259,10 @@ pub struct Crew {
     links: std::sync::OnceLock<CrewLinks>,
     /// (10c 13번) 지금 논의 중인 수. 뜻 검색 다시 만들기는 이것이 0일 때만 걷는다.
     discussing: Arc<std::sync::atomic::AtomicUsize>,
+    /// (16차 3번) 하루 AI 호출 상한(설정이 비었으면 없음). 논의 하나를 열 때마다 한 번 센다.
+    ai_cap: Option<quota::DailyQuota>,
+    /// (16차 3번) 상한에 닿았다고 알린 마지막 날(같은 날 한 번만 알린다).
+    ai_cap_told: std::sync::Mutex<Option<chrono::NaiveDate>>,
 }
 
 impl Crew {
