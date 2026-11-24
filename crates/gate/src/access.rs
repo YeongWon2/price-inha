@@ -58,9 +58,19 @@
 //! [`AccessKeys::issue`]가 새 키를 만들고 저장소의 세대를 올린다. 앞 세대로 만든 원격 세션은
 //! 모두 끊긴다(보호된 경로 401, 열린 실시간 연결은 닫힌다). 그 컴퓨터의 세션은 그대로다.
 //! 앞 키는 더 맞지 않는다.
+//!
+//! # 다른 프로세스가 올린 세대 (11차, V41)
+//!
+//! 도는 서버 밖의 다른 프로세스(예: 서버를 찾지 못한 `access-key`)가 같은 저장소의 키 세대만
+//! 올리면, 이 프로세스는 누가 새 키로 들어오기 전까지 그것을 모른다. 그동안 앞 세대의 원격 세션과
+//! 실시간 연결이 계속 살지 않게, 루프백이 아닌 요청의 세션 확인과 원격 실시간 연결의 ping 간격마다
+//! 저장소의 지금 세대(`pi_store::Store::access_key`)를 읽어 본 세대보다 높으면 올리고 앞 세대
+//! 원격 세션을 버린다. 요청마다 디스크를 읽지 않게, 관문의 시계로 1초 안에 읽은
+//! 값은 다시 쓴다. 읽지 못하면 그 원격 요청은 세션이 없는 것과 같다(401). 세션은 버리지 않고
+//! 다음 요청에서 다시 본다. 그 컴퓨터의 요청은 저장소의 세대를 보지 않는다.
 
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use pi_store::{AccessKeyHash, NewAccess, Store, StoreError, UnixMillis};
@@ -202,6 +212,10 @@ impl AccessKeys {
     }
 }
 
+/// (11차) 저장소에서 읽은 키 세대를 다시 쓰는 시간(관문의 시계 기준).
+/// 이 시간 안의 원격 요청 · ping은 저장소를 다시 읽지 않는다.
+const STORE_RECHECK: Duration = Duration::from_secs(1);
+
 /// 키를 바꾼 기록의 "어디서". 키는 그 컴퓨터에서만 바꾼다(잇는 것은 조립하는 쪽).
 const KEY_ISSUER: &str = "이 컴퓨터";
 
@@ -214,6 +228,8 @@ pub(crate) struct Access {
     pub(crate) strikes: Strikes,
     /// 지금까지 본 가장 높은 키 세대. 오르면 앞 세대의 원격 연결이 닫힌다.
     generation: watch::Sender<u64>,
+    /// (11차) 저장소에서 마지막으로 세대를 읽은 때(관문의 시계). 아직 읽지 않았으면 없음.
+    store_read_at: Mutex<Option<UnixMillis>>,
     /// 그 컴퓨터를 늦추는 시간의 시작값과 상한.
     pub(crate) loopback_delay: (Duration, Duration),
 }
@@ -233,6 +249,7 @@ impl Access {
             sessions: Sessions::default(),
             strikes: Strikes::new(max_tracked),
             generation: watch::Sender::new(0),
+            store_read_at: Mutex::new(None),
             loopback_delay,
         }
     }
@@ -260,6 +277,45 @@ impl Access {
             }
             higher
         });
+    }
+
+    /// (11차, V41) 저장소의 지금 키 세대를 본다. 다른 프로세스가 같은 저장소의 세대를 올렸으면
+    /// 이 프로세스는 그것을 모르므로, 원격 세션을 확인할 때마다 이것을 먼저 부른다.
+    /// 본 세대보다 높으면 올리고([`Self::advance`]) 앞 세대 원격 세션을 버린다.
+    ///
+    /// 관문의 시계로 [`STORE_RECHECK`] 안에 읽었으면 저장소를 다시 읽지 않는다.
+    /// 읽었거나 다시 쓸 값이 있으면 참, 저장소를 읽지 못했으면 거짓이다(그때 세션은 버리지 않는다).
+    pub(crate) async fn catch_up(&self) -> bool {
+        let now = self.now();
+        if self.read_recently(now) {
+            return true;
+        }
+        let store = self.store.clone();
+        let Ok(Ok(found)) = tokio::task::spawn_blocking(move || store.access_key()).await else {
+            return false;
+        };
+        if let Some(record) = found {
+            self.advance(record.generation);
+            self.sessions.drop_remote_before(*self.generation.borrow());
+        }
+        *self.read_slot() = Some(now);
+        true
+    }
+
+    /// `now`가 마지막으로 저장소를 읽은 때부터 [`STORE_RECHECK`] 안인가.
+    /// 시계가 뒤로 갔으면 다시 읽는다.
+    fn read_recently(&self, now: UnixMillis) -> bool {
+        let recheck = i64::try_from(STORE_RECHECK.as_millis()).unwrap_or(i64::MAX);
+        self.read_slot().is_some_and(|read_at| {
+            let since = now.0.saturating_sub(read_at.0);
+            (0..recheck).contains(&since)
+        })
+    }
+
+    fn read_slot(&self) -> std::sync::MutexGuard<'_, Option<UnixMillis>> {
+        self.store_read_at
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// 세대가 `generation`보다 높아질 때(키를 바꿨을 때) 끝난다.

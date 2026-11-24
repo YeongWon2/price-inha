@@ -154,10 +154,18 @@ async fn revoked(shared: &Shared, kind: SessionKind) {
 }
 
 /// 원격 세션이 만든 때부터 수명(30일)을 넘길 때까지 기다린다. ping 간격마다 관문의 시계로 본다(10차).
+///
+/// (11차, V41) 같은 ping 간격마다 저장소의 지금 키 세대도 본다: 다른 프로세스가 세대를 올렸으면
+/// 이 프로세스가 키를 바꾸지 않았어도 본 세대가 올라 [`revoked`]가 끝난다. 저장소를 읽지 못하면
+/// 원격 요청과 같이 닫힌 쪽으로 보고 연결을 끝낸다(화면은 다시 붙으며 세션을 다시 확인받는다).
 async fn expired(shared: &Shared, made_at: pi_store::UnixMillis) {
     loop {
         tokio::time::sleep(shared.keepalive.interval).await;
         if !crate::session::remote_alive(made_at, shared.access.now()) {
+            return;
+        }
+        if !shared.access.catch_up().await {
+            tracing::warn!("저장소의 접속 키 세대를 읽지 못해 원격 실시간 연결을 닫습니다");
             return;
         }
     }

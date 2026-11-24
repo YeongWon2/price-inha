@@ -175,7 +175,15 @@ pub(crate) async fn host_and_peer(
     // 그 컴퓨터 밖: 접속 키로 세션을 만드는 경로만 열고, 나머지는 원격 세션이 있어야 한다.
     request.extensions_mut().insert(Outside);
     let entering = request.method() == Method::POST && request.uri().path() == SESSION_PATH;
-    if entering || find_session(&shared, request.headers(), true).is_some() {
+    if entering {
+        return next.run(request).await;
+    }
+    // (11차, V41) 다른 프로세스가 저장소의 키 세대를 올렸을 수 있으니 세션을 보기 전에 저장소의
+    // 지금 세대를 본다. 읽지 못하면 닫힌 쪽(세션 없음과 같은 401)이다.
+    if !shared.access.catch_up().await {
+        return reject(StatusCode::UNAUTHORIZED, "접속 키로 들어와야 합니다");
+    }
+    if find_session(&shared, request.headers(), true).is_some() {
         next.run(request).await
     } else {
         reject(StatusCode::UNAUTHORIZED, "접속 키로 들어와야 합니다")
