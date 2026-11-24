@@ -630,3 +630,4 @@ N2가 구현을 끝내고 잠긴 시험끼리의 어긋남 셋을 찾았다. 앞
 | `crates/server/src/page.rs` 단위 시험 · `round4` CSP 시험 | 유지 | `contains`만 본다 |
 | `crates/server/tests/web/phone-*.test.ts` · `office-approval*.test.ts` · `office-trim.test.ts` | 유지 | 20차와 무관 |
 | 그 밖의 server 시험 | 유지 | 20차와 무관 |
+- 20차 N3 참고(다음 차수 후보): `screen-paths.test.ts` 사무실 경로 목록에 `/api/office/looks` · `/api/office/look` 더하기(지금 `paths.ts`가 이어 붙여 글자 검사를 비껴감), 외형 저장 파일 `office-looks.json`이 백업 대상인지 확인, 따라 비추기 인원 기준(회의 3 · 쉼 4)은 N2가 정함, 저장소 +98MB(public · dist 두 벌).
