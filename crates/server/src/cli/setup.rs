@@ -56,10 +56,27 @@
 //! [`SETUP_SKIPPED`]이다. 비밀값은 인자로 받지 않는다(프로세스 목록에 남지 않게) — 표준 입력으로만.
 //! 질문과 결과는 표준 출력에 쓰고 줄마다 비운다(flush).
 
-use std::io::{BufRead, Write};
-use std::path::PathBuf;
+mod ai;
+mod broker;
+mod prompt;
+mod server;
+mod service;
+mod signals;
+mod summary;
+mod symbols;
 
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use self::prompt::{Mode, Prompter};
+use self::server::{Connected, Link, Spawned};
+use self::summary::{ANSWERS_ENDED, Outcome, any_failed, write_summary};
+use super::open::{OpenScreen, open_browser, screen_url};
+use super::runner::SystemRunner;
 use crate::Settings;
+use crate::setup::SETUP_PATH;
 
 /// 마법사의 구역. 차례는 [`SETUP_SECTIONS`]이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -146,8 +163,8 @@ pub const ANSWER_KEY: &str = "key";
 /// AI 구역의 답: 건너뛰기.
 pub const ANSWER_SKIP: &str = "skip";
 
-/// 뼈대(37차 구현 전)의 종료 코드. 구현이 들어오면 쓰지 않는다.
-pub(crate) const NOT_YET_EXIT: u8 = 70;
+/// 서버의 답을 읽지 못했을 때의 까닭.
+const BROKEN: &str = "서버의 답을 읽지 못함";
 
 /// `setup`의 선택.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -178,7 +195,277 @@ pub struct SetupContext<'a> {
 
 /// 마법사를 돌리고 종료 코드를 돌려준다(모듈 문서의 계약).
 pub async fn setup(settings: &Settings, request: &SetupRequest, context: SetupContext<'_>) -> u8 {
-    let _ = (settings, request, context.interactive, &context.server_exe);
-    let _ = writeln!(context.output, "아직 없음: price-inha setup (37차 구현 전)");
-    NOT_YET_EXIT
+    let SetupContext {
+        input,
+        output,
+        env,
+        interactive,
+        server_exe,
+    } = context;
+    if !interactive && !request.stdin_answers {
+        let _ = writeln!(output, "{SETUP_NOT_TERMINAL}");
+        let _ = output.flush();
+        return SETUP_NOT_TERMINAL_EXIT;
+    }
+    let terminal = !request.stdin_answers;
+    let mode = if terminal {
+        signals::watch();
+        Mode::Terminal { hide: true }
+    } else {
+        Mode::Lines
+    };
+    let runner = SystemRunner;
+    let mut prompter = Prompter::new(input, output, mode, &runner);
+    prompter.title("price-inha 처음 설정");
+    show_home(&mut prompter, &settings.home);
+    let (link, spawned) = match server::connect(settings, request, &server_exe, &mut prompter).await
+    {
+        Connected::Ready(link, spawned) => (link, spawned),
+        Connected::Stop(code) => return code,
+    };
+    let mut run = Wizard {
+        settings,
+        request,
+        link,
+        spawned,
+        env,
+        terminal,
+    };
+    let (rows, picked) = run.sections(&mut prompter).await;
+    if let Some(server) = run.spawned.take() {
+        server.stop().await;
+        prompter.say("마법사가 띄운 서버를 껐습니다");
+    }
+    write_summary(&mut prompter, &rows);
+    if any_failed(&rows) || !picked {
+        SETUP_FAILED_EXIT
+    } else {
+        0
+    }
+}
+
+/// 0단계: 보관 폴더 위치(경로 그대로)와 권한.
+fn show_home(prompter: &mut Prompter<'_>, home: &Path) {
+    let Ok(meta) = std::fs::metadata(home) else {
+        prompter.say(&format!(
+            "보관 폴더: {} (아직 없음 — 서버가 켤 때 0700으로 만듭니다)",
+            home.display()
+        ));
+        return;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        let open = if mode & 0o077 == 0 {
+            "나만 읽고 씀"
+        } else {
+            "다른 사용자도 볼 수 있음 — 0700을 권합니다"
+        };
+        prompter.say(&format!(
+            "보관 폴더: {} (권한 {mode:o}, {open})",
+            home.display()
+        ));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        prompter.say(&format!("보관 폴더: {}", home.display()));
+    }
+}
+
+/// 한 번 도는 마법사의 상태.
+struct Wizard<'a> {
+    settings: &'a Settings,
+    request: &'a SetupRequest,
+    link: Link,
+    spawned: Option<Spawned>,
+    env: &'a dyn Fn(&str) -> Option<String>,
+    terminal: bool,
+}
+
+impl Wizard<'_> {
+    /// 구역들을 돌고 요약 줄들을 돌려준다. 구역 고르기에서 답이 끝났으면 두 번째 값이 거짓.
+    async fn sections(
+        &mut self,
+        prompter: &mut Prompter<'_>,
+    ) -> (Vec<(SetupSection, Outcome)>, bool) {
+        let listed: Vec<SetupSection> = match self.request.section {
+            Some(section) => vec![section],
+            None => SETUP_SECTIONS.to_vec(),
+        };
+        let picked = self.pick(prompter).await;
+        let mut ended = picked.is_none();
+        let chosen = picked.clone().unwrap_or_default();
+        let mut rows = Vec::new();
+        for section in listed {
+            let outcome = if ended {
+                Outcome::skipped(ANSWERS_ENDED)
+            } else if !chosen.contains(&section) {
+                Outcome::skipped(SETUP_ALREADY)
+            } else {
+                self.section(section, prompter).await
+            };
+            ended = ended || outcome.input_ended();
+            if section == SetupSection::Symbols && self.request.section.is_none() && !ended {
+                prompter.title("메신저");
+                prompter.say(SETUP_MESSENGER_LATER);
+            }
+            rows.push((section, outcome));
+        }
+        (rows, picked.is_some())
+    }
+
+    async fn section(&mut self, section: SetupSection, prompter: &mut Prompter<'_>) -> Outcome {
+        match section {
+            SetupSection::Ai => {
+                let outside = ai::AiEnv { env: self.env };
+                ai::ai(&self.link, prompter, &outside).await
+            }
+            SetupSection::Broker => broker::broker(&self.link, prompter).await,
+            SetupSection::Symbols => symbols::symbols(&self.link, prompter).await,
+            SetupSection::Service => {
+                service::service(
+                    self.settings,
+                    &self.request.args,
+                    self.request.dry_run,
+                    &mut self.spawned,
+                    prompter,
+                )
+                .await
+            }
+            SetupSection::Open => self.open(prompter),
+        }
+    }
+
+    /// 0단계의 나머지: 이미 된 것을 보이고, 구역을 주지 않았으면 다시 할 구역을 고르게 한다.
+    /// 답이 끝났으면 `None`.
+    async fn pick(&self, prompter: &mut Prompter<'_>) -> Option<Vec<SetupSection>> {
+        if let Some(section) = self.request.section {
+            return Some(vec![section]);
+        }
+        let status = self.link.get(SETUP_PATH).await.unwrap_or(Value::Null);
+        let saved = [
+            SetupSection::Ai,
+            SetupSection::Broker,
+            SetupSection::Symbols,
+        ];
+        let done: Vec<SetupSection> = saved
+            .into_iter()
+            .filter(|section| registered(&status, section.as_str()))
+            .collect();
+        prompter.say("지금 설정 상태:");
+        for section in saved {
+            let state = if done.contains(&section) {
+                SETUP_ALREADY
+            } else {
+                "없음"
+            };
+            prompter.say(&format!("  {}: {state}", section.as_str()));
+        }
+        if done.is_empty() {
+            return Some(SETUP_SECTIONS.to_vec());
+        }
+        let names: Vec<&str> = SETUP_SECTIONS.iter().map(|s| s.as_str()).collect();
+        loop {
+            let question = format!(
+                "다시 할 구역을 쉼표로 고르세요({}, 빈 줄 = 아직 안 된 구역과 service · open):",
+                names.join(", ")
+            );
+            let answer = prompter.line(&question)?;
+            match choose(&answer, &done) {
+                Ok(chosen) => return Some(chosen),
+                Err(unknown) => prompter.say(&format!("모르는 구역입니다: {unknown}")),
+            }
+        }
+    }
+
+    /// 열기 구역: 묻지 않는다. 주소를 보이고 터미널이면 브라우저로 연다.
+    fn open(&self, prompter: &mut Prompter<'_>) -> Outcome {
+        prompter.title("대시보드 열기");
+        let url = screen_url(self.link.port, OpenScreen::Home);
+        prompter.say(&format!("대시보드: {url}"));
+        if self.spawned.is_some() {
+            prompter.say(&format!(
+                "마법사가 띄운 서버는 끝날 때 끕니다. {SETUP_RUN_HINT} — 그 뒤 이 주소를 여세요"
+            ));
+            return Outcome::done("주소를 보임");
+        }
+        if !self.terminal {
+            return Outcome::done("주소를 보임");
+        }
+        if open_browser(&SystemRunner, &url) {
+            Outcome::done("브라우저로 엶")
+        } else {
+            prompter.say("브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
+            Outcome::done("주소를 보임")
+        }
+    }
+}
+
+/// 설정 상태에서 그 항목이 등록됐는가.
+fn registered(status: &Value, name: &str) -> bool {
+    status
+        .get("items")
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().find(|item| item["name"] == json!(name)))
+        .and_then(|item| item["registered"].as_bool())
+        .unwrap_or(false)
+}
+
+/// "다시 할 구역" 답 → 고른 구역(도는 차례). 빈 줄 = 아직 안 된 구역 + `service` + `open`.
+/// 모르는 이름이 있으면 그 이름.
+fn choose(answer: &str, done: &[SetupSection]) -> Result<Vec<SetupSection>, String> {
+    let names: Vec<&str> = answer
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if names.is_empty() {
+        return Ok(SETUP_SECTIONS
+            .into_iter()
+            .filter(|section| !done.contains(section))
+            .collect());
+    }
+    let mut chosen = Vec::new();
+    for name in names {
+        let section = SetupSection::parse(&name.to_lowercase()).ok_or_else(|| name.to_string())?;
+        chosen.push(section);
+    }
+    Ok(SETUP_SECTIONS
+        .into_iter()
+        .filter(|section| chosen.contains(section))
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 구역_고르기() {
+        let done = [SetupSection::Symbols];
+        assert_eq!(
+            choose("", &done).unwrap(),
+            [
+                SetupSection::Ai,
+                SetupSection::Broker,
+                SetupSection::Service,
+                SetupSection::Open
+            ]
+        );
+        assert_eq!(
+            choose("open, symbols", &done).unwrap(),
+            [SetupSection::Symbols, SetupSection::Open]
+        );
+        assert_eq!(choose("ai,rockets", &done), Err("rockets".to_string()));
+    }
+
+    #[test]
+    fn 등록_여부를_읽는다() {
+        let status = json!({"items": [{"name": "ai", "registered": true}, {"name": "broker", "registered": false}]});
+        assert!(registered(&status, "ai"));
+        assert!(!registered(&status, "broker"));
+        assert!(!registered(&Value::Null, "symbols"));
+    }
 }

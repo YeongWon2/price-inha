@@ -16,8 +16,9 @@
 
 use std::io::Write;
 
-use super::runner::CommandRunner;
-use super::setup::NOT_YET_EXIT;
+use super::access::{Located, locate, places_for};
+use super::runner::{CommandLine, CommandRunner};
+use super::service::{Service, ServiceSetup};
 use crate::Settings;
 use crate::page::{ACCOUNT_PAGE_PATH, HISTORY_PAGE_PATH, RULES_PAGE_PATH, TEMPLATES_PAGE_PATH};
 
@@ -106,7 +107,83 @@ pub async fn open(
     output: &mut dyn Write,
     runner: &dyn CommandRunner,
 ) -> u8 {
-    let _ = (settings, request, runner);
-    let _ = writeln!(output, "아직 없음: price-inha open (37차 구현 전)");
-    NOT_YET_EXIT
+    let service = ServiceSetup::for_this_computer(&settings.home, Vec::new())
+        .ok()
+        .map(|setup| Service::new(setup, runner));
+    let port = match locate(places_for(settings, service.as_ref())).await {
+        Located::Ours(_, port) => port,
+        Located::NotOurs(port) => {
+            let _ = writeln!(
+                output,
+                "127.0.0.1:{port}에서 이 서버가 아닌 것이 답합니다.\n{OPEN_NO_SERVER}"
+            );
+            return OPEN_NO_SERVER_EXIT;
+        }
+        Located::Nowhere => {
+            let _ = writeln!(
+                output,
+                "127.0.0.1:{}에서 답하는 서버가 없습니다.\n{OPEN_NO_SERVER}",
+                settings.port
+            );
+            return OPEN_NO_SERVER_EXIT;
+        }
+    };
+    let url = screen_url(port, request.screen);
+    let _ = writeln!(output, "{url}");
+    if request.print {
+        return 0;
+    }
+    if !open_browser(runner, &url) {
+        let _ = writeln!(output, "브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
+    }
+    0
+}
+
+/// 화면 주소 `http://127.0.0.1:<포트><화면 경로>`. 비밀값(접속 키 · 세션 · 토큰)을 싣지 않는다.
+pub(crate) fn screen_url(port: u16, screen: OpenScreen) -> String {
+    format!("http://127.0.0.1:{port}{}", screen.path())
+}
+
+/// 운영체제의 여는 명령으로 주소를 연다(macOS `open`, 윈도 `cmd /c start`, 그 밖은 `xdg-open`). 열었는가.
+pub(crate) fn open_browser(runner: &dyn CommandRunner, url: &str) -> bool {
+    runner
+        .run(&browser_command(url))
+        .is_ok_and(|output| output.success)
+}
+
+fn browser_command(url: &str) -> CommandLine {
+    let (program, mut args): (&str, Vec<String>) = if cfg!(target_os = "macos") {
+        ("open", Vec::new())
+    } else if cfg!(windows) {
+        (
+            "cmd",
+            vec!["/c".to_string(), "start".to_string(), String::new()],
+        )
+    } else {
+        ("xdg-open", Vec::new())
+    };
+    args.push(url.to_string());
+    CommandLine {
+        program: program.to_string(),
+        args,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 주소에는_화면_경로만_있다() {
+        assert_eq!(screen_url(7, OpenScreen::Home), "http://127.0.0.1:7/");
+        assert_eq!(
+            screen_url(7, OpenScreen::Office),
+            "http://127.0.0.1:7/office/"
+        );
+        let command = browser_command("http://127.0.0.1:7/");
+        assert_eq!(
+            command.args.last().map(String::as_str),
+            Some("http://127.0.0.1:7/")
+        );
+    }
 }

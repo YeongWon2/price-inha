@@ -98,27 +98,18 @@ pub async fn access_key_with(
     request: &AccessKeyRequest,
     service: &Service<'_>,
 ) -> Result<ShownAccessKey, CliError> {
-    let mut places = vec![Place::loopback(settings.port)];
-    if let Some(listen) = service.installed_listen(&settings.home) {
-        let port = listen.port.unwrap_or(pi_gate::DEFAULT_PORT);
-        places.push(Place::loopback(port));
-        if let Some(bind) = listen.bind {
-            places.push(Place::at(bind, port));
-        }
-    }
-    places.push(Place::at(settings.bind, settings.port));
-    issue_at(settings, request, places).await
+    issue_at(settings, request, places_for(settings, Some(service))).await
 }
 
 /// 도는 서버를 찾아볼 주소 하나.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Place {
+pub(crate) struct Place {
     host: IpAddr,
     port: u16,
 }
 
 impl Place {
-    fn loopback(port: u16) -> Place {
+    pub(crate) fn loopback(port: u16) -> Place {
         Place {
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port,
@@ -126,7 +117,7 @@ impl Place {
     }
 
     /// 여는 주소 → 물어볼 주소. 루프백이거나 모든 주소(`0.0.0.0` · `::`)면 루프백으로 묻는다.
-    fn at(bind: IpAddr, port: u16) -> Place {
+    pub(crate) fn at(bind: IpAddr, port: u16) -> Place {
         if bind.is_loopback() || bind.is_unspecified() {
             Place::loopback(port)
         } else {
@@ -145,31 +136,61 @@ enum How {
     Direct,
 }
 
+/// (37차) 도는 서버를 찾은 결과.
+pub(crate) enum Located {
+    /// 어디에도 없다.
+    Nowhere,
+    /// 루프백에서 이 서버가 돈다(그 포트).
+    Ours(Running, u16),
+    /// 그 포트에서 다른 프로그램이 답하거나, 서버가 도는데 루프백 경로가 아니다.
+    NotOurs(u16),
+}
+
+/// (37차) [`access_key_with`]와 같은 차례의 찾을 자리: 설정의 포트의 루프백 → 이 홈을 가리키는 서비스 정의의
+/// 포트(와 그 여는 주소) → 설정의 여는 주소. `setup` · `open`도 이 차례로 찾는다.
+pub(crate) fn places_for(settings: &Settings, service: Option<&Service<'_>>) -> Vec<Place> {
+    let mut places = vec![Place::loopback(settings.port)];
+    if let Some(listen) = service.and_then(|service| service.installed_listen(&settings.home)) {
+        let port = listen.port.unwrap_or(pi_gate::DEFAULT_PORT);
+        places.push(Place::loopback(port));
+        if let Some(bind) = listen.bind {
+            places.push(Place::at(bind, port));
+        }
+    }
+    places.push(Place::at(settings.bind, settings.port));
+    places
+}
+
+/// `places`를 차례로 물어 도는 서버를 찾는다. 포트 0(빈 포트를 골라 연다)과 이미 물은 자리는 건너뛴다.
+pub(crate) async fn locate(places: Vec<Place>) -> Located {
+    let mut asked: Vec<Place> = Vec::new();
+    for place in places {
+        if place.port == 0 || asked.contains(&place) {
+            continue;
+        }
+        asked.push(place);
+        match Running::find(place).await {
+            Found::None => {}
+            Found::Ours(found) if place.host.is_loopback() => {
+                return Located::Ours(found, place.port);
+            }
+            Found::Ours(_) | Found::Other => return Located::NotOurs(place.port),
+        }
+    }
+    Located::Nowhere
+}
+
 /// `places`를 차례로 물어 도는 서버를 찾고, 있으면 그 서버가, 어디에도 없으면 직접 만든다.
 async fn issue_at(
     settings: &Settings,
     request: &AccessKeyRequest,
     places: Vec<Place>,
 ) -> Result<ShownAccessKey, CliError> {
-    let mut asked: Vec<Place> = Vec::new();
-    let mut running = None;
-    for place in places {
-        // 포트 0은 "빈 포트를 골라 연다"는 설정이라 물어볼 주소가 없다.
-        if place.port == 0 || asked.contains(&place) {
-            continue;
-        }
-        asked.push(place);
-        let port = place.port;
-        match Running::find(place).await {
-            Found::None => {}
-            Found::Ours(found) if place.host.is_loopback() => {
-                running = Some((found, port));
-                break;
-            }
-            // 다른 프로그램이 답하거나, 서버가 도는데 루프백 경로가 아니다: 만들지 않는다.
-            Found::Ours(_) | Found::Other => return Err(CliError::NotOurServer { port }),
-        }
-    }
+    let running = match locate(places).await {
+        Located::Nowhere => None,
+        Located::Ours(found, port) => Some((found, port)),
+        Located::NotOurs(port) => return Err(CliError::NotOurServer { port }),
+    };
     let (key, generation, how) = match running {
         None => {
             let (key, generation) = issue_directly(settings, request.rotate).await?;
@@ -239,7 +260,7 @@ enum Found {
 }
 
 /// 루프백에서 도는 이 서버와, 그 컴퓨터의 세션(화면이 받는 것과 같은 쿠키).
-struct Running {
+pub(crate) struct Running {
     client: reqwest::Client,
     origin: String,
     cookie: String,
@@ -291,6 +312,37 @@ impl Running {
             }
             _ => Found::Other,
         }
+    }
+
+    /// (37차) 그 서버의 경로 하나를 화면과 같은 세션 · `Origin`으로 부른다. `body`가 있으면 `POST`(JSON),
+    /// 없으면 `GET`. 답의 (상태, JSON 본문 — 읽지 못하면 `null`). 닿지 못하면 `None`.
+    /// 본문(비밀값이 들 수 있다)은 기록하지 않는다.
+    pub(crate) async fn send(
+        &self,
+        path: &str,
+        body: Option<Vec<u8>>,
+        timeout: Duration,
+    ) -> Option<(u16, serde_json::Value)> {
+        let url = format!("{}{path}", self.origin);
+        let builder = match body {
+            Some(body) => self
+                .client
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body),
+            None => self.client.get(url),
+        };
+        let reply = builder
+            .header(reqwest::header::ORIGIN, &self.origin)
+            .header(reqwest::header::COOKIE, &self.cookie)
+            .timeout(timeout)
+            .send()
+            .await
+            .ok()?;
+        let status = reply.status().as_u16();
+        let bytes = reply.bytes().await.ok()?;
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        Some((status, value))
     }
 
     /// 그 서버가 키를 만들게 한다(화면의 발급과 같은 경로). 답이 발급 답의 모양이 아니면 `None`.
