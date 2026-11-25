@@ -19,11 +19,12 @@ use serde_json::{Value, json};
 use super::linked::Linked;
 use super::{
     KIND_OFFICE_MESSAGE, OFFICE_BAD_INPUT, OFFICE_CHAT_PATH, OFFICE_NOTICE_PATH,
-    OFFICE_NOTICES_PATH, OFFICE_PATH, OFFICE_SEND_INTERVAL, OFFICE_SOURCE_ID_MAX,
-    OFFICE_SUMMON_ARRIVED_PATH, OFFICE_SUMMON_PATH, OFFICE_SUMMON_VIEW_PATH, OFFICE_TEXT_MAX,
-    OFFICE_TOO_FAST, OFFICE_TOO_LONG,
+    OFFICE_NOTICES_PATH, OFFICE_PATH, OFFICE_PENDING_APPROVALS, OFFICE_SEND_INTERVAL,
+    OFFICE_SOURCE_ID_MAX, OFFICE_SUMMON_ARRIVED_PATH, OFFICE_SUMMON_PATH, OFFICE_SUMMON_VIEW_PATH,
+    OFFICE_TEXT_MAX, OFFICE_TOO_FAST, OFFICE_TOO_LONG,
 };
-use crate::Crew;
+use crate::trading::approval_agent;
+use crate::{Crew, Trading};
 
 pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -60,6 +61,8 @@ pub(crate) struct OfficeDesk {
     pub(super) linked: Arc<Linked>,
     pub(super) crew: Option<Arc<Crew>>,
     pub(super) store: Store,
+    /// (34차 1번) 기다리는 승인 요청을 읽는 주문 길(없으면 기다리는 승인 칸은 빈 목록).
+    trading: Option<Arc<Trading>>,
     /// 답을 기다리는 글(응답 번호 → 가린 글).
     pub(super) texts: Mutex<HashMap<String, String>>,
     /// (33차 2번) 멘션으로 받은 답 턴(응답 번호). 턴이 시작되면 그 담당이 곁으로 온다.
@@ -119,7 +122,38 @@ pub(super) fn parse_words(body: &Value) -> Result<(String, String), &'static str
 }
 
 impl OfficeDesk {
-    pub(crate) fn new(linked: Arc<Linked>, crew: Option<Arc<Crew>>, store: Store) -> Self {
+    /// (34차 1번, C27) 스냅샷의 기다리는 승인 칸: 한 줄은 정확히 `{agent, number, created_at, summary, short_code}`.
+    /// 요약은 승인 카드와 같이 비밀 값을 가린다. 전체 지문은 싣지 않는다. 읽지 못하면 빈 목록이다.
+    fn pending_approvals(&self) -> Vec<Value> {
+        let Some(trading) = &self.trading else {
+            return Vec::new();
+        };
+        match trading.pending_approvals() {
+            Ok(list) => list
+                .into_iter()
+                .map(|(view, created_at)| {
+                    json!({
+                        "agent": approval_agent(&view.subject),
+                        "number": view.number.as_str(),
+                        "created_at": created_at,
+                        "summary": self.linked.secrets.redact(&view.reason),
+                        "short_code": view.short_code,
+                    })
+                })
+                .collect(),
+            Err(error) => {
+                tracing::warn!(%error, "기다리는 승인 요청을 읽지 못했다");
+                Vec::new()
+            }
+        }
+    }
+
+    pub(crate) fn new(
+        linked: Arc<Linked>,
+        crew: Option<Arc<Crew>>,
+        store: Store,
+        trading: Option<Arc<Trading>>,
+    ) -> Self {
         let turns = Agent::ALL
             .iter()
             .map(|a| (a.id(), tokio::sync::Mutex::new(())))
@@ -128,6 +162,7 @@ impl OfficeDesk {
             linked,
             crew,
             store,
+            trading,
             texts: Mutex::new(HashMap::new()),
             mentions: Mutex::new(HashSet::new()),
             notice_replies: tokio::sync::Mutex::new(Vec::new()),
@@ -201,9 +236,15 @@ async fn snapshot(State(desk): State<Arc<OfficeDesk>>) -> Response {
             Vec::new()
         }
     };
+    // (34차 1번, C27 · E49) 아직 기다리는 승인 요청(다시 열어도 ✋를 다시 띄운다). 마지막 번호 뒤에 읽으므로
+    // 그 사이에 생긴 요청은 여기와 실시간 연결 양쪽에 올 수 있다(화면은 같은 번호를 하나로 본다).
+    let approvals = desk.pending_approvals();
     reply(
         StatusCode::OK,
-        json!({"agents": agents, "pending": pending, "last_seq": last_seq, "talk": talk}),
+        json!({
+            "agents": agents, "pending": pending, "last_seq": last_seq, "talk": talk,
+            OFFICE_PENDING_APPROVALS: approvals,
+        }),
     )
 }
 

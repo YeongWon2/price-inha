@@ -56,6 +56,25 @@ pub(crate) fn approval_status_word(status: ApprovalStatus) -> &'static str {
     }
 }
 
+/// (34차 1번, C27) 승인 카드 이벤트의 `"state"` 글자: 기다림 · 답함(승인 · 거절) · 만료(답 없음 · 만료).
+pub(crate) fn approval_state_word(status: ApprovalStatus) -> &'static str {
+    match status {
+        ApprovalStatus::Pending => "waiting",
+        ApprovalStatus::Approved | ApprovalStatus::Rejected => "answered",
+        ApprovalStatus::NoAnswer | ApprovalStatus::Expired => "expired",
+    }
+}
+
+/// (34차 1번, C27) ✋를 띄울 담당 id(`pi_office::Agent::id`): 주문 → 매매 담당, 규칙 개선안 → 복기 담당,
+/// 실전 승격 · 다시 시작 → 팀장.
+pub(crate) fn approval_agent(subject: &Subject) -> &'static str {
+    match subject {
+        Subject::Order(_) => pi_office::Agent::Trader.id(),
+        Subject::RuleImprovement { .. } => pi_office::Agent::Review.id(),
+        Subject::LivePromotion { .. } | Subject::Restart => pi_office::Agent::Leader.id(),
+    }
+}
+
 /// 실행기가 단 주문 키(`pi-exec-<매매>-…`)에서 매매 번호를 읽는다.
 fn trade_of(order: &Order) -> Option<i64> {
     let key = order.client_order_id.as_deref()?;
@@ -149,6 +168,29 @@ impl Trading {
         self.approvals
             .get(&ApprovalNumber::new(number))
             .map_err(exec_text)
+    }
+
+    /// (34차 1번, C27 · E49) 아직 기다리는 승인 요청과 만든 시각, 만든 차례(같은 시각이면 번호 순)로.
+    /// 저장소의 결과가 기다림이어도 실행 때 지문이 달라 무효가 된 것(거절로 보임)은 빠진다.
+    pub(crate) fn pending_approvals(&self) -> Result<Vec<(ApprovalView, i64)>, TradingError> {
+        let rows = self.store.approvals_in_status(ApprovalStatus::Pending)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let Some(number) = row
+                .summary
+                .get("number")
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            if let Some(view) = self.approval_view(number)?
+                && view.status == ApprovalStatus::Pending
+            {
+                out.push((row.id.0, view, row.created_at.0));
+            }
+        }
+        out.sort_by_key(|(id, _, at)| (*at, *id));
+        Ok(out.into_iter().map(|(_, view, at)| (view, at)).collect())
     }
 
     /// 승인 요청 알림을 보낸 결과를 남긴다(P20).

@@ -21,6 +21,7 @@ import { Chatter, KIND_OFFICE_TALK, readTalk } from "./chatter";
 import { createLookPicker } from "./look-picker";
 import { DEFAULT_LOOKS } from "./looks";
 import { FollowState } from "./follow";
+import { KIND_RULE_PROPOSAL, createOfficeMarks, type OfficeMarks } from "./marks-scene";
 import { loadMe, type Me } from "./player-sync";
 import { hintText } from "./mention-text";
 import { createSummonScene, type SummonScene } from "./summon-scene";
@@ -98,6 +99,8 @@ let toolbar: Toolbar | null = null;
 /** (33차) 팀 방 글 칸(멘션 칩 · 공지)과 부르기. */
 let compose: TeamCompose | null = null;
 let summons: SummonScene | null = null;
+/** (34차) 머리 위 ✋ · ✓ · 승인 알림음 · 범례. */
+let marks: OfficeMarks | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -127,7 +130,7 @@ function renderLight() {
       button.append(line);
     }
     button.addEventListener("click", () => selectConversation(id));
-    li.append(button, summonButton(id, (agent) => void summons?.summon(agent)));
+    li.append(button, ...(marks?.badges(id, Date.now()) ?? []), summonButton(id, (agent) => void summons?.summon(agent)));
     list.append(li);
   }
 }
@@ -171,6 +174,7 @@ async function show3d(): Promise<void> {
     },
     speech: chatter.board,
     speaker,
+    marks: marks?.layer($("stage")),
   });
   state.view = scene;
   for (const [id, view] of state.agents) { scene.setAgent(id, view, { snap: true }); }
@@ -180,7 +184,9 @@ async function show3d(): Promise<void> {
 function applyAgent(view: AgentEvent | null | undefined, snap: boolean): void {
   if (!view || !state.agents.has(view.agent)) { return; }
   const next = { place: view.place, work: view.work };
+  const before = state.agents.get(view.agent)?.work ?? "idle";
   state.agents.set(view.agent, next);
+  if (!snap) { marks?.work(view.agent, before, next.work, Date.now()); }
   chatter.work(view.agent, next.work);
   if (state.view) { state.view.setAgent(view.agent, next, { snap }); }
   if (!$("light").hidden) { renderLight(); }
@@ -439,7 +445,11 @@ function onFrame(text: string): void {
     if (frame.kind === "office.agent") { applyAgent(frame.payload as AgentEvent, false); }
     else if (frame.kind === "office.chat") { applyChat(frame.payload as ChatResponse); }
     else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, !replayedOld(frame.payload)); }
-    else if (frame.kind === KIND_OFFICE_APPROVAL) { applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init)); }
+    else if (frame.kind === KIND_OFFICE_APPROVAL) {
+      applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+      marks?.onApproval(frame.payload);
+    }
+    else if (frame.kind === KIND_RULE_PROPOSAL) { void refreshApprovals(true); }
     else if (frame.kind === "office.notice") { compose?.onNotice(frame.payload); }
     else if (frame.kind === "office.notice_ack") { compose?.onAck(frame.payload); }
     else if (frame.kind === "office.summon") { summons?.onEvent(frame.payload); }
@@ -508,14 +518,29 @@ async function loadSnapshot(): Promise<void> {
     if (!reply.ok) { return; }
     const snap = (await reply.json()) as {
       agents?: AgentEvent[]; pending?: ChatResponse[]; last_seq?: unknown; talk?: { seq?: unknown }[];
+      pending_approvals?: unknown;
     };
     for (const view of snap.agents ?? []) { applyAgent(view, true); summons?.fromSnapshot(view.agent, view.phase, view.reason); }
     for (const resp of snap.pending ?? []) { applyChat(resp); }
     // (22차 1번) 최근 팀 대화(지난 것이라 말풍선은 띄우지 않는다).
     for (const talk of snap.talk ?? []) { if (typeof talk.seq === "number") { onTalk(talk, talk.seq, false); } }
     if (typeof snap.last_seq === "number") { state.lastSeq = snap.last_seq; }
+    // (34차 1번) 기다리는 승인의 ✋를 채운다(소리 없이, E49).
+    marks?.sync(snap.pending_approvals, false);
   } catch {
     // 스냅샷이 없으면 이벤트만으로 그린다.
+  }
+}
+
+/** (34차 1번 · 5번) 기다리는 승인만 다시 읽어 맞춘다(다시 이을 때 · 개선안 요청이 생겼을 때). */
+async function refreshApprovals(ringNew: boolean): Promise<void> {
+  try {
+    const reply = await fetch(SNAPSHOT_PATH, { credentials: "same-origin", cache: "no-store" });
+    if (!reply.ok) { return; }
+    const snap = (await reply.json()) as { pending_approvals?: unknown };
+    marks?.sync(snap.pending_approvals, ringNew);
+  } catch {
+    // 못 읽으면 지금 표시를 그대로 둔다(다음 이음에 다시 맞춘다).
   }
 }
 
@@ -542,7 +567,7 @@ function openSocket(): void {
   };
   socket.onopen = () => {
     retryMs = RETRY_MIN_MS;
-    if (resuming) { replayUntil = Date.now() + REPLAY_WINDOW_MS; }
+    if (resuming) { replayUntil = Date.now() + REPLAY_WINDOW_MS; void refreshApprovals(false); }
     setConn("연결됨", "ok");
   };
   socket.onmessage = (event) => { if (typeof event.data === "string") { onFrame(event.data); } };
@@ -614,6 +639,17 @@ async function main(): Promise<void> {
       say: (text) => compose?.say(text),
     });
   }
+  const legend = document.createElement("div");
+  legend.className = "legend-wrap";
+  $("look-toggle").after(legend);
+  marks = createOfficeMarks({
+    approvals: $("approvals"),
+    fetcher: (input, init) => fetch(input, init),
+    names: state.names,
+    legendRoot: legend,
+    gestures: document,
+  });
+  marks.onChange(() => { if (!$("light").hidden) { renderLight(); } });
   wireChat();
   renderTabs();
   renderLog(true);

@@ -1,6 +1,9 @@
 // 머리 위 말풍선(server 22차 3번 · 5번, 원본 DeskRPG 동작 — docs/research/deskrpg.md 10절).
 // 장면 없이 시험할 수 있게 글 다듬기 · 폭 · 말풍선 판(수명 · 우선순위) · 자리 고르기 · 가벼운 화면의 최근 말을
 // 순수 함수와 작은 클래스로 둔다. 시각은 부르는 쪽이 넘기는 밀리초(`now`)다.
+// (34차 4번) 상태 표시 · 말하는 중 글자는 legend.ts의 머리 위 표시 정의를 쓴다(범례와 한곳에서 정의).
+
+import { markOf } from "./legend";
 
 /** 말풍선 글의 최대 글자 수. 넘으면 [`SPEECH_CUT`]자 + "..."(원본 `speech-previews`). */
 export const SPEECH_MAX = 240;
@@ -9,7 +12,7 @@ export const SPEECH_CUT = 237;
 /** 글 말풍선이 마지막으로 바뀐 뒤 보이는 시간(밀리초). */
 export const SPEECH_LIFE_MS = 12_000;
 /** 글 없이 "말하는 중"만 알 때의 표시 글. */
-export const TYPING_TEXT = "···";
+export const TYPING_TEXT: string = markOf("typing").glyph;
 /** [`TYPING_TEXT`] 말풍선이 보이는 시간(밀리초). */
 export const TYPING_LIFE_MS = 4_000;
 /** 가벼운 화면에서 담당 줄 아래 최근 말이 보이는 시간(밀리초). */
@@ -40,10 +43,10 @@ export type SpeechState = "thinking" | "writing" | "waiting" | "failed";
 
 /** 상태 표시: 생각 중 💭 · 쓰는 중 💬 · 기다림 ⏳ · 실패 ❗. 글 앞에 붙인다. */
 export const STATE_ICONS: Readonly<Record<SpeechState, string>> = {
-  thinking: "💭",
-  writing: "💬",
-  waiting: "⏳",
-  failed: "❗",
+  thinking: markOf("thinking").glyph,
+  writing: markOf("writing").glyph,
+  waiting: markOf("waiting").glyph,
+  failed: markOf("failed").glyph,
 };
 
 /** 빈칸(줄바꿈 포함)을 하나로 접고 앞뒤를 깎은 뒤, [`SPEECH_MAX`]자를 넘으면 [`SPEECH_CUT`]자 + "..."로 자른다. */

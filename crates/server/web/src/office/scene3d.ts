@@ -30,6 +30,7 @@ import { FOLLOW_LERP, followStep, type CameraTouch, type FollowState } from "./f
 import { createPlayerScene, type PlayerScene, type PlayerSceneOptions } from "./player-scene";
 import type { ToolId } from "./toolbar";
 import { PointerGesture } from "./gesture";
+import type { MarksLayer } from "./marks-scene";
 import type { SpeechBoard } from "./speech";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
@@ -84,6 +85,8 @@ export interface SceneOptions {
   speech?: SpeechBoard;
   /** (23차 7번 (나)) 회의 발언자 카메라(있으면 미팅룸에 모였을 때 목표를 따라간다). */
   speaker?: SpeakerCamera;
+  /** (34차) 머리 위 ✋ · ✓ 표시 층(있으면 말풍선 층이 자리를 피해 놓게 한다). */
+  marks?: MarksLayer;
 }
 
 const FOV = 38;
@@ -164,7 +167,7 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
   });
 }
 
-export function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker }: SceneOptions): Scene {
+export function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker, marks }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
   host.appendChild(renderer.domElement);
@@ -179,7 +182,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
   scene.add(furnitureRoot);
   const rooms = roomTags(labels, map);
   const actors = createActors({ scene, labels, map, names, looks, grid: buildGrid(map) });
-  const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
+  const bubbles = speech ? createBubbleLayer(labels, speech, names, marks) : null;
   const player: PlayerScene | null = playerOptions
     ? createPlayerScene({
       ...playerOptions, scene, labels, map, names,

@@ -5,6 +5,7 @@
 // 지나가며 잡담(smalltalk.ts)도 여기서 돌린다(화면만, 서버에 보내지 않는다).
 
 import { actorPriority, layoutOffice, type OfficeActor } from "./layout";
+import type { MarksLayer } from "./marks-scene";
 import { Smalltalk, type Walker } from "./smalltalk";
 import { bubbleText, bubbleWhere, bubbleWidth, type Rect, type Size, type SpeechBoard } from "./speech";
 
@@ -35,7 +36,9 @@ export interface BubbleLayer {
 
 interface Shown { el: HTMLElement; body: HTMLElement; text: string; maxWidth: number; size: Size }
 
-export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names: Record<string, string>): BubbleLayer {
+/** (34차) `marks`가 있으면 매 프레임 자리 잡기 뒤에 ✋ · ✓ 표시를 놓은 것들을 피해 놓게 한다. */
+export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names: Record<string, string>,
+  marks?: MarksLayer): BubbleLayer {
   const smalltalk = new Smalltalk();
   const rail = document.createElement("div");
   rail.className = "speech-rail";
@@ -153,6 +156,13 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
     for (const [id, one] of shown) {
       if (!drawn.has(id) || (!placed.has(id) && !inRail.has(id))) { hide(one); }
     }
+    if (marks) {
+      // (34차) ✋ · ✓는 이름표 · 머리 위 말풍선 · 말풍선 줄을 피해 같은 후보 규칙으로 놓는다.
+      const taken = [...layout.tags.map((t) => t.rect), ...layout.bubbles.map((b) => b.rect)];
+      if (layout.rail) { taken.push(layout.rail.rect); }
+      const own = new Map(layout.bubbles.map((b) => [b.agent, b.rect]));
+      marks.place(now, spots, taken, own, { width, height });
+    }
   }
 
   return {
@@ -162,6 +172,7 @@ export function createBubbleLayer(labels: HTMLElement, board: SpeechBoard, names
       for (const one of shown.values()) { one.el.remove(); }
       shown.clear();
       rail.remove();
+      marks?.dispose();
     },
   };
 }

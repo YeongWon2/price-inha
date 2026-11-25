@@ -1,4 +1,4 @@
-import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-efyf5guo.js";
+import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gfkp5x9p.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -40911,7 +40911,8 @@ function pairKey(a, b) {
 	return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 // src/office/bubbles3d.ts
-function createBubbleLayer(labels, board, names) {
+/** (34차) `marks`가 있으면 매 프레임 자리 잡기 뒤에 ✋ · ✓ 표시를 놓은 것들을 피해 놓게 한다. */
+function createBubbleLayer(labels, board, names, marks) {
 	const smalltalk = new Smalltalk();
 	const rail = document.createElement("div");
 	rail.className = "speech-rail";
@@ -41029,6 +41030,15 @@ function createBubbleLayer(labels, board, names) {
 		} else rail.style.display = "none";
 		const placed = new Set(layout.bubbles.map((b) => b.agent));
 		for (const [id, one] of shown) if (!drawn.has(id) || !placed.has(id) && !inRail.has(id)) hide(one);
+		if (marks) {
+			const taken = [...layout.tags.map((t) => t.rect), ...layout.bubbles.map((b) => b.rect)];
+			if (layout.rail) taken.push(layout.rail.rect);
+			const own = new Map(layout.bubbles.map((b) => [b.agent, b.rect]));
+			marks.place(now, spots, taken, own, {
+				width,
+				height
+			});
+		}
 	}
 	return {
 		update,
@@ -41037,6 +41047,7 @@ function createBubbleLayer(labels, board, names) {
 			for (const one of shown.values()) one.el.remove();
 			shown.clear();
 			rail.remove();
+			marks?.dispose();
 		}
 	};
 }
@@ -41733,7 +41744,7 @@ function roomTags(labels, map) {
 		};
 	});
 }
-function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker }) {
+function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker, marks }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
 	host.appendChild(renderer.domElement);
@@ -41755,7 +41766,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 		looks,
 		grid: buildGrid(map)
 	});
-	const bubbles = speech ? createBubbleLayer(labels, speech, names) : null;
+	const bubbles = speech ? createBubbleLayer(labels, speech, names, marks) : null;
 	const player = playerOptions ? createPlayerScene({
 		...playerOptions,
 		scene,

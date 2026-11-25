@@ -24,7 +24,10 @@ use crate::reach::{
     looks_routes, me_routes, office_routes, phone_routes, semantic_routes, talk_routes,
 };
 use crate::team::CrewLinks;
-use crate::trading::{Hooks, PROPOSAL_UNAVAILABLE, ProposalHook, approval_status_word, rejected};
+use crate::trading::{
+    Hooks, PROPOSAL_UNAVAILABLE, ProposalHook, approval_agent, approval_state_word,
+    approval_status_word, rejected,
+};
 use crate::{
     AppError, Crew, KIND_OFFICE_APPROVAL, Launch, Reach, SecretsRedactor, Settings, Trading, Wiring,
 };
@@ -60,6 +63,7 @@ pub(super) fn session_parts(
         Arc::clone(linked),
         crew.cloned(),
         store.clone(),
+        Some(Arc::clone(trading)),
     ));
     let phone = Arc::new(Phone {
         linked: Arc::clone(linked),
@@ -98,6 +102,9 @@ async fn office_card(linked: &Linked, trading: &Trading, number: &ApprovalNumber
         "summary": linked.secrets.redact(&view.reason),
         "short_code": view.short_code,
         "status": approval_status_word(view.status),
+        // (34차 1번, C27) ✋를 띄울 담당 · 기다림/답함/만료.
+        "agent": approval_agent(&view.subject),
+        "state": approval_state_word(view.status),
     });
     if let Err(error) = EventSink::publish(linked.sink.as_ref(), KIND_OFFICE_APPROVAL, card).await {
         tracing::warn!(%error, "사무실 승인 카드를 내지 못했습니다");

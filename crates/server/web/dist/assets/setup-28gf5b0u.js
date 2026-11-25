@@ -1,6 +1,8 @@
 import { n as API, t as mountMenu } from "./menu-ndyyrws6.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
-import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, o as field, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
+import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
+import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-lxatn1hv.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -37,35 +39,6 @@ function aiLimitRequest(limit) {
 		path: API.setupAi,
 		body: { [AI_LIMIT_KEY]: limit }
 	};
-}
-/** 서버 답에서 `enabled`(참 · 거짓)를 꺼낸다. 모양이 다르면 `null`. */
-function enabledOf(body) {
-	if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
-	const value = body.enabled;
-	return typeof value === "boolean" ? value : null;
-}
-/** 알림음이 켜져 있나(서버에서 읽는다). 읽지 못하거나 답의 모양이 맞지 않으면 [`SOUND_DEFAULT`]. 던지지 않는다. */
-async function soundEnabled() {
-	try {
-		const reply = await call("GET", API.setupSound);
-		if (!reply.ok) return true;
-		return enabledOf(reply.body) ?? true;
-	} catch {
-		return true;
-	}
-}
-/**
-* 알림음 켜기 · 끄기를 서버에 보내고 서버가 답한 값(저장한 뒤의 `enabled`)을 돌려준다.
-* 보내지 못했거나(연결) 거절됐거나(상태) 답의 모양이 맞지 않으면 `null`. 던지지 않는다.
-*/
-async function saveSound(on) {
-	try {
-		const reply = await call("POST", API.setupSound, { enabled: on });
-		if (!reply.ok) return null;
-		return enabledOf(reply.body);
-	} catch {
-		return null;
-	}
 }
 // src/setup/extras.ts
 /** 시장 글자 → 화면 이름. */

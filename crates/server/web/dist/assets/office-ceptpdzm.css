@@ -179,3 +179,30 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #chat-tabs button.summon, #light-list button.summon { width: auto; border-style: dashed; padding: 3px 8px; font-size: 12px; color: var(--accent); }
 #light-list li { display: flex; gap: var(--space-1); align-items: stretch; }
 #light-list li > button:first-child { flex: 1; }
+
+/* 34차 1 · 3 · 4번: 머리 위 ✋(승인 기다림, 누르면 승인 카드) · ✓(끝남) — 말풍선과 같은 모양 · 원본 고정 색(다크에서도 같음).
+   ✋만 누를 수 있고 나머지 층은 장면 조작을 막지 않는다. 범례는 위 줄의 단추로 연다(기본 닫힘). */
+.overhead-marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.overhead-mark { position: absolute; left: 0; top: 0; display: flex; gap: 4px; align-items: center; will-change: transform; }
+.mark-hand, .mark-done { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 26px;
+  padding: 0 7px; border: 1px solid #cdd7c7; border-radius: 12px 12px 12px 3px; background: #fffdf4; font-size: 14px;
+  font-weight: 700; line-height: 1; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, .16); }
+.mark-hand { font-family: inherit; border-color: #dcb48f; pointer-events: auto; cursor: pointer;
+  animation: mark-hand-pulse 1.8s ease-in-out infinite; }
+.mark-hand:hover { background: #fff6e6; }
+.mark-hand:focus-visible { outline: 2px solid #4e745b; outline-offset: 2px; }
+.mark-done { pointer-events: none; transition: opacity .1s linear; }
+@keyframes mark-hand-pulse { 0%, 100% { box-shadow: 0 4px 14px rgba(0, 0, 0, .16); } 50% { box-shadow: 0 0 0 4px #f3dcc4, 0 4px 14px rgba(0, 0, 0, .16); } }
+@media (prefers-reduced-motion: reduce) { .mark-hand { animation: none; } }
+#light-list li > .mark-hand, #light-list li > .mark-done { align-self: center; width: auto; height: 30px; padding: 0 8px;
+  border-radius: 8px; box-shadow: none; animation: none; }
+.approval-card[data-focus="1"] { outline: 3px solid var(--accent-soft); outline-offset: 1px; }
+.approval-card:focus { outline: 3px solid var(--accent-soft); }
+.legend-wrap { position: relative; display: flex; align-items: center; }
+.legend { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 240px; padding: 8px 12px;
+  border: 1px solid #cdd7c7; border-radius: 12px; background: #fffdf4; color: #3e513f; font-size: 12px; line-height: 1.4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .16); }
+.legend[hidden] { display: none; }
+.legend ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.legend li { display: flex; gap: 8px; align-items: center; }
+.legend-glyph { flex: none; width: 22px; text-align: center; font-size: 14px; font-weight: 700; }

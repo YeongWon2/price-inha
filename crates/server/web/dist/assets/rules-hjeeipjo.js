@@ -1,6 +1,7 @@
 import { n as API, t as mountMenu } from "./menu-ndyyrws6.js";
 /* empty css               */
-import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
+import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
+import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
 import { a as isObject, i as formatValue, n as changeRow, r as fieldLabel, t as capText } from "./fields-j3bgfwvj.js";
 // src/rules/model.ts
 /** 상태 글. */

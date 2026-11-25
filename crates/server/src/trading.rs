@@ -62,7 +62,7 @@ pub(crate) use chosen::CHOOSE_TEMPLATE_NOTICE;
 pub(crate) use http::routes;
 pub(crate) use link::{
     AnsweredHook, ApprovalHook, CloseHook, DataHaltHook, Hooks, PROPOSAL_UNAVAILABLE, ProposalHook,
-    StuckStopHook, approval_status_word,
+    StuckStopHook, approval_agent, approval_state_word, approval_status_word,
 };
 pub(crate) use templates::change_of;
 pub(crate) use view::change_json;

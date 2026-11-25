@@ -12,6 +12,7 @@
 // - 글자 · 색은 legend.ts의 `approval` 표시를 쓴다.
 
 import type { AgentId } from "./actor";
+import { markOf } from "./legend";
 
 /** 기다리는 승인 하나. `at`은 오래된 차례를 정하는 밀리초(이벤트는 받은 `now`, 다시 읽기는 `created_at`). */
 export interface WaitingApproval {
@@ -36,13 +37,64 @@ export interface HandBubble {
 /** 이벤트 하나를 반영한 결과: 새 요청(알림음을 낼 일) · 이미 아는 요청 · 끝나서 지움 · 모양이 맞지 않아 무시. */
 export type ApplyOutcome = "new" | "known" | "closed" | "ignored";
 
+const AGENTS: readonly AgentId[] = ["news", "strategy", "risk", "review", "trader", "leader"];
+const LEADER: AgentId = "leader";
+const PENDING = "pending";
+const WAITING = "waiting";
+const CLOSED_STATES = new Set(["answered", "expired"]);
+
+function agentOf(value: unknown): AgentId {
+  return typeof value === "string" && (AGENTS as readonly string[]).includes(value) ? (value as AgentId) : LEADER;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** 이벤트가 기다림인가(`state`가 있으면 그것, 없으면 `status`). 모양이 맞지 않으면 `null`. */
+function waitingOf(p: Record<string, unknown>): boolean | null {
+  if (typeof p.state === "string") {
+    if (p.state === WAITING) return true;
+    if (CLOSED_STATES.has(p.state)) return false;
+  }
+  if (typeof p.status === "string") return p.status === PENDING;
+  return null;
+}
+
 /** 승인 기다림 상태. */
 export class ApprovalBubbles {
+  private readonly items = new Map<string, WaitingApproval>();
+
   /** `office.approval` 이벤트 하나를 반영한다(위 규칙). */
   apply(payload: unknown, now: number): ApplyOutcome {
-    void payload;
-    void now;
-    throw new Error("todo");
+    const p = record(payload);
+    if (!p || typeof p.number !== "string" || p.number === "") return "ignored";
+    const waiting = waitingOf(p);
+    if (waiting === null) return "ignored";
+    const number = p.number;
+    if (!waiting) {
+      this.items.delete(number);
+      return "closed";
+    }
+    const known = this.items.get(number);
+    if (known) {
+      // 같은 요청: 차례(at)는 그대로 두고 보이는 글만 고친다.
+      if (typeof p.summary === "string") known.summary = p.summary;
+      if (typeof p.short_code === "string") known.short_code = p.short_code;
+      return "known";
+    }
+    this.items.set(number, {
+      number,
+      agent: agentOf(p.agent),
+      at: now,
+      summary: text(p.summary),
+      short_code: text(p.short_code),
+    });
+    return "new";
   }
 
   /**
@@ -50,26 +102,56 @@ export class ApprovalBubbles {
    * 줄은 건너뛴다. 배열이 아니면(그 칸이 없으면) 아무것도 바꾸지 않는다. 새로 넣은 것도 "새 요청"으로 치지 않는다.
    */
   sync(list: unknown): void {
-    void list;
-    throw new Error("todo");
+    if (!Array.isArray(list)) return;
+    const next = new Map<string, WaitingApproval>();
+    for (const line of list) {
+      const p = record(line);
+      if (!p || typeof p.number !== "string" || p.number === "") continue;
+      const at = typeof p.created_at === "number" && Number.isFinite(p.created_at) ? p.created_at : null;
+      const known = this.items.get(p.number);
+      if (at === null && !known) continue;
+      next.set(p.number, {
+        number: p.number,
+        agent: agentOf(p.agent),
+        at: at ?? (known as WaitingApproval).at,
+        summary: typeof p.summary === "string" ? p.summary : (known?.summary ?? ""),
+        short_code: typeof p.short_code === "string" ? p.short_code : (known?.short_code ?? ""),
+      });
+    }
+    this.items.clear();
+    for (const [number, item] of next) this.items.set(number, item);
   }
 
   /** 지금 기다리는 승인 모두(오래된 것부터). */
   waiting(): WaitingApproval[] {
-    throw new Error("todo");
+    return [...this.items.values()]
+      .sort((a, b) => a.at - b.at || (a.number < b.number ? -1 : a.number > b.number ? 1 : 0))
+      .map((item) => ({ ...item }));
   }
 
   /** 그 담당의 ✋ 말풍선. 기다리는 것이 없으면 `undefined`. 시간으로 사라지지 않는다(`now`와 무관). */
   bubble(agent: AgentId, now: number): HandBubble | undefined {
-    void agent;
     void now;
-    throw new Error("todo");
+    const mine = this.waiting().filter((item) => item.agent === agent);
+    if (mine.length === 0) return undefined;
+    const mark = markOf("approval");
+    return {
+      agent,
+      oldest: mine[0],
+      count: mine.length,
+      text: mine.length > 1 ? `${mark.glyph} ${mine.length}` : mark.glyph,
+      color: mark.color,
+    };
   }
 
   /** ✋가 떠 있는 담당 모두. */
   bubbles(now: number): HandBubble[] {
-    void now;
-    throw new Error("todo");
+    const out: HandBubble[] = [];
+    for (const agent of AGENTS) {
+      const hand = this.bubble(agent, now);
+      if (hand) out.push(hand);
+    }
+    return out;
   }
 
   /**
@@ -77,8 +159,9 @@ export class ApprovalBubbles {
    * `false`. 누른 것만으로는 ✋가 사라지지 않는다(답하거나 만료될 때까지 남는다).
    */
   press(agent: AgentId, open: (approval: WaitingApproval) => void): boolean {
-    void agent;
-    void open;
-    throw new Error("todo");
+    const hand = this.bubble(agent, 0);
+    if (!hand) return false;
+    open(hand.oldest);
+    return true;
   }
 }

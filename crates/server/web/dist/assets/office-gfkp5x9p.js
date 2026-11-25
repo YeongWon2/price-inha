@@ -1,5 +1,6 @@
 import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ndyyrws6.js";
-var PENDING = "pending";
+import { n as soundEnabled } from "./sound-pref-lxatn1hv.js";
+var PENDING$1 = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
 	if (typeof payload !== "object" || payload === null) return null;
@@ -62,7 +63,7 @@ function applyApproval(root, payload, fetcher) {
 	const approval = parse(payload);
 	if (!approval) return;
 	const existing = findCard(root, approval.number);
-	if (approval.status !== PENDING) {
+	if (approval.status !== PENDING$1) {
 		existing?.remove();
 		return;
 	}
@@ -207,10 +208,109 @@ function chatLineElement(line, note, extra) {
 	div.append(document.createTextNode(line.text));
 	return div;
 }
+// src/office/legend.ts
+/**
+* 지금 쓰는 머리 위 표시 모두(범례 차례): 생각 중 💭 · 쓰는 중 💬 · 말하는 중 ··· · 기다림 ⏳ · 실패 ❗ ·
+* 승인 기다림 ✋ · 끝남 ✓. 글자는 지금 화면이 쓰는 것과 같다(speech.ts `STATE_ICONS` · `TYPING_TEXT`는 이것을 쓴다).
+*/
+var OVERHEAD_MARKS = [
+	{
+		id: "thinking",
+		glyph: "💭",
+		color: "#5a6b5e",
+		label: "생각 중"
+	},
+	{
+		id: "writing",
+		glyph: "💬",
+		color: "#4e745b",
+		label: "답을 쓰는 중"
+	},
+	{
+		id: "typing",
+		glyph: "···",
+		color: "#3e513f",
+		label: "말하는 중"
+	},
+	{
+		id: "waiting",
+		glyph: "⏳",
+		color: "#8a5a00",
+		label: "차례를 기다리는 중"
+	},
+	{
+		id: "failed",
+		glyph: "❗",
+		color: "#b3412f",
+		label: "일이 막힘(실패)"
+	},
+	{
+		id: "approval",
+		glyph: "✋",
+		color: "#a4561d",
+		label: "내 승인을 기다림 — 누르면 승인 카드가 열려요"
+	},
+	{
+		id: "done",
+		glyph: "✓",
+		color: "#2f6b47",
+		label: "일을 마침(잠깐 보였다 사라져요)"
+	}
+];
+var legendCount = 0;
+var BY_ID = new Map(OVERHEAD_MARKS.map((mark) => [mark.id, mark]));
+/** 그 종류의 표시. */
+function markOf(id) {
+	const mark = BY_ID.get(id);
+	if (!mark) throw new Error(`모르는 표시: ${id}`);
+	return mark;
+}
+/** 범례를 `root` 아래에 그린다(위 모양, 처음에는 닫힘). 범례 요소(`[data-legend]`)를 돌려준다. */
+function renderLegend(root) {
+	const toggle = document.createElement("button");
+	toggle.type = "button";
+	toggle.className = "legend-toggle";
+	toggle.dataset.legendToggle = "";
+	toggle.textContent = "표시 뜻";
+	toggle.title = "머리 위 표시의 뜻";
+	toggle.setAttribute("aria-expanded", "false");
+	const legend = document.createElement("div");
+	legend.className = "legend";
+	legend.dataset.legend = "";
+	legendCount += 1;
+	legend.id = `overhead-legend-${legendCount}`;
+	legend.setAttribute("role", "region");
+	legend.setAttribute("aria-label", "머리 위 표시의 뜻");
+	legend.hidden = true;
+	toggle.setAttribute("aria-controls", legend.id);
+	const list = document.createElement("ul");
+	for (const mark of OVERHEAD_MARKS) {
+		const row = document.createElement("li");
+		row.dataset.mark = mark.id;
+		const glyph = document.createElement("span");
+		glyph.dataset.part = "glyph";
+		glyph.className = "legend-glyph";
+		glyph.textContent = mark.glyph;
+		glyph.style.color = mark.color;
+		glyph.setAttribute("aria-hidden", "true");
+		const label = document.createElement("span");
+		label.dataset.part = "label";
+		label.textContent = mark.label;
+		row.append(glyph, label);
+		list.append(row);
+	}
+	legend.append(list);
+	toggle.addEventListener("click", () => {
+		legend.hidden = !legend.hidden;
+		toggle.setAttribute("aria-expanded", String(!legend.hidden));
+	});
+	root.append(toggle, legend);
+	return legend;
+}
 /** 글 말풍선이 마지막으로 바뀐 뒤 보이는 시간(밀리초). */
 var SPEECH_LIFE_MS = 12e3;
 /** 글 없이 "말하는 중"만 알 때의 표시 글. */
-var TYPING_TEXT = "···";
+var TYPING_TEXT = markOf("typing").glyph;
 /** [`TYPING_TEXT`] 말풍선이 보이는 시간(밀리초). */
 var TYPING_LIFE_MS = 4e3;
 /** 좌우 후보가 비켜나는 거리(말풍선 폭의 배수). */
@@ -219,10 +319,10 @@ var BUBBLE_SIDE_SHIFT = .55;
 var LANE_AREA_RATIO = .24;
 /** 상태 표시: 생각 중 💭 · 쓰는 중 💬 · 기다림 ⏳ · 실패 ❗. 글 앞에 붙인다. */
 var STATE_ICONS = {
-	thinking: "💭",
-	writing: "💬",
-	waiting: "⏳",
-	failed: "❗"
+	thinking: markOf("thinking").glyph,
+	writing: markOf("writing").glyph,
+	waiting: markOf("waiting").glyph,
+	failed: markOf("failed").glyph
 };
 /** 빈칸(줄바꿈 포함)을 하나로 접고 앞뒤를 깎은 뒤, [`SPEECH_MAX`]자를 넘으면 [`SPEECH_CUT`]자 + "..."로 자른다. */
 function trimSpeech(text) {
@@ -1012,6 +1112,542 @@ function followStep(target, player, factor = FOLLOW_LERP) {
 	return {
 		x: target.x + (player.x - target.x) * factor,
 		z: target.z + (player.z - target.z) * factor
+	};
+}
+// src/office/approval-bubbles.ts
+var AGENTS = [
+	"news",
+	"strategy",
+	"risk",
+	"review",
+	"trader",
+	"leader"
+];
+var LEADER = "leader";
+var PENDING = "pending";
+var WAITING = "waiting";
+var CLOSED_STATES = /* @__PURE__ */ new Set(["answered", "expired"]);
+function agentOf(value) {
+	return typeof value === "string" && AGENTS.includes(value) ? value : LEADER;
+}
+function record$1(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function text(value) {
+	return typeof value === "string" ? value : "";
+}
+/** 이벤트가 기다림인가(`state`가 있으면 그것, 없으면 `status`). 모양이 맞지 않으면 `null`. */
+function waitingOf(p) {
+	if (typeof p.state === "string") {
+		if (p.state === WAITING) return true;
+		if (CLOSED_STATES.has(p.state)) return false;
+	}
+	if (typeof p.status === "string") return p.status === PENDING;
+	return null;
+}
+/** 승인 기다림 상태. */
+var ApprovalBubbles = class {
+	items = /* @__PURE__ */ new Map();
+	/** `office.approval` 이벤트 하나를 반영한다(위 규칙). */
+	apply(payload, now) {
+		const p = record$1(payload);
+		if (!p || typeof p.number !== "string" || p.number === "") return "ignored";
+		const waiting = waitingOf(p);
+		if (waiting === null) return "ignored";
+		const number = p.number;
+		if (!waiting) {
+			this.items.delete(number);
+			return "closed";
+		}
+		const known = this.items.get(number);
+		if (known) {
+			if (typeof p.summary === "string") known.summary = p.summary;
+			if (typeof p.short_code === "string") known.short_code = p.short_code;
+			return "known";
+		}
+		this.items.set(number, {
+			number,
+			agent: agentOf(p.agent),
+			at: now,
+			summary: text(p.summary),
+			short_code: text(p.short_code)
+		});
+		return "new";
+	}
+	/**
+	* 다시 읽은 `pending_approvals`로 통째로 맞춘다: 목록에 없는 것은 지우고 있는 것은 넣거나 고친다. 모양이 맞지 않는
+	* 줄은 건너뛴다. 배열이 아니면(그 칸이 없으면) 아무것도 바꾸지 않는다. 새로 넣은 것도 "새 요청"으로 치지 않는다.
+	*/
+	sync(list) {
+		if (!Array.isArray(list)) return;
+		const next = /* @__PURE__ */ new Map();
+		for (const line of list) {
+			const p = record$1(line);
+			if (!p || typeof p.number !== "string" || p.number === "") continue;
+			const at = typeof p.created_at === "number" && Number.isFinite(p.created_at) ? p.created_at : null;
+			const known = this.items.get(p.number);
+			if (at === null && !known) continue;
+			next.set(p.number, {
+				number: p.number,
+				agent: agentOf(p.agent),
+				at: at ?? known.at,
+				summary: typeof p.summary === "string" ? p.summary : known?.summary ?? "",
+				short_code: typeof p.short_code === "string" ? p.short_code : known?.short_code ?? ""
+			});
+		}
+		this.items.clear();
+		for (const [number, item] of next) this.items.set(number, item);
+	}
+	/** 지금 기다리는 승인 모두(오래된 것부터). */
+	waiting() {
+		return [...this.items.values()].sort((a, b) => a.at - b.at || (a.number < b.number ? -1 : a.number > b.number ? 1 : 0)).map((item) => ({ ...item }));
+	}
+	/** 그 담당의 ✋ 말풍선. 기다리는 것이 없으면 `undefined`. 시간으로 사라지지 않는다(`now`와 무관). */
+	bubble(agent, now) {
+		const mine = this.waiting().filter((item) => item.agent === agent);
+		if (mine.length === 0) return void 0;
+		const mark = markOf("approval");
+		return {
+			agent,
+			oldest: mine[0],
+			count: mine.length,
+			text: mine.length > 1 ? `${mark.glyph} ${mine.length}` : mark.glyph,
+			color: mark.color
+		};
+	}
+	/** ✋가 떠 있는 담당 모두. */
+	bubbles(now) {
+		const out = [];
+		for (const agent of AGENTS) {
+			const hand = this.bubble(agent, now);
+			if (hand) out.push(hand);
+		}
+		return out;
+	}
+	/**
+	* 그 담당의 ✋를 눌렀다: 가장 오래된 요청으로 `open`(승인 카드 열기)을 한 번 부르고 `true`. ✋가 없으면 부르지 않고
+	* `false`. 누른 것만으로는 ✋가 사라지지 않는다(답하거나 만료될 때까지 남는다).
+	*/
+	press(agent, open) {
+		const hand = this.bubble(agent, 0);
+		if (!hand) return false;
+		open(hand.oldest);
+		return true;
+	}
+};
+// src/office/chime.ts
+/** 알림음의 음들(원본 권한 알림음: A5 → E5). */
+var CHIME_NOTES = [{
+	hz: 880,
+	at: 0
+}, {
+	hz: 659.25,
+	at: .12
+}];
+/** 음마다 길이(초). */
+var CHIME_NOTE_SECONDS = .15;
+/** 음량(0~1). */
+var CHIME_VOLUME = .12;
+/** 음이 사라질 때까지 줄이는 음량(지수 램프는 0으로 갈 수 없다). */
+var CHIME_FLOOR = 1e-4;
+/** 음 시작의 짧은 올림(초) — 딸깍 소리를 막는다. */
+var CHIME_ATTACK = .01;
+/** 승인 알림음. 오디오는 처음 필요할 때 한 번 만든다. */
+var Chime = class {
+	makeAudio;
+	enabled;
+	audio = null;
+	/** 낸 번호 · 다시 읽어 채운 번호(다시 내지 않는다). */
+	heard = /* @__PURE__ */ new Set();
+	/** `makeAudio`: 오디오 만들기. `enabled`: 알림음 설정을 읽는다(화면은 `soundEnabled`). */
+	constructor(makeAudio, enabled) {
+		this.makeAudio = makeAudio;
+		this.enabled = enabled;
+	}
+	/** 오디오(처음이면 만든다). 만들 수 없으면 `null`. */
+	context() {
+		if (this.audio) return this.audio;
+		try {
+			this.audio = this.makeAudio();
+		} catch {
+			this.audio = null;
+		}
+		return this.audio;
+	}
+	/** 설정을 읽는다(읽지 못하면 끈 것으로 본다). */
+	async allowed() {
+		try {
+			return await this.enabled() === true;
+		} catch {
+			return false;
+		}
+	}
+	/** 오디오가 돌고 있게 한다(막혀 있으면 `resume`). 돌면 `true`. */
+	async running(audio) {
+		if (audio.state === "running") return true;
+		try {
+			await audio.resume();
+		} catch {
+			return false;
+		}
+		return audio.state === "running";
+	}
+	/** 화면을 눌렀다(사용자 손짓): 막힌 오디오를 푼다(`resume`). 실패해도 던지지 않는다. */
+	async unlock() {
+		if (!await this.allowed()) return;
+		const audio = this.context();
+		if (!audio) return;
+		await this.running(audio);
+	}
+	/** 다시 읽어 채운 번호들: 소리 없이 "이미 알린 것"으로 적는다. */
+	quiet(numbers) {
+		for (const number of numbers) this.heard.add(number);
+	}
+	/**
+	* 새 승인 요청 `number`에 알림음을 낸다. 낸 번호 · 채운 번호면 내지 않는다. 설정이 꺼져 있거나 소리가 막히면 내지
+	* 않는다. 소리를 냈으면 `true`, 아니면 `false`. 던지지 않는다.
+	*/
+	async ring(number) {
+		if (this.heard.has(number)) return false;
+		this.heard.add(number);
+		if (!await this.allowed()) return false;
+		const audio = this.context();
+		if (!audio || !await this.running(audio)) return false;
+		try {
+			this.play(audio);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	/** 사인파 두 음을 낸다(A5 → E5, 음마다 [`CHIME_NOTE_SECONDS`], 음량 [`CHIME_VOLUME`]). */
+	play(audio) {
+		const t0 = audio.currentTime;
+		for (const note of CHIME_NOTES) {
+			const start = t0 + note.at;
+			const end = start + CHIME_NOTE_SECONDS;
+			const osc = audio.createOscillator();
+			osc.type = "sine";
+			osc.frequency.setValueAtTime(note.hz, start);
+			const gain = audio.createGain();
+			gain.gain.setValueAtTime(CHIME_FLOOR, start);
+			gain.gain.linearRampToValueAtTime(CHIME_VOLUME, start + CHIME_ATTACK);
+			gain.gain.exponentialRampToValueAtTime(CHIME_FLOOR, end);
+			osc.connect(gain);
+			gain.connect(audio.destination);
+			osc.start(start);
+			osc.stop(end);
+		}
+	}
+};
+// src/office/done-mark.ts
+/** 끝남 표시가 온전히 보이는 시간(밀리초, 원본 2.0초). */
+var DONE_SHOW_MS = 2e3;
+/** 담당마다의 끝남 표시. */
+var DoneMarks = class {
+	/** 담당 → 끝난 시각(밀리초). */
+	finished = /* @__PURE__ */ new Map();
+	/** 그 담당의 일이 `now`에 끝났다: ✓를 새로 띄운다(이미 있으면 `now`부터 다시 센다). */
+	finish(agent, now) {
+		this.finished.set(agent, now);
+	}
+	/** 그 담당이 새 일을 시작했다: 끝남 표시를 바로 지운다. */
+	start(agent, now) {
+		this.finished.delete(agent);
+	}
+	/**
+	* `now`에 그 담당에게 보이는 끝남 표시. 끝난 뒤 [`DONE_SHOW_MS`] 동안 `opacity` 1, 그 뒤 [`DONE_FADE_MS`] 동안
+	* 1에서 0으로 고르게(직선으로) 줄고, 끝난 뒤 `DONE_SHOW_MS + DONE_FADE_MS`부터는 `undefined`.
+	*/
+	shown(agent, now) {
+		const at = this.finished.get(agent);
+		if (at === void 0) return void 0;
+		const age = Math.max(0, now - at);
+		if (age >= 2500) {
+			this.finished.delete(agent);
+			return;
+		}
+		const opacity = age < 2e3 ? 1 : 1 - (age - DONE_SHOW_MS) / 500;
+		const mark = markOf("done");
+		return {
+			mark: mark.id,
+			text: mark.glyph,
+			color: mark.color,
+			opacity
+		};
+	}
+	/** 지금 끝남 표시가 걸린 담당들(다 사라진 것은 빠진다). */
+	agents(now) {
+		return [...this.finished.keys()].filter((agent) => this.shown(agent, now) !== void 0);
+	}
+};
+/** 일하는 중인 일 상태(이것에서 쉼으로 바뀌면 일이 끝난 것이다). */
+var BUSY = /* @__PURE__ */ new Set(["queued", "thinking"]);
+/** 표시와 이웃 사각형 사이 틈(px). */
+var MARK_GAP = 4;
+/**
+* 표시 자리 고르기(넘긴 순서대로): 머리 위 3×3 후보([`bubbleCandidates`]) 다음에 자기 말풍선의 오른쪽 · 왼쪽 · 위.
+* 화면 안이고 `taken` · 앞서 놓은 표시와 겹치지 않는 첫 자리. 없으면 화면 안인 첫 후보(그것도 없으면 첫 후보).
+*/
+function placeMarks(items, taken, screen) {
+	const placed = [];
+	for (const item of items) {
+		const { width, height } = item.size;
+		const candidates = bubbleCandidates(item.head.x, item.head.y, item.size);
+		if (item.own) {
+			const o = item.own;
+			candidates.push({
+				x: o.x + o.width + MARK_GAP,
+				y: o.y,
+				width,
+				height
+			}, {
+				x: o.x - width - MARK_GAP,
+				y: o.y,
+				width,
+				height
+			}, {
+				x: o.x + (o.width - width) / 2,
+				y: o.y - height - MARK_GAP,
+				width,
+				height
+			});
+		}
+		const free = (r) => insideScreen(r, screen) && !taken.some((t) => overlap(t, r)) && !placed.some((p) => overlap(p.rect, r));
+		const rect = candidates.find(free) ?? candidates.find((r) => insideScreen(r, screen)) ?? candidates[0];
+		placed.push({
+			agent: item.agent,
+			rect
+		});
+	}
+	return placed;
+}
+function makeAudio() {
+	const Audio = window.AudioContext ?? window.webkitAudioContext;
+	if (!Audio) throw new Error("no audio");
+	return new Audio();
+}
+/** 표시들을 만들어 잇는다. */
+function createOfficeMarks(options) {
+	const board = new ApprovalBubbles();
+	const done = new DoneMarks();
+	const chime = new Chime(makeAudio, soundEnabled);
+	/** 이벤트로 끝난 번호(승인은 다시 열리지 않는다 — 늦게 온 다시 읽기가 되살리지 않게). */
+	const closed = /* @__PURE__ */ new Set();
+	const listeners = [];
+	const changed = () => {
+		for (const listener of listeners) listener();
+	};
+	const nameOf = (agent) => options.names[agent] ?? agent;
+	const unlock = () => {
+		chime.unlock();
+	};
+	options.gestures.addEventListener("pointerdown", unlock, { once: true });
+	options.gestures.addEventListener("keydown", unlock, { once: true });
+	renderLegend(options.legendRoot);
+	function open(approval) {
+		const root = options.approvals;
+		applyApproval(root, {
+			number: approval.number,
+			summary: approval.summary,
+			short_code: approval.short_code,
+			status: "pending"
+		}, options.fetcher);
+		const card = [...root.querySelectorAll("[data-approval]")].find((c) => c.dataset.approval === approval.number);
+		if (!card) return;
+		card.tabIndex = -1;
+		card.dataset.focus = "1";
+		card.scrollIntoView({ block: "nearest" });
+		card.focus({ preventScroll: true });
+		window.setTimeout(() => {
+			delete card.dataset.focus;
+		}, 1600);
+	}
+	function press(agent) {
+		board.press(agent, open);
+	}
+	/** 기다리지 않는 카드는 닫는다(이벤트를 놓쳐도 끝난 카드가 남지 않게). */
+	function closeStaleCards(waiting) {
+		for (const card of options.approvals.querySelectorAll("[data-approval]")) {
+			const number = card.dataset.approval ?? "";
+			if (!waiting.has(number) && card.dataset.deciding !== "1") card.remove();
+		}
+	}
+	function handOf(agent, now) {
+		return board.bubble(agent, now);
+	}
+	function handButton(hand, agent) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "mark-hand";
+		button.dataset.mark = "approval";
+		button.style.color = hand.color;
+		button.addEventListener("click", (event) => {
+			event.stopPropagation();
+			press(agent);
+		});
+		paintHand(button, hand, agent);
+		return button;
+	}
+	function paintHand(button, hand, agent) {
+		if (button.textContent !== hand.text) button.textContent = hand.text;
+		const label = `${nameOf(agent)} · 승인 기다림 ${hand.count}건 — 승인 카드 열기`;
+		if (button.getAttribute("aria-label") !== label) {
+			button.setAttribute("aria-label", label);
+			button.title = label;
+		}
+	}
+	function doneSpan(shown) {
+		const span = document.createElement("span");
+		span.className = "mark-done";
+		span.dataset.mark = "done";
+		span.textContent = shown.text;
+		span.style.color = shown.color;
+		span.style.opacity = String(shown.opacity);
+		span.setAttribute("role", "img");
+		span.setAttribute("aria-label", markOf("done").label);
+		return span;
+	}
+	function layer(stage) {
+		const host = document.createElement("div");
+		host.className = "overhead-marks";
+		stage.appendChild(host);
+		const shown = /* @__PURE__ */ new Map();
+		function element(agent) {
+			let one = shown.get(agent);
+			if (!one) {
+				const el = document.createElement("div");
+				el.className = "overhead-mark";
+				el.dataset.agent = agent;
+				host.appendChild(el);
+				one = {
+					el,
+					hand: null,
+					done: null
+				};
+				shown.set(agent, one);
+			}
+			return one;
+		}
+		/** 이번 프레임의 표시로 고친다. 크기가 바뀌었으면 참. */
+		function refresh(agent, hand, check) {
+			const one = element(agent);
+			let resized = false;
+			if (hand && !one.hand) {
+				one.hand = handButton(hand, agent);
+				one.el.prepend(one.hand);
+				resized = true;
+			} else if (!hand && one.hand) {
+				one.hand.remove();
+				one.hand = null;
+				resized = true;
+			} else if (hand && one.hand) {
+				const before = one.hand.textContent;
+				paintHand(one.hand, hand, agent);
+				resized ||= before !== one.hand.textContent;
+			}
+			if (check && !one.done) {
+				one.done = doneSpan(check);
+				one.el.append(one.done);
+				resized = true;
+			} else if (!check && one.done) {
+				one.done.remove();
+				one.done = null;
+				resized = true;
+			} else if (check && one.done) one.done.style.opacity = String(check.opacity);
+			one.el.style.display = "";
+			return resized;
+		}
+		const sizes = /* @__PURE__ */ new Map();
+		return {
+			place(now, spots, taken, own, screen) {
+				const items = [];
+				const drawn = /* @__PURE__ */ new Set();
+				for (const spot of spots) {
+					const hand = handOf(spot.id, now);
+					const check = done.shown(spot.id, now);
+					if (!spot.visible || !hand && !check) continue;
+					const resized = refresh(spot.id, hand, check);
+					let size = sizes.get(spot.id);
+					if (!size || resized) {
+						const box = element(spot.id).el.getBoundingClientRect();
+						size = {
+							width: box.width || 28,
+							height: box.height || 26
+						};
+						sizes.set(spot.id, size);
+					}
+					drawn.add(spot.id);
+					items.push({
+						agent: spot.id,
+						head: spot.head,
+						size,
+						own: own.get(spot.id)
+					});
+				}
+				for (const { agent, rect } of placeMarks(items, taken, screen)) element(agent).el.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+				for (const [agent, one] of shown) if (!drawn.has(agent)) {
+					one.el.style.display = "none";
+					if (one.done) {
+						one.done.remove();
+						one.done = null;
+						sizes.delete(agent);
+					}
+				}
+			},
+			dispose() {
+				host.remove();
+				shown.clear();
+			}
+		};
+	}
+	return {
+		onApproval(payload) {
+			const outcome = board.apply(payload, Date.now());
+			const number = payload?.number;
+			if (typeof number !== "string") return;
+			if (outcome === "new") chime.ring(number);
+			if (outcome === "closed") closed.add(number);
+			if (outcome !== "ignored") changed();
+		},
+		sync(list, ringNew) {
+			if (!Array.isArray(list)) return;
+			const before = new Set(board.waiting().map((w) => w.number));
+			const live = list.filter((row) => !closed.has(String(row?.number ?? "")));
+			board.sync(live);
+			const now = board.waiting().map((w) => w.number);
+			if (ringNew) {
+				for (const number of now) if (!before.has(number)) chime.ring(number);
+			} else chime.quiet(now);
+			closeStaleCards(new Set(now));
+			changed();
+		},
+		work(agent, before, after, now) {
+			if (BUSY.has(after)) {
+				if (done.shown(agent, now)) {
+					done.start(agent, now);
+					changed();
+				}
+				return;
+			}
+			if (after === "idle" && BUSY.has(before)) {
+				done.finish(agent, now);
+				changed();
+				window.setTimeout(changed, DONE_SHOW_MS + 500 + 50);
+			}
+		},
+		layer,
+		badges(agent, now) {
+			const out = [];
+			const hand = handOf(agent, now);
+			if (hand) out.push(handButton(hand, agent));
+			const check = done.shown(agent, now);
+			if (check) out.push(doneSpan(check));
+			return out;
+		},
+		onChange(listener) {
+			listeners.push(listener);
+		}
 	};
 }
 var FACINGS = [
@@ -2777,6 +3413,8 @@ var toolbar = null;
 /** (33차) 팀 방 글 칸(멘션 칩 · 공지)과 부르기. */
 var compose = null;
 var summons = null;
+/** (34차) 머리 위 ✋ · ✓ · 승인 알림음 · 범례. */
+var marks = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 var replayUntil = 0;
 function renderLight() {
@@ -2802,7 +3440,7 @@ function renderLight() {
 			button.append(line);
 		}
 		button.addEventListener("click", () => selectConversation(id));
-		li.append(button, summonButton(id, (agent) => void summons?.summon(agent)));
+		li.append(button, ...marks?.badges(id, Date.now()) ?? [], summonButton(id, (agent) => void summons?.summon(agent)));
 		list.append(li);
 	}
 }
@@ -2821,7 +3459,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-f5dn7utz.js");
+		const { webglAvailable, createScene } = await import("./scene3d-l0iv9oez.js");
 		return {
 			webglAvailable,
 			createScene
@@ -2858,7 +3496,8 @@ async function show3d() {
 			}
 		},
 		speech: chatter.board,
-		speaker
+		speaker,
+		marks: marks?.layer($("stage"))
 	});
 	state.view = scene;
 	for (const [id, view] of state.agents) scene.setAgent(id, view, { snap: true });
@@ -2870,7 +3509,9 @@ function applyAgent(view, snap) {
 		place: view.place,
 		work: view.work
 	};
+	const before = state.agents.get(view.agent)?.work ?? "idle";
 	state.agents.set(view.agent, next);
+	if (!snap) marks?.work(view.agent, before, next.work, Date.now());
 	chatter.work(view.agent, next.work);
 	if (state.view) state.view.setAgent(view.agent, next, { snap });
 	if (!$("light").hidden) renderLight();
@@ -3176,7 +3817,10 @@ function onFrame(text) {
 		if (frame.kind === "office.agent") applyAgent(frame.payload, false);
 		else if (frame.kind === "office.chat") applyChat(frame.payload);
 		else if (frame.kind === "office.talk") onTalk(frame.payload, frame.seq, !replayedOld(frame.payload));
-		else if (frame.kind === "office.approval") applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+		else if (frame.kind === "office.approval") {
+			applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+			marks?.onApproval(frame.payload);
+		} else if (frame.kind === "rule_proposal") refreshApprovals(true);
 		else if (frame.kind === "office.notice") compose?.onNotice(frame.payload);
 		else if (frame.kind === "office.notice_ack") compose?.onAck(frame.payload);
 		else if (frame.kind === "office.summon") summons?.onEvent(frame.payload);
@@ -3251,6 +3895,19 @@ async function loadSnapshot() {
 		for (const resp of snap.pending ?? []) applyChat(resp);
 		for (const talk of snap.talk ?? []) if (typeof talk.seq === "number") onTalk(talk, talk.seq, false);
 		if (typeof snap.last_seq === "number") state.lastSeq = snap.last_seq;
+		marks?.sync(snap.pending_approvals, false);
+	} catch {}
+}
+/** (34차 1번 · 5번) 기다리는 승인만 다시 읽어 맞춘다(다시 이을 때 · 개선안 요청이 생겼을 때). */
+async function refreshApprovals(ringNew) {
+	try {
+		const reply = await fetch(SNAPSHOT_PATH, {
+			credentials: "same-origin",
+			cache: "no-store"
+		});
+		if (!reply.ok) return;
+		const snap = await reply.json();
+		marks?.sync(snap.pending_approvals, ringNew);
 	} catch {}
 }
 function retryLater() {
@@ -3280,7 +3937,10 @@ function openSocket() {
 	};
 	socket.onopen = () => {
 		retryMs = RETRY_MIN_MS;
-		if (resuming) replayUntil = Date.now() + REPLAY_WINDOW_MS;
+		if (resuming) {
+			replayUntil = Date.now() + REPLAY_WINDOW_MS;
+			refreshApprovals(false);
+		}
 		setConn("연결됨", "ok");
 	};
 	socket.onmessage = (event) => {
@@ -3362,6 +4022,19 @@ async function main() {
 		nameOf,
 		openChat: (id) => selectConversation(id),
 		say: (text) => compose?.say(text)
+	});
+	const legend = document.createElement("div");
+	legend.className = "legend-wrap";
+	$("look-toggle").after(legend);
+	marks = createOfficeMarks({
+		approvals: $("approvals"),
+		fetcher: (input, init) => fetch(input, init),
+		names: state.names,
+		legendRoot: legend,
+		gestures: document
+	});
+	marks.onChange(() => {
+		if (!$("light").hidden) renderLight();
 	});
 	wireChat();
 	renderTabs();

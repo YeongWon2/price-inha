@@ -1,6 +1,7 @@
 import { n as API, t as mountMenu } from "./menu-ndyyrws6.js";
 /* empty css               */
-import { a as errorLine, c as table, d as el, i as emptyState, l as LOAD_FAILED, n as button, r as card, s as loading, t as badge, u as call } from "./parts-clyrk8h1.js";
+import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
+import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
 // src/account/model.ts
 /** 팀 상태 → 화면 글(F1-6). */
 var TEAM_STATE_TEXT = {
