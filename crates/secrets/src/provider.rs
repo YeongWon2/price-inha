@@ -12,7 +12,7 @@
 //! 모두 가리기 대상이다(8자 미만 값은 빼고).
 
 use crate::kind::Entry;
-use crate::{Credentials, SecretStore, SecretsError, Verifier};
+use crate::{Credentials, MIN_SECRET_CHARS, SecretStore, SecretsError, Verifier, envfile, fsio};
 
 /// 공급자 키 줄 이름의 머리. 열 때 이 머리로 시작하는 줄 값은 모두 가리기 대상이다.
 pub(crate) const KEY_LINE_PREFIX: &str = "PRICE_INHA_KEY__";
@@ -169,7 +169,33 @@ impl SecretStore {
     ///   `contains_registered`의 대상이다(N8 · E38).
     pub fn remove_provider(&self, keys: ProviderKeys) -> Result<bool, SecretsError> {
         keys.check()?;
-        Err(SecretsError::InvalidProviderKeys)
+        let entry = Entry::Provider(keys);
+        let file = entry.file_name();
+        // 등록과 같은 잠금: 읽고 고쳐 쓰는 사이에 다른 등록 · 읽기가 끼지 않는다.
+        let _guard = self.lock_files();
+        let Some(text) = fsio::read_private(&self.dir().join(file), file)? else {
+            return Ok(false);
+        };
+        let lines = envfile::lines_named(&text, &entry.env_names());
+        if lines.is_empty() {
+            return Ok(false);
+        }
+        // 3번: 파일에서 지우기 **전에** 지울 값을 가리기 대상에 올린다. 지운 뒤에도 계속 가린다
+        // (열 뒤 바깥에서 적힌 값이라 아직 대상이 아니었어도).
+        self.targets_mut(|targets| {
+            for (name, value) in lines {
+                if let Some(value) = value
+                    && value.chars().count() >= MIN_SECRET_CHARS
+                {
+                    targets.set_current_line(name, &value);
+                }
+            }
+        });
+        // 값 없는 묶음으로 바꿔 쓰면 그 공급자의 줄만 빠지고 다른 줄은 그대로다.
+        let kept = envfile::replace_kind(&text, entry, &Credentials::new());
+        fsio::prepare_dir(self.dir())?;
+        fsio::write_atomic(self.dir(), file, kept.as_bytes())?;
+        Ok(true)
     }
 
     /// 넘긴 선언 순서대로 공급자별 등록 여부. 값 · 값의 일부 · 길이는 없다.

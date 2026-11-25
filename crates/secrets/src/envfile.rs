@@ -181,10 +181,47 @@ pub(crate) fn read_prefixed(text: &str, prefix: &str) -> Vec<(String, Zeroizing<
         .collect()
 }
 
+/// `.env` 글에서 이름이 `names` 가운데 하나인 줄을 모두 찾는다(같은 이름이 여러 번이면 모두).
+///
+/// 줄마다 (이름, 값)이다. 값이 깨졌거나 비었으면 값은 `None`이다(줄은 있으므로 지울 대상이다).
+/// 지우기 전에 지울 값을 가리기 대상에 올리려고 쓴다.
+pub(crate) fn lines_named<S: AsRef<str>>(
+    text: &str,
+    names: &[S],
+) -> Vec<(String, Option<Zeroizing<String>>)> {
+    text.lines()
+        .filter_map(split_line)
+        .filter(|(name, _)| names.iter().any(|ours| ours.as_ref() == *name))
+        .map(|(name, src)| {
+            let value = parse_value(src).filter(|value| !value.is_empty());
+            (name.to_owned(), value)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::KeyKind;
+
+    #[test]
+    fn 이름이_같은_줄은_모두_찾고_깨진_값은_값_없이_찾는다() {
+        let text = "A=첫값\n# A=설명\nB=keep\nA=\"깨진\nA=둘째값\nC=\n";
+        let found = lines_named(text, &["A", "C"]);
+        let shown: Vec<(&str, Option<&str>)> = found
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_ref().map(|v| v.as_str())))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                ("A", Some("첫값")),
+                ("A", None),
+                ("A", Some("둘째값")),
+                ("C", None)
+            ]
+        );
+    }
 
     #[test]
     fn 머리로_시작하는_줄은_마지막_값만_읽고_깨진_줄은_뺀다() {

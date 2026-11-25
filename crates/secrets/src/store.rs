@@ -301,7 +301,7 @@ impl SecretStore {
     }
 
     /// 가리기 대상을 고친다.
-    fn targets_mut(&self, apply: impl FnOnce(&mut Targets)) {
+    pub(crate) fn targets_mut(&self, apply: impl FnOnce(&mut Targets)) {
         apply(&mut self.targets.write().unwrap_or_else(PoisonError::into_inner));
     }
 
