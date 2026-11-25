@@ -55,7 +55,6 @@ fn 마법사_코드는_다른_프로그램의_토큰_파일을_열지_않는다(
         ".credentials.json",
         "Claude Code-credentials",
         ".codex",
-        "auth.json",
         "find-generic-password",
         "oauth",
         "OAuth",

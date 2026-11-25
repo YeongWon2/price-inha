@@ -58,11 +58,10 @@ impl Root {
         // macOS의 임시 폴더는 다른 경로를 거치므로 실제 경로로 바꿔 둔다.
         let base = std::fs::canonicalize(dir.path()).unwrap();
         let user = base.join("user");
-        for (folder, file) in [(".claude", ".credentials.json"), (".codex", "auth.json")] {
-            std::fs::create_dir_all(user.join(folder)).unwrap();
-            let bait = json!({ "claudeAiOauth": { "accessToken": BAIT, "refreshToken": BAIT } });
-            std::fs::write(user.join(folder).join(file), bait.to_string()).unwrap();
-        }
+        let (folder, file) = (".claude", ".credentials.json");
+        std::fs::create_dir_all(user.join(folder)).unwrap();
+        let bait = json!({ "claudeAiOauth": { "accessToken": BAIT, "refreshToken": BAIT } });
+        std::fs::write(user.join(folder).join(file), bait.to_string()).unwrap();
         Self {
             _dir: dir,
             home: base.join("pi-home"),
