@@ -68,6 +68,7 @@ pi-gate = { path = "crates/gate", version = "0.1.0" }
 pi-journal = { path = "crates/journal", version = "0.1.0" }
 pi-knowledge = { path = "crates/knowledge", version = "0.1.0" }
 pi-market = { path = "crates/market", version = "0.1.0" }
+pi-channel = { path = "crates/channel", version = "0.1.0" }
 pi-notify = { path = "crates/notify", version = "0.1.0" }
 pi-office = { path = "crates/office", version = "0.1.0" }
 pi-paper = { path = "crates/paper", version = "0.1.0" }

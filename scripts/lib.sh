@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 파이프라인 스크립트가 함께 쓰는 표. docs/dev/pipeline.md 6장과 같아야 한다.
 # 모든 모듈(그래프 docs/dev/graph.toml 과 같은 순서). 폴더는 crates/<모듈>, 패키지는 pi-<모듈>(server 는 price-inha).
-ALL_MODULES="store secrets ai market paper gate server template rules approval exec data trigger agent journal knowledge backup office notify"
+ALL_MODULES="store secrets ai market paper gate server template rules approval exec data trigger agent journal knowledge backup office notify channel"
 
 module_dirs() { # 모듈 → 폴더들
   case " $ALL_MODULES " in

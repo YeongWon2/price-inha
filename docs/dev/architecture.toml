@@ -102,6 +102,13 @@ component = "A3 알림 · A1 폰 (웹 푸시)"
 internal = ["pi-store"]
 external = ["serde", "serde_json", "thiserror", "tokio", "async-trait", "tracing", "chrono", "reqwest", "url", "p256", "aes-gcm", "hkdf", "sha2", "base64", "rand", "zeroize"]
 
+# 결정 24(2026-11-26 사용자): 메신저 채널(텔레그램 · 슬랙). 저장은 포트로 받는다(내부 의존 없음).
+[crates.pi-channel]
+dir = "crates/channel"
+component = "A3 알림 · 메신저 채널 (결정 24)"
+internal = []
+external = ["serde", "serde_json", "thiserror", "tokio", "async-trait", "tracing", "chrono", "reqwest", "url", "rand", "zeroize", "tokio-tungstenite"]
+
 [crates.pi-knowledge]
 dir = "crates/knowledge"
 component = "M7 지식 (키워드 · 조건 검색, 뜻 검색 자리)"
@@ -117,7 +124,7 @@ external = ["age", "base64", "hex", "reqwest", "serde", "serde_json", "sha2", "t
 [crates.price-inha]
 dir = "crates/server"
 component = "실행 파일, 조립"
-internal = ["pi-store", "pi-secrets", "pi-ai", "pi-market", "pi-paper", "pi-gate", "pi-template", "pi-data", "pi-trigger", "pi-rules", "pi-approval", "pi-office", "pi-exec", "pi-journal", "pi-agent", "pi-notify", "pi-knowledge", "pi-backup"]
+internal = ["pi-store", "pi-secrets", "pi-ai", "pi-market", "pi-paper", "pi-gate", "pi-template", "pi-data", "pi-trigger", "pi-rules", "pi-approval", "pi-office", "pi-exec", "pi-journal", "pi-agent", "pi-notify", "pi-channel", "pi-knowledge", "pi-backup"]
 external = ["*"]
 
 # 어디에도 들어오면 안 되는 의존 (전체 의존 나무 기준)
@@ -191,7 +198,7 @@ fix = "pi-secrets의 공개 API나 CredentialSource trait을 거친다"
 [[patterns]]
 id = "ARCH-ENV-READ"
 regex = '\benv::(var|vars|var_os)\b'
-scope = ["crates/store/src", "crates/ai/src", "crates/market/src", "crates/paper/src", "crates/gate/src", "crates/template/src", "crates/data/src", "crates/trigger/src", "crates/rules/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src"]
+scope = ["crates/store/src", "crates/ai/src", "crates/market/src", "crates/paper/src", "crates/gate/src", "crates/template/src", "crates/data/src", "crates/trigger/src", "crates/rules/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src", "crates/channel/src"]
 why = "환경 변수는 조립하는 곳(price-inha)과 pi-secrets만 읽는다. 라이브러리는 인자로 받는다"
 fix = "설정 값을 생성자 인자로 받게 바꾼다"
 
@@ -219,7 +226,7 @@ fix = "바깥 호출은 어댑터 모듈(pi-ai, pi-market)에 둔다"
 [[patterns]]
 id = "CONV-BOX-ERROR"
 regex = 'Box<dyn (std::error::)?Error'
-scope = ["crates/store/src", "crates/secrets/src", "crates/ai/src", "crates/market/src", "crates/gate/src", "crates/template/src", "crates/data/src", "crates/trigger/src", "crates/rules/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src"]
+scope = ["crates/store/src", "crates/secrets/src", "crates/ai/src", "crates/market/src", "crates/gate/src", "crates/template/src", "crates/data/src", "crates/trigger/src", "crates/rules/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src", "crates/channel/src"]
 why = "라이브러리는 종류가 구분되는 오류 타입을 낸다"
 fix = "thiserror로 만든 그 모듈의 오류 enum을 쓴다"
 
@@ -233,7 +240,7 @@ fix = "값과 시각은 인자로 받고, 저장은 값을 내보내 store에 �
 [[patterns]]
 id = "ARCH-CLOCK-2"
 regex = '\b(SystemTime|Instant|OffsetDateTime|Utc|Local)::now\b|now_utc\(\)'
-scope = ["crates/data/src", "crates/trigger/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src"]
+scope = ["crates/data/src", "crates/trigger/src", "crates/approval/src", "crates/office/src", "crates/exec/src", "crates/journal/src", "crates/agent/src", "crates/notify/src", "crates/channel/src"]
 why = "자료의 알게 된 시각, 깨우기 일정, 승인 만료, 사무실 이벤트 시각은 주입한 Clock으로 낸다(테스트가 시계를 정한다)"
 fix = "Clock trait을 인자로 받아 그 값을 쓴다. 실제 시계는 조립하는 곳(price-inha)이 넣는다"
 
