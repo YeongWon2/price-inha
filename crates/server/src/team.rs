@@ -314,6 +314,8 @@ pub struct Crew {
     ai_cap: quota::DailyQuota,
     /// (16차 3번) 상한에 닿았다고 알린 마지막 날(같은 날 한 번만 알린다).
     ai_cap_told: std::sync::Mutex<Option<chrono::NaiveDate>>,
+    /// (51차) 담당별 하루 AI 사용과 사무실 표시판(진행 단계 · 잔량).
+    meter: budget::Meter,
 }
 
 impl Crew {

@@ -206,3 +206,48 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .legend ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .legend li { display: flex; gap: 8px; align-items: center; }
 .legend-glyph { flex: none; width: 22px; text-align: center; font-size: 14px; font-weight: 700; }
+/* (51차, C22 · V64 · N14) 위 줄 하루 AI 잔량 바: 막대 40×4px, 색은 사용률 단계(0.33 · 0.66)로 초록 → 노랑 → 빨강.
+   막대 끝의 예비분 구간(팀장 몫)은 흐리게 칠한다. 정리 · 팀장만 모드면 테두리와 모드 글이 바뀐다. 누르면 담당별 표. */
+#bar .budget-wrap { position: relative; display: flex; align-items: center; }
+#bar button.budget { display: inline-flex; align-items: center; gap: var(--space-2); margin-left: var(--space-2); white-space: nowrap; }
+#bar .budget-track { position: relative; display: inline-block; width: 40px; height: 4px; border-radius: 999px;
+  background: var(--border); overflow: hidden; }
+#bar .budget-track[hidden] { display: none; }
+#bar .budget-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--success); }
+#bar .budget-reserve { position: absolute; top: 0; bottom: 0; right: 0; background: var(--text-muted); opacity: .35; }
+#bar button.budget[data-level="mid"] .budget-fill { background: var(--warning); }
+#bar button.budget[data-level="high"] .budget-fill { background: var(--danger); }
+#bar .budget-mode { font-size: var(--font-size-sm); font-weight: 700; color: var(--warning); }
+#bar .budget-mode[hidden] { display: none; }
+#bar button.budget[data-mode="wrap_up"] { border-color: var(--warning); }
+#bar button.budget[data-mode="leader_only"] { border-color: var(--danger); }
+#bar button.budget[data-mode="leader_only"] .budget-mode { color: var(--danger); }
+#bar button.budget[data-unlimited="true"] { color: var(--text-muted); }
+#bar .budget-table { position: absolute; top: calc(100% + var(--space-1)); right: 0; z-index: 30; min-width: 280px;
+  border-collapse: collapse; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md); font-size: var(--font-size-sm); }
+#bar .budget-table[hidden] { display: none; }
+#bar .budget-table caption { padding: var(--space-2) var(--space-3) 0; text-align: left; font-weight: 700; }
+#bar .budget-table th, #bar .budget-table td { padding: var(--space-1) var(--space-3); text-align: left; white-space: nowrap; }
+#bar .budget-table thead th { color: var(--text-muted); font-weight: 600; }
+#bar .budget-mini { display: inline-block; position: relative; width: 40px; height: 4px; margin-right: var(--space-2);
+  vertical-align: middle; border-radius: 999px; background: var(--border); overflow: hidden; }
+#bar .budget-mini[hidden] { display: none; }
+#bar .budget-mini-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--success); }
+#bar .budget-table tr[data-level="mid"] .budget-mini-fill { background: var(--warning); }
+#bar .budget-table tr[data-level="high"] .budget-mini-fill { background: var(--danger); }
+/* (51차, C21 · V63) 옆 패널 맨 위 논의 진행 단계: 대기 ○ · 진행 ● · 완료 ✓ · 오류 ! · 다시 시도 n/3, 아래 한 줄 요약. */
+.progress { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); background: var(--surface-sunk);
+  font-size: var(--font-size-sm); }
+.progress[hidden] { display: none; }
+.progress-topic { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1) var(--space-2);
+  margin: var(--space-1) 0; padding: 0; list-style: none; }
+.progress-list li { display: flex; gap: var(--space-1); align-items: baseline; min-width: 0; }
+.progress-mark { flex: none; width: 1em; text-align: center; font-weight: 700; color: var(--text-muted); }
+.progress-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-label { flex: none; color: var(--text-muted); }
+.progress-list li[data-state="running"] .progress-mark, .progress-list li[data-state="running"] .progress-label { color: var(--accent); }
+.progress-list li[data-state="done"] .progress-mark { color: var(--success); }
+.progress-list li[data-state="error"] .progress-mark, .progress-list li[data-state="error"] .progress-label { color: var(--danger); }
+.progress-summary { color: var(--text-muted); }

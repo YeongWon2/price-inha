@@ -84,9 +84,9 @@ impl SpareBudget {
 }
 
 impl AiBudget for SpareBudget {
-    fn try_take(&self, _agent: Agent) -> bool {
+    fn try_take(&self, agent: Agent) -> bool {
         match self.0.get().and_then(Weak::upgrade) {
-            Some(crew) => crew.take_spare_ai_call(),
+            Some(crew) => crew.take_spare_ai_call_by(agent),
             None => true,
         }
     }

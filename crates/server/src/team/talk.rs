@@ -74,10 +74,14 @@ impl Crew {
             .ai_daily_limit
             .or_else(|| self.desk.saved_ai_limit());
         let Some(limit) = limit else {
+            // (51차) 상한이 없어도 그날 쓴 수는 센다(잔량 바의 쓴 수). 막지는 않는다.
+            self.ai_cap.take_within(self.clock.now(), u32::MAX);
+            self.publish_budget();
             return Ok(());
         };
         let now = self.clock.now();
         if self.ai_cap.take_within(now, limit) {
+            self.publish_budget();
             return Ok(());
         }
         let today = super::quota::kst_date(now);
@@ -233,10 +237,8 @@ impl Crew {
             self.table_release(Arc::clone(&lowered), Arc::clone(&self.discussing)),
         );
         self.at_table(true).await;
-        let result = self
-            .team
-            .discuss_with(request, self.discussion_options())
-            .await;
+        // (51차) 진행 단계 신호 · 다시 시도(3번)와 함께 돈다(공지 옵션은 그대로).
+        let result = self.discuss_watched(request).await;
         if !lowered.swap(true, Ordering::SeqCst) {
             self.at_table(false).await;
         }

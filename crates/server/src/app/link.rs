@@ -289,6 +289,8 @@ pub(super) fn attach(
     linked.sink.attach(gate.publisher());
     if let Some(crew) = crew {
         linked.budget.attach(crew);
+        // (51차) 논의 진행 단계 · 하루 AI 잔량 표시판.
+        crew.attach_board(Arc::clone(&linked.progress));
         crew.link(CrewLinks {
             knowledge: Arc::clone(&memory.knowledge),
             office: Some(Arc::clone(&linked.office)),

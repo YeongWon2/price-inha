@@ -244,6 +244,8 @@ async fn snapshot(State(desk): State<Arc<OfficeDesk>>) -> Response {
         json!({
             "agents": agents, "pending": pending, "last_seq": last_seq, "talk": talk,
             OFFICE_PENDING_APPROVALS: approvals,
+            // (51차, C21) 지금 도는 논의의 진행 단계(없으면 null).
+            "progress": desk.linked.progress.current(),
         }),
     )
 }

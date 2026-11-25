@@ -20,19 +20,20 @@ const NOTICE_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 const NOTICE_NOTES_MAX: usize = 20;
 
 /// 하루 상한에서 팀장만 쓰는 몫(N14): 상한의 10%(올림), 최소 2번.
-fn leader_reserve(limit: u32) -> u32 {
+pub(super) fn leader_reserve(limit: u32) -> u32 {
     limit.div_ceil(10).max(LEADER_RESERVE_MIN)
 }
 
 impl Crew {
     /// 공지 확인 답 · 이어 말하기 한 번을 하루 상한에서 잡는다. 팀장 예비분을 남기고 남은 몫이 없으면 거짓.
-    /// 상한이 꺼져 있으면 늘 참(세지 않는다).
+    /// 상한이 꺼져 있으면 늘 참이다. (51차) 그래도 그날 쓴 수는 센다(잔량 바의 쓴 수).
     pub(crate) fn take_spare_ai_call(&self) -> bool {
         let limit = self
             .wiring
             .ai_daily_limit
             .or_else(|| self.desk.saved_ai_limit());
         let Some(limit) = limit else {
+            self.ai_cap.take_within(self.clock.now(), u32::MAX);
             return true;
         };
         let spare = limit.saturating_sub(leader_reserve(limit));

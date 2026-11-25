@@ -70,6 +70,17 @@ impl DailyQuota {
         true
     }
 
+    /// (51차) 오늘(한국 날짜) 쓴 수를 읽기만 한다(쓰지 않는다).
+    pub(super) fn peek(&self, now: DateTime<Utc>) -> u32 {
+        let today = kst_date(now);
+        let used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+        match *used {
+            Some((date, count)) if date == today => count,
+            Some(_) => 0,
+            None => self.saved_count(today),
+        }
+    }
+
     /// 저장소에 남긴 그날의 수(다른 날이거나 없으면 0).
     fn saved_count(&self, today: NaiveDate) -> u32 {
         let saved = self.store.knowledge_meta(self.key).ok().flatten();

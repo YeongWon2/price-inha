@@ -223,6 +223,8 @@ impl Crew {
         if self.take_ai_call().is_err() {
             return None;
         }
+        // (51차) 깨우기 턴은 뉴스 공시 시세 담당의 호출 하나다(담당별 사용).
+        self.note_member_call(Role::Scout);
         let config = self.role(Role::Scout);
         let limits = pi_agent::TimeLimits::MARKET;
         match self
