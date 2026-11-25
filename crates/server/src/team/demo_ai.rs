@@ -112,6 +112,11 @@ impl DemoAi {
         lock(&self.scripts).insert(turn, reply.into());
     }
 
+    /// (51차) 이 뒤로 그 턴의 요청 `times`번을 공급자 장애로 답한다(다시 시도 · 오류 표시 시험용, E51). 뼈대.
+    pub fn fail_next(&self, turn: DemoTurn, times: u32) {
+        let _ = (turn, times);
+    }
+
     /// 받은 요청들의 마지막 사용자 글(받은 순서). 가리기를 거친 뒤의 글이다.
     pub fn prompts(&self) -> Vec<String> {
         lock(&self.prompts).clone()

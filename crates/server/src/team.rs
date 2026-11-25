@@ -38,6 +38,9 @@ mod seen;
 mod talk;
 mod tools;
 mod wake;
+// (51차) 하루 AI 잔량 · 논의 진행 단계.
+mod budget;
+mod progress;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -58,7 +61,9 @@ pub(crate) use http::routes;
 pub(crate) use link::{CrewLinks, role_of};
 pub(crate) use wake::spawn_trigger;
 
+pub use budget::{KIND_TEAM_AI_USED, TEAM_BUDGET_PATH};
 pub use demo_ai::{DemoAi, DemoTurn};
+pub use progress::KIND_OFFICE_PROGRESS;
 
 /// 투자 팀 담당 명단(V1). `GET` → `{"members": [{"id": 담당 id, "name": 담당 이름}, …]}`.
 /// 명단 순서(`pi_agent::Role::ALL`)로 6명이다. 세션이 있어야 열린다.

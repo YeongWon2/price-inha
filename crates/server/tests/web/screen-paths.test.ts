@@ -68,6 +68,8 @@ describe("화면이 부르는 경로", () => {
         "/api/office/summon",
         "/api/office/summon/arrived",
         "/api/office/summon/view",
+        // 51차(차수 표 21번): 하루 AI 잔량 읽기.
+        "/api/team/budget",
         "/ws",
         ...APPROVALS,
       ]),
