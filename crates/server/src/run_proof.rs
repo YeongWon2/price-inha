@@ -18,7 +18,9 @@
 //! ## 확인 경로 ([`WHOAMI_PATH`])
 //!
 //! - `POST` [`WHOAMI_PATH`] 본문 `{"nonce": "<CLI가 만든 난수>"}`([`WHOAMI_NONCE_FIELD`]) →
-//!   200 `{"proof": "<요약값>"}`([`WHOAMI_PROOF_FIELD`]). 요약값은 [`run_proof`]`(증표, nonce)`다.
+//!   200 `{"proof": "<요약값>"}`([`WHOAMI_PROOF_FIELD`]). 요약값은 [`run_proof`]`(증표, nonce, 포트)`다.
+//!   포트는 (38차 보강) 서버의 관문이 **실제로 묶인 주소의 포트**다. 요청에서 받은 값(Host 머리글 등)으로 정하지
+//!   않는다 — 사칭이 고쳐 보낼 수 있다.
 //! - nonce는 [`WHOAMI_NONCE_MIN_LEN`] ~ [`WHOAMI_NONCE_MAX_LEN`]글자의 ASCII 16진수(`0-9a-fA-F`)다. 칸이 없거나,
 //!   짧거나 길거나, 16진수가 아니거나, 본문이 JSON이 아니면 400이고 요약값을 싣지 않는다.
 //! - 세션이 있고 **그 컴퓨터(루프백)에서 온** 요청에만 답한다(`pi_gate::local_only`와 같은 관문 — 원격 세션 ·
@@ -27,9 +29,15 @@
 //!
 //! ## 요약값 ([`run_proof`])
 //!
-//! `run_proof(token, nonce)` = 소문자 16진수(SHA-256( [`RUN_PROOF_DOMAIN`] ‖ `"\n"` ‖ token ‖ `"\n"` ‖ nonce )).
+//! `run_proof(token, nonce, port)` = 소문자 16진수(SHA-256( [`RUN_PROOF_DOMAIN`] ‖ `"\n"` ‖ token ‖ `"\n"` ‖ nonce
+//! ‖ `"\n"` ‖ 십진수 포트 )).
 //! `token`은 증표 파일의 글자(64글자 16진수) 그대로, `nonce`는 보낸 글자 그대로(대소문자를 바꾸지 않는다)의
-//! UTF-8 바이트다. 결과는 64글자. 증표를 모르면 만들 수 없고, 요약값에서 증표를 되찾을 수 없다.
+//! UTF-8 바이트, 포트는 앞 0 없는 십진수 글자(`u16`의 `to_string`)다. 결과는 64글자. 증표를 모르면 만들 수 없고,
+//! 요약값에서 증표를 되찾을 수 없다.
+//!
+//! (38차 보강 — 중계 사칭) 요약값을 포트와 묶는다: 서버는 자기가 실제로 연 포트로, CLI는 자기가 접속한 포트로
+//! 계산한다. 진짜 서버가 다른 포트에서 돌 때 설정 포트를 차지한 사칭이 nonce를 진짜 서버의 `whoami`로 중계해도
+//! 포트가 달라 맞지 않는다. 도메인 글자의 판 번호는 v2다(옛 식과 섞이지 않게).
 //!
 //! ## CLI의 확인 (`setup` · `access-key` · `open`)
 //!
@@ -38,7 +46,7 @@
 //! 1. 보관 폴더의 [`RUN_PROOF_FILE`]을 읽는다. 없거나, 유닉스에서 주인이 지금 사용자가 아니거나, 권한에
 //!    0600 밖의 비트(그룹 · 남 · 실행)가 있으면 실패.
 //! 2. 운영체제 난수로 nonce(16진수 [`WHOAMI_NONCE_MIN_LEN`]글자 이상)를 만들어 [`WHOAMI_PATH`]에 보낸다.
-//! 3. 답의 `proof`가 [`run_proof`]`(파일의 증표, nonce)`와 같아야 한다(상수 시간 비교). 아니면 실패.
+//! 3. 답의 `proof`가 [`run_proof`]`(파일의 증표, nonce, 접속한 포트)`와 같아야 한다(상수 시간 비교). 아니면 실패.
 //!
 //! 실패하면 아무것도 보내지 않고 멈춘다. 출력에 [`NOT_THIS_HOME_SERVER`] 글이 든다. 종료 코드는 지금의 "그 포트에
 //! 다른 프로그램"과 같다: `setup`은 [`crate::SETUP_FAILED_EXIT`], `access-key`는 1(`CliError::NotOurServer`와
@@ -65,7 +73,7 @@ pub const WHOAMI_NONCE_MIN_LEN: usize = 32;
 pub const WHOAMI_NONCE_MAX_LEN: usize = 128;
 
 /// 요약값 계산의 앞머리(다른 쓰임의 SHA-256과 섞이지 않게).
-pub const RUN_PROOF_DOMAIN: &str = "price-inha run proof v1";
+pub const RUN_PROOF_DOMAIN: &str = "price-inha run proof v2";
 
 /// CLI가 확인에 실패해 멈출 때 출력에 드는 까닭 글.
 pub const NOT_THIS_HOME_SERVER: &str = "이 포트에서 답하는 것은 이 보관 폴더의 서버가 아닙니다";
@@ -88,8 +96,10 @@ use zeroize::Zeroizing;
 
 use crate::AppError;
 
-/// 증표와 nonce로 요약값을 만든다(모듈 문서의 식). 소문자 16진수 64글자.
-pub fn run_proof(token: &str, nonce: &str) -> String {
+/// 증표 · nonce · 포트로 요약값을 만든다(모듈 문서의 식). 소문자 16진수 64글자.
+pub fn run_proof(token: &str, nonce: &str, port: u16) -> String {
+    // 뼈대(38차 보강 red): 포트를 아직 섞지 않는다 — 구현이 식에 더한다.
+    let _ = port;
     let mut hasher = Sha256::new();
     hasher.update(RUN_PROOF_DOMAIN.as_bytes());
     hasher.update(b"\n");
@@ -228,7 +238,7 @@ async fn whoami(State(token): State<Token>, body: Bytes) -> Response {
     let (status, body) = match nonce_of(&body) {
         Some(nonce) => (
             StatusCode::OK,
-            json!({ WHOAMI_PROOF_FIELD: run_proof(token.as_str(), &nonce) }),
+            json!({ WHOAMI_PROOF_FIELD: run_proof(token.as_str(), &nonce, 0) }),
         ),
         None => (StatusCode::BAD_REQUEST, json!({ "error": "invalid_input" })),
     };

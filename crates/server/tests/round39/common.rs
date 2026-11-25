@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use price_inha::{
     ACCESS_KEY_PATH, App, Launch, RUN_PROOF_DOMAIN, RUN_PROOF_FILE, Settings, TradingWiring,
-    WHOAMI_NONCE_FIELD, WHOAMI_PATH, WHOAMI_PROOF_FIELD, Wiring, run_proof,
+    WHOAMI_NONCE_FIELD, WHOAMI_PATH, WHOAMI_PROOF_FIELD, Wiring,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -147,14 +147,17 @@ pub fn is_token(text: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// 계약의 식을 시험이 따로 계산한다: 소문자 16진수(SHA-256(앞머리 ‖ "\n" ‖ 증표 ‖ "\n" ‖ nonce)).
-pub fn expected_proof(token: &str, nonce: &str) -> String {
+/// 계약의 식을 시험이 따로 계산한다(38차 보강): 소문자 16진수(SHA-256(앞머리 v2 ‖ "\n" ‖ 증표 ‖ "\n" ‖ nonce
+/// ‖ "\n" ‖ 십진수 포트)).
+pub fn expected_proof(token: &str, nonce: &str, port: u16) -> String {
     let mut hasher = Sha256::new();
     hasher.update(RUN_PROOF_DOMAIN.as_bytes());
     hasher.update(b"\n");
     hasher.update(token.as_bytes());
     hasher.update(b"\n");
     hasher.update(nonce.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(port.to_string().as_bytes());
     hasher
         .finalize()
         .iter()
@@ -256,6 +259,14 @@ pub async fn enter(addr: SocketAddr, key: Option<&str>, remote: bool) -> Reply {
     send(request, remote).await
 }
 
+/// 다른 서버의 [`WHOAMI_PATH`]에 그 컴퓨터의 세션으로 `body`를 보내고 답(상태 · 본문 글)을 돌려준다 — 중계
+/// 사칭이 받은 nonce를 진짜 서버로 넘길 때 쓴다(사칭도 같은 컴퓨터라 세션을 얻는다).
+pub async fn relay_whoami(addr: SocketAddr, body: &str) -> (u16, String) {
+    let cookie = local_session(addr).await;
+    let reply = whoami(addr, Some(&cookie), body, false).await;
+    (reply.status, reply.text)
+}
+
 /// 그 컴퓨터의 세션 쿠키.
 pub async fn local_session(addr: SocketAddr) -> String {
     enter(addr, None, false)
@@ -333,6 +344,8 @@ impl Impostor {
     }
 
     async fn mount(server: MockServer, whoami: Whoami) -> Impostor {
+        // 증표를 아는 도우미는 CLI가 접속한 자기 포트로 요약값을 만든다(38차 보강의 식).
+        let own_port = server.address().port();
         Mock::given(method("POST"))
             .and(path(pi_gate::SESSION_PATH))
             .respond_with(
@@ -355,8 +368,9 @@ impl Impostor {
                 Whoami::Proves(token) => {
                     let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
                     let nonce = body[WHOAMI_NONCE_FIELD].as_str().unwrap_or_default();
-                    ResponseTemplate::new(200)
-                        .set_body_json(json!({ WHOAMI_PROOF_FIELD: run_proof(token, nonce) }))
+                    ResponseTemplate::new(200).set_body_json(
+                        json!({ WHOAMI_PROOF_FIELD: expected_proof(token, nonce, own_port) }),
+                    )
                 }
             })
             .with_priority(1)

@@ -16,6 +16,9 @@ use crate::common::{
 };
 use crate::run::{Env, Wizard};
 
+/// 식 시험에 쓰는 포트(시험이 정한 값).
+const PORT: u16 = 7878;
+
 /// 16진수 nonce(시험이 정한 글자).
 fn nonce(len: usize, seed: char) -> String {
     std::iter::repeat_n(seed, len).collect()
@@ -84,10 +87,10 @@ async fn whoami는_증표와_nonce로_만든_요약값을_준다() {
             .to_string();
         assert_eq!(
             proof,
-            expected_proof(&token, &asked),
-            "요약값은 계약의 식(증표 · nonce)이다"
+            expected_proof(&token, &asked, addr.port()),
+            "요약값은 계약의 식(증표 · nonce · 서버가 연 포트)이다"
         );
-        assert_eq!(proof, run_proof(&token, &asked));
+        assert_eq!(proof, run_proof(&token, &asked, addr.port()));
         assert!(!reply.text.contains(&token), "답에 증표 글자가 없다");
         seen.push(proof);
     }
@@ -186,31 +189,31 @@ async fn 원격_상대에게는_요약값을_주지_않는다() {
 #[test]
 fn 요약값은_계약의_식이고_증표를_담지_않는다() {
     let asked = nonce(WHOAMI_NONCE_MIN_LEN, 'c');
-    let proof = run_proof(TOKEN_HOME, &asked);
+    let proof = run_proof(TOKEN_HOME, &asked, PORT);
     assert_eq!(
         proof,
-        expected_proof(TOKEN_HOME, &asked),
+        expected_proof(TOKEN_HOME, &asked, PORT),
         "앞머리 {RUN_PROOF_DOMAIN}"
     );
     assert!(is_token(&proof), "소문자 16진수 64글자");
     assert!(!proof.contains(TOKEN_HOME));
     assert_ne!(
         proof,
-        run_proof(TOKEN_OTHER, &asked),
+        run_proof(TOKEN_OTHER, &asked, PORT),
         "증표가 다르면 요약값도 다르다"
     );
     assert_ne!(
         proof,
-        run_proof(TOKEN_HOME, &nonce(WHOAMI_NONCE_MIN_LEN, 'd')),
+        run_proof(TOKEN_HOME, &nonce(WHOAMI_NONCE_MIN_LEN, 'd'), PORT),
         "nonce가 다르면 요약값도 다르다"
     );
     // nonce 글자는 바꾸지 않고 쓴다(대소문자 그대로).
     let upper = asked.to_uppercase();
     assert_eq!(
-        run_proof(TOKEN_HOME, &upper),
-        expected_proof(TOKEN_HOME, &upper)
+        run_proof(TOKEN_HOME, &upper, PORT),
+        expected_proof(TOKEN_HOME, &upper, PORT)
     );
-    assert_ne!(run_proof(TOKEN_HOME, &upper), proof);
+    assert_ne!(run_proof(TOKEN_HOME, &upper, PORT), proof);
 }
 
 // 검증: N8 E38 D2
@@ -271,7 +274,7 @@ async fn 실행_파일로_띄운_서버는_기록과_보관_폴더에_증표를_
     assert_eq!(reply.status, 200, "{}", reply.text);
     assert_eq!(
         reply.body[WHOAMI_PROOF_FIELD].as_str(),
-        Some(expected_proof(&token, &asked).as_str())
+        Some(expected_proof(&token, &asked, port).as_str())
     );
 
     // 끄기 신호(SIGTERM).
