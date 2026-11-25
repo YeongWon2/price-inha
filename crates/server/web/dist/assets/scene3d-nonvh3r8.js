@@ -1,4 +1,4 @@
-import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gfkp5x9p.js";
+import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gnempdio.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors

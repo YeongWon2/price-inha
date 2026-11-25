@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-ndyyrws6.js";
+import { n as API, t as mountMenu } from "./menu-iyrf4dyx.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-lxatn1hv.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-d3wzz2ba.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";

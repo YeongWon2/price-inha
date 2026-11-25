@@ -233,6 +233,52 @@ pub const KIND_DAY_CLOSE: &str = "day_close";
 /// `{"date": "YYYY-MM-DD", "plan": "trade" | "rest", "reason": 쉬는 이유 | null}`.
 pub const KIND_DAY_PLAN: &str = "day_plan";
 
+/// (35차 1번, 결정 19번 · P5 · P8) 보관 폴더의 금지 종목 · 업종표 파일 이름. 모양:
+///
+/// ```text
+/// {"banned": [{"market": "kr" | "us", "symbol": 종목 글자}], "sectors": {"<종목 글자>": "업종 이름", …}}
+/// ```
+///
+/// - 켤 때(`App::launch_with` — 따라서 `App::start` · `App::launch_run`도, 시연 모드여도) 읽어 주문 길의
+///   [`TradingWiring::rules`]를 **대신한다**(파일 값이 주문 전 점검의 금지 종목(P5) · 업종표(P8)가 된다).
+/// - 파일이 없으면 조립이 준 값 그대로다(기본 조립은 빈 표 — 지금과 같이 표에 없는 종목의 사는 주문은 P8로 막는다).
+/// - 파일이 깨졌으면(JSON이 아님 · 모양이 다름 · 값 검사([`RULES_CONFIG_PATH`]의 `POST`와 같은 규칙)에 걸림)
+///   켜지지 않고 `AppError::BadFile { file: RULES_CONFIG_FILE, .. }`로 까닭을 말한다(조용히 빈 표로 돌지 않는다).
+/// - 시연 조립(`crate::run_assembly`, `--demo`)의 시연 업종("시연 업종 A" 식)은 조립 값으로만 넣고 이 파일에 쓰지
+///   않는다(E56). 파일이 있어도 지켜보는 종목 가운데 업종이 없는 것에는 시연 업종이 더해진다. `App::launch_with`에
+///   직접 준 조립 값에는 (시연 설정이어도) 시연 업종을 더하지 않는다(기존 시험의 빈 표 조립이 그대로다).
+pub const RULES_CONFIG_FILE: &str = "rules-config.json";
+
+/// (35차 2번, R7-3 · F5) 금지 종목 · 업종표 읽기 · 고치기.
+///
+/// `GET` → 200
+///
+/// ```text
+/// {"banned": [{"market": "kr" | "us", "symbol"}],          // 저장된 차례
+///  "sectors": [{"symbol", "sector"}],                         // 종목 글자 차례
+///  "editable": bool,                                          // 이 요청이 그 컴퓨터에서 왔는가(원격이면 false)
+///  "unsectored": [종목 글자]}                                 // 지켜보는 종목 가운데 업종표에 없는 것(지켜보는 차례)
+/// ```
+///
+/// `POST` `{"banned": [...], "sectors": [{"symbol", "sector"}]}`(같은 모양, 두 칸뿐)로 **통째** 바꾼다.
+/// - 세션이 있어야 한다(없으면 관문이 401 — `GET`도). 고치기는 **그 컴퓨터에서만**: 원격 세션의 `POST`는 403이고
+///   저장하지 않으며 바꾼 일도 남기지 않는다(하루 AI 상한과 같은 관문 — 규칙을 푸는 일은 사용자가 직접). 원격 세션의
+///   `GET`은 200이고 `"editable": false`다.
+/// - 값 검사: 종목은 `pi_market::Symbol::parse` 글자, 시장은 `"kr"` · `"us"`, 업종 이름은 앞뒤 공백을 뗀 뒤
+///   1자 이상 [`RULES_SECTOR_MAX_CHARS`]자 이하, 같은 종목이 업종표에 두 번 · 같은 (시장, 종목)이 금지 목록에
+///   두 번이면 안 된다. 걸리면 400 `{"error": "invalid_input"}`이고 아무것도 저장하지 않는다(파일 · 점검 값 그대로).
+/// - 저장은 원자적으로(임시 파일 → 옮기기) [`RULES_CONFIG_FILE`]에 쓰고, 바꾼 값은 **다시 켜지 않아도** 다음
+///   주문 전 점검부터 쓰인다. 응답은 200과 `GET`과 같은 모양(바꾼 뒤 값).
+/// - 바꾼 일을 [`KIND_RULES_CONFIG`] 이벤트로 남긴다.
+pub const RULES_CONFIG_PATH: &str = "/api/rules/config";
+
+/// (35차 2번) 업종 이름의 가장 긴 글자 수(앞뒤 공백을 뗀 뒤 센다).
+pub const RULES_SECTOR_MAX_CHARS: usize = 40;
+
+/// (35차 2번) 저장되는 이벤트 종류: 금지 종목 · 업종표를 바꿨다. 내용
+/// `{"at": 유닉스 밀리초, "by": "local", "banned": 금지 종목 수, "sectors": 업종표 줄 수}`(값 자체는 싣지 않아도 된다).
+pub const KIND_RULES_CONFIG: &str = "rules_config";
+
 /// 날짜 → 그 시장의 달력. 조립하는 쪽(테스트)이 넣는다.
 pub type CalendarFn = Arc<dyn Fn(NaiveDate) -> MarketCalendar + Send + Sync>;
 

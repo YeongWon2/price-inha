@@ -31,6 +31,10 @@ pub struct RunAssembly {
 /// 실행 파일 `run`의 조립: 실제 주소 · 실제 시계([`Wiring::default`]), 기본 주문 길, 공식 투자 팀
 /// ([`TeamWiring::official`]), 빈 [`Reach`]. `settings.demo`면 시연 달력 · 시연용 가짜 공시를 켠다
 /// ([`DemoWiring::binary`]). 시연이 아니면 시연 달력이 섞이지 않는다(E56). `secrets`는 부르는 쪽이 연 보관소.
+///
+/// (35차 4번) `settings.demo`면 지켜보는 종목 전부에 시연용 업종("시연 업종 A" 식)을 조립 값으로 넣는다
+/// (`crate::RULES_CONFIG_FILE`에 쓰지 않는다). 시연 어댑터는 종목 상태(VI · 거래정지)를 "아님"으로 알린다. 그래서
+/// 시연에서 팀이 사기로 정하면 주문 전 점검(P8 · P12)을 지나 주문(또는 승인 기다림)까지 간다 — 모의계좌뿐이다.
 pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> RunAssembly {
     let demo = if settings.demo {
         DemoWiring::binary()

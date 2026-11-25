@@ -342,7 +342,10 @@ describe("규칙 화면 · 못 읽음 · 경로 · 가벼움", () => {
     record();
     const table = SCREEN_PATHS.rules;
     for (const url of seen) expect(table, url).toContain(url);
-    expect([...table].sort()).toEqual(["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer"].sort());
+    // 35차 2번 · 3번: 금지 종목 · 업종표 경로가 더해진다(그 경로만 더한다).
+    expect([...table].sort()).toEqual(
+      ["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer", "/api/rules/config"].sort(),
+    );
   });
 
   it("규칙 main은 메뉴와 화면을 그리고 '준비 중'이 아니다", async () => {

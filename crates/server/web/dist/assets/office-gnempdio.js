@@ -1,5 +1,5 @@
-import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ndyyrws6.js";
-import { n as soundEnabled } from "./sound-pref-lxatn1hv.js";
+import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-iyrf4dyx.js";
+import { n as soundEnabled } from "./sound-pref-d3wzz2ba.js";
 var PENDING$1 = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -58,8 +58,10 @@ function newCard(root, number, fetcher) {
 /**
 * 이벤트 한 건을 카드에 반영한다. `pending`이면 그 번호의 카드를 그리거나 고치고(같은 번호는 한 장),
 * 아니면 그 카드를 닫는다(지운다). 모양이 맞지 않는 몸통은 무시한다.
+*
+* (35차 6번) `resync`를 주면 이 카드의 승인 · 거절 단추가 [`decideApproval`]에 그대로 넘긴다(실패 뒤 다시 읽기).
 */
-function applyApproval(root, payload, fetcher) {
+function applyApproval(root, payload, fetcher, resync) {
 	const approval = parse(payload);
 	if (!approval) return;
 	const existing = findCard(root, approval.number);
@@ -87,8 +89,12 @@ function lockVerbs(card, locked) {
 *
 * 폰과 같이 GET /api/approvals/{id}로 전체 지문을 받아, 그 앞 6자가 카드에 보인
 * 지문 앞 6자와 같을 때만 POST /api/approvals/{id}/{verb} `{"fingerprint": 전체 지문}`을 보낸다.
+*
+* (35차 6번) 결과가 실패(`failed` — 승인 내용 읽기나 답 보내기가 200대가 아님(5xx 포함) · 연결 실패)면 `resync`를
+* 한 번 부른다(서버가 이미 닫은 요청의 ✋가 남지 않게 대기 목록을 다시 읽는다). 보냄 · 지문 다름 · 이미 보내는 중이라
+* 막힘에는 부르지 않는다. `resync`가 던져도 결과와 단추 상태는 그대로다.
 */
-async function decideApproval(root, number, verb, fetcher) {
+async function decideApproval(root, number, verb, fetcher, resync) {
 	const card = findCard(root, number);
 	if (card?.dataset.deciding === "1") return "failed";
 	if (card) card.dataset.deciding = "1";
@@ -3459,7 +3465,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-l0iv9oez.js");
+		const { webglAvailable, createScene } = await import("./scene3d-nonvh3r8.js");
 		return {
 			webglAvailable,
 			createScene

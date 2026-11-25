@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-ndyyrws6.js";
+import { n as API, t as mountMenu } from "./menu-iyrf4dyx.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/keys/main.ts
 mountMenu(document.getElementById("menu"), "keys");

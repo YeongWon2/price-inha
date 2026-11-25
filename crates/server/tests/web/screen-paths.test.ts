@@ -77,8 +77,9 @@ describe("화면이 부르는 경로", () => {
       sorted(["/api/session", "/api/trades", "/api/trades/{id}", "/api/daily-summary", "/api/approvals"]),
     );
     // 28차 2번: 규칙 화면은 규칙 읽기 · 개선안 목록 · 개선안 답하기 경로를 부른다.
+    // 35차 2번 · 3번: 금지 종목 · 업종표 읽기 · 고치기 경로를 더 부른다.
     expect(sorted(SCREEN_PATHS.rules)).toEqual(
-      sorted(["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer"]),
+      sorted(["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer", "/api/rules/config"]),
     );
     // 27차 4번: 템플릿 화면은 읽기 · 고르기 · 값 맞추기 · 멈추기 · 승인 카드(읽기 · 승인) 경로를 부른다.
     expect(sorted(SCREEN_PATHS.templates)).toEqual(

@@ -425,6 +425,10 @@ pub const KNOWLEDGE_TOOL: &str = "knowledge_search";
 ///   ([`OFFICE_PENDING_APPROVALS`]와 같은 규칙).
 /// - `"state"`: `"waiting"`(기다림) · `"answered"`(승인 · 거절) · `"expired"`(답 없음 · 만료로 닫힘).
 ///   답 없음 · 만료로 닫힐 때도 같은 번호로 이 이벤트를 낸다.
+///
+/// (35차 5번) 규칙 개선안(복기가 낸 것 · 실전중 템플릿의 위험을 키우는 사용자 변경)의 승인 요청도 다른 승인과
+/// 같게 만들 때 이 이벤트(`agent` `"review"`, `state` `"waiting"`, `status` `"pending"`)를 한 번 낸다
+/// (`crate::KIND_PROPOSAL`은 그대로 낸다). 폰 알림은 지금 규칙 그대로다(두 번 가지 않게).
 pub const KIND_OFFICE_APPROVAL: &str = "office.approval";
 
 /// (10차 10c 13번) 뜻 검색 설정. `GET` → `{"enabled", "base_url", "model"}`(처음에는 꺼짐 ·

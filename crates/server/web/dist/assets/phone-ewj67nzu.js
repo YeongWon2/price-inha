@@ -1,4 +1,4 @@
-import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-ndyyrws6.js";
+import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-iyrf4dyx.js";
 // src/phone/main.ts
 mountMenu(document.getElementById("menu"), "phone");
 var OFFICE_PATH = SCREEN_ROOTS.office;

@@ -1,4 +1,4 @@
-import { a as approvalPath, n as API, o as decidePath, s as templateStopPath, t as mountMenu } from "./menu-ndyyrws6.js";
+import { a as approvalPath, n as API, o as decidePath, s as templateStopPath, t as mountMenu } from "./menu-iyrf4dyx.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";

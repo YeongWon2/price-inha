@@ -50,6 +50,7 @@ var API = {
 	rules: "/api/rules",
 	proposals: "/api/proposals",
 	proposalAnswer: "/api/proposals/answer",
+	rulesConfig: "/api/rules/config",
 	trades: "/api/trades",
 	approvalLog: "/api/approvals",
 	account: "/api/account",
@@ -98,7 +99,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.account, API.team, API.teamRestart, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.session, API.trades, API.dailySummary, API.approvalLog;
+], API.session, API.account, API.team, API.teamRestart, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.session, API.trades, API.dailySummary, API.approvalLog;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));

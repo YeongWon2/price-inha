@@ -1,4 +1,4 @@
-import { c as tradePath, n as API, t as mountMenu } from "./menu-ndyyrws6.js";
+import { c as tradePath, n as API, t as mountMenu } from "./menu-iyrf4dyx.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
 import { a as errorLine, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
