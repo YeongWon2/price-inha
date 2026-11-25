@@ -3,7 +3,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use pi_gate::{GateServer, Publisher};
 use pi_market::{Clock, SystemClock};
@@ -13,7 +12,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::desk::Desk;
-use crate::team::{CrewParts, spawn_trigger};
 use crate::trading::{TradingParts, default_wiring};
 use crate::{AppError, CLI_COMMON_LOCATIONS, Crew, Settings, Trading, Upstreams};
 
@@ -32,18 +30,18 @@ use crate::{AppError, CLI_COMMON_LOCATIONS, Crew, Settings, Trading, Upstreams};
 /// 사람이 시작이 늦다고 느끼지 않는 값이다.
 const CLI_CHECK_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
 
+mod crew;
 mod link;
 mod parts;
 mod run;
 
+use crew::{crew_trigger, open_crew, team_with_limit};
 pub use parts::announce_addr;
 use parts::{
     check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, setup_view, spawn_feed,
 };
 use run::DemoRun;
 pub use run::{RunAssembly, run_assembly};
-
-use crate::demo::DemoWiring;
 
 /// 저장소 파일 이름(보관 폴더 안).
 pub const DB_FILE: &str = "price-inha.sqlite";
@@ -175,66 +173,8 @@ pub struct App {
     reembed: JoinHandle<()>,
     /// (38차) 이번 실행의 증표 파일(끌 때 · 놓을 때 지운다).
     run_proof: crate::run_proof::RunProofFile,
-}
-
-/// 팀이 있으면 깨우기 엔진을 띄운다.
-/// (24차) `demo`는 시연 값(꺼짐이면 지금 동작 그대로).
-async fn crew_trigger(
-    crew: Option<&Arc<Crew>>,
-    clock: &Arc<dyn Clock>,
-    stop: &watch::Sender<bool>,
-    demo: &DemoWiring,
-) -> Result<Option<JoinHandle<()>>, AppError> {
-    match crew {
-        Some(crew) => Ok(Some(
-            spawn_trigger(crew, Arc::clone(clock), stop.subscribe(), demo).await?,
-        )),
-        None => Ok(None),
-    }
-}
-
-/// 투자 팀을 잇는다(`team`이 없으면 잇지 않는다).
-/// (17차 4번) 설정의 하루 AI 호출 상한을 팀 조립에 잇는다(팀 조립에 이미 적힌 값이 앞선다). (22차 6번) 그 켤 때 값을
-/// 설정 책상에도 적는다(설정 상태에 보이고, 화면에서 저장한 값보다 앞선다).
-fn team_with_limit(
-    team: Option<crate::TeamWiring>,
-    settings: &Settings,
-    desk: &Desk,
-) -> Option<crate::TeamWiring> {
-    team.map(|mut team| {
-        team.ai_daily_limit = team.ai_daily_limit.or(settings.ai_daily_limit);
-        desk.set_launch_ai_limit(team.ai_daily_limit);
-        team
-    })
-}
-
-/// (24차) `stored.1`(offline)이 참이면 팀이 바깥 자료(DART · ECOS · FRED · 네이버)를 부르지 않는다.
-/// (25차 3번) `stored.2`는 시연용 가짜 AI가 답마다 두는 뜸이다.
-fn open_crew(
-    team: Option<crate::TeamWiring>,
-    stored: (&Store, bool, Duration),
-    wiring: &Wiring,
-    trading: &Arc<Trading>,
-    desk: &Arc<Desk>,
-    secrets: &Arc<SecretStore>,
-) -> Result<Option<Arc<Crew>>, AppError> {
-    let Some(team) = team else {
-        return Ok(None);
-    };
-    let (store, offline, demo_ai_pause) = stored;
-    let crew = Crew::open(CrewParts {
-        store: store.clone(),
-        clock: Arc::clone(&wiring.clock),
-        trading: Arc::clone(trading),
-        desk: Arc::clone(desk),
-        secrets: Arc::clone(secrets),
-        wiring: team,
-        offline,
-        demo_ai_pause,
-    })?;
-    // (28차 3번) 승인 카드 길로 온 개선안 답이 개선안 답하기와 같은 함수를 타게 잇는다.
-    trading.hook_proposals(link::proposal_hook(Arc::downgrade(&crew)));
-    Ok(Some(crew))
+    /// (39차) 메신저([`App::launch_with_messenger`]로 띄웠을 때만). 끌 때 받기 루프를 멈춘다.
+    messenger: Option<Arc<crate::messenger::Messenger>>,
 }
 
 /// 보관 폴더의 비밀 보관소(부르는 쪽이 연 것이 있으면 그것)와 저장소를 연다. 밖의 주소로 열면 경고를 남긴다.
@@ -334,9 +274,10 @@ impl App {
         settings: Settings,
         wiring: Wiring,
         mut launch: Launch,
-        reach: Option<crate::Reach>,
+        reach: Option<(crate::Reach, crate::MessengerWiring)>,
         demo: DemoRun,
     ) -> Result<App, AppError> {
+        let (reach, messenger) = reach.unzip();
         // 되살리기 중 꺼져 남은 작업 폴더(보관 폴더 옆)를 지운다.
         crate::reach::clear_restore_leftover(&settings.home);
         let demo_sectors = demo.prepare(&settings, &mut launch)?;
@@ -363,6 +304,8 @@ impl App {
             &secrets,
         )?;
         let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
+        let messenger =
+            link::open_messenger(messenger, &settings, linked.as_ref(), &trading, &store);
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());
         let (extra, alert) = link::session_parts(linked.as_ref(), &trading, crew.as_ref(), &store);
         let extra = link::with_semantic(extra, &memory.semantic);
@@ -404,6 +347,7 @@ impl App {
             office_sync,
             reembed,
             run_proof,
+            messenger,
         })
     }
 
@@ -471,6 +415,11 @@ impl App {
             let _ = sync.await;
         }
         let _ = self.reembed.await;
+        // (39차) 메신저 받기 루프를 멈추고 거둔다(자식 태스크가 남지 않게).
+        if let Some(messenger) = &self.messenger {
+            messenger.shutdown().await;
+        }
+        drop(self.messenger);
         drop(self.linked);
         drop(self.crew);
         // 뒤에서 돌던 CLI 확인을 그만두고(확인 프로세스는 `pi-ai`가 시간 제한으로 거둔다),

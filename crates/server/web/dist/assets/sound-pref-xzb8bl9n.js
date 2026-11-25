@@ -1,5 +1,5 @@
-import { n as API } from "./menu-iyrf4dyx.js";
-import { n as call } from "./call-k6mg8w4a.js";
+import { n as API } from "./menu-ebudw6pk.js";
+import { n as call } from "./call-enmqzayl.js";
 /** 서버 답에서 `enabled`(참 · 거짓)를 꺼낸다. 모양이 다르면 `null`. */
 function enabledOf(body) {
 	if (body === null || typeof body !== "object" || Array.isArray(body)) return null;

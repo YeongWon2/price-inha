@@ -267,6 +267,15 @@ impl Trading {
             .map_or(Decimal::ZERO, |b| b.equity - b.day_start_equity))
     }
 
+    /// (39차) 보유 종목 수(모든 통화 장부의 수량이 0이 아닌 보유).
+    pub(crate) async fn holdings_count(&self) -> Result<usize, TradingError> {
+        let books = self.books(self.clock.now()).await?;
+        Ok(books
+            .iter()
+            .map(|b| b.positions.iter().filter(|p| !p.quantity.is_zero()).count())
+            .sum())
+    }
+
     /// 팔린(복기됨 포함) 매매의 요약(조건 검색, 기록 키는 매매 번호 글자). 손익은 그 매매 주문들의 돈 흐름 합이다.
     pub(crate) async fn sold_records(&self) -> Result<Vec<TradeRecord>, TradingError> {
         let orders = self.closed_orders().await?;

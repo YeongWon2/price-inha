@@ -67,6 +67,7 @@
 mod book;
 mod commands;
 mod http;
+mod hub;
 mod outbound;
 mod runner;
 mod status;
@@ -81,11 +82,13 @@ pub use commands::{
     MESSENGER_HELP, MESSENGER_NO_APPROVALS, MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED,
     MESSENGER_SHORT_ID_LEN, MESSENGER_STATUS_PENDING, MESSENGER_STOP_LATER, MESSENGER_UNKNOWN,
 };
+pub(crate) use http::routes;
 pub use http::{
     MESSENGER_DEMO_REFUSED, MESSENGER_LOCKED, MESSENGER_OWNER_EXISTS,
     MESSENGER_PAIRING_APPROVE_PATH, MESSENGER_PAIRING_REVOKE_PATH, MESSENGER_PATH,
     MESSENGER_TELEGRAM_PATH, MESSENGER_WRONG_CODE,
 };
+pub(crate) use hub::{Messenger, MessengerParts};
 pub use outbound::{MESSENGER_REJECT_HINT, MESSENGER_WEB_ONLY};
 pub use runner::MESSENGER_PAIRING_REPLY;
 pub use status::{

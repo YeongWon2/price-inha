@@ -24,6 +24,10 @@ var API = {
 	setupSemantic: "/api/setup/semantic",
 	setupDoctor: "/api/setup/doctor",
 	setupSound: "/api/setup/sound",
+	messenger: "/api/messenger",
+	messengerTelegram: "/api/messenger/telegram",
+	messengerApprove: "/api/messenger/pairing/approve",
+	messengerRevoke: "/api/messenger/pairing/revoke",
 	accessKey: "/api/access/key",
 	accessUnlock: "/api/access/unlock",
 	accessLog: "/api/access/log",
@@ -78,7 +82,7 @@ var APPROVALS = [
 	"/api/approvals/{id}/approve",
 	"/api/approvals/{id}/reject"
 ];
-API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.setupSound, API.remoteKeys, API.setupSlots, API.setupProviders, [
+API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.setupSound, API.messenger, API.messengerTelegram, API.messengerApprove, API.messengerRevoke, API.remoteKeys, API.setupSlots, API.setupProviders, [
 	API.session,
 	API.office,
 	API.officeChat,

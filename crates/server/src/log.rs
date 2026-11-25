@@ -7,7 +7,10 @@ use std::io;
 use std::sync::Arc;
 
 use pi_secrets::SecretStore;
+use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// tracing 출력의 가리기 자리. `W`는 실제로 쓰는 곳(표준 오류 등)이다.
 ///
@@ -79,5 +82,54 @@ where
             inner: self.inner.make_writer(),
             pending: Vec::new(),
         }
+    }
+}
+
+/// (39차 9번) HTTP 라이브러리의 기록 대상. 이 대상들은 경고 이상만 남긴다(자세한 연결 기록을 켜지 않는다 —
+/// 텔레그램은 주소에 봇 토큰이 든다).
+pub const HTTP_LOG_TARGETS: [&str; 6] = [
+    "reqwest",
+    "hyper",
+    "hyper_util",
+    "h2",
+    "rustls",
+    "tower_http",
+];
+
+/// (39차 9번) 기록 거르개: 우리 기록은 정보(INFO)까지, [`HTTP_LOG_TARGETS`]는 경고(WARN)까지.
+pub fn log_targets() -> Targets {
+    Targets::new()
+        .with_default(LevelFilter::INFO)
+        .with_targets(HTTP_LOG_TARGETS.map(|target| (target, LevelFilter::WARN)))
+}
+
+/// (39차 9번) 전역 기록을 단다(실행 파일이 한 번 부른다): 정보까지 · [`log_targets`] 거르개 · `writer`로.
+/// `ansi`가 거짓이면 색 글자(터미널 제어 글자)를 쓰지 않는다.
+pub fn install_logging<W>(writer: W, ansi: bool)
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
+    tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::INFO)
+        .with_ansi(ansi)
+        .with_writer(writer)
+        .finish()
+        .with(log_targets())
+        .init();
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use tracing::Level;
+
+    use super::*;
+
+    #[test]
+    fn http_라이브러리의_자세한_기록은_거른다() {
+        let targets = log_targets();
+        assert!(!targets.would_enable("reqwest::connect", &Level::DEBUG));
+        assert!(!targets.would_enable("hyper_util::client", &Level::INFO));
+        assert!(targets.would_enable("reqwest", &Level::WARN));
+        assert!(targets.would_enable("price_inha::messenger", &Level::INFO));
     }
 }

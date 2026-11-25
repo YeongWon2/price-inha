@@ -66,6 +66,7 @@
 
 mod ai;
 mod broker;
+mod messenger;
 mod prompt;
 mod server;
 mod service;
@@ -326,16 +327,16 @@ impl Wizard<'_> {
         for section in listed {
             let outcome = if ended {
                 Outcome::skipped(ANSWERS_ENDED)
+            } else if section == SetupSection::Messenger && self.request.section.is_none() {
+                prompter.title("메신저");
+                prompter.say(SETUP_MESSENGER_GUIDE);
+                Outcome::skipped(SETUP_MESSENGER_GUIDE)
             } else if !chosen.contains(&section) {
                 Outcome::skipped(SETUP_ALREADY)
             } else {
                 self.section(section, prompter).await
             };
             ended = ended || outcome.input_ended();
-            if section == SetupSection::Symbols && self.request.section.is_none() && !ended {
-                prompter.title("메신저");
-                prompter.say(SETUP_MESSENGER_LATER);
-            }
             rows.push((section, outcome));
         }
         (rows, picked.is_some())
@@ -349,7 +350,7 @@ impl Wizard<'_> {
             }
             SetupSection::Broker => broker::broker(&self.link, prompter).await,
             SetupSection::Symbols => symbols::symbols(&self.link, prompter).await,
-            SetupSection::Messenger => todo!(),
+            SetupSection::Messenger => messenger::messenger(&self.link, prompter).await,
             SetupSection::Service => {
                 service::service(
                     self.settings,
@@ -476,6 +477,7 @@ mod tests {
             [
                 SetupSection::Ai,
                 SetupSection::Broker,
+                SetupSection::Messenger,
                 SetupSection::Service,
                 SetupSection::Open
             ]

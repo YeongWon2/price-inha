@@ -21,7 +21,7 @@ use price_inha::{
     AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, OpenRequest,
     RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
     SettingsError, SetupContext, SetupRequest, SystemRunner, VERSION, access_key, access_key_with,
-    announce_addr, doctor, restore, run_assembly,
+    announce_addr, doctor, install_logging, restore, run_assembly,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -36,7 +36,7 @@ const USAGE: &str = "쓰는 법: price-inha [run] [--home <폴더>] [--bind <IP>
   price-inha doctor [--json] [설정 인자들]
   price-inha access-key [--rotate] [--home <폴더>]
   price-inha restore <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>
-  price-inha setup [ai|broker|symbols|service|open] [--dry-run] [설정 인자들]
+  price-inha setup [ai|broker|symbols|messenger|service|open] [--dry-run] [설정 인자들]
   price-inha open [home|office|account|templates|rules|history] [--print] [설정 인자들]
   price-inha --version";
 
@@ -112,15 +112,11 @@ fn init_tracing(settings: Option<&Settings>, create: bool) -> Option<Arc<SecretS
         .map(Arc::new);
     let log_file = settings.and_then(|s| s.log_file.as_deref());
     let sink = log_sink(log_file);
-    // 파일에는 색 글자(터미널 제어 글자)를 쓰지 않는다.
-    let builder = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_ansi(log_file.is_none());
+    // 파일에는 색 글자(터미널 제어 글자)를 쓰지 않는다. (39차 9번) HTTP 라이브러리는 경고만 남긴다.
+    let ansi = log_file.is_none();
     match &secrets {
-        Some(secrets) => builder
-            .with_writer(RedactingWriter::new(Arc::clone(secrets), sink))
-            .init(),
-        None => builder.with_writer(sink).init(),
+        Some(secrets) => install_logging(RedactingWriter::new(Arc::clone(secrets), sink), ansi),
+        None => install_logging(sink, ansi),
     }
     secrets
 }
@@ -129,10 +125,7 @@ fn init_tracing(settings: Option<&Settings>, create: bool) -> Option<Arc<SecretS
 /// 보관 폴더를 열지 않는다(`SecretStore::open`은 폴더를 만들고 권한을 고친다 — 9차 보강 2).
 /// 이 명령들은 비밀 값을 읽어 기록하지 않는다.
 fn init_plain_tracing() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(std::io::stderr)
-        .init();
+    install_logging(std::io::stderr, true);
 }
 
 /// 프로그램 이름을 뺀 인자. 글자로 읽을 수 없는 인자는 말없이 버리지 않고 거부한다.

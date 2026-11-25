@@ -84,6 +84,19 @@ impl Link {
                 .map_or(Reply::Broken, Reply::Refused),
         }
     }
+
+    /// (39차) `POST`(JSON 본문)의 상태와 몸통 그대로. 닿지 못했으면 `None`. 본문을 기록하지 않는다.
+    pub(crate) async fn post_raw(&self, path: &str, body: Vec<u8>) -> Option<(u16, Value)> {
+        self.running.send(path, Some(body), REQUEST_TIMEOUT).await
+    }
+}
+
+/// (39차) `error` 글자 → 거절(없으면 `None`).
+pub(crate) fn refusal_of(value: &Value) -> Option<SetupRefusal> {
+    value
+        .get("error")
+        .and_then(Value::as_str)
+        .and_then(refusal_named)
 }
 
 /// 다시 물어도 소용없는 거절(그 구역은 실패로 적고 다음 구역으로 간다).

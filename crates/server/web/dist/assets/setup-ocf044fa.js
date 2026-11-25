@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-iyrf4dyx.js";
+import { n as API, t as mountMenu } from "./menu-ebudw6pk.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
-import { n as call, r as el, t as LOAD_FAILED } from "./call-k6mg8w4a.js";
+import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-d3wzz2ba.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-xzb8bl9n.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -39,6 +39,288 @@ function aiLimitRequest(limit) {
 		path: API.setupAi,
 		body: { [AI_LIMIT_KEY]: limit }
 	};
+}
+// src/setup/messenger-model.ts
+/** 상태 → 화면 글. */
+var STATE_LABELS = {
+	off: "꺼짐",
+	polling: "받는 중",
+	unauthorized: "토큰 거절",
+	error: "오류"
+};
+/** 페어링 안내(토큰이 있고 아직 연결된 사람이 없을 때). */
+var PAIRING_HINT = "봇에게 아무 말이나 보내면 코드가 옵니다";
+/** 연결된 사람이 있을 때. */
+var PAIRED_TEXT = "연결됨";
+/** 다른 기기에서 볼 때(보기만). 403의 글이기도 하다. */
+var REMOTE_NOTE = "이 컴퓨터에서만 바꿀 수 있습니다";
+/** 슬랙 줄. */
+var SLACK_SOON = "슬랙은 준비 중입니다";
+/** 틀린 코드(400, 서버 `MESSENGER_WRONG_CODE`와 같은 글). */
+var WRONG_CODE = "코드가 맞지 않습니다";
+/** 잠김(423)의 앞부분(서버 `MESSENGER_LOCKED`와 같은 글). 뒤에 풀리는 시각이 붙는다. */
+var LOCKED_TEXT = "틀린 코드가 많아 잠시 승인을 받지 않습니다";
+/** 이미 연결된 사람이 있음(409 `owner_exists`). */
+var OWNER_EXISTS = "이미 연결된 사람이 있습니다 — 먼저 빼세요";
+/** 토큰이 거절됨(422 `key_rejected`). */
+var TOKEN_REJECTED = "봇 토큰이 맞지 않습니다";
+/** 텔레그램에 닿지 못함(502 `unreachable`). */
+var UNREACHABLE = "텔레그램에 닿지 못했습니다";
+/** 시도가 너무 많음(429 `too_many_attempts`). */
+var TOO_MANY = "시도가 너무 많습니다. 잠시 뒤에 다시 해 주세요";
+/** 상태 글자 목록(모르는 글자를 걸러 낸다). */
+var STATES = [
+	"off",
+	"polling",
+	"unauthorized",
+	"error"
+];
+function isRecord(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isState(value) {
+	return typeof value === "string" && STATES.includes(value);
+}
+/** 텔레그램 칸을 읽는다. 모양이 틀리면 `null`. */
+function parseTelegram(value) {
+	if (!isRecord(value)) return null;
+	const { configured, bot, state, paired, pending, locked_until: lockedUntil } = value;
+	if (typeof configured !== "boolean" || typeof paired !== "boolean") return null;
+	if (bot !== null && typeof bot !== "string") return null;
+	if (!isState(state)) return null;
+	if (typeof pending !== "number" || !Number.isFinite(pending)) return null;
+	if (lockedUntil !== null && (typeof lockedUntil !== "number" || !Number.isFinite(lockedUntil))) return null;
+	return {
+		configured,
+		bot,
+		state,
+		paired,
+		pending,
+		locked_until: lockedUntil
+	};
+}
+/**
+* `GET /api/messenger` 몸통을 읽는다. 모양이 틀리면 `null`(칸 이름 · 형은 [`MessengerStatus`] 그대로, 모르는 상태
+* 글자도 `null`).
+*/
+function parseMessengerStatus(body) {
+	if (!isRecord(body) || typeof body.editable !== "boolean") return null;
+	const telegram = parseTelegram(body.telegram);
+	return telegram === null ? null : {
+		editable: body.editable,
+		telegram
+	};
+}
+/** 두 자리 숫자. */
+function pad(value) {
+	return String(value).padStart(2, "0");
+}
+/** 잠긴 동안의 글: [`LOCKED_TEXT`] 뒤에 풀리는 시각(이 기기의 시각 `HH:MM`). */
+function lockedText(until) {
+	const at = new Date(until);
+	if (!Number.isFinite(until) || Number.isNaN(at.getTime())) return LOCKED_TEXT;
+	return `${LOCKED_TEXT} (${pad(at.getHours())}:${pad(at.getMinutes())}에 풀립니다)`;
+}
+/** 몸통의 `error` 글자(없으면 빈 글). */
+function errorOf(body) {
+	return isRecord(body) && typeof body.error === "string" ? body.error : "";
+}
+/** 몸통의 `message` 글자(없으면 `null`). */
+function messageOf(body) {
+	return isRecord(body) && typeof body.message === "string" && body.message !== "" ? body.message : null;
+}
+/**
+* 실패한 답 → 화면 글: 403 → [`REMOTE_NOTE`], 400 `wrong_code` → [`WRONG_CODE`], 423 → [`lockedText`]
+* (`locked_until`), 409 `demo_mode` → 서버가 준 `message`(없으면 [`DEMO_REFUSED`]), 409 `owner_exists` →
+* [`OWNER_EXISTS`], 422 `key_rejected` → [`TOKEN_REJECTED`], 502 `unreachable` → [`UNREACHABLE`],
+* 429 → [`TOO_MANY`]. 그 밖은 `ui/call.ts`의 `LOAD_FAILED`. 남은 횟수 같은 숫자를 만들어 넣지 않는다.
+*/
+function messengerError(status, body) {
+	const error = errorOf(body);
+	if (status === 403) return REMOTE_NOTE;
+	if (status === 400 && error === "wrong_code") return WRONG_CODE;
+	if (status === 423) return lockedText(isRecord(body) && typeof body.locked_until === "number" ? body.locked_until : NaN);
+	if (status === 409 && error === "demo_mode") return messageOf(body) ?? "시연 모드에서는 메신저를 쓰지 않습니다";
+	if (status === 409 && error === "owner_exists") return OWNER_EXISTS;
+	if (status === 422 && error === "key_rejected") return TOKEN_REJECTED;
+	if (status === 502 && error === "unreachable") return UNREACHABLE;
+	if (status === 429) return TOO_MANY;
+	return LOAD_FAILED;
+}
+/** 토큰 등록 몸통: 앞뒤 공백을 뗀다. */
+function registerBody(token) {
+	return { token: token.trim() };
+}
+/** 페어링 승인 몸통: 앞뒤 공백을 떼고 대문자로. */
+function approveBody(code) {
+	return { code: code.trim().toUpperCase() };
+}
+// src/setup/messenger-view.ts
+/** 묶음 제목. */
+var TITLE = "메신저";
+/** 상태 배지의 빛깔(공통 부품의 상태 이름만 쓴다). */
+var STATE_TONES = {
+	off: "neutral",
+	polling: "success",
+	unauthorized: "danger",
+	error: "warning"
+};
+/** 이 묶음의 겉(`data-role="messenger"`). */
+function shell(...body) {
+	const node = card(TITLE, ...body);
+	node.dataset.role = "messenger";
+	return node;
+}
+/** 상태를 읽는다. 실패(상태 · 연결 · 모양)면 `null`. */
+async function readStatus() {
+	try {
+		const reply = await call("GET", API.messenger);
+		return reply.ok ? parseMessengerStatus(reply.body) : null;
+	} catch {
+		return null;
+	}
+}
+/** 읽지 못했을 때의 묶음. */
+function failedBlock$1() {
+	const message = el("div", "");
+	message.dataset.role = "messenger-message";
+	message.append(errorLine(LOAD_FAILED));
+	return shell(message);
+}
+/** 단추 하나를 만든다(`data-action`). */
+function actionButton(label, action, kind = "default") {
+	const node = button(label, kind);
+	node.dataset.action = action;
+	return node;
+}
+/** 단추를 누르면 `ask()`가 만든 요청을 보내고, 됐으면 다시 읽어 묶음을 새로 그린다. 실패면 결과 자리에 오류 줄. */
+function wire(box, message, node, ask) {
+	node.addEventListener("click", () => {
+		node.disabled = true;
+		message.replaceChildren();
+		(async () => {
+			const { method, url, body } = ask();
+			let text = null;
+			try {
+				const reply = await call(method, url, body);
+				if (!reply.ok) text = messengerError(reply.status, reply.body);
+			} catch {
+				text = LOAD_FAILED;
+			}
+			if (text === null) {
+				const next = await readStatus();
+				if (next !== null) {
+					box.replaceWith(messengerBlock(next));
+					return;
+				}
+				text = LOAD_FAILED;
+			}
+			message.replaceChildren(errorLine(text));
+			node.disabled = false;
+		})();
+	});
+}
+/** 칸 하나의 입력 요소(`field`가 만든 것). */
+function inputOf$1(holder) {
+	return holder.querySelector("input");
+}
+/** 상태 줄: 배지(`messenger-state`)와 봇 이름(`messenger-bot`, 있으면). */
+function stateLine(status) {
+	const line = el("div", "");
+	const state = status.telegram.state;
+	const mark = badge(STATE_LABELS[state], STATE_TONES[state]);
+	mark.dataset.role = "messenger-state";
+	mark.dataset.state = state;
+	line.append(el("span", "", "텔레그램 "), mark);
+	if (status.telegram.bot !== null) {
+		const bot = el("span", "", ` @${status.telegram.bot}`);
+		bot.dataset.role = "messenger-bot";
+		line.append(bot);
+	}
+	return line;
+}
+/** 이 컴퓨터에서 바꾸는 칸 · 단추들. */
+function editParts(box, message, status) {
+	const parts = [];
+	const tokenField = field("봇 토큰", "messenger-token", "password");
+	const token = inputOf$1(tokenField);
+	token.autocomplete = "new-password";
+	const register = actionButton("등록", "messenger-register", "accent");
+	wire(box, message, register, () => {
+		const body = registerBody(token.value);
+		token.value = "";
+		return {
+			method: "POST",
+			url: API.messengerTelegram,
+			body
+		};
+	});
+	parts.push(tokenField, register);
+	const telegram = status.telegram;
+	if (telegram.configured) {
+		const remove = actionButton("지우기", "messenger-remove", "danger");
+		wire(box, message, remove, () => ({
+			method: "DELETE",
+			url: API.messengerTelegram
+		}));
+		parts.push(remove);
+	}
+	if (telegram.configured && !telegram.paired) {
+		const pairing = el("div", "");
+		pairing.dataset.role = "messenger-pairing";
+		const codeField = field("페어링 코드", "messenger-code");
+		const code = inputOf$1(codeField);
+		code.autocomplete = "off";
+		const approve = actionButton("승인", "messenger-approve", "accent");
+		wire(box, message, approve, () => ({
+			method: "POST",
+			url: API.messengerApprove,
+			body: approveBody(code.value)
+		}));
+		pairing.append(el("p", "", PAIRING_HINT), codeField, approve);
+		parts.push(pairing);
+	}
+	if (telegram.paired) {
+		const paired = el("div", "");
+		paired.dataset.role = "messenger-paired";
+		const revoke = actionButton("빼기", "messenger-revoke", "danger");
+		wire(box, message, revoke, () => ({
+			method: "POST",
+			url: API.messengerRevoke
+		}));
+		paired.append(el("span", "", `${PAIRED_TEXT} `), revoke);
+		parts.push(paired);
+	}
+	return parts;
+}
+/** 다른 기기에서 보는 줄들(입력 · 단추 없음). */
+function remoteParts(status) {
+	const note = el("p", "", REMOTE_NOTE);
+	note.dataset.role = "messenger-remote";
+	const parts = [note];
+	if (status.telegram.paired) {
+		const paired = el("p", "", PAIRED_TEXT);
+		paired.dataset.role = "messenger-paired";
+		parts.push(paired);
+	}
+	return parts;
+}
+/** 상태 하나로 메신저 묶음(`data-role="messenger"`)을 그린다. 단추는 위 계약대로 서버를 부르고 다시 그린다. */
+function messengerBlock(status) {
+	const message = el("div", "");
+	message.dataset.role = "messenger-message";
+	const slack = el("p", "", SLACK_SOON);
+	slack.dataset.role = "messenger-slack";
+	const box = shell();
+	const middle = status.editable ? editParts(box, message, status) : remoteParts(status);
+	box.append(stateLine(status), ...middle, slack, message);
+	return box;
+}
+/** 자리 하나에 메신저 묶음을 읽어 그린다(`GET API.messenger`). 읽기가 실패해도 던지지 않는다. */
+async function mountMessenger(root) {
+	root.replaceChildren(shell(loading()));
+	const status = await readStatus();
+	root.replaceChildren(status === null ? failedBlock$1() : messengerBlock(status));
 }
 // src/setup/extras.ts
 /** 시장 글자 → 화면 이름. */
@@ -317,7 +599,9 @@ async function mountSetupExtras(root) {
 	const slots = {};
 	for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
 	const sound = soundBlock();
-	root.replaceChildren(...Object.values(slots), sound.node);
+	const messengerSlot = el("div", "");
+	root.replaceChildren(...Object.values(slots), sound.node, messengerSlot);
+	const messenger = mountMessenger(messengerSlot);
 	const status = read(API.setup).then((body) => {
 		swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
 		swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -338,7 +622,8 @@ async function mountSetupExtras(root) {
 		semantic,
 		doctor,
 		backup,
-		sound.ready
+		sound.ready,
+		messenger
 	]);
 }
 // src/setup/main.ts

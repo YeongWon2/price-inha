@@ -31,6 +31,7 @@
 import { API } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
+import { mountMessenger } from "./messenger-view";
 import type { BadgeTone } from "../ui/parts";
 import { SOUND_DEFAULT, saveSound, soundEnabled } from "../ui/sound-pref";
 
@@ -356,7 +357,10 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
   const slots: Record<string, HTMLElement> = {};
   for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
   const sound = soundBlock();
-  root.replaceChildren(...Object.values(slots), sound.node);
+  // (39차 7번) 메신저 묶음은 제 자리를 스스로 읽어 그린다.
+  const messengerSlot = el("div", "");
+  root.replaceChildren(...Object.values(slots), sound.node, messengerSlot);
+  const messenger = mountMessenger(messengerSlot);
   const status = read(API.setup).then((body) => {
     swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
     swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -374,5 +378,5 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
     const state = guide.querySelector('[data-role="backup-state"]');
     if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
   });
-  await Promise.allSettled([status, semantic, doctor, backup, sound.ready]);
+  await Promise.allSettled([status, semantic, doctor, backup, sound.ready, messenger]);
 }

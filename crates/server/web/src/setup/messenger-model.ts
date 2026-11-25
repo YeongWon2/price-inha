@@ -1,6 +1,7 @@
 // 설정 화면의 메신저 묶음(server 39차 7번, 결정 24)이 쓰는 값 · 글 · 순수 함수. 그리기는 `messenger-view.ts`가 한다.
 // 서버 계약: `crates/server/src/messenger.rs` 모듈 문서(`GET /api/messenger` · `POST` · `DELETE /api/messenger/telegram` ·
 // `POST /api/messenger/pairing/approve` · `POST /api/messenger/pairing/revoke`).
+import { LOAD_FAILED } from "../ui/call";
 
 /** 텔레그램 받기 상태(서버 `MESSENGER_STATE_*`). */
 export type MessengerState = "off" | "polling" | "unauthorized" | "error";
@@ -53,19 +54,59 @@ export const UNREACHABLE = "텔레그램에 닿지 못했습니다";
 /** 시도가 너무 많음(429 `too_many_attempts`). */
 export const TOO_MANY = "시도가 너무 많습니다. 잠시 뒤에 다시 해 주세요";
 
+/** 상태 글자 목록(모르는 글자를 걸러 낸다). */
+const STATES: readonly MessengerState[] = ["off", "polling", "unauthorized", "error"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isState(value: unknown): value is MessengerState {
+  return typeof value === "string" && (STATES as readonly string[]).includes(value);
+}
+
+/** 텔레그램 칸을 읽는다. 모양이 틀리면 `null`. */
+function parseTelegram(value: unknown): TelegramStatus | null {
+  if (!isRecord(value)) return null;
+  const { configured, bot, state, paired, pending, locked_until: lockedUntil } = value;
+  if (typeof configured !== "boolean" || typeof paired !== "boolean") return null;
+  if (bot !== null && typeof bot !== "string") return null;
+  if (!isState(state)) return null;
+  if (typeof pending !== "number" || !Number.isFinite(pending)) return null;
+  if (lockedUntil !== null && (typeof lockedUntil !== "number" || !Number.isFinite(lockedUntil))) return null;
+  return { configured, bot, state, paired, pending, locked_until: lockedUntil };
+}
+
 /**
  * `GET /api/messenger` 몸통을 읽는다. 모양이 틀리면 `null`(칸 이름 · 형은 [`MessengerStatus`] 그대로, 모르는 상태
  * 글자도 `null`).
  */
 export function parseMessengerStatus(body: unknown): MessengerStatus | null {
-  void body;
-  throw new Error("todo");
+  if (!isRecord(body) || typeof body.editable !== "boolean") return null;
+  const telegram = parseTelegram(body.telegram);
+  return telegram === null ? null : { editable: body.editable, telegram };
+}
+
+/** 두 자리 숫자. */
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 /** 잠긴 동안의 글: [`LOCKED_TEXT`] 뒤에 풀리는 시각(이 기기의 시각 `HH:MM`). */
 export function lockedText(until: number): string {
-  void until;
-  throw new Error("todo");
+  const at = new Date(until);
+  if (!Number.isFinite(until) || Number.isNaN(at.getTime())) return LOCKED_TEXT;
+  return `${LOCKED_TEXT} (${pad(at.getHours())}:${pad(at.getMinutes())}에 풀립니다)`;
+}
+
+/** 몸통의 `error` 글자(없으면 빈 글). */
+function errorOf(body: unknown): string {
+  return isRecord(body) && typeof body.error === "string" ? body.error : "";
+}
+
+/** 몸통의 `message` 글자(없으면 `null`). */
+function messageOf(body: unknown): string | null {
+  return isRecord(body) && typeof body.message === "string" && body.message !== "" ? body.message : null;
 }
 
 /**
@@ -75,19 +116,27 @@ export function lockedText(until: number): string {
  * 429 → [`TOO_MANY`]. 그 밖은 `ui/call.ts`의 `LOAD_FAILED`. 남은 횟수 같은 숫자를 만들어 넣지 않는다.
  */
 export function messengerError(status: number, body: unknown): string {
-  void status;
-  void body;
-  throw new Error("todo");
+  const error = errorOf(body);
+  if (status === 403) return REMOTE_NOTE;
+  if (status === 400 && error === "wrong_code") return WRONG_CODE;
+  if (status === 423) {
+    const until = isRecord(body) && typeof body.locked_until === "number" ? body.locked_until : NaN;
+    return lockedText(until);
+  }
+  if (status === 409 && error === "demo_mode") return messageOf(body) ?? DEMO_REFUSED;
+  if (status === 409 && error === "owner_exists") return OWNER_EXISTS;
+  if (status === 422 && error === "key_rejected") return TOKEN_REJECTED;
+  if (status === 502 && error === "unreachable") return UNREACHABLE;
+  if (status === 429) return TOO_MANY;
+  return LOAD_FAILED;
 }
 
 /** 토큰 등록 몸통: 앞뒤 공백을 뗀다. */
 export function registerBody(token: string): { token: string } {
-  void token;
-  throw new Error("todo");
+  return { token: token.trim() };
 }
 
 /** 페어링 승인 몸통: 앞뒤 공백을 떼고 대문자로. */
 export function approveBody(code: string): { code: string } {
-  void code;
-  throw new Error("todo");
+  return { code: code.trim().toUpperCase() };
 }

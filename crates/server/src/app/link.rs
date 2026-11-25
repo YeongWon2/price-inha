@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 
 use super::App;
 use crate::feed::StaleHook;
+use crate::messenger::{Messenger, MessengerParts};
 use crate::reach::{
     Linked, LockNotices, Looks, Me, OfficeDesk, Phone, Semantic, backup_routes, daily_summary,
     looks_routes, me_routes, office_routes, phone_routes, semantic_routes, talk_routes,
@@ -72,15 +73,40 @@ pub(super) fn session_parts(
         store: store.clone(),
     });
     let alert: Arc<dyn LockAlert> = Arc::new(LockNotices(Arc::clone(linked)));
-    (
-        Some(
-            office_routes(desk)
-                .merge(talk_routes(Arc::clone(&linked.talk)))
-                .merge(phone_routes(phone))
-                .merge(backup_routes(Arc::clone(linked))),
-        ),
-        Some(alert),
-    )
+    let mut routes = office_routes(desk)
+        .merge(talk_routes(Arc::clone(&linked.talk)))
+        .merge(phone_routes(phone))
+        .merge(backup_routes(Arc::clone(linked)));
+    // (39차) 메신저를 이었으면 그 경로(읽기는 세션, 바꾸기는 그 컴퓨터에서만)도 단다.
+    if let Some(messenger) = linked.messenger() {
+        routes = routes.merge(crate::messenger::routes(messenger));
+    }
+    (Some(routes), Some(alert))
+}
+
+/// (39차) 메신저를 연다(메신저 조립 값과 3차 부품이 있을 때만). 알림 자리에 바로 잇는다 — 루프는
+/// [`attach`]가 관문이 뜬 뒤에 켠다.
+pub(super) fn open_messenger(
+    wiring: Option<crate::MessengerWiring>,
+    settings: &Settings,
+    linked: Option<&Arc<Linked>>,
+    trading: &Arc<Trading>,
+    store: &Store,
+) -> Option<Arc<Messenger>> {
+    let (wiring, linked) = (wiring?, linked?);
+    let messenger = Messenger::open(
+        settings,
+        MessengerParts {
+            wiring,
+            store: store.clone(),
+            secrets: Arc::clone(&linked.secrets),
+            clock: Arc::clone(&linked.clock),
+            trading: Arc::clone(trading),
+            linked: Arc::clone(linked),
+        },
+    );
+    linked.attach_messenger(&messenger);
+    Some(messenger)
 }
 
 /// (10c 14번) 사무실 승인 카드 이벤트([`KIND_OFFICE_APPROVAL`])를 낸다: 번호 · 가린 내용(폰 카드와 같은 것) ·
@@ -141,8 +167,14 @@ fn approval_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading
             let link = format!("/phone/#/approvals/{}", number.as_str());
             let title = "승인이 필요해요";
             // 구독이 하나도 없으면 "갔다"가 아니다(P20: 승인 경로가 막혔으면 답이 없어도 사지 않는다).
+            let short = number.as_str().chars().take(crate::MESSENGER_SHORT_ID_LEN);
             let sent = linked
-                .notice_reached(NoticeKind::ApprovalRequest, title, &summary, Some(link))
+                .notice_reached(
+                    NoticeKind::ApprovalRequest,
+                    (title, &summary),
+                    Some(link),
+                    Some(short.collect()),
+                )
                 .await;
             if let Some(trading) = trading.upgrade() {
                 trading.record_approval_notice(&number, sent);
@@ -262,6 +294,10 @@ pub(super) fn attach(
             ai_capped: Some(ai_capped_hook(linked)),
             talk: Some(Arc::clone(&linked.talk)),
         });
+    }
+    // (39차) 저장된 토큰이 있으면(시연이 아니면) 받기 루프를 켠다(관문이 이벤트를 받을 수 있게 된 뒤).
+    if let Some(messenger) = linked.messenger() {
+        tokio::spawn(async move { messenger.start_saved().await });
     }
     trading.hook(Hooks {
         approval: approval_hook(linked, Arc::downgrade(trading)),
@@ -400,8 +436,11 @@ impl App {
         launch: Launch,
         reach: Reach,
     ) -> Result<App, AppError> {
-        let demo = super::DemoRun::default();
-        Box::pin(App::assemble(settings, wiring, launch, Some(reach), demo)).await
+        let messenger = crate::MessengerWiring::default();
+        Box::pin(App::launch_with_messenger(
+            settings, wiring, launch, reach, messenger,
+        ))
+        .await
     }
 
     /// (39차) [`App::launch_with`]가 하는 일에 더해 메신저를 `messenger` 조립 값으로 잇는다(`crate::messenger`
@@ -414,8 +453,9 @@ impl App {
         reach: Reach,
         messenger: crate::MessengerWiring,
     ) -> Result<App, AppError> {
-        let _ = (settings, wiring, launch, reach, messenger);
-        todo!()
+        let demo = super::DemoRun::default();
+        let reach = Some((reach, messenger));
+        Box::pin(App::assemble(settings, wiring, launch, reach, demo)).await
     }
 
     /// (W5 3차) 지식 검색 창구(같은 저장소). 임베딩은 없다.

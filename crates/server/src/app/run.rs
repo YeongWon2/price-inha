@@ -137,7 +137,7 @@ impl App {
         } else {
             DemoRun::default()
         };
-        let reach = Some(assembly.reach);
+        let reach = Some((assembly.reach, assembly.messenger));
         Box::pin(App::assemble(
             settings,
             assembly.wiring,

@@ -64,7 +64,7 @@ pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
 };
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
-pub use log::{RedactedLine, RedactingWriter};
+pub use log::{HTTP_LOG_TARGETS, RedactedLine, RedactingWriter, install_logging, log_targets};
 pub use messenger::{
     KIND_MESSENGER, MESSENGER_ACTION_PAIRED, MESSENGER_ACTION_REVOKED,
     MESSENGER_ACTION_TOKEN_REMOVED, MESSENGER_ACTION_TOKEN_SET, MESSENGER_APPROVAL_DONE,

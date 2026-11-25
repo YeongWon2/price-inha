@@ -1,7 +1,7 @@
 //! 3차 조립의 부품 묶음: 알림 · 사무실 · 백업과 그 자리들(사무실 이벤트 포트 · 잠금 알림 · 이상 알림).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use async_trait::async_trait;
 use chrono::{FixedOffset, TimeZone};
@@ -97,6 +97,8 @@ pub(crate) struct Linked {
     pub(crate) secrets: Arc<SecretStore>,
     /// 지켜보는 종목 가운데 늦은 것이 있다고 알렸는가.
     stale: AtomicBool,
+    /// (39차) 알림을 허용된 메신저 대화에도 보내는 자리(메신저를 이었을 때만).
+    messenger: OnceLock<Weak<crate::messenger::Messenger>>,
 }
 
 fn backup_of(
@@ -182,6 +184,7 @@ impl Linked {
             clock: Arc::clone(clock),
             secrets: Arc::clone(secrets),
             stale: AtomicBool::new(false),
+            messenger: OnceLock::new(),
         })
     }
 
@@ -197,31 +200,36 @@ impl Linked {
         body: &str,
         link: Option<String>,
     ) -> bool {
-        let sent = self.deliver(kind, title, body, link).await;
+        let sent = self.deliver(kind, (title, body), link, None).await;
         sent.is_some_and(|(attempts, reached)| attempts == 0 || reached)
     }
 
     /// (10차 10a 5번) 알림 하나를 보내, 구독이 하나라도 **받았을 때만** 참이다(구독이 없으면 거짓).
     /// 승인 요청의 "알림이 갔다"는 사람에게 닿았다는 뜻이어야 한다(P20: 닿지 않았으면 줄여서도 사지 않는다).
+    /// (39차) `short`는 승인 요청의 짧은 번호(메신저 글의 거절 안내에 붙는다).
     pub(crate) async fn notice_reached(
         &self,
         kind: NoticeKind,
-        title: &str,
-        body: &str,
+        (title, body): (&str, &str),
         link: Option<String>,
+        short: Option<String>,
     ) -> bool {
-        let sent = self.deliver(kind, title, body, link).await;
+        let sent = self.deliver(kind, (title, body), link, short).await;
         sent.is_some_and(|(_, reached)| reached)
     }
 
     /// 알림을 보낸다: (보내 본 구독 수, 하나라도 받았는가). 보내지 못했으면 없음.
+    /// (39차) 같은 알림을 허용된 메신저 대화에도 뒤에서 보낸다(폰 푸시의 결과와 상관없다).
     async fn deliver(
         &self,
         kind: NoticeKind,
-        title: &str,
-        body: &str,
+        (title, body): (&str, &str),
         link: Option<String>,
+        short: Option<String>,
     ) -> Option<(usize, bool)> {
+        if let Some(messenger) = self.messenger() {
+            messenger.forward(kind, title, body, short);
+        }
         let notice = NewNotice {
             kind,
             title: title.to_string(),
@@ -242,6 +250,16 @@ impl Linked {
                 None
             }
         }
+    }
+
+    /// (39차) 메신저를 잇는다(알림을 허용된 대화에도 보낸다). 한 번만.
+    pub(crate) fn attach_messenger(&self, messenger: &Arc<crate::messenger::Messenger>) {
+        let _ = self.messenger.set(Arc::downgrade(messenger));
+    }
+
+    /// (39차) 이은 메신저(없거나 이미 놓였으면 없음).
+    pub(crate) fn messenger(&self) -> Option<Arc<crate::messenger::Messenger>> {
+        self.messenger.get().and_then(Weak::upgrade)
     }
 
     /// 알림을 뒤에서 보낸다(요청 처리 · 잠금을 붙잡지 않는다).

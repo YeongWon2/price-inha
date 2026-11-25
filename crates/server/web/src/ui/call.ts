@@ -11,8 +11,8 @@ export interface Reply {
   body: unknown;
 }
 
-/** 같은 출처 경로를 부른다. 몸통을 JSON으로 읽고, 읽을 수 없으면 `null`. */
-export async function call(method: "GET" | "POST", url: string, body?: unknown): Promise<Reply> {
+/** 같은 출처 경로를 부른다(`GET` · `POST` · (39차) `DELETE`). 몸통을 JSON으로 읽고, 읽을 수 없으면 `null`. */
+export async function call(method: "GET" | "POST" | "DELETE", url: string, body?: unknown): Promise<Reply> {
   const init: RequestInit = { method, credentials: "same-origin", cache: "no-store" };
   if (body !== undefined) {
     init.headers = { "Content-Type": "application/json" };
