@@ -79,6 +79,7 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 | 8 | 바깥 주소 | 테스트가 실제 증권사 · AI 주소를 쓴다 |
 | 9 | 검사 끄기 | `#[ignore]`나 지시서에 없는 `#[allow]`가 있다. 화면 · 시험 TS(`.ts` · `.js` · `.mjs` · `.html`)에 `eslint-disable` · `@ts-ignore` · `@ts-nocheck` · `@ts-expect-error` 주석이나 `.skip` · `.only` · `.fixme`가 있다(결정 23) |
 | 10 | 공급망 (`cargo deny --offline check licenses bans sources`, 설정은 루트 `deny.toml`) | 허용 목록 밖 라이선스, crates.io 밖 출처(git · 다른 레지스트리), 금지 크레이트(`openssl-sys` · `native-tls`)가 의존 나무에 있다. cargo-deny가 없으면 ✗와 설치 안내(`cargo install cargo-deny --version <scripts/lib.sh DENY_VERSION> --locked`) |
+| 11 | 설치 스크립트 시험 (`scripts/test-install.sh`, 전체 범위에서만 — 모듈 범위 실행에서는 돌지 않는다, 결정 27) | 루트 `install.sh`가 가짜 릴리스 묶음(임시 폴더 · 네트워크 없음)으로 깔리지 않거나, sha256이 틀리거나 없는 묶음 · http 주소 · 지원하지 않는 OS/CPU를 거절하지 않거나, `--dry-run`이 무언가 쓰거나, `--uninstall`이 실행 파일 밖의 것(보관 폴더)을 지우거나, 홈(셸 설정 파일)에 무언가 쓰거나, 받는 도구(curl · wget · git)를 불렀다. shellcheck가 있으면 세 스크립트(`install.sh` · `scripts/release.sh` · `scripts/test-install.sh`)도 본다 |
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 

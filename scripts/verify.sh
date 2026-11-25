@@ -19,6 +19,7 @@ run_fix() { # run_fix <이름> <고치기> <명령...>: 실패하면 고치는 �
 }
 
 picked=0 # 모듈을 사람이 골랐는가(그때만 red 태그 없음을 실패로 본다)
+full=0   # 전체 범위인가(모듈 밖의 검사 — 11 설치 스크립트 — 는 그때만 돈다)
 if [ "${1:-}" = "--affected" ]; then
   shift
   PY=$(find_python)
@@ -41,7 +42,7 @@ if [ "$#" -gt 0 ]; then
   fmtpkgs="$pkgs"
   echo "범위: $mods"
 else
-  mods="$MODULES"; pkgs="--workspace"; only=""; srcdirs="crates"; fmtpkgs="--all"
+  mods="$MODULES"; pkgs="--workspace"; only=""; srcdirs="crates"; fmtpkgs="--all"; full=1
   echo "범위: 전체"
 fi
 
@@ -160,6 +161,13 @@ if ! cargo deny --version >/dev/null 2>&1; then
 elif out=$(cargo deny --offline check licenses bans sources 2>&1); then ok "10 공급망 (cargo-deny)"
 else bad "10 공급망 (cargo-deny) — 고치기: 아래 error 를 본다. 허용 밖 라이선스 · git 출처 · 금지 크레이트는 더하지 말고 멈춰 알린다(deny.toml 은 사용자 확인 뒤 조정자만 고친다)"
   printf '%s\n' "$out" | grep -E -A6 '^error' | head -60; fi
+
+# 11 설치 스크립트 시험 (결정 27): 전체 범위에서만. 가짜 릴리스 묶음 · 임시 폴더만 쓰고 네트워크를 쓰지 않는다.
+if [ "$full" -eq 1 ]; then
+  run_fix "11 설치 스크립트 시험 (scripts/test-install.sh)" \
+    "아래 ✗ 줄의 동작을 install.sh 에서 고친다(sha256 확인 · https 만 · sudo 없음 · 셸 설정 안 고침). 시험이 틀렸으면 멈추고 알린다" \
+    bash scripts/test-install.sh
+fi
 
 echo
 [ "$fail" -eq 0 ] && echo "G2 통과" || echo "G2 실패"

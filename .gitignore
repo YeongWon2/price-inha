@@ -13,3 +13,5 @@ auth.json
 test-results/
 playwright-report/
 blob-report/
+# 릴리스 묶음(scripts/release.sh, 결정 27)은 올리지 않는다 — 루트의 dist/ 만(crates/server/web/dist 는 커밋한다).
+/dist/

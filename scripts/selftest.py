@@ -58,7 +58,7 @@ def required_ids(module):
 
 
 def build_fixture(fx):
-    for f in ["Cargo.toml", "clippy.toml", ".gitignore", "deny.toml"]:
+    for f in ["Cargo.toml", "clippy.toml", ".gitignore", "deny.toml", "install.sh"]:
         shutil.copy(ROOT / f, fx / f)
     shutil.copytree(ROOT / "scripts", fx / "scripts")
     (fx / "docs").mkdir()
@@ -365,6 +365,15 @@ def main():
         case(fx, "설명 글 속의 eslint-disable 낱말은 잡지 않는다",
              lambda: (fx / probe).write_text("// 검사를 끄는 주석(eslint-disable)은 쓰지 않는다.\nexport const x = 1;\n"),
              verify + ["store"], "G2 통과", should_fail=False)
+        # --- 설치 스크립트 시험 (결정 27): 전체 범위에서만 돌고, sha256 확인을 빼면 잡는다
+        def drop_sha_check():
+            p = fx / "install.sh"
+            t = p.read_text(encoding="utf-8")
+            p.write_text(t.replace('[ "$want" = "$got" ] || die', 'true || die'), encoding="utf-8")
+        case(fx, "설치 스크립트가 SHA-256 확인을 빼면 잡는다 (전체 검사)", drop_sha_check, verify,
+             "✗ 11 설치 스크립트 시험")
+        case(fx, "설치 스크립트 시험은 모듈 범위에서는 돌지 않는다",
+             lambda: (fx / "install.sh").unlink(), verify + ["store"], "G2 통과", should_fail=False)
         case(fx, "red 태그 없이 모듈 검사를 하면 잡는다",
              lambda: sh(["git", "tag", "-d", "red/ai"], fx), verify + ["ai"], "✗ 4 red 태그 없음: ai")
         sh(["git", "tag", "-f", "red/ai"], fx)
