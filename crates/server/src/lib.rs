@@ -41,12 +41,17 @@ pub use app::{
     announce_addr, run_assembly,
 };
 pub use cli::{
-    AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem, Command, CommandLine, CommandOutput,
-    CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE, LAUNCHD_LABEL, Os, RestoreRequest,
-    RestoreSummary, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, SYSTEMD_UNIT, Service,
-    ServiceAction, ServiceDefinition, ServiceReport, ServiceSetup, ServiceStatus, ShownAccessKey,
-    SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor,
-    restore,
+    ANSWER_CLI, ANSWER_KEY, ANSWER_SKIP, AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem,
+    Command, CommandLine, CommandOutput, CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE,
+    LAUNCHD_LABEL, OPEN_NO_SERVER, OPEN_NO_SERVER_EXIT, OPEN_SCREENS, OpenRequest, OpenScreen, Os,
+    RestoreRequest, RestoreSummary, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, SETUP_ALREADY,
+    SETUP_CLI_BILLING_WARNING, SETUP_CLI_LOGIN_HINT, SETUP_DOCTOR_HINT, SETUP_DONE, SETUP_FAILED,
+    SETUP_FAILED_EXIT, SETUP_MESSENGER_LATER, SETUP_NOT_TERMINAL, SETUP_NOT_TERMINAL_EXIT,
+    SETUP_RUN_HINT, SETUP_SECTIONS, SETUP_SECTOR_NOTICE, SETUP_SKIPPED,
+    SETUP_START_SERVER_QUESTION, SETUP_SUMMARY_TITLE, SYSTEMD_UNIT, Service, ServiceAction,
+    ServiceDefinition, ServiceReport, ServiceSetup, ServiceStatus, SetupContext, SetupRequest,
+    SetupSection, ShownAccessKey, SystemRunner, VERSION, WINDOWS_TASK, WINDOWS_TASK_FILE,
+    access_key, access_key_with, doctor, open, restore, setup,
 };
 pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,

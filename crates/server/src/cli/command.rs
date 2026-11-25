@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use super::open::OpenScreen;
+use super::setup::SetupSection;
 use crate::error::CliError;
 
 /// 이 실행 파일의 판 번호. `--version`이 보관 폴더 · 설정을 읽지 않고 답한다.
@@ -49,6 +51,28 @@ pub enum Command {
     },
     /// 판 번호를 보여 준다.
     Version,
+    /// (37차) 터미널 처음 설정 마법사: `setup [구역] [--stdin-answers] [--dry-run] [설정 인자들]`.
+    /// 구역은 `setup` 바로 다음 인자(`-`로 시작하지 않을 때)다. 모르는 구역은 [`CliError::UnknownCommand`].
+    Setup {
+        /// 한 구역만. `None`이면 모두 차례로.
+        section: Option<SetupSection>,
+        /// 표준 입력에서 답을 흘려 받는다(숨은 길, 시험 · 자동 설치용).
+        stdin_answers: bool,
+        /// 서비스 구역을 할 일만 보이게 한다.
+        dry_run: bool,
+        /// 설정 인자.
+        args: Vec<String>,
+    },
+    /// (37차) 도는 서버의 대시보드를 연다: `open [화면] [--print] [설정 인자들]`.
+    /// 화면은 `open` 바로 다음 인자(`-`로 시작하지 않을 때)다. 모르는 화면은 [`CliError::UnknownCommand`].
+    Open {
+        /// 열 화면(주지 않으면 첫 화면).
+        screen: OpenScreen,
+        /// 브라우저를 열지 않고 주소만 쓴다.
+        print: bool,
+        /// 설정 인자.
+        args: Vec<String>,
+    },
 }
 
 /// `service`의 할 일.
@@ -111,6 +135,8 @@ impl Command {
                 Ok(Command::AccessKey { rotate, args })
             }
             "restore" => parse_restore(rest),
+            "setup" => parse_setup(rest),
+            "open" => parse_open(rest),
             other => Err(CliError::UnknownCommand(other.to_string())),
         }
     }
@@ -150,6 +176,50 @@ fn parse_service(args: &[String]) -> Result<Command, CliError> {
         other => return Err(CliError::UnknownCommand(format!("service {other}"))),
     };
     Ok(Command::Service { action, args })
+}
+
+/// 하위 명령 바로 다음의 이름 인자(`-`로 시작하지 않을 때)와 남은 인자.
+fn take_word(args: &[String]) -> (Option<&str>, &[String]) {
+    match args.split_first() {
+        Some((word, rest)) if !word.starts_with('-') => (Some(word.as_str()), rest),
+        _ => (None, args),
+    }
+}
+
+/// `setup [구역] [--stdin-answers] [--dry-run] [설정 인자들]`.
+fn parse_setup(args: &[String]) -> Result<Command, CliError> {
+    let (word, rest) = take_word(args);
+    let section = match word {
+        Some(word) => Some(
+            SetupSection::parse(word)
+                .ok_or_else(|| CliError::UnknownCommand(format!("setup {word}")))?,
+        ),
+        None => None,
+    };
+    let (stdin_answers, rest) = take_flag(rest, "--stdin-answers");
+    let (dry_run, args) = take_flag(&rest, "--dry-run");
+    Ok(Command::Setup {
+        section,
+        stdin_answers,
+        dry_run,
+        args,
+    })
+}
+
+/// `open [화면] [--print] [설정 인자들]`.
+fn parse_open(args: &[String]) -> Result<Command, CliError> {
+    let (word, rest) = take_word(args);
+    let screen = match word {
+        Some(word) => OpenScreen::parse(word)
+            .ok_or_else(|| CliError::UnknownCommand(format!("open {word}")))?,
+        None => OpenScreen::Home,
+    };
+    let (print, args) = take_flag(rest, "--print");
+    Ok(Command::Open {
+        screen,
+        print,
+        args,
+    })
 }
 
 /// `restore <백업 파일> --identity <파일> --into <폴더>`. 순서는 상관없다.

@@ -18,10 +18,10 @@ use std::sync::{Arc, Mutex};
 use pi_secrets::SecretStore;
 use pi_store::UnixMillis;
 use price_inha::{
-    AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, RedactingWriter,
-    RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings, SettingsError,
-    SystemRunner, VERSION, access_key, access_key_with, announce_addr, doctor, restore,
-    run_assembly,
+    AccessKeyRequest, App, AppError, CliError, Command, InstallOptions, OpenRequest,
+    RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
+    SettingsError, SetupContext, SetupRequest, SystemRunner, VERSION, access_key, access_key_with,
+    announce_addr, doctor, restore, run_assembly,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -36,6 +36,8 @@ const USAGE: &str = "쓰는 법: price-inha [run] [--home <폴더>] [--bind <IP>
   price-inha doctor [--json] [설정 인자들]
   price-inha access-key [--rotate] [--home <폴더>]
   price-inha restore <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>
+  price-inha setup [ai|broker|symbols|service|open] [--dry-run] [설정 인자들]
+  price-inha open [home|office|account|templates|rules|history] [--print] [설정 인자들]
   price-inha --version";
 
 /// 설정 치명 오류의 종료 코드(서비스 관리자가 이 코드로는 다시 띄우지 않는다).
@@ -218,11 +220,61 @@ async fn dispatch(command: Command) -> ExitCode {
             show(&format!("price-inha {VERSION}\n"));
             ExitCode::SUCCESS
         }
+        Command::Setup {
+            section,
+            stdin_answers,
+            dry_run,
+            args,
+        } => match settings_of(&args) {
+            Ok(settings) => {
+                let request = SetupRequest {
+                    section,
+                    stdin_answers,
+                    dry_run,
+                    args,
+                };
+                setup_command(&settings, &request).await
+            }
+            Err(code) => code,
+        },
+        Command::Open {
+            screen,
+            print,
+            args,
+        } => match settings_of(&args) {
+            Ok(settings) => {
+                let request = OpenRequest { screen, print };
+                let code =
+                    price_inha::open(&settings, &request, &mut std::io::stdout(), &SystemRunner)
+                        .await;
+                ExitCode::from(code)
+            }
+            Err(code) => code,
+        },
         _ => {
             say(USAGE);
             ExitCode::from(SETTINGS_EXIT)
         }
     }
+}
+
+/// (37차) 처음 설정 마법사: 실제 표준 입출력 · 프로세스 환경 · 자기 경로로 부른다.
+async fn setup_command(settings: &Settings, request: &SetupRequest) -> ExitCode {
+    use std::io::IsTerminal;
+    let stdin = std::io::stdin();
+    let interactive = stdin.is_terminal();
+    let mut input = stdin.lock();
+    let mut output = std::io::stdout();
+    let env = |name: &str| std::env::var(name).ok();
+    let server_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("price-inha"));
+    let context = SetupContext {
+        input: &mut input,
+        output: &mut output,
+        env: &env,
+        interactive,
+        server_exe,
+    };
+    ExitCode::from(price_inha::setup(settings, request, context).await)
 }
 
 /// 하위 명령의 설정 인자를 읽는다(기록은 명령마다 따로 켠다). 읽지 못하면 종료 코드 2.
