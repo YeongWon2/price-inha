@@ -155,6 +155,23 @@ impl SecretStore {
         self.read_entry_locked(Entry::Provider(keys))
     }
 
+    /// 공급자 키를 지운다 (9차, 결정 24 · A13).
+    ///
+    /// 그 공급자의 칸 줄을 모두 `.env`에서 지운다. 그 공급자의 줄이 하나라도 있어서 지웠으면 `true`,
+    /// 없었으면(파일이 없을 때도) 파일을 건드리지 않고 `false`다(오류 아님).
+    ///
+    /// - 이름 규칙([`ProviderKeys::check`])을 먼저 본다. 어기면 [`SecretsError::InvalidProviderKeys`].
+    /// - 등록과 같은 잠금 안에서 같은 원자 쓰기(임시 파일 → 이름 바꾸기, 0600)로 쓴다. 실패하면
+    ///   파일은 그대로다(반쯤 지워지지 않는다). 파일이 깨졌으면(UTF-8 아님) [`SecretsError::Corrupt`].
+    /// - 다른 공급자 · 옛 종류 · 칸 · 설명 · 모르는 줄은 글자 그대로 둔다.
+    /// - 지운 뒤 [`SecretStore::read_provider`]는 `None`, [`SecretStore::provider_status`]는 등록 안 됨.
+    /// - **가리기는 남긴다**: 지운 값도 이 보관소가 살아 있는 동안 [`SecretStore::redact`] ·
+    ///   `contains_registered`의 대상이다(N8 · E38).
+    pub fn remove_provider(&self, keys: ProviderKeys) -> Result<bool, SecretsError> {
+        keys.check()?;
+        Err(SecretsError::InvalidProviderKeys)
+    }
+
     /// 넘긴 선언 순서대로 공급자별 등록 여부. 값 · 값의 일부 · 길이는 없다.
     ///
     /// 옛 [`SecretStore::status`] · [`SecretStore::slot_status`]에는 공급자 칸이 나오지 않는다.
