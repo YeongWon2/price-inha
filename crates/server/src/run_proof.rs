@@ -79,7 +79,7 @@ pub const RUN_PROOF_DOMAIN: &str = "price-inha run proof v2";
 pub const NOT_THIS_HOME_SERVER: &str = "이 포트에서 답하는 것은 이 보관 폴더의 서버가 아닙니다";
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::Router;
 use axum::body::Bytes;
@@ -98,14 +98,14 @@ use crate::AppError;
 
 /// 증표 · nonce · 포트로 요약값을 만든다(모듈 문서의 식). 소문자 16진수 64글자.
 pub fn run_proof(token: &str, nonce: &str, port: u16) -> String {
-    // 뼈대(38차 보강 red): 포트를 아직 섞지 않는다 — 구현이 식에 더한다.
-    let _ = port;
     let mut hasher = Sha256::new();
     hasher.update(RUN_PROOF_DOMAIN.as_bytes());
     hasher.update(b"\n");
     hasher.update(token.as_bytes());
     hasher.update(b"\n");
     hasher.update(nonce.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(port.to_string().as_bytes());
     lower_hex(&hasher.finalize())
 }
 
@@ -218,11 +218,15 @@ fn write_private(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 관문이 실제로 묶인 포트를 경로보다 늦게 한 번 채우는 자리. 채우기 전의 확인 요청에는 요약값을 주지 않는다.
+pub(crate) type BoundPort = Arc<OnceLock<u16>>;
+
 /// 그 컴퓨터에서만 열리는 확인 경로([`WHOAMI_PATH`]). `GateBuilder::local_routes`에 끼운다.
-pub(crate) fn routes(token: Token) -> Router {
+/// `port`는 관문을 연 뒤 실제로 묶인 포트로 채운다(요청의 Host 머리글 등은 쓰지 않는다).
+pub(crate) fn routes(token: Token, port: BoundPort) -> Router {
     Router::new()
         .route(WHOAMI_PATH, post(whoami))
-        .with_state(token)
+        .with_state((token, port))
 }
 
 /// 본문에서 계약의 모양인 nonce를 읽는다.
@@ -234,13 +238,18 @@ fn nonce_of(body: &[u8]) -> Option<String> {
     fits.then(|| nonce.to_string())
 }
 
-async fn whoami(State(token): State<Token>, body: Bytes) -> Response {
-    let (status, body) = match nonce_of(&body) {
-        Some(nonce) => (
-            StatusCode::OK,
-            json!({ WHOAMI_PROOF_FIELD: run_proof(token.as_str(), &nonce, 0) }),
+async fn whoami(State((token, port)): State<(Token, BoundPort)>, body: Bytes) -> Response {
+    let (status, body) = match (nonce_of(&body), port.get()) {
+        (None, _) => (StatusCode::BAD_REQUEST, json!({ "error": "invalid_input" })),
+        // 포트를 아직 모른다(관문이 막 열리는 중): 요약값을 주지 않는다.
+        (Some(_), None) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "error": "not_ready" }),
         ),
-        None => (StatusCode::BAD_REQUEST, json!({ "error": "invalid_input" })),
+        (Some(nonce), Some(port)) => (
+            StatusCode::OK,
+            json!({ WHOAMI_PROOF_FIELD: run_proof(token.as_str(), &nonce, *port) }),
+        ),
     };
     (status, [(CACHE_CONTROL, "no-store")], axum::Json(body)).into_response()
 }

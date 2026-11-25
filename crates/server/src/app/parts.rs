@@ -142,6 +142,7 @@ pub(super) async fn open_gate(
     lock_alert: Option<Arc<dyn pi_gate::LockAlert>>,
 ) -> Result<(GateServer, RunProofFile), AppError> {
     let token = Token::fresh()?;
+    let bound_port: crate::run_proof::BoundPort = Arc::default();
     let config = GateConfig {
         bind: SocketAddr::new(settings.bind, settings.port),
         ..GateConfig::default()
@@ -161,7 +162,10 @@ pub(super) async fn open_gate(
         .local_routes(setup_http::register_routes(Arc::clone(view.desk())))
         // (7차) 접속 키 발급 · 잠금 풀기는 그 컴퓨터에서만, 접속 기록 보기는 세션이면.
         .local_routes(access_http::local_routes(Arc::clone(&access)))
-        .local_routes(crate::run_proof::routes(token.clone()))
+        .local_routes(crate::run_proof::routes(
+            token.clone(),
+            Arc::clone(&bound_port),
+        ))
         .protected_routes(access_http::session_routes(
             Arc::clone(&access),
             store.clone(),
@@ -175,6 +179,8 @@ pub(super) async fn open_gate(
     let gate = builder.build().serve().await?;
     // 관문을 연 뒤에야 접속 키 손잡이를 얻는다. 자리는 여기서 한 번만 채운다.
     let _ = access.set(gate.access_keys());
+    // (38차 보강) 확인 요약값은 관문이 실제로 묶인 포트로 만든다(포트 0으로 띄웠으면 운영체제가 고른 포트).
+    let _ = bound_port.set(gate.local_addr().port());
     let proof = RunProofFile::write(&settings.home, token)?;
     Ok((gate, proof))
 }

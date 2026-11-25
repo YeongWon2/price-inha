@@ -38,7 +38,7 @@ pub(crate) async fn confirm(home: &Path, running: &Running) -> bool {
     let Some(proof) = reply.get(WHOAMI_PROOF_FIELD).and_then(Value::as_str) else {
         return false;
     };
-    let wanted = Zeroizing::new(run_proof(&token, &nonce, 0));
+    let wanted = Zeroizing::new(run_proof(&token, &nonce, running.port()));
     status == 200 && same_text(proof, &wanted)
 }
 

@@ -275,6 +275,8 @@ pub(crate) struct Running {
     client: reqwest::Client,
     origin: String,
     cookie: String,
+    /// 접속한 포트(확인 요약값에 섞는다).
+    port: u16,
 }
 
 impl Running {
@@ -319,10 +321,16 @@ impl Running {
                     cookie: cookie.to_string(),
                     client,
                     origin,
+                    port: place.port,
                 })
             }
             _ => Found::Other,
         }
+    }
+
+    /// 접속한 포트.
+    pub(crate) fn port(&self) -> u16 {
+        self.port
     }
 
     /// (37차) 그 서버의 경로 하나를 화면과 같은 세션 · `Origin`으로 부른다. `body`가 있으면 `POST`(JSON),
