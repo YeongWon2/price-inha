@@ -16,8 +16,10 @@ enum Condition {
     NextTradingDayStart,
     /// "내 승인" 표시가 있을 때만.
     OwnerApproved,
-    /// 사유가 "최대 손실"일 때만.
-    MaxLoss,
+    /// 사유가 "최대 손실"이거나, "내 정지"이고 "내 승인" 표시가 있을 때만(운용 중 · 두 멈춤 → 전체 정지).
+    MaxLossOrOwnerStop,
+    /// 사유가 "내 정지"이고 "내 승인" 표시가 있을 때만(쉬는 중 → 전체 정지). 다른 사유는 표에 없는 것과 같다.
+    OwnerStopOnly,
 }
 
 /// 허용 표([`TeamState`]의 문서 주석과 같다). 표에 없으면 `None`.
@@ -25,8 +27,9 @@ fn rule(from: TeamState, to: TeamState) -> Option<Condition> {
     use TeamState::{AnomalyHalt, DailyLimitHalt, FullStop, Operating, Resting};
     match (from, to) {
         (Resting, Operating | AnomalyHalt) => Some(Condition::Always),
+        (Resting, FullStop) => Some(Condition::OwnerStopOnly),
         (Operating, Resting | DailyLimitHalt | AnomalyHalt) => Some(Condition::Always),
-        (Operating | DailyLimitHalt | AnomalyHalt, FullStop) => Some(Condition::MaxLoss),
+        (Operating | DailyLimitHalt | AnomalyHalt, FullStop) => Some(Condition::MaxLossOrOwnerStop),
         (DailyLimitHalt, Resting) => Some(Condition::NextTradingDayStart),
         (AnomalyHalt, Resting) => Some(Condition::Always),
         (FullStop, Resting) => Some(Condition::OwnerApproved),
@@ -46,20 +49,25 @@ fn check(from: TeamState, change: &TeamChange) -> Result<(), DenyReason> {
                 Err(DenyReason::NextTradingDayOnly)
             }
         }
-        Some(Condition::MaxLoss) => {
-            if change.cause == TeamCause::MaxLoss {
-                Ok(())
-            } else {
-                Err(DenyReason::MaxLossOnly)
-            }
-        }
-        Some(Condition::OwnerApproved) => {
-            if change.owner_approved {
-                Ok(())
-            } else {
-                Err(DenyReason::OwnerApprovalRequired)
-            }
-        }
+        Some(Condition::MaxLossOrOwnerStop) => match change.cause {
+            TeamCause::MaxLoss => Ok(()),
+            TeamCause::OwnerStop => owner_approved(change),
+            _ => Err(DenyReason::MaxLossOnly),
+        },
+        Some(Condition::OwnerStopOnly) => match change.cause {
+            TeamCause::OwnerStop => owner_approved(change),
+            _ => Err(DenyReason::NotAllowed),
+        },
+        Some(Condition::OwnerApproved) => owner_approved(change),
+    }
+}
+
+/// "내 승인" 표시가 있어야 한다.
+fn owner_approved(change: &TeamChange) -> Result<(), DenyReason> {
+    if change.owner_approved {
+        Ok(())
+    } else {
+        Err(DenyReason::OwnerApprovalRequired)
     }
 }
 
