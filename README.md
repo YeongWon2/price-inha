@@ -20,15 +20,49 @@ MIT 라이선스의 무료 오픈소스입니다. 서버는 Rust 한 프로그�
 
 ## 설치
 
-Rust(1.85 이상)와 Git이 필요합니다. macOS · Linux · Windows에서 같은 방법으로 설치합니다.
+### 한 줄 설치 (macOS · Linux)
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.sh | sh
+```
+
+- 운영체제 · CPU(macOS arm64 · x86_64, Linux x86_64 · arm64)에 맞는 릴리스 묶음을 받아 **SHA-256을 확인한 뒤** 실행 파일 하나를 `~/.local/bin/price-inha`에 놓습니다. 맞지 않으면 설치하지 않습니다.
+- sudo를 쓰지 않고, 셸 설정 파일을 고치지 않고, 키를 묻지 않습니다. `~/.local/bin`이 PATH에 없으면 넣는 법만 알려 줍니다.
+- 릴리스가 없으면 소스로 짓습니다(Rust가 있어야 합니다. 없으면 설치 안내만 합니다).
+- 선택: `sh -s -- --version v0.1.0` · `--prefix <폴더>` · `--from-source` · `--dry-run`(무엇을 할지만) · `--help`. 받기 전에 내용을 보고 싶으면 `install.sh`를 먼저 내려받아 읽은 뒤 `sh install.sh`로 돌립니다.
+- 윈도는 아직 한 줄 설치가 없습니다. 아래 "소스로 짓기"를 따릅니다.
+
+### 소스로 짓기
+
+Rust(1.85 이상)와 Git이 필요합니다. macOS · Linux · Windows에서 같은 방법입니다.
 
 ```bash
 git clone https://github.com/YeongWon2/price-inha.git
 cd price-inha
-cargo build --release
+cargo build --release          # 실행 파일: target/release/price-inha
+sh install.sh --from-source    # (macOS · Linux) ~/.local/bin 에 놓기까지
 ```
 
-실행 파일은 `target/release/price-inha`에 만들어집니다. 따로 설치할 데이터베이스나 서비스는 없습니다.
+따로 설치할 데이터베이스나 서비스는 없습니다.
+
+### 처음 세팅 · 열기
+
+```bash
+price-inha setup        # 터미널 마법사: AI 연결 · 증권 키 · 종목 · 메신저 · 자동 실행
+price-inha open         # 화면을 브라우저로 연다
+price-inha run --demo   # 키 없이 가짜 시세로 먼저 보기(시연 모드)
+```
+
+한 줄 설치는 끝에 터미널이 있으면 `price-inha setup`을 지금 실행할지 묻습니다. 필요한 키와 계정은 [docs/dev/keys-needed.md](docs/dev/keys-needed.md)에 있습니다.
+
+### 지우기
+
+```bash
+price-inha service uninstall    # 자동 실행으로 등록했다면 먼저
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.sh | sh -s -- --uninstall
+```
+
+실행 파일만 지웁니다. 키 · 기록 · 모의계좌가 든 보관 폴더(`~/.price-inha`)는 그대로 두고 위치를 알려 줍니다. 자료까지 지우려면 그 폴더를 직접 지웁니다(되돌릴 수 없습니다).
 
 ## 실행
 
