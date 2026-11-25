@@ -16,6 +16,7 @@
 //!
 //! 화면(메신저 묶음)은 `tests/web/setup-messenger*.test.ts`(vitest)와 `tests/e2e/messenger.spec.ts`가 본다.
 
+mod bench;
 mod commands;
 mod common;
 mod demo;

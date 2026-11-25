@@ -3,8 +3,9 @@
 //! round37(같은 홈으로 다시 띄우기 · 원격 세션 · 사는 주문 안)의 장치를 본떠 두고(그 폴더는 고치지 않는다) 39차에 맞게
 //! 줄였다. 가짜 텔레그램은 `crates/channel/tests/suite/common.rs`의 모양(경로 `/bot<토큰>/<메서드>`, JSON 몸통)을 따른다.
 //!
-//! - [`Bench`]: 임시 보관 폴더 · `127.0.0.1:0` · **시연 아님**(필수 키는 시험용 값으로 미리 등록 — 토스 · Anthropic
-//!   자리는 아무도 듣지 않는 로컬 주소)으로 [`price_inha::App::launch_with_messenger`]를 띄운다. 팀은 잇지 않는다
+//! - [`Bench`]: 임시 보관 폴더 · `127.0.0.1:0` · **시연 아님**(필수 키는 시험용 값으로 미리 등록 — 토스 자리는
+//!   [`HYNIX`] 시세를 시계의 지금 시각으로 주는 로컬 가짜 증권사, Anthropic 자리는 아무도 듣지 않는 로컬 주소)으로
+//!   [`price_inha::App::launch_with_messenger`]를 띄운다. 시세가 흐르므로 이상 감시가 팀을 멈추지 않는다. 팀은 잇지 않는다
 //!   (뒤에서 AI를 부르지 않는다). 메신저 조립 값은 가짜 텔레그램 주소 · 짧은 long polling · 물러서기 3초→7초다
 //!   (시험 시계는 10ms만 자고 잔 시간을 적는다).
 //! - [`FakeTelegram`]: 받을 갱신을 차례로 내주고(`offset` 이상만), 보낸 글(`sendMessage`)은 받은 요청으로 남는다.
@@ -48,7 +49,7 @@ use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use wiremock::matchers::any;
+use wiremock::matchers::{any, method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 /// 한 걸음을 기다리는 가장 긴 시간.
@@ -565,12 +566,79 @@ fn peer_override(remote: Arc<AtomicBool>) -> pi_gate::PeerOverride {
     })
 }
 
-fn wiring(clock: &Arc<TestClock>, remote: &Arc<AtomicBool>) -> Wiring {
+/// 가짜 증권사(토스): 토큰 · 현재가(시계의 지금 시각으로 [`HYNIX`] 한 종목, 진입가) · 국내 달력.
+/// 시세 흐름이 바퀴마다 시세를 받게 한다(round17의 가짜 시세 서버와 같은 모양).
+async fn fake_broker(clock: Arc<TestClock>) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "zz-round40-quote-token", "token_type": "Bearer", "expires_in": 86_400
+        })))
+        .mount(&server)
+        .await;
+    let price_clock = Arc::clone(&clock);
+    Mock::given(method("GET"))
+        .and(path("/api/v1/prices"))
+        .respond_with(move |_: &Request| {
+            let now = price_clock.now().with_timezone(&seoul());
+            ResponseTemplate::new(200).set_body_json(json!({"result": [{
+                "symbol": HYNIX, "timestamp": now.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string(),
+                "lastPrice": ENTRY.to_string(), "currency": "KRW"
+            }]}))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/market-calendar/KR"))
+        .respond_with(move |_: &Request| {
+            let today = clock.now().with_timezone(&seoul()).date_naive();
+            ResponseTemplate::new(200).set_body_json(json!({"result": {
+                "today": toss_day(today),
+                "previousBusinessDay": toss_day(business_day(today, false)),
+                "nextBusinessDay": toss_day(business_day(today, true)),
+            }}))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+fn seoul() -> chrono::FixedOffset {
+    chrono::FixedOffset::east_opt(9 * 3600).unwrap()
+}
+
+/// 토스 달력 응답의 하루(round17과 같은 모양).
+fn toss_day(date: NaiveDate) -> Value {
+    let date = date.format("%Y-%m-%d").to_string();
+    json!({
+        "date": date,
+        "integrated": {
+            "preMarket": {
+                "startTime": format!("{date}T08:00:00+09:00"),
+                "singlePriceAuctionStartTime": format!("{date}T08:50:00+09:00"),
+                "endTime": format!("{date}T09:00:00+09:00"),
+            },
+            "regularMarket": {
+                "startTime": format!("{date}T09:00:00+09:00"),
+                "singlePriceAuctionStartTime": format!("{date}T15:20:00+09:00"),
+                "endTime": format!("{date}T15:30:00+09:00"),
+            },
+            "afterMarket": {
+                "startTime": format!("{date}T15:30:00+09:00"),
+                "singlePriceAuctionEndTime": format!("{date}T15:40:00+09:00"),
+                "endTime": format!("{date}T20:00:00+09:00"),
+            },
+        }
+    })
+}
+
+fn wiring(clock: &Arc<TestClock>, remote: &Arc<AtomicBool>, broker: &MockServer) -> Wiring {
     let dead = dead_base_url();
     Wiring {
         upstreams: Upstreams {
             toss: TossConfig {
-                base_url: dead.clone(),
+                base_url: broker.uri(),
                 timeout: Duration::from_secs(3),
                 token_failure_cooldown: Duration::ZERO,
                 ..TossConfig::default()
@@ -646,11 +714,14 @@ pub async fn register_provider(home: &Path, keys: ProviderKeys, field: &str, val
         .unwrap();
 }
 
+/// 띄우기: `tg`가 있으면 그 가짜 텔레그램으로 메신저를 잇고([`App::launch_with_messenger`]), 없으면 메신저 없이
+/// 같은 조립으로 띄운다([`App::launch_with`] — 발판 자체를 볼 때).
 async fn launch(
     home: &Path,
     clock: &Arc<TestClock>,
     remote: &Arc<AtomicBool>,
-    tg: &FakeTelegram,
+    broker: &MockServer,
+    tg: Option<&FakeTelegram>,
 ) -> App {
     let launch = Launch {
         trading: trading_wiring(),
@@ -661,28 +732,31 @@ async fn launch(
         push: None,
         backup: None,
     };
-    tokio::time::timeout(
-        STEP,
-        App::launch_with_messenger(
-            settings(home),
-            wiring(clock, remote),
-            launch,
-            reach,
-            messenger_wiring(tg),
-        ),
-    )
-    .await
-    .expect("서버가 시간 안에 떠야 한다")
-    .expect("서버가 떠야 한다")
+    let settings = settings(home);
+    let wiring = wiring(clock, remote, broker);
+    let app = match tg {
+        Some(tg) => {
+            let messenger = messenger_wiring(tg);
+            tokio::time::timeout(
+                STEP,
+                App::launch_with_messenger(settings, wiring, launch, reach, messenger),
+            )
+            .await
+        }
+        None => tokio::time::timeout(STEP, App::launch_with(settings, wiring, launch, reach)).await,
+    };
+    app.expect("서버가 시간 안에 떠야 한다")
+        .expect("서버가 떠야 한다")
 }
 
 // ───────────── 띄운 서버 ─────────────
 
-/// 떠 있는 서버 하나와 그 보관 폴더 · 시계 · 상대 주소.
+/// 떠 있는 서버 하나와 그 보관 폴더 · 시계 · 상대 주소 · 가짜 증권사.
 pub struct Bench {
     dir: TempDir,
     clock: Arc<TestClock>,
     remote: Arc<AtomicBool>,
+    broker: MockServer,
     app: App,
 }
 
@@ -694,13 +768,24 @@ impl Bench {
 
     /// 그 보관 폴더로 월요일 10시에 띄운다.
     pub async fn start_in(dir: TempDir, tg: &FakeTelegram) -> Bench {
+        Bench::assemble(dir, Some(tg)).await
+    }
+
+    /// 메신저 없이 같은 조립(가짜 증권사 · 시계 · 모의계좌)으로 띄운다 — 발판 자체를 볼 때.
+    pub async fn start_plain() -> Bench {
+        Bench::assemble(fresh_home().await, None).await
+    }
+
+    async fn assemble(dir: TempDir, tg: Option<&FakeTelegram>) -> Bench {
         let clock = TestClock::at(kst(monday(), 10, 0));
         let remote = Arc::new(AtomicBool::new(false));
-        let app = launch(dir.path(), &clock, &remote, tg).await;
+        let broker = fake_broker(Arc::clone(&clock)).await;
+        let app = launch(dir.path(), &clock, &remote, &broker, tg).await;
         Bench {
             dir,
             clock,
             remote,
+            broker,
             app,
         }
     }
@@ -717,18 +802,23 @@ impl Bench {
     /// 끄고, 같은 보관 폴더 · 같은 시계로 다시 띄운다(상대 주소는 그 컴퓨터로 돌린다).
     pub async fn restart(self, tg: &FakeTelegram) -> Bench {
         let Bench {
-            dir, clock, app, ..
+            dir,
+            clock,
+            broker,
+            app,
+            ..
         } = self;
         tokio::time::timeout(STEP, app.shutdown())
             .await
             .expect("시간 안에 꺼져야 한다")
             .expect("끄기가 성공해야 한다");
         let remote = Arc::new(AtomicBool::new(false));
-        let app = launch(dir.path(), &clock, &remote, tg).await;
+        let app = launch(dir.path(), &clock, &remote, &broker, Some(tg)).await;
         Bench {
             dir,
             clock,
             remote,
+            broker,
             app,
         }
     }
