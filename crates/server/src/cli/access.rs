@@ -9,6 +9,7 @@
 //! 원본 동작: Hermes 2.3 · OpenClaw 3.3(화면 없는 컴퓨터의 처음 설정은 터미널에서 일회용 자격을 한 번 보여 준다).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::time::Duration;
 
 use pi_gate::{Gate, GateConfig};
@@ -16,6 +17,7 @@ use pi_secrets::SecretStore;
 use pi_store::Store;
 
 use super::peek::stored_generation;
+use super::proof;
 use super::service::Service;
 use crate::error::CliError;
 use crate::{ACCESS_KEY_PATH, AppError, DB_FILE, Settings};
@@ -144,6 +146,9 @@ pub(crate) enum Located {
     Ours(Running, u16),
     /// 그 포트에서 다른 프로그램이 답하거나, 서버가 도는데 루프백 경로가 아니다.
     NotOurs(u16),
+    /// (38차) 그 포트가 세션은 주지만 이 보관 폴더의 서버임을 실행 증표로 확인하지 못했다
+    /// (세션 · 확인 말고는 아무것도 보내지 않았다).
+    NotThisHome(u16),
 }
 
 /// (37차) [`access_key_with`]와 같은 차례의 찾을 자리: 설정의 포트의 루프백 → 이 홈을 가리키는 서비스 정의의
@@ -162,7 +167,9 @@ pub(crate) fn places_for(settings: &Settings, service: Option<&Service<'_>>) -> 
 }
 
 /// `places`를 차례로 물어 도는 서버를 찾는다. 포트 0(빈 포트를 골라 연다)과 이미 물은 자리는 건너뛴다.
-pub(crate) async fn locate(places: Vec<Place>) -> Located {
+/// (38차) 루프백에서 세션을 주는 서버를 찾으면, 돌려주기 전에(그 서버에 다른 요청을 보내기 전에) 보관 폴더
+/// `home`의 실행 증표로 신원을 확인한다([`super::proof::confirm`]). `setup` · `access-key` · `open`이 모두 이 길이다.
+pub(crate) async fn locate(home: &Path, places: Vec<Place>) -> Located {
     let mut asked: Vec<Place> = Vec::new();
     for place in places {
         if place.port == 0 || asked.contains(&place) {
@@ -172,6 +179,9 @@ pub(crate) async fn locate(places: Vec<Place>) -> Located {
         match Running::find(place).await {
             Found::None => {}
             Found::Ours(found) if place.host.is_loopback() => {
+                if !proof::confirm(home, &found).await {
+                    return Located::NotThisHome(place.port);
+                }
                 return Located::Ours(found, place.port);
             }
             Found::Ours(_) | Found::Other => return Located::NotOurs(place.port),
@@ -186,10 +196,11 @@ async fn issue_at(
     request: &AccessKeyRequest,
     places: Vec<Place>,
 ) -> Result<ShownAccessKey, CliError> {
-    let running = match locate(places).await {
+    let running = match locate(&settings.home, places).await {
         Located::Nowhere => None,
         Located::Ours(found, port) => Some((found, port)),
         Located::NotOurs(port) => return Err(CliError::NotOurServer { port }),
+        Located::NotThisHome(port) => return Err(CliError::NotThisHome { port }),
     };
     let (key, generation, how) = match running {
         None => {

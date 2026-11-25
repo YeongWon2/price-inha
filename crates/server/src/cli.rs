@@ -9,6 +9,7 @@ mod command;
 mod doctor;
 mod open;
 mod peek;
+mod proof;
 mod restore;
 mod runner;
 mod service;

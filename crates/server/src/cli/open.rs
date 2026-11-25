@@ -19,8 +19,8 @@ use std::io::Write;
 use super::access::{Located, locate, places_for};
 use super::runner::{CommandLine, CommandRunner};
 use super::service::{Service, ServiceSetup};
-use crate::Settings;
 use crate::page::{ACCOUNT_PAGE_PATH, HISTORY_PAGE_PATH, RULES_PAGE_PATH, TEMPLATES_PAGE_PATH};
+use crate::{NOT_THIS_HOME_SERVER, Settings};
 
 /// 열 화면.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -110,8 +110,16 @@ pub async fn open(
     let service = ServiceSetup::for_this_computer(&settings.home, Vec::new())
         .ok()
         .map(|setup| Service::new(setup, runner));
-    let port = match locate(places_for(settings, service.as_ref())).await {
+    let port = match locate(&settings.home, places_for(settings, service.as_ref())).await {
         Located::Ours(_, port) => port,
+        // (38차) 신원을 확인하지 못하면 주소를 내지 않는다.
+        Located::NotThisHome(port) => {
+            let _ = writeln!(
+                output,
+                "127.0.0.1:{port}: {NOT_THIS_HOME_SERVER}. --home 과 --port 를 확인하세요.\n{OPEN_NO_SERVER}"
+            );
+            return OPEN_NO_SERVER_EXIT;
+        }
         Located::NotOurs(port) => {
             let _ = writeln!(
                 output,

@@ -16,6 +16,7 @@ use crate::ai_link::Leftovers;
 use crate::demo::DemoAdapter;
 use crate::desk::{AiParts, Desk, DeskParts, prepare_work};
 use crate::feed::{Feed, Pace, Registered, Source, StaleHook};
+use crate::run_proof::{RunProofFile, Token};
 use crate::setup::{AttemptLimit, SymbolsSource, load_watchlist};
 use crate::setup_doctor::SetupView;
 use crate::{
@@ -129,6 +130,8 @@ pub(super) fn key_verifier(
 /// 접속 관문을 연다. 공개 경로는 첫 화면과 웹 자산(사무실 · 폰), 세션 경로는 설정 상태와 `protected`
 /// (주문 길 · 팀 · 3차 경로), 그 컴퓨터에서만 열리는 경로는 키 · 종목 등록이다. 가리기 자리에는 비밀
 /// 보관소를, 잠금 알림 자리에는 `lock_alert`(있으면)를 끼운다. (7차) 접속 키 경로도 여기서 잇는다.
+/// (38차) 이번 실행의 증표를 만들어 확인 경로(그 컴퓨터에서만)에 쥐여 주고, 관문이 포트를 얻은 **뒤** 보관
+/// 폴더에 쓴다(포트를 얻지 못한 서버가 도는 서버의 증표 파일을 덮지 않게). 돌려주기 전에 파일이 있다.
 pub(super) async fn open_gate(
     settings: &Settings,
     wiring: &Wiring,
@@ -137,7 +140,8 @@ pub(super) async fn open_gate(
     view: Arc<SetupView>,
     protected: axum::Router,
     lock_alert: Option<Arc<dyn pi_gate::LockAlert>>,
-) -> Result<GateServer, AppError> {
+) -> Result<(GateServer, RunProofFile), AppError> {
+    let token = Token::fresh()?;
     let config = GateConfig {
         bind: SocketAddr::new(settings.bind, settings.port),
         ..GateConfig::default()
@@ -157,6 +161,7 @@ pub(super) async fn open_gate(
         .local_routes(setup_http::register_routes(Arc::clone(view.desk())))
         // (7차) 접속 키 발급 · 잠금 풀기는 그 컴퓨터에서만, 접속 기록 보기는 세션이면.
         .local_routes(access_http::local_routes(Arc::clone(&access)))
+        .local_routes(crate::run_proof::routes(token.clone()))
         .protected_routes(access_http::session_routes(
             Arc::clone(&access),
             store.clone(),
@@ -170,7 +175,24 @@ pub(super) async fn open_gate(
     let gate = builder.build().serve().await?;
     // 관문을 연 뒤에야 접속 키 손잡이를 얻는다. 자리는 여기서 한 번만 채운다.
     let _ = access.set(gate.access_keys());
-    Ok(gate)
+    let proof = RunProofFile::write(&settings.home, token)?;
+    Ok((gate, proof))
+}
+
+/// 설정 상태 보기(설정 책상 · 시장 · 고른 모델 · 저장소 · 3차 조립).
+pub(super) fn setup_view(
+    desk: &Arc<Desk>,
+    settings: &Settings,
+    models: Vec<(&'static str, String)>,
+    (store, linked): (&Store, &Option<Arc<crate::reach::Linked>>),
+) -> Arc<SetupView> {
+    let parts = (store.clone(), linked.clone());
+    Arc::new(SetupView::new(
+        Arc::clone(desk),
+        settings.market,
+        models,
+        parts,
+    ))
 }
 
 /// 세션 경로: 주문 길, 팀(있으면), 3차 경로(있으면).

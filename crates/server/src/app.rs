@@ -13,7 +13,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::desk::Desk;
-use crate::setup_doctor::SetupView;
 use crate::team::{CrewParts, spawn_trigger};
 use crate::trading::{TradingParts, default_wiring};
 use crate::{AppError, CLI_COMMON_LOCATIONS, Crew, Settings, Trading, Upstreams};
@@ -38,7 +37,9 @@ mod parts;
 mod run;
 
 pub use parts::announce_addr;
-use parts::{check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, spawn_feed};
+use parts::{
+    check_cli_briefly, key_verifier, open_desk, open_gate, session_routes, setup_view, spawn_feed,
+};
 use run::DemoRun;
 pub use run::{RunAssembly, run_assembly};
 
@@ -172,6 +173,8 @@ pub struct App {
     office_sync: Option<JoinHandle<()>>,
     /// (10c 13번) 뜻 검색 임베딩 다시 만들기(꺼져 있으면 아무것도 묻지 않는다).
     reembed: JoinHandle<()>,
+    /// (38차) 이번 실행의 증표 파일(끌 때 · 놓을 때 지운다).
+    run_proof: crate::run_proof::RunProofFile,
 }
 
 /// 팀이 있으면 깨우기 엔진을 띄운다.
@@ -365,14 +368,9 @@ impl App {
         let extra = link::with_semantic(extra, &memory.semantic);
         let extra = link::with_looks(extra, &settings.home, &store, &wiring.clock);
         let protected = session_routes(&trading, crew.as_ref(), extra);
-        let parts = (store.clone(), linked.clone());
-        let view = Arc::new(SetupView::new(
-            Arc::clone(&desk),
-            settings.market,
-            models,
-            parts,
-        ));
-        let gate = open_gate(&settings, &wiring, &store, &secrets, view, protected, alert).await?;
+        let view = setup_view(&desk, &settings, models, (&store, &linked));
+        let (gate, run_proof) =
+            open_gate(&settings, &wiring, &store, &secrets, view, protected, alert).await?;
         trading.attach(gate.publisher());
         if let Some(linked) = &linked {
             link::attach(linked, &gate, &trading, crew.as_ref(), &memory);
@@ -405,6 +403,7 @@ impl App {
             linked,
             office_sync,
             reembed,
+            run_proof,
         })
     }
 
@@ -483,6 +482,8 @@ impl App {
         self.desk.shutdown_ai().await;
         // 시세 흐름이 비정상으로 끝났어도 연결과 저장소는 정리한다.
         let gate = self.gate.shutdown().await;
+        // (38차) 연결을 닫은 뒤 이번 실행의 증표 파일을 지운다.
+        drop(self.run_proof);
         drop(self.trading);
         drop(self.store);
         gate?;

@@ -70,8 +70,196 @@ pub const RUN_PROOF_DOMAIN: &str = "price-inha run proof v1";
 /// CLI가 확인에 실패해 멈출 때 출력에 드는 까닭 글.
 pub const NOT_THIS_HOME_SERVER: &str = "이 포트에서 답하는 것은 이 보관 폴더의 서버가 아닙니다";
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::http::header::CACHE_CONTROL;
+use axum::response::{IntoResponse, Response};
+use axum::routing::post;
+use rand::TryRngCore;
+use rand::rngs::OsRng;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
+
+use crate::AppError;
+
 /// 증표와 nonce로 요약값을 만든다(모듈 문서의 식). 소문자 16진수 64글자.
 pub fn run_proof(token: &str, nonce: &str) -> String {
-    let _ = (token, nonce);
-    String::new()
+    let mut hasher = Sha256::new();
+    hasher.update(RUN_PROOF_DOMAIN.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(token.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(nonce.as_bytes());
+    lower_hex(&hasher.finalize())
+}
+
+/// 바이트 → 소문자 16진수.
+pub(crate) fn lower_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        text.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        text.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    text
+}
+
+/// 운영체제 난수 `N`바이트의 소문자 16진수(사본은 지울 때 0으로). 난수를 얻지 못하면 `None`.
+pub(crate) fn random_hex<const N: usize>() -> Option<Zeroizing<String>> {
+    let mut bytes = Zeroizing::new([0u8; N]);
+    OsRng.try_fill_bytes(bytes.as_mut()).ok()?;
+    Some(Zeroizing::new(lower_hex(bytes.as_ref())))
+}
+
+/// 두 글자를 상수 시간으로 비교한다(길이가 다르면 바로 거짓 — 길이는 계약으로 정해져 있다).
+pub(crate) fn same_text(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// 서버가 쥔 이번 실행의 증표. 메모리의 사본은 놓을 때 0으로 지운다. `Debug`는 글자를 찍지 않는다.
+#[derive(Clone)]
+pub(crate) struct Token(Arc<Zeroizing<String>>);
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(..)")
+    }
+}
+
+impl Token {
+    /// 운영체제 난수 32바이트로 새 증표를 만든다.
+    pub(crate) fn fresh() -> Result<Token, AppError> {
+        random_hex::<32>()
+            .map(|text| Token(Arc::new(text)))
+            .ok_or(AppError::RunProof {
+                kind: std::io::ErrorKind::Other,
+            })
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// 보관 폴더에 쓴 증표 파일. 놓으면(서버를 끄면) 파일이 아직 이 증표일 때만 지운다
+/// (같은 보관 폴더로 뒤에 뜬 다른 서버의 파일은 건드리지 않는다).
+#[derive(Debug)]
+pub(crate) struct RunProofFile {
+    path: PathBuf,
+    token: Token,
+}
+
+impl RunProofFile {
+    /// `home`의 [`RUN_PROOF_FILE`]에 증표를 원자적으로(같은 폴더의 임시 파일 → 이름 바꾸기) 0600으로 쓴다.
+    /// 앞서 남은 파일은 바꿔 쓴다.
+    pub(crate) fn write(home: &Path, token: Token) -> Result<RunProofFile, AppError> {
+        let path = home.join(RUN_PROOF_FILE);
+        let temp = home.join(format!(".{RUN_PROOF_FILE}.{}.tmp", std::process::id()));
+        let written = write_private(&temp, token.as_str().as_bytes())
+            .and_then(|()| std::fs::rename(&temp, &path));
+        if let Err(error) = written {
+            let _ = std::fs::remove_file(&temp);
+            return Err(AppError::RunProof { kind: error.kind() });
+        }
+        Ok(RunProofFile { path, token })
+    }
+}
+
+impl Drop for RunProofFile {
+    fn drop(&mut self) {
+        let ours = std::fs::read_to_string(&self.path)
+            .map(Zeroizing::new)
+            .is_ok_and(|text| same_text(&text, self.token.as_str()));
+        if ours {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// 새 파일을 주인만 읽고 쓰게(0600) 만들어 `bytes`를 쓰고 디스크에 내린다. 같은 이름이 있으면 지우고 새로 만든다.
+fn write_private(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let _ = std::fs::remove_file(file);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut opened = options.open(file)?;
+    opened.write_all(bytes)?;
+    opened.sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        opened.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// 그 컴퓨터에서만 열리는 확인 경로([`WHOAMI_PATH`]). `GateBuilder::local_routes`에 끼운다.
+pub(crate) fn routes(token: Token) -> Router {
+    Router::new()
+        .route(WHOAMI_PATH, post(whoami))
+        .with_state(token)
+}
+
+/// 본문에서 계약의 모양인 nonce를 읽는다.
+fn nonce_of(body: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let nonce = value.get(WHOAMI_NONCE_FIELD)?.as_str()?;
+    let fits = (WHOAMI_NONCE_MIN_LEN..=WHOAMI_NONCE_MAX_LEN).contains(&nonce.len())
+        && nonce.bytes().all(|byte| byte.is_ascii_hexdigit());
+    fits.then(|| nonce.to_string())
+}
+
+async fn whoami(State(token): State<Token>, body: Bytes) -> Response {
+    let (status, body) = match nonce_of(&body) {
+        Some(nonce) => (
+            StatusCode::OK,
+            json!({ WHOAMI_PROOF_FIELD: run_proof(token.as_str(), &nonce) }),
+        ),
+        None => (StatusCode::BAD_REQUEST, json!({ "error": "invalid_input" })),
+    };
+    (status, [(CACHE_CONTROL, "no-store")], axum::Json(body)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 상수_시간_비교() {
+        assert!(same_text("abc", "abc"));
+        assert!(!same_text("abc", "abd"));
+        assert!(!same_text("abc", "ab"));
+    }
+
+    #[test]
+    fn 난수_글자는_소문자_16진수() {
+        let made = random_hex::<32>().unwrap_or_default();
+        assert_eq!(made.len(), 64);
+        assert!(
+            made.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+    }
+
+    #[test]
+    fn nonce_모양() {
+        assert!(nonce_of(br#"{"nonce":"0123456789abcdefABCDEF0123456789"}"#).is_some());
+        assert!(nonce_of(br#"{"nonce":"0123"}"#).is_none());
+        assert!(nonce_of(b"nonce=1").is_none());
+    }
 }

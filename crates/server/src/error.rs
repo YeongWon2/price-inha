@@ -52,6 +52,12 @@ pub enum AppError {
         /// 실패 종류.
         kind: std::io::ErrorKind,
     },
+    /// (38차) 실행 증표를 만들거나 보관 폴더에 쓰지 못했다. 종류만 싣는다(증표 글자는 싣지 않는다).
+    #[error("실행 증표를 쓰지 못했습니다: {kind}")]
+    RunProof {
+        /// 실패 종류.
+        kind: std::io::ErrorKind,
+    },
     /// 안에서 돌던 작업이 끝나지 못했다.
     #[error("서버 작업이 비정상으로 끝났습니다")]
     Task,
@@ -259,6 +265,17 @@ pub enum CliError {
 --port 를 서버의 포트로 맞게 주거나, 서버를 멈춘 뒤 다시 합니다"
     )]
     NotOurServer {
+        /// 물어본 포트.
+        port: u16,
+    },
+    /// (38차) 그 포트에서 세션을 주는 것이 이 보관 폴더의 서버임을 실행 증표로 확인하지 못했다.
+    /// 아무것도 보내지 않았고 키를 만들지 않았다.
+    #[error(
+        "127.0.0.1:{port} — {reason}. 접속 키를 만들지 않았습니다. --home 과 --port 가 도는 서버의 것인지 \
+확인하거나, 서버를 다시 띄운 뒤 다시 합니다",
+        reason = crate::NOT_THIS_HOME_SERVER
+    )]
+    NotThisHome {
         /// 물어본 포트.
         port: u16,
     },

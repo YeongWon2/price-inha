@@ -2375,6 +2375,7 @@ dependencies = [
  "pi-store",
  "pi-template",
  "pi-trigger",
+ "rand 0.9.5",
  "reqwest",
  "rusqlite",
  "rust_decimal",

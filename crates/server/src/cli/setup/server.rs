@@ -8,14 +8,16 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use super::prompt::Prompter;
 use super::signals::{remember_server, terminate};
 use super::{SETUP_FAILED_EXIT, SETUP_RUN_HINT, SETUP_START_SERVER_QUESTION, SetupRequest};
 use crate::cli::access::{Located, Place, Running, locate, places_for};
+use crate::cli::proof::raw_proof;
 use crate::cli::runner::SystemRunner;
 use crate::cli::service::{Service, ServiceSetup};
-use crate::{Settings, SetupRefusal};
+use crate::{NOT_THIS_HOME_SERVER, Settings, SetupRefusal};
 
 /// 설정 경로 한 번의 상한(등록 전 확인이 바깥에 닿는 시간을 넉넉히 둔다).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
@@ -164,10 +166,14 @@ pub(crate) async fn connect(
     let service = ServiceSetup::for_this_computer(&settings.home, Vec::new())
         .ok()
         .map(|setup| Service::new(setup, &runner));
-    match locate(places_for(settings, service.as_ref())).await {
+    match locate(&settings.home, places_for(settings, service.as_ref())).await {
         Located::Ours(running, port) => Connected::Ready(Link { running, port }, None),
         Located::NotOurs(port) => {
             prompter.say(&not_ours(port));
+            Connected::Stop(SETUP_FAILED_EXIT)
+        }
+        Located::NotThisHome(port) => {
+            prompter.say(&not_this_home(port));
             Connected::Stop(SETUP_FAILED_EXIT)
         }
         Located::Nowhere => match prompter.yes_no(SETUP_START_SERVER_QUESTION, true) {
@@ -184,6 +190,18 @@ fn not_ours(port: u16) -> String {
     format!("127.0.0.1:{port}에서 이 서버가 아닌 것이 답합니다. --port를 확인하세요")
 }
 
+/// (38차) 세션은 주지만 실행 증표로 이 보관 폴더의 서버임을 확인하지 못했다. 아무것도 보내지 않았다.
+fn not_this_home(port: u16) -> String {
+    format!(
+        "127.0.0.1:{port}: {NOT_THIS_HOME_SERVER}. 키를 보내지 않았습니다. --home 과 --port 를 확인하세요"
+    )
+}
+
+/// (38차) 띄운 서버가 새 증표 파일을 썼나(띄우기 전에 남아 있던 `stale`과 다른 글자의 파일이 있다).
+fn fresh_proof(home: &Path, stale: Option<&Zeroizing<String>>) -> bool {
+    raw_proof(home).is_some_and(|now| stale.is_none_or(|old| old.as_str() != now.as_str()))
+}
+
 /// `run`과 같은 설정 인자로 뒤에서 띄우고 답할 때까지 기다린다.
 async fn start(
     settings: &Settings,
@@ -192,6 +210,8 @@ async fn start(
     prompter: &mut Prompter<'_>,
 ) -> Connected {
     let port = settings.port;
+    // 띄우기 전에 남은 증표 파일(끝내 지우지 못하고 죽은 서버의 것)은 띄운 서버의 것이 아니다.
+    let stale = raw_proof(&settings.home);
     if port == 0 {
         prompter.say("포트 0(빈 포트를 고름)으로는 띄운 서버를 찾을 수 없습니다. --port를 주세요");
         return Connected::Stop(SETUP_FAILED_EXIT);
@@ -221,7 +241,13 @@ async fn start(
             ));
             return Connected::Stop(SETUP_FAILED_EXIT);
         }
-        match locate(vec![Place::loopback(port)]).await {
+        // (38차) 자식이라는 것만으로 믿지 않는다: 띄운 서버가 새 증표 파일을 쓸 때까지 기다린 뒤 같은 확인을
+        // 거친다(띄운 서버가 포트를 얻지 못하고 다른 것이 그 포트에서 답하면 확인에 실패한다).
+        if !fresh_proof(&settings.home, stale.as_ref()) {
+            tokio::time::sleep(POLL).await;
+            continue;
+        }
+        match locate(&settings.home, vec![Place::loopback(port)]).await {
             Located::Ours(running, port) => {
                 prompter.say(&format!(
                     "서버를 뒤에서 띄웠습니다(127.0.0.1:{port}). 서비스로 등록하지 않으면 마법사가 끝날 때 끕니다"
@@ -230,6 +256,11 @@ async fn start(
             }
             Located::NotOurs(port) => {
                 prompter.say(&not_ours(port));
+                spawned.stop().await;
+                return Connected::Stop(SETUP_FAILED_EXIT);
+            }
+            Located::NotThisHome(port) => {
+                prompter.say(&not_this_home(port));
                 spawned.stop().await;
                 return Connected::Stop(SETUP_FAILED_EXIT);
             }

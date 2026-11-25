@@ -30,10 +30,12 @@ pi-secrets.workspace = true
 pi-store.workspace = true
 pi-template.workspace = true
 pi-trigger.workspace = true
+rand.workspace = true
 reqwest.workspace = true
 rusqlite = { workspace = true, features = ["bundled"] }
 rust_decimal.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 tracing.workspace = true
