@@ -6,8 +6,11 @@ import type { AccountReply, CashLine, EquityLine, TeamReply } from "./model";
 import {
   EMPTY_HOLDINGS,
   FULL_STOP_TEXT,
+  OWNER_STOP_TEXT,
   PAPER_NOTICE,
+  STOP_LABEL,
   canRestart,
+  canStop,
   drawdownRatio,
   holdingRows,
   moneyText,
@@ -41,8 +44,10 @@ export function renderNotice(): HTMLElement {
  * 팀 상태 카드(`data-role="team"`): 상태 배지(`data-role="team-state"`) · 오늘 할 일(`data-role="team-plan"`) ·
  * 쉬는 이유(`data-role="team-reason"`, 있을 때만). 전체 정지면 까닭(`FULL_STOP_TEXT`)과
  * `button[data-action="restart"]`를 더한다(그 밖의 상태에는 단추가 없다). 단추를 누르면 `onRestart`를 부른다.
+ * (40차) 내가 내린 정지(`stop_cause` `"owner_stop"`)면 까닭 뒤에 `OWNER_STOP_TEXT`를 덧붙인다(`data-role="owner-stop"`).
+ * (40차 2번) 전체 정지가 아니고 `onStop`을 주면 정지 자리([`renderStop`])를 단다.
  */
-export function renderTeam(team: TeamReply, onRestart: () => void): HTMLElement {
+export function renderTeam(team: TeamReply, onRestart: () => void, onStop?: () => void): HTMLElement {
   const state = badge(teamStateText(team.state), teamTone(team.state));
   state.dataset.role = "team-state";
   const plan = el("p", "acc-plan", planText(team));
@@ -67,8 +72,16 @@ export function renderTeam(team: TeamReply, onRestart: () => void): HTMLElement 
     const restart = button("다시 시작", "danger");
     restart.dataset.action = "restart";
     restart.addEventListener("click", () => onRestart());
-    stop.append(el("p", "acc-stop-text", FULL_STOP_TEXT), restart);
+    stop.append(el("p", "acc-stop-text", FULL_STOP_TEXT));
+    if (team.stop_cause === "owner_stop") {
+      const owner = el("p", "acc-stop-text", OWNER_STOP_TEXT);
+      owner.dataset.role = "owner-stop";
+      stop.append(owner);
+    }
+    stop.append(restart);
     node.append(stop);
+  } else if (onStop && canStop(team.state)) {
+    node.append(renderStop(onStop));
   }
   return node;
 }
@@ -79,8 +92,13 @@ export function renderTeam(team: TeamReply, onRestart: () => void): HTMLElement 
  * 이미 전체 정지면 이 자리 없이 지금의 "다시 시작"만 보인다.
  */
 export function renderStop(onStop: () => void): HTMLElement {
-  void onStop;
-  throw new Error("todo");
+  const node = el("div", "acc-stop-action");
+  node.dataset.role = "stop";
+  const stop = button(STOP_LABEL, "danger");
+  stop.dataset.action = "stop";
+  stop.addEventListener("click", () => onStop());
+  node.append(stop);
+  return node;
 }
 
 /** 이름 · 값 한 쌍(`data-role`은 값에 단다). */

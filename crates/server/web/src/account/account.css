@@ -38,6 +38,10 @@
 .acc-stop .acc-stop-text { margin: 0; }
 .acc-team .acc-restart-result { margin: var(--space-3) 0 0; font-weight: 600; }
 .acc-restart-result:empty { display: none; }
+/* (40차) 전체 정지 단추 자리와 정지 오류 줄 */
+.acc-stop-action { margin-top: var(--space-3); }
+.acc-team .ui-error { margin-top: var(--space-3); }
+.acc-team .ui-error:empty { display: none; }
 
 /* 계좌 카드: 통화마다 한 칸 */
 .acc-currencies { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-3); }

@@ -30,11 +30,12 @@
 // (`GET API.messenger`, 계약은 그 파일).
 //
 // (40차 6번) 알림 묶음 `notify`: 메신저 묶음 다음에 자리 하나를 더 두고 `setup/notify-view.ts`의 `mountNotify`로
-// 그린다(`GET API.notifySettings`, 계약은 그 파일). 40차 N1 뼈대에는 아직 달지 않았다(N2가 단다).
+// 그린다(`GET API.notifySettings`, 계약은 그 파일).
 import { API } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
 import { mountMessenger } from "./messenger-view";
+import { mountNotify } from "./notify-view";
 import type { BadgeTone } from "../ui/parts";
 import { SOUND_DEFAULT, saveSound, soundEnabled } from "../ui/sound-pref";
 
@@ -362,8 +363,11 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
   const sound = soundBlock();
   // (39차 7번) 메신저 묶음은 제 자리를 스스로 읽어 그린다.
   const messengerSlot = el("div", "");
-  root.replaceChildren(...Object.values(slots), sound.node, messengerSlot);
+  // (40차 6번) 알림 묶음도 제 자리를 스스로 읽어 그린다(메신저 묶음 다음).
+  const notifySlot = el("div", "");
+  root.replaceChildren(...Object.values(slots), sound.node, messengerSlot, notifySlot);
   const messenger = mountMessenger(messengerSlot);
+  const notify = mountNotify(notifySlot);
   const status = read(API.setup).then((body) => {
     swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
     swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -381,5 +385,5 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
     const state = guide.querySelector('[data-role="backup-state"]');
     if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
   });
-  await Promise.allSettled([status, semantic, doctor, backup, sound.ready, messenger]);
+  await Promise.allSettled([status, semantic, doctor, backup, sound.ready, messenger, notify]);
 }

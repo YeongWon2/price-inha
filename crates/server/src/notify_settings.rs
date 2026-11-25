@@ -79,3 +79,9 @@ pub const NOTIFY_LOCKED_OFF: &str = "locked_kind_off";
 
 /// 바꾸기 거부: 조용한 시간의 시각 글자가 틀렸다(400).
 pub const NOTIFY_INVALID_QUIET: &str = "invalid_quiet_hours";
+
+mod book;
+mod http;
+
+pub(crate) use book::{NotifyBook, NotifySettings};
+pub(crate) use http::routes;

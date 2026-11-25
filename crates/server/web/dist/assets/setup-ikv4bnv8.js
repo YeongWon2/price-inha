@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-ebudw6pk.js";
+import { n as API, t as mountMenu } from "./menu-drn5z1qq.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-xzb8bl9n.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-ddms2yvj.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -53,13 +53,13 @@ var PAIRING_HINT = "봇에게 아무 말이나 보내면 코드가 옵니다";
 /** 연결된 사람이 있을 때. */
 var PAIRED_TEXT = "연결됨";
 /** 다른 기기에서 볼 때(보기만). 403의 글이기도 하다. */
-var REMOTE_NOTE = "이 컴퓨터에서만 바꿀 수 있습니다";
+var REMOTE_NOTE$1 = "이 컴퓨터에서만 바꿀 수 있습니다";
 /** 슬랙 줄. */
 var SLACK_SOON = "슬랙은 준비 중입니다";
 /** 틀린 코드(400, 서버 `MESSENGER_WRONG_CODE`와 같은 글). */
 var WRONG_CODE = "코드가 맞지 않습니다";
 /** 잠김(423)의 앞부분(서버 `MESSENGER_LOCKED`와 같은 글). 뒤에 풀리는 시각이 붙는다. */
-var LOCKED_TEXT = "틀린 코드가 많아 잠시 승인을 받지 않습니다";
+var LOCKED_TEXT$1 = "틀린 코드가 많아 잠시 승인을 받지 않습니다";
 /** 이미 연결된 사람이 있음(409 `owner_exists`). */
 var OWNER_EXISTS = "이미 연결된 사람이 있습니다 — 먼저 빼세요";
 /** 토큰이 거절됨(422 `key_rejected`). */
@@ -118,8 +118,8 @@ function pad(value) {
 /** 잠긴 동안의 글: [`LOCKED_TEXT`] 뒤에 풀리는 시각(이 기기의 시각 `HH:MM`). */
 function lockedText(until) {
 	const at = new Date(until);
-	if (!Number.isFinite(until) || Number.isNaN(at.getTime())) return LOCKED_TEXT;
-	return `${LOCKED_TEXT} (${pad(at.getHours())}:${pad(at.getMinutes())}에 풀립니다)`;
+	if (!Number.isFinite(until) || Number.isNaN(at.getTime())) return LOCKED_TEXT$1;
+	return `${LOCKED_TEXT$1} (${pad(at.getHours())}:${pad(at.getMinutes())}에 풀립니다)`;
 }
 /** 몸통의 `error` 글자(없으면 빈 글). */
 function errorOf(body) {
@@ -137,7 +137,7 @@ function messageOf(body) {
 */
 function messengerError(status, body) {
 	const error = errorOf(body);
-	if (status === 403) return REMOTE_NOTE;
+	if (status === 403) return REMOTE_NOTE$1;
 	if (status === 400 && error === "wrong_code") return WRONG_CODE;
 	if (status === 423) return lockedText(isRecord(body) && typeof body.locked_until === "number" ? body.locked_until : NaN);
 	if (status === 409 && error === "demo_mode") return messageOf(body) ?? "시연 모드에서는 메신저를 쓰지 않습니다";
@@ -166,7 +166,7 @@ var STATE_TONES = {
 	error: "warning"
 };
 /** 이 묶음의 겉(`data-role="messenger"`). */
-function shell(...body) {
+function shell$1(...body) {
 	const node = card(TITLE, ...body);
 	node.dataset.role = "messenger";
 	return node;
@@ -181,11 +181,11 @@ async function readStatus() {
 	}
 }
 /** 읽지 못했을 때의 묶음. */
-function failedBlock$1() {
+function failedBlock$2() {
 	const message = el("div", "");
 	message.dataset.role = "messenger-message";
 	message.append(errorLine(LOAD_FAILED));
-	return shell(message);
+	return shell$1(message);
 }
 /** 단추 하나를 만든다(`data-action`). */
 function actionButton(label, action, kind = "default") {
@@ -221,7 +221,7 @@ function wire(box, message, node, ask) {
 	});
 }
 /** 칸 하나의 입력 요소(`field`가 만든 것). */
-function inputOf$1(holder) {
+function inputOf$2(holder) {
 	return holder.querySelector("input");
 }
 /** 상태 줄: 배지(`messenger-state`)와 봇 이름(`messenger-bot`, 있으면). */
@@ -243,7 +243,7 @@ function stateLine(status) {
 function editParts(box, message, status) {
 	const parts = [];
 	const tokenField = field("봇 토큰", "messenger-token", "password");
-	const token = inputOf$1(tokenField);
+	const token = inputOf$2(tokenField);
 	token.autocomplete = "new-password";
 	const register = actionButton("등록", "messenger-register", "accent");
 	wire(box, message, register, () => {
@@ -269,7 +269,7 @@ function editParts(box, message, status) {
 		const pairing = el("div", "");
 		pairing.dataset.role = "messenger-pairing";
 		const codeField = field("페어링 코드", "messenger-code");
-		const code = inputOf$1(codeField);
+		const code = inputOf$2(codeField);
 		code.autocomplete = "off";
 		const approve = actionButton("승인", "messenger-approve", "accent");
 		wire(box, message, approve, () => ({
@@ -295,7 +295,7 @@ function editParts(box, message, status) {
 }
 /** 다른 기기에서 보는 줄들(입력 · 단추 없음). */
 function remoteParts(status) {
-	const note = el("p", "", REMOTE_NOTE);
+	const note = el("p", "", REMOTE_NOTE$1);
 	note.dataset.role = "messenger-remote";
 	const parts = [note];
 	if (status.telegram.paired) {
@@ -311,16 +311,276 @@ function messengerBlock(status) {
 	message.dataset.role = "messenger-message";
 	const slack = el("p", "", SLACK_SOON);
 	slack.dataset.role = "messenger-slack";
-	const box = shell();
+	const box = shell$1();
 	const middle = status.editable ? editParts(box, message, status) : remoteParts(status);
 	box.append(stateLine(status), ...middle, slack, message);
 	return box;
 }
 /** 자리 하나에 메신저 묶음을 읽어 그린다(`GET API.messenger`). 읽기가 실패해도 던지지 않는다. */
 async function mountMessenger(root) {
-	root.replaceChildren(shell(loading()));
+	root.replaceChildren(shell$1(loading()));
 	const status = await readStatus();
-	root.replaceChildren(status === null ? failedBlock$1() : messengerBlock(status));
+	root.replaceChildren(status === null ? failedBlock$2() : messengerBlock(status));
+}
+// src/setup/notify-model.ts
+/** 묶음 제목. */
+var NOTIFY_TITLE = "알림";
+/** 잠긴 줄의 표시 글. */
+var LOCKED_TEXT = "끌 수 없음";
+/** 잠긴 종류 안내(표 아래 한 줄). */
+var LOCKED_NOTE = "승인 요청 · 멈춤 · 이상 알림은 적어도 한 곳으로는 갑니다";
+/** 조용한 시간 안내. */
+var QUIET_NOTE = "조용한 시간에는 급하지 않은 알림을 미룹니다. 승인 요청 · 멈춤 같은 급한 알림은 그대로 갑니다";
+/** 저장 성공. */
+var SAVED_TEXT = "저장했습니다";
+/** 다른 기기에서 볼 때(보기만). 403의 글이기도 하다. */
+var REMOTE_NOTE = "이 컴퓨터에서만 바꿀 수 있습니다";
+/** 잠긴 종류를 둘 다 끄려 함(400 `locked_kind_off`). 뒤에 " — <종류 글>"이 붙을 수 있다. */
+var LOCKED_OFF_TEXT = "이 알림은 폰과 메신저를 모두 끌 수 없습니다";
+/** 조용한 시간의 시각 글자가 틀림(400 `invalid_quiet_hours`). */
+var INVALID_QUIET_TEXT = "조용한 시간의 시작과 끝을 HH:MM으로, 서로 다르게 적어 주세요";
+/** 그 밖의 거부. */
+var SAVE_FAILED = "저장하지 못했습니다";
+/** `GET` 몸통을 읽는다. 모양이 틀리면 `null`(종류 줄 하나라도 틀리면 `null`). */
+function parseNotifySettings(body) {
+	if (!isObject(body) || !Array.isArray(body.kinds) || typeof body.editable !== "boolean") return null;
+	const kinds = [];
+	for (const row of body.kinds) {
+		const parsed = parseKind(row);
+		if (parsed === null) return null;
+		kinds.push(parsed);
+	}
+	const quiet = parseQuiet(body.quiet);
+	if (quiet === null) return null;
+	return {
+		kinds,
+		quiet,
+		editable: body.editable
+	};
+}
+/** 몸통이 JSON 객체(배열 아님)인가. */
+function isObject(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/** 종류 한 줄. 칸 하나라도 틀리면 `null`. */
+function parseKind(row) {
+	if (!isObject(row)) return null;
+	const { kind, label, push, messenger, locked } = row;
+	if (typeof kind !== "string" || typeof label !== "string") return null;
+	if (typeof push !== "boolean" || typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
+	return {
+		kind,
+		label,
+		push,
+		messenger,
+		locked
+	};
+}
+/** 조용한 시간. 칸 하나라도 틀리면 `null`. */
+function parseQuiet(quiet) {
+	if (!isObject(quiet)) return null;
+	const { enabled, start, end } = quiet;
+	if (typeof enabled !== "boolean" || typeof start !== "string" || typeof end !== "string") return null;
+	return {
+		enabled,
+		start,
+		end
+	};
+}
+/**
+* 바꾸기(`POST`) 몸통: `{"kinds": [{"kind", "push", "messenger"}], "quiet": {"enabled", "start", "end"}}` — 모든 종류를
+* 받은 차례 그대로 통째로 보낸다(`label` · `locked` · `editable`은 싣지 않는다).
+*/
+function saveBody(settings) {
+	return {
+		kinds: settings.kinds.map(({ kind, push, messenger }) => ({
+			kind,
+			push,
+			messenger
+		})),
+		quiet: {
+			enabled: settings.quiet.enabled,
+			start: settings.quiet.start,
+			end: settings.quiet.end
+		}
+	};
+}
+/**
+* 바꾸기 실패의 글: 403은 [`REMOTE_NOTE`], 400 `locked_kind_off`는 [`LOCKED_OFF_TEXT`](몸통의 `kind`가 `labels`에
+* 있으면 " — <종류 글>"을 잇는다), 400 `invalid_quiet_hours`는 [`INVALID_QUIET_TEXT`], 그 밖은 [`SAVE_FAILED`].
+*/
+function notifyError(status, body, labels = []) {
+	if (status === 403) return REMOTE_NOTE;
+	if (status !== 400 || !isObject(body)) return SAVE_FAILED;
+	if (body.error === "locked_kind_off") {
+		const label = labels.find((row) => row.kind === body.kind)?.label;
+		return label === void 0 ? LOCKED_OFF_TEXT : `${LOCKED_OFF_TEXT} — ${label}`;
+	}
+	if (body.error === "invalid_quiet_hours") return INVALID_QUIET_TEXT;
+	return SAVE_FAILED;
+}
+// src/setup/notify-view.ts
+/** 표의 머리 칸. */
+var COLUMNS = [
+	"종류",
+	"폰",
+	"메신저"
+];
+/** 이 묶음의 겉(`data-role="notify"`). */
+function shell(...body) {
+	const node = card(NOTIFY_TITLE, ...body);
+	node.dataset.role = "notify";
+	return node;
+}
+/** 설정을 읽는다. 실패(상태 · 연결 · 모양)면 `null`. */
+async function readSettings() {
+	try {
+		const reply = await call("GET", API.notifySettings);
+		return reply.ok ? parseNotifySettings(reply.body) : null;
+	} catch {
+		return null;
+	}
+}
+/** 켜고 끄는 칸 하나(`input[type=checkbox][name]`). */
+function toggle(name, checked, label, editable) {
+	const input = el("input", "");
+	input.type = "checkbox";
+	input.name = name;
+	input.checked = checked;
+	input.disabled = !editable;
+	input.setAttribute("aria-label", label);
+	return input;
+}
+/** 종류 한 줄(`tr[data-kind]`, 잠긴 줄은 `data-locked="true"`와 [`LOCKED_TEXT`]). */
+function kindRow(tbody, row, editable) {
+	const tr = tbody.insertRow();
+	tr.dataset.kind = row.kind;
+	if (row.locked) tr.dataset.locked = "true";
+	const name = tr.insertCell();
+	name.append(el("span", "", row.label));
+	if (row.locked) name.append(" ", badge(LOCKED_TEXT, "warning"));
+	tr.insertCell().append(toggle("push", row.push, `${row.label} 폰 알림`, editable));
+	tr.insertCell().append(toggle("messenger", row.messenger, `${row.label} 메신저 알림`, editable));
+}
+/** 종류별 표(`data-role="notify-kinds"`). */
+function kindsTable(settings) {
+	const grid = table(COLUMNS, []);
+	const tbody = grid.tBodies[0] ?? grid.createTBody();
+	for (const row of settings.kinds) kindRow(tbody, row, settings.editable);
+	const holder = el("div", "");
+	holder.dataset.role = "notify-kinds";
+	holder.append(grid, el("p", "", LOCKED_NOTE));
+	return holder;
+}
+/** 칸 묶음(`field`)의 입력 요소. */
+function inputOf$1(holder) {
+	return holder.querySelector("input");
+}
+/** 조용한 시간 칸(`data-role="notify-quiet"`): 켜기 · 시작 · 끝(`HH:MM`). */
+function quietPart(settings) {
+	const on = field("조용한 시간 켜기", "notify-quiet-on", "checkbox");
+	on.classList.add("setup-extra-check");
+	const start = field("시작", "notify-quiet-start", "time");
+	const end = field("끝", "notify-quiet-end", "time");
+	inputOf$1(on).checked = settings.quiet.enabled;
+	inputOf$1(start).value = settings.quiet.start;
+	inputOf$1(end).value = settings.quiet.end;
+	for (const holder of [
+		on,
+		start,
+		end
+	]) inputOf$1(holder).disabled = !settings.editable;
+	const part = el("div", "");
+	part.dataset.role = "notify-quiet";
+	part.append(on, start, end, el("p", "", QUIET_NOTE));
+	return part;
+}
+/** 지금 칸 값으로 바꾼 설정(서버가 준 차례 그대로). */
+function currentValues(box, settings) {
+	const checked = (selector, fallback) => box.querySelector(selector)?.checked ?? fallback;
+	const value = (selector, fallback) => box.querySelector(selector)?.value ?? fallback;
+	const lines = [...box.querySelectorAll("tr[data-kind]")];
+	const kinds = settings.kinds.map((row) => {
+		const line = lines.find((tr) => tr.dataset.kind === row.kind);
+		const flag = (name) => line?.querySelector(`input[name="${name}"]`)?.checked;
+		return {
+			...row,
+			push: flag("push") ?? row.push,
+			messenger: flag("messenger") ?? row.messenger
+		};
+	});
+	const quiet = {
+		enabled: checked("#notify-quiet-on", settings.quiet.enabled),
+		start: value("#notify-quiet-start", settings.quiet.start),
+		end: value("#notify-quiet-end", settings.quiet.end)
+	};
+	return {
+		...settings,
+		kinds,
+		quiet
+	};
+}
+/** 저장 단추: 지금 칸 값으로 통째 보낸다. 성공이면 받은 값으로 다시 그리고, 실패면 오류 줄(칸 값은 그대로). */
+function saveButton(box, message, settings) {
+	const save = button("저장", "accent");
+	save.dataset.action = "notify-save";
+	save.addEventListener("click", () => {
+		save.disabled = true;
+		message.replaceChildren();
+		(async () => {
+			let text;
+			try {
+				const reply = await call("POST", API.notifySettings, saveBody(currentValues(box, settings)));
+				const next = reply.ok ? parseNotifySettings(reply.body) : null;
+				if (next !== null) {
+					const fresh = notifyBlock(next);
+					const done = fresh.querySelector("[data-role=\"notify-message\"]");
+					if (done) done.replaceChildren(savedLine());
+					box.replaceWith(fresh);
+					return;
+				}
+				text = notifyError(reply.status, reply.body, settings.kinds);
+			} catch {
+				text = notifyError(0, null);
+			}
+			message.replaceChildren(errorLine(text));
+			save.disabled = false;
+		})();
+	});
+	return save;
+}
+/** 저장 성공 줄(`role="status"`). */
+function savedLine() {
+	const line = el("p", "", SAVED_TEXT);
+	line.setAttribute("role", "status");
+	return line;
+}
+/** 설정 하나로 알림 묶음(`data-role="notify"`)을 그린다. 단추는 위 계약대로 서버를 부르고 다시 그린다. */
+function notifyBlock(settings) {
+	const message = el("div", "");
+	message.dataset.role = "notify-message";
+	const box = shell(kindsTable(settings), quietPart(settings));
+	if (settings.editable) box.append(saveButton(box, message, settings));
+	else {
+		const remote = el("p", "", REMOTE_NOTE);
+		remote.dataset.role = "notify-remote";
+		box.append(remote);
+	}
+	box.append(message);
+	return box;
+}
+/** 읽지 못했을 때의 묶음. */
+function failedBlock$1() {
+	const message = el("div", "");
+	message.dataset.role = "notify-message";
+	message.append(errorLine(LOAD_FAILED));
+	return shell(message);
+}
+/** 자리 하나에 알림 묶음을 읽어 그린다(`GET API.notifySettings`). 읽기가 실패해도 던지지 않는다. */
+async function mountNotify(root) {
+	root.replaceChildren(shell(loading()));
+	const settings = await readSettings();
+	root.replaceChildren(settings === null ? failedBlock$1() : notifyBlock(settings));
 }
 // src/setup/extras.ts
 /** 시장 글자 → 화면 이름. */
@@ -600,8 +860,10 @@ async function mountSetupExtras(root) {
 	for (const [role, title] of Object.entries(titles)) slots[role] = block(role, title, loading());
 	const sound = soundBlock();
 	const messengerSlot = el("div", "");
-	root.replaceChildren(...Object.values(slots), sound.node, messengerSlot);
+	const notifySlot = el("div", "");
+	root.replaceChildren(...Object.values(slots), sound.node, messengerSlot, notifySlot);
 	const messenger = mountMessenger(messengerSlot);
+	const notify = mountNotify(notifySlot);
 	const status = read(API.setup).then((body) => {
 		swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
 		swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
@@ -623,7 +885,8 @@ async function mountSetupExtras(root) {
 		doctor,
 		backup,
 		sound.ready,
-		messenger
+		messenger,
+		notify
 	]);
 }
 // src/setup/main.ts

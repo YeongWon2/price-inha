@@ -43,6 +43,8 @@ export interface TeamReply {
   state: string;
   plan: "trade" | "rest" | null;
   reason: string | null;
+  /** (server 40차) 전체 정지면 그 정지의 사유(`"owner_stop"` 내가 정지 · `"max_loss"` 최대 손실). 없으면 없음. */
+  stop_cause?: string | null;
 }
 
 /** 통화 하나의 현금(십진수 글자). */
@@ -102,6 +104,9 @@ export interface HoldingRow {
  * 전체 정지 확인 글(server 40차 2번, 결정 25): 누르면 `window.confirm`으로 한 번 묻는다.
  */
 export const STOP_CONFIRM = "새 주문이 모두 막힙니다. 보유의 손절은 계속 돕니다. 다시 시작은 이 화면에서만 됩니다.";
+
+/** (server 40차) 내가 내린 전체 정지일 때 정지 안내(`FULL_STOP_TEXT`) 뒤에 덧붙이는 글. */
+export const OWNER_STOP_TEXT = "이번 전체 정지는 내가 누른 정지입니다(최대 손실 때문이 아닙니다).";
 
 /** 전체 정지 단추 글. */
 export const STOP_LABEL = "전체 정지";
@@ -310,8 +315,7 @@ export function restartText(result: RestartResult): string {
  * 정지면 보이지 않는다(그때는 지금의 "다시 시작"만 보인다 — [`canRestart`]).
  */
 export function canStop(state: string): boolean {
-  void state;
-  throw new Error("todo");
+  return state !== "full_stop";
 }
 
 /**
@@ -321,15 +325,21 @@ export function canStop(state: string): boolean {
  * - 그 밖(`message`가 있으면 그 글, 없으면 "서버가 받지 않았습니다") → 거절.
  */
 export function stopResult(status: number, body: unknown): StopResult {
-  void status;
-  void body;
-  throw new Error("todo");
+  const state = textField(body, "state");
+  if (status === 200 && state !== null) return { kind: "stopped", state };
+  if (status === 409 && textField(body, "error") === "already_stopped") {
+    return { kind: "refused", reason: "이미 전체 정지입니다" };
+  }
+  const message = textField(body, "message");
+  if (message !== null) return { kind: "refused", reason: message };
+  return { kind: "refused", reason: "서버가 받지 않았습니다" };
 }
 
 /**
  * 전체 정지 결과 글: 정지됨은 "전체 정지했습니다 — 지금 상태: <상태 글>", 거절은 "전체 정지하지 못했습니다 — <이유>".
  */
 export function stopText(result: StopResult): string {
-  void result;
-  throw new Error("todo");
+  return result.kind === "stopped"
+    ? `전체 정지했습니다 — 지금 상태: ${teamStateText(result.state)}`
+    : `전체 정지하지 못했습니다 — ${result.reason}`;
 }

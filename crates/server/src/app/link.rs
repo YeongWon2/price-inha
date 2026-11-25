@@ -44,9 +44,10 @@ pub(super) fn open_linked(
     store: &Store,
     secrets: &Arc<SecretStore>,
     clock: &Arc<dyn Clock>,
+    market: pi_market::Market,
 ) -> Result<Option<Arc<Linked>>, AppError> {
     reach
-        .map(|reach| Linked::open(store, secrets, clock, reach).map(Arc::new))
+        .map(|reach| Linked::open(store, secrets, clock, reach, market).map(Arc::new))
         .transpose()
 }
 
@@ -76,7 +77,8 @@ pub(super) fn session_parts(
     let mut routes = office_routes(desk)
         .merge(talk_routes(Arc::clone(&linked.talk)))
         .merge(phone_routes(phone))
-        .merge(backup_routes(Arc::clone(linked)));
+        .merge(backup_routes(Arc::clone(linked)))
+        .merge(crate::notify_settings::routes(Arc::clone(linked)));
     // (39차) 메신저를 이었으면 그 경로(읽기는 세션, 바꾸기는 그 컴퓨터에서만)도 단다.
     if let Some(messenger) = linked.messenger() {
         routes = routes.merge(crate::messenger::routes(messenger));

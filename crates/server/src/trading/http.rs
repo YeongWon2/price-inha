@@ -17,9 +17,10 @@ use super::day::{Restart, team_word};
 use super::templates::Refusal;
 use super::view::Stopped;
 use super::{
-    ACCOUNT_PATH, APPROVAL_ANSWER_PATH, RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED, TEAM_PATH,
-    TEAM_RESTART_PATH, TEMPLATE_ADJUST_PATH, TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH,
-    TEMPLATE_STOP_PATH, TEMPLATES_VIEW_PATH, Trading,
+    ACCOUNT_PATH, APPROVAL_ANSWER_PATH, RESTART_KEYS_REQUIRED, RESTART_NOT_STOPPED,
+    STOP_ALREADY_STOPPED, TEAM_PATH, TEAM_RESTART_PATH, TEAM_STOP_PATH, TEMPLATE_ADJUST_PATH,
+    TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH, TEMPLATE_STOP_PATH, TEMPLATES_VIEW_PATH,
+    Trading,
 };
 use crate::TradingError;
 
@@ -28,6 +29,7 @@ pub(crate) fn routes(trading: Arc<Trading>) -> Router {
     Router::new()
         .route(TEAM_PATH, get(team))
         .route(TEAM_RESTART_PATH, post(restart))
+        .route(TEAM_STOP_PATH, post(owner_stop))
         .route(APPROVAL_ANSWER_PATH, post(answer))
         .route(TEMPLATE_PATH, post(choose))
         .route(TEMPLATE_ADJUST_PATH, post(adjust))
@@ -91,6 +93,24 @@ async fn restart(State(trading): State<Arc<Trading>>) -> Response {
         Ok(Restart::NotStopped) => reply(
             StatusCode::CONFLICT,
             json!({ "error": RESTART_NOT_STOPPED }),
+        ),
+        Err(error) => failed(&error),
+    }
+}
+
+/// (40차 1번) 사람이 내리는 전체 정지. 몸통은 없거나 `{}`이고 읽지 않는다(원격 세션도 된다 — 결정 25).
+async fn owner_stop(State(trading): State<Arc<Trading>>) -> Response {
+    match trading.owner_stop() {
+        Ok(Some(state)) => {
+            let mut body = json!({ "state": team_word(state) });
+            if let Some(notice) = trading.template_notice() {
+                body["notice"] = json!(notice);
+            }
+            reply(StatusCode::OK, body)
+        }
+        Ok(None) => reply(
+            StatusCode::CONFLICT,
+            json!({ "error": STOP_ALREADY_STOPPED }),
         ),
         Err(error) => failed(&error),
     }

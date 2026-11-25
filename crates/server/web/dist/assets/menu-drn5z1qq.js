@@ -59,7 +59,9 @@ var API = {
 	approvalLog: "/api/approvals",
 	account: "/api/account",
 	team: "/api/team",
-	teamRestart: "/api/team/restart"
+	teamRestart: "/api/team/restart",
+	teamStop: "/api/team/stop",
+	notifySettings: "/api/notify/settings"
 };
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
 function tradePath(id) {
@@ -82,7 +84,7 @@ var APPROVALS = [
 	"/api/approvals/{id}/approve",
 	"/api/approvals/{id}/reject"
 ];
-API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.setupSound, API.messenger, API.messengerTelegram, API.messengerApprove, API.messengerRevoke, API.remoteKeys, API.setupSlots, API.setupProviders, [
+API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi, API.setupBackup, API.setupSlots, API.setupProviders, API.accessKey, API.accessUnlock, API.accessLog, API.setupSemantic, API.setupDoctor, API.setupSound, API.messenger, API.messengerTelegram, API.messengerApprove, API.messengerRevoke, API.notifySettings, API.remoteKeys, API.setupSlots, API.setupProviders, [
 	API.session,
 	API.office,
 	API.officeChat,
@@ -103,7 +105,7 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.account, API.team, API.teamRestart, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.session, API.trades, API.dailySummary, API.approvalLog;
+], API.session, API.account, API.team, API.teamRestart, API.teamStop, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.session, API.trades, API.dailySummary, API.approvalLog;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));

@@ -303,7 +303,7 @@ impl App {
             &desk,
             &secrets,
         )?;
-        let linked = link::open_linked(reach, &store, &secrets, &wiring.clock)?;
+        let linked = link::open_linked(reach, &store, &secrets, &wiring.clock, settings.market)?;
         let messenger =
             link::open_messenger(messenger, &settings, linked.as_ref(), &trading, &store);
         let memory = link::open_memory(&settings.home, &store, &secrets, crew.as_ref());

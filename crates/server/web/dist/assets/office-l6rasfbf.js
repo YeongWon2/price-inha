@@ -1,5 +1,5 @@
-import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ebudw6pk.js";
-import { n as soundEnabled } from "./sound-pref-xzb8bl9n.js";
+import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-drn5z1qq.js";
+import { n as soundEnabled } from "./sound-pref-ddms2yvj.js";
 var PENDING$1 = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -3468,7 +3468,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-owb2a8h2.js");
+		const { webglAvailable, createScene } = await import("./scene3d-mj7q1rs5.js");
 		return {
 			webglAvailable,
 			createScene

@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-ebudw6pk.js";
+import { n as API, t as mountMenu } from "./menu-drn5z1qq.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
@@ -27,6 +27,10 @@ var REFRESH_KINDS = [
 	"day_close",
 	"day_plan"
 ];
+/** (server 40차) 내가 내린 전체 정지일 때 정지 안내(`FULL_STOP_TEXT`) 뒤에 덧붙이는 글. */
+var OWNER_STOP_TEXT = "이번 전체 정지는 내가 누른 정지입니다(최대 손실 때문이 아닙니다).";
+/** 전체 정지 단추 글. */
+var STOP_LABEL = "전체 정지";
 /** 십진수 글자(`-12.5`, `+3`, `0.00`)를 읽는다. 십진수가 아니면 없음. 부동소수점으로 바꾸지 않는다. */
 function digitsOf(value) {
 	const found = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
@@ -209,6 +213,45 @@ function restartText(result) {
 		case "refused": return `다시 시작하지 못했습니다 — ${result.reason}`;
 	}
 }
+/**
+* "전체 정지" 단추를 보이는가(server 40차 2번): 전체 정지가 아닌 모든 상태(모르는 글자 포함)에서 보이고, 이미 전체
+* 정지면 보이지 않는다(그때는 지금의 "다시 시작"만 보인다 — [`canRestart`]).
+*/
+function canStop(state) {
+	return state !== "full_stop";
+}
+/**
+* 전체 정지 응답을 결과로 읽는다(server 40차 1 · 2번):
+* - 200 `{"state"}` → 정지됨(바뀐 상태 글자).
+* - 409 `{"error": "already_stopped"}` → 거절, 이유 "이미 전체 정지입니다".
+* - 그 밖(`message`가 있으면 그 글, 없으면 "서버가 받지 않았습니다") → 거절.
+*/
+function stopResult(status, body) {
+	const state = textField(body, "state");
+	if (status === 200 && state !== null) return {
+		kind: "stopped",
+		state
+	};
+	if (status === 409 && textField(body, "error") === "already_stopped") return {
+		kind: "refused",
+		reason: "이미 전체 정지입니다"
+	};
+	const message = textField(body, "message");
+	if (message !== null) return {
+		kind: "refused",
+		reason: message
+	};
+	return {
+		kind: "refused",
+		reason: "서버가 받지 않았습니다"
+	};
+}
+/**
+* 전체 정지 결과 글: 정지됨은 "전체 정지했습니다 — 지금 상태: <상태 글>", 거절은 "전체 정지하지 못했습니다 — <이유>".
+*/
+function stopText(result) {
+	return result.kind === "stopped" ? `전체 정지했습니다 — 지금 상태: ${teamStateText(result.state)}` : `전체 정지하지 못했습니다 — ${result.reason}`;
+}
 // src/account/view.ts
 /** 낙폭 막대가 경고 빛깔로 바뀌는 한도 대비 비율(한도의 3/4). */
 var NEAR_LIMIT = .75;
@@ -237,8 +280,10 @@ function renderNotice() {
 * 팀 상태 카드(`data-role="team"`): 상태 배지(`data-role="team-state"`) · 오늘 할 일(`data-role="team-plan"`) ·
 * 쉬는 이유(`data-role="team-reason"`, 있을 때만). 전체 정지면 까닭(`FULL_STOP_TEXT`)과
 * `button[data-action="restart"]`를 더한다(그 밖의 상태에는 단추가 없다). 단추를 누르면 `onRestart`를 부른다.
+* (40차) 내가 내린 정지(`stop_cause` `"owner_stop"`)면 까닭 뒤에 `OWNER_STOP_TEXT`를 덧붙인다(`data-role="owner-stop"`).
+* (40차 2번) 전체 정지가 아니고 `onStop`을 주면 정지 자리([`renderStop`])를 단다.
 */
-function renderTeam(team, onRestart) {
+function renderTeam(team, onRestart, onStop) {
 	const state = badge(teamStateText(team.state), teamTone(team.state));
 	state.dataset.role = "team-state";
 	const plan = el("p", "acc-plan", planText(team));
@@ -261,9 +306,29 @@ function renderTeam(team, onRestart) {
 		const restart = button("다시 시작", "danger");
 		restart.dataset.action = "restart";
 		restart.addEventListener("click", () => onRestart());
-		stop.append(el("p", "acc-stop-text", FULL_STOP_TEXT), restart);
+		stop.append(el("p", "acc-stop-text", FULL_STOP_TEXT));
+		if (team.stop_cause === "owner_stop") {
+			const owner = el("p", "acc-stop-text", OWNER_STOP_TEXT);
+			owner.dataset.role = "owner-stop";
+			stop.append(owner);
+		}
+		stop.append(restart);
 		node.append(stop);
-	}
+	} else if (onStop && canStop(team.state)) node.append(renderStop(onStop));
+	return node;
+}
+/**
+* (server 40차 2번) 전체 정지 자리(`data-role="stop"`): 위험 단추 모양의 `button[data-action="stop"]`(글
+* `STOP_LABEL`). 단추를 누르면 `onStop`을 부른다. 팀 상태 카드([`renderTeam`])가 `canStop(state)`일 때만 단다 —
+* 이미 전체 정지면 이 자리 없이 지금의 "다시 시작"만 보인다.
+*/
+function renderStop(onStop) {
+	const node = el("div", "acc-stop-action");
+	node.dataset.role = "stop";
+	const stop = button(STOP_LABEL, "danger");
+	stop.dataset.action = "stop";
+	stop.addEventListener("click", () => onStop());
+	node.append(stop);
 	return node;
 }
 /** 이름 · 값 한 쌍(`data-role`은 값에 단다). */
@@ -379,12 +444,20 @@ var AccountScreen = class {
 	body = el("div", "acc-body");
 	/** 다시 시작 결과 줄: 다시 그려도 남는다(다시 시작 뒤 단추가 사라져도 결과는 보인다). */
 	result = el("p", "acc-restart-result");
+	/** (40차) 전체 정지 결과 · 오류 줄: 다시 그려도 남는다(정지 뒤 단추가 사라져도 결과는 보인다). */
+	stopResult = el("p", "acc-restart-result");
+	stopError = el("p", "ui-error");
 	running = null;
 	again = false;
 	restarting = false;
+	stopping = false;
 	constructor(main) {
 		this.result.dataset.role = "restart-result";
 		this.result.setAttribute("role", "status");
+		this.stopResult.dataset.role = "stop-result";
+		this.stopResult.setAttribute("role", "status");
+		this.stopError.dataset.role = "stop-error";
+		this.stopError.setAttribute("role", "alert");
 		main.append(renderNotice(), this.body);
 	}
 	renderLoading() {
@@ -417,8 +490,9 @@ var AccountScreen = class {
 		}
 	}
 	render(team, account) {
-		const teamCard = renderTeam(team, () => void this.restart());
-		teamCard.append(this.result);
+		const teamCard = renderTeam(team, () => void this.restart(), () => void this.stop());
+		teamCard.append(this.result, this.stopResult);
+		if (this.stopError.textContent) teamCard.append(this.stopError);
 		const top = el("div", "acc-top");
 		top.append(teamCard, renderAccount(account));
 		this.body.replaceChildren(top, renderHoldings(account));
@@ -452,7 +526,31 @@ var AccountScreen = class {
 			for (const node of this.body.querySelectorAll("button[data-action=\"restart\"]")) node.disabled = false;
 		}
 	}
+	/** (40차 2번) 확인 한 번 뒤에만 전체 정지를 보낸다. 결과든 오류든 그 뒤 팀 상태와 계좌를 다시 읽는다. */
+	async stop() {
+		if (this.stopping || !window.confirm("새 주문이 모두 막힙니다. 보유의 손절은 계속 돕니다. 다시 시작은 이 화면에서만 됩니다.")) return;
+		this.stopping = true;
+		lockButtons(this.body, "stop", true);
+		try {
+			let status = 0;
+			let body = null;
+			try {
+				({status, body} = await call("POST", API.teamStop));
+			} catch {}
+			const result = stopResult(status, body);
+			this.stopResult.textContent = result.kind === "stopped" ? stopText(result) : "";
+			this.stopError.textContent = result.kind === "refused" ? stopText(result) : "";
+			await this.refresh();
+		} finally {
+			this.stopping = false;
+			lockButtons(this.body, "stop", false);
+		}
+	}
 };
+/** 한 상태의 단추들을 잠그거나 푼다. */
+function lockButtons(root, action, locked) {
+	for (const node of root.querySelectorAll(`button[data-action="${action}"]`)) node.disabled = locked;
+}
 /** 같은 출처의 `/ws`를 열어 `REFRESH_KINDS` 이벤트에 다시 읽는다. 끊기면 `REFRESH_MS` 뒤 다시 잇는다. */
 function listen(screen) {
 	if (typeof WebSocket === "undefined") return;

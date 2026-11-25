@@ -22,6 +22,9 @@ use crate::TradingError;
 /// 하루 시작 · 마감을 다시 보는 간격(시계의 쉬기로 잰다).
 const TICK: Duration = Duration::from_secs(1);
 
+/// (40차 1번) 사람이 내린 전체 정지의 까닭 글(팀 상태 기록).
+const OWNER_STOP_DETAIL: &str = "내가 정지";
+
 /// 다시 시작(C8)의 결과.
 pub(super) enum Restart {
     /// 쉬는 중이 됐다.
@@ -280,6 +283,20 @@ impl Trading {
         Ok(Restart::Done(state))
     }
 
+    /// (40차 1번 · 결정 25) 사람이 내리는 전체 정지([`super::TEAM_STOP_PATH`] · 메신저 `/stop`이 함께 쓴다).
+    /// 전체 정지가 아니면 전체 정지로(사유 `OwnerStop`, 내 승인 표시, 까닭 글 "내가 정지") 바꾸고 바뀐 상태를,
+    /// 이미 전체 정지면 아무것도 하지 않고 없음을 돌려준다. 그 뒤는 최대 손실 전체 정지와 같은 길이다(저장소가 실전중
+    /// 템플릿을 멈추고, 팀 상태를 보는 자리들이 같은 상태를 읽는다).
+    pub(crate) fn owner_stop(&self) -> Result<Option<TeamState>, TradingError> {
+        let _turn = lock(&self.team_turn);
+        if self.store.team_state()? == TeamState::FullStop {
+            return Ok(None);
+        }
+        let cause = TeamCause::OwnerStop;
+        self.change_team(TeamState::FullStop, cause, true, OWNER_STOP_DETAIL)
+            .map(Some)
+    }
+
     /// 오늘 쉬는 날이면 그 이유.
     pub(super) fn rest_reason(&self, now: DateTime<Utc>) -> Option<String> {
         let today = self.date_of(now);
@@ -301,6 +318,32 @@ impl Trading {
             _ => (Value::Null, Value::Null),
         };
         let notice = self.template_notice();
-        Ok(json!({ "state": team_word(state), "plan": plan, "reason": reason, "notice": notice }))
+        let stop_cause = self.stop_cause(state)?;
+        Ok(json!({
+            "state": team_word(state),
+            "plan": plan,
+            "reason": reason,
+            "notice": notice,
+            "stop_cause": stop_cause,
+        }))
+    }
+
+    /// (40차) 전체 정지면 그 정지의 사유 글자(`"owner_stop"` 내가 정지 · `"max_loss"` 최대 손실), 아니면 없음.
+    /// 계좌 화면이 지금의 정지 안내에 "내가 정지했다"는 줄을 덧붙이는 데 쓴다.
+    fn stop_cause(&self, state: TeamState) -> Result<Value, TradingError> {
+        if state != TeamState::FullStop {
+            return Ok(Value::Null);
+        }
+        let history = self.store.team_history()?;
+        let cause = history
+            .iter()
+            .rev()
+            .find(|record| record.to == TeamState::FullStop)
+            .map(|record| match record.cause {
+                TeamCause::OwnerStop => json!("owner_stop"),
+                TeamCause::MaxLoss => json!("max_loss"),
+                _ => Value::Null,
+            });
+        Ok(cause.unwrap_or(Value::Null))
     }
 }

@@ -28,8 +28,11 @@ import {
   REFRESH_KINDS,
   REFRESH_MS,
   RESTART_CONFIRM,
+  STOP_CONFIRM,
   restartResult,
   restartText,
+  stopResult,
+  stopText,
   type AccountReply,
   type TeamReply,
 } from "./model";
@@ -45,13 +48,21 @@ class AccountScreen {
   private readonly body = el("div", "acc-body");
   /** 다시 시작 결과 줄: 다시 그려도 남는다(다시 시작 뒤 단추가 사라져도 결과는 보인다). */
   private readonly result = el("p", "acc-restart-result");
+  /** (40차) 전체 정지 결과 · 오류 줄: 다시 그려도 남는다(정지 뒤 단추가 사라져도 결과는 보인다). */
+  private readonly stopResult = el("p", "acc-restart-result");
+  private readonly stopError = el("p", "ui-error");
   private running: Promise<void> | null = null;
   private again = false;
   private restarting = false;
+  private stopping = false;
 
   constructor(main: HTMLElement) {
     this.result.dataset.role = "restart-result";
     this.result.setAttribute("role", "status");
+    this.stopResult.dataset.role = "stop-result";
+    this.stopResult.setAttribute("role", "status");
+    this.stopError.dataset.role = "stop-error";
+    this.stopError.setAttribute("role", "alert");
     main.append(renderNotice(), this.body);
   }
 
@@ -88,8 +99,14 @@ class AccountScreen {
   }
 
   private render(team: TeamReply, account: AccountReply): void {
-    const teamCard = renderTeam(team, () => void this.restart());
-    teamCard.append(this.result);
+    const teamCard = renderTeam(
+      team,
+      () => void this.restart(),
+      () => void this.stop(),
+    );
+    teamCard.append(this.result, this.stopResult);
+    // 오류 줄(`role="alert"`)은 오류가 있을 때만 단다(빈 경보 줄을 두지 않는다).
+    if (this.stopError.textContent) teamCard.append(this.stopError);
     const top = el("div", "acc-top");
     top.append(teamCard, renderAccount(account));
     this.body.replaceChildren(top, renderHoldings(account));
@@ -127,6 +144,34 @@ class AccountScreen {
       for (const node of this.body.querySelectorAll<HTMLButtonElement>('button[data-action="restart"]')) node.disabled = false;
     }
   }
+
+  /** (40차 2번) 확인 한 번 뒤에만 전체 정지를 보낸다. 결과든 오류든 그 뒤 팀 상태와 계좌를 다시 읽는다. */
+  private async stop(): Promise<void> {
+    if (this.stopping || !window.confirm(STOP_CONFIRM)) return;
+    this.stopping = true;
+    lockButtons(this.body, "stop", true);
+    try {
+      let status = 0;
+      let body: unknown = null;
+      try {
+        ({ status, body } = await call("POST", API.teamStop));
+      } catch {
+        // 보내지 못했다: 거절("서버가 받지 않았습니다")로 보인다.
+      }
+      const result = stopResult(status, body);
+      this.stopResult.textContent = result.kind === "stopped" ? stopText(result) : "";
+      this.stopError.textContent = result.kind === "refused" ? stopText(result) : "";
+      await this.refresh();
+    } finally {
+      this.stopping = false;
+      lockButtons(this.body, "stop", false);
+    }
+  }
+}
+
+/** 한 상태의 단추들을 잠그거나 푼다. */
+function lockButtons(root: HTMLElement, action: string, locked: boolean): void {
+  for (const node of root.querySelectorAll<HTMLButtonElement>(`button[data-action="${action}"]`)) node.disabled = locked;
 }
 
 /** 같은 출처의 `/ws`를 열어 `REFRESH_KINDS` 이벤트에 다시 읽는다. 끊기면 `REFRESH_MS` 뒤 다시 잇는다. */

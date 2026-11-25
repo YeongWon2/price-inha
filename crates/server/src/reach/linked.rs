@@ -7,15 +7,16 @@ use async_trait::async_trait;
 use chrono::{FixedOffset, TimeZone};
 use pi_backup::{Backup, BackupReport, BackupSettings, BackupStatus};
 use pi_gate::{LockAlert, LockNotice, Publisher};
-use pi_market::Clock;
+use pi_market::{Clock, Market};
 use pi_notify::{NewNotice, NoticeKind, Notifier, NotifierConfig, VapidKey};
 use pi_office::{EventSink, Office, SinkError};
 use pi_secrets::SecretStore;
 use pi_store::{Store, UnixMillis};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{BackupWiring, DEFAULT_PUSH_SUBJECT, PUSH_TIMEOUT, Reach, backup_http};
 use crate::AppError;
+use crate::notify_settings::NotifyBook;
 
 /// 시계 한 개를 여러 모듈의 시계 자리에 끼운다.
 pub(crate) struct Clocked(pub(crate) Arc<dyn Clock>);
@@ -99,6 +100,8 @@ pub(crate) struct Linked {
     stale: AtomicBool,
     /// (39차) 알림을 허용된 메신저 대화에도 보내는 자리(메신저를 이었을 때만).
     messenger: OnceLock<Weak<crate::messenger::Messenger>>,
+    /// (40차) 알림 전달처 설정 · 조용한 시간(보관 폴더의 파일). 전달처는 [`Linked::deliver`]에서 고른다.
+    pub(crate) notify: NotifyBook,
 }
 
 fn backup_of(
@@ -135,6 +138,7 @@ impl Linked {
         secrets: &Arc<SecretStore>,
         clock: &Arc<dyn Clock>,
         reach: Reach,
+        market: Market,
     ) -> Result<Linked, AppError> {
         let notify_error = |e: pi_notify::Error| AppError::Notify(e.to_string());
         let vapid = VapidKey::load_or_create(secrets.dir()).map_err(notify_error)?;
@@ -142,6 +146,9 @@ impl Linked {
             Some(transport) => transport,
             None => Arc::new(pi_notify::HttpTransport::new(PUSH_TIMEOUT).map_err(notify_error)?),
         };
+        // (40차) 저장한 알림 설정을 읽는다(읽지 못하면 기본). 조용한 시간은 그 값으로 notify에 넘긴다.
+        let notify = NotifyBook::open(secrets.dir(), market);
+        let now = UnixMillis(clock.now().timestamp_millis());
         let notifier = Notifier::new(NotifierConfig {
             store: store.clone(),
             vapid,
@@ -149,7 +156,7 @@ impl Linked {
             transport,
             clock: Arc::new(Clocked(Arc::clone(clock))),
             redactor: Arc::new(Hidden(Arc::clone(secrets))),
-            quiet_hours: None,
+            quiet_hours: notify.quiet_at(now),
             attempt_timeout: PUSH_TIMEOUT,
         });
         let sink = Arc::new(LateSink::default());
@@ -185,6 +192,7 @@ impl Linked {
             secrets: Arc::clone(secrets),
             stale: AtomicBool::new(false),
             messenger: OnceLock::new(),
+            notify,
         })
     }
 
@@ -220,6 +228,8 @@ impl Linked {
 
     /// 알림을 보낸다: (보내 본 구독 수, 하나라도 받았는가). 보내지 못했으면 없음.
     /// (39차) 같은 알림을 허용된 메신저 대화에도 뒤에서 보낸다(폰 푸시의 결과와 상관없다).
+    /// (40차 4 · 5 · 7번) 전달처는 여기서 고른다: 종류별로 끈 전달처로는 보내지 않고, 조용한 시간에는 급하지 않은
+    /// 알림을 메신저로도 보내지 않는다(폰 푸시는 notify가 미룬다). 폰 푸시를 끈 종류도 알림 기록은 남긴다.
     async fn deliver(
         &self,
         kind: NoticeKind,
@@ -227,8 +237,15 @@ impl Linked {
         link: Option<String>,
         short: Option<String>,
     ) -> Option<(usize, bool)> {
-        if let Some(messenger) = self.messenger() {
+        let plan = self.notify.plan(kind, self.now());
+        self.notifier.set_quiet_hours(plan.quiet);
+        if plan.messenger
+            && let Some(messenger) = self.messenger()
+        {
             messenger.forward(kind, title, body, short);
+        }
+        if !plan.push {
+            return self.record_only(kind, (title, body), link);
         }
         let notice = NewNotice {
             kind,
@@ -250,6 +267,40 @@ impl Linked {
                 None
             }
         }
+    }
+
+    /// (40차) 폰 푸시를 끈 종류: 보내지 않고 알림 기록만 남긴다(notify가 남기는 것과 같은 모양 · 같은 가리기).
+    /// 보내 본 구독이 없으니 "받았다"는 아니다.
+    fn record_only(
+        &self,
+        kind: NoticeKind,
+        (title, body): (&str, &str),
+        link: Option<String>,
+    ) -> Option<(usize, bool)> {
+        let hidden = Hidden(Arc::clone(&self.secrets));
+        let hide = |text: &str| pi_notify::Redactor::redact(&hidden, text);
+        let mut event = json!({ "title": hide(title), "body": hide(body) });
+        if let Some(link) = link {
+            event["link"] = json!(hide(&link));
+        }
+        match self.store.append_at(kind.event_kind(), &event, self.now()) {
+            Ok(_) => Some((0, false)),
+            Err(error) => {
+                tracing::warn!(%error, "알림 기록을 남기지 못했습니다");
+                None
+            }
+        }
+    }
+
+    /// (40차 4번) 알림 설정을 통째로 바꾼다(파일에 남기고 바로 쓴다 — 조용한 시간은 notify에도 곧바로).
+    pub(crate) fn change_notify(
+        &self,
+        next: crate::notify_settings::NotifySettings,
+    ) -> std::io::Result<()> {
+        self.notify.replace(next)?;
+        self.notifier
+            .set_quiet_hours(self.notify.quiet_at(self.now()));
+        Ok(())
     }
 
     /// (39차) 메신저를 잇는다(알림을 허용된 대화에도 보낸다). 한 번만.
@@ -295,6 +346,9 @@ impl Linked {
 
     /// 조용한 시간이 아니면 미뤄 둔 알림을 보낸다(구독이 생겼을 때 · 조용한 시간이 끝났을 때).
     pub(crate) async fn release_held(&self) {
+        // (40차) 시장 시간대의 시차가 바뀌었을 수 있다(미국 서머타임): 지금 값으로 맞춘 뒤 본다.
+        self.notifier
+            .set_quiet_hours(self.notify.quiet_at(self.now()));
         match self.notifier.release_held().await {
             Ok(sent) if !sent.is_empty() => {
                 tracing::info!(count = sent.len(), "미뤄 둔 알림을 보냈습니다")

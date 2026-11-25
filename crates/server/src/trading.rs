@@ -72,6 +72,7 @@ pub(crate) use view::change_json;
 
 /// 투자 팀 상태 읽기(세션이 있어야 열린다). `GET` →
 /// `{"state": 팀 상태 글자, "plan": "trade" | "rest" | null, "reason": 쉬는 이유 | null}`.
+/// (40차) 전체 정지면 `"stop_cause"`에 그 정지의 사유(`"owner_stop"` · `"max_loss"`), 아니면 `null`.
 ///
 /// `plan` · `reason`은 **오늘**(시장 달력의 날짜) 팀장이 정한 것이다([`Trading::decide_day`]).
 /// 오늘 정한 것이 없으면 둘 다 `null`이다.

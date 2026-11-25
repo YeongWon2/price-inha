@@ -47,8 +47,38 @@ export const SAVE_FAILED = "저장하지 못했습니다";
 
 /** `GET` 몸통을 읽는다. 모양이 틀리면 `null`(종류 줄 하나라도 틀리면 `null`). */
 export function parseNotifySettings(body: unknown): NotifySettings | null {
-  void body;
-  throw new Error("todo");
+  if (!isObject(body) || !Array.isArray(body.kinds) || typeof body.editable !== "boolean") return null;
+  const kinds: NotifyKindRow[] = [];
+  for (const row of body.kinds) {
+    const parsed = parseKind(row);
+    if (parsed === null) return null;
+    kinds.push(parsed);
+  }
+  const quiet = parseQuiet(body.quiet);
+  if (quiet === null) return null;
+  return { kinds, quiet, editable: body.editable };
+}
+
+/** 몸통이 JSON 객체(배열 아님)인가. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** 종류 한 줄. 칸 하나라도 틀리면 `null`. */
+function parseKind(row: unknown): NotifyKindRow | null {
+  if (!isObject(row)) return null;
+  const { kind, label, push, messenger, locked } = row;
+  if (typeof kind !== "string" || typeof label !== "string") return null;
+  if (typeof push !== "boolean" || typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
+  return { kind, label, push, messenger, locked };
+}
+
+/** 조용한 시간. 칸 하나라도 틀리면 `null`. */
+function parseQuiet(quiet: unknown): QuietSetting | null {
+  if (!isObject(quiet)) return null;
+  const { enabled, start, end } = quiet;
+  if (typeof enabled !== "boolean" || typeof start !== "string" || typeof end !== "string") return null;
+  return { enabled, start, end };
 }
 
 /**
@@ -56,8 +86,10 @@ export function parseNotifySettings(body: unknown): NotifySettings | null {
  * 받은 차례 그대로 통째로 보낸다(`label` · `locked` · `editable`은 싣지 않는다).
  */
 export function saveBody(settings: NotifySettings): unknown {
-  void settings;
-  throw new Error("todo");
+  return {
+    kinds: settings.kinds.map(({ kind, push, messenger }) => ({ kind, push, messenger })),
+    quiet: { enabled: settings.quiet.enabled, start: settings.quiet.start, end: settings.quiet.end },
+  };
 }
 
 /**
@@ -65,8 +97,12 @@ export function saveBody(settings: NotifySettings): unknown {
  * 있으면 " — <종류 글>"을 잇는다), 400 `invalid_quiet_hours`는 [`INVALID_QUIET_TEXT`], 그 밖은 [`SAVE_FAILED`].
  */
 export function notifyError(status: number, body: unknown, labels: readonly NotifyKindRow[] = []): string {
-  void status;
-  void body;
-  void labels;
-  throw new Error("todo");
+  if (status === 403) return REMOTE_NOTE;
+  if (status !== 400 || !isObject(body)) return SAVE_FAILED;
+  if (body.error === "locked_kind_off") {
+    const label = labels.find((row) => row.kind === body.kind)?.label;
+    return label === undefined ? LOCKED_OFF_TEXT : `${LOCKED_OFF_TEXT} — ${label}`;
+  }
+  if (body.error === "invalid_quiet_hours") return INVALID_QUIET_TEXT;
+  return SAVE_FAILED;
 }

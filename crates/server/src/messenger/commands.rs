@@ -29,8 +29,7 @@ pub const MESSENGER_ALREADY_STOPPED: &str = "이미 전체 정지입니다. 다�
 /// 승인을 뜻하는 글에 대한 답.
 pub const MESSENGER_APPROVE_ON_WEB: &str = "승인은 웹에서만 받습니다";
 /// 도움말.
-pub const MESSENGER_HELP: &str =
-    "/status 팀 상태 · /approvals 기다리는 승인 · /reject <번호> 거절 · /help 도움말";
+pub const MESSENGER_HELP: &str = "/status 팀 상태 · /approvals 기다리는 승인 · /reject <번호> 거절 · /stop 전체 정지 · /help 도움말";
 /// 모르는 글에 대한 도움말 한 줄.
 pub const MESSENGER_UNKNOWN: &str = "모르는 명령입니다 — /help";
 
@@ -45,9 +44,7 @@ pub(crate) async fn answer(hub: &Messenger, text: &str, bot: Option<&str>) -> St
         Command::Status => status(hub).await.unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Approvals => approvals(hub).unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Reject { id } => reject(hub, &id).await,
-        // 40차 3번(N1 뼈대): 아직 정지하지 않는다. N2가 [`crate::TEAM_STOP_PATH`]와 같은 길로 잇고
-        // [`MESSENGER_STOPPED`] · [`MESSENGER_ALREADY_STOPPED`]로 답한다.
-        Command::Stop => MESSENGER_UNKNOWN.to_string(),
+        Command::Stop => stop(hub),
         Command::Help => MESSENGER_HELP.to_string(),
         Command::ApproveNotHere => MESSENGER_APPROVE_ON_WEB.to_string(),
         Command::Unknown(_) => MESSENGER_UNKNOWN.to_string(),
@@ -85,6 +82,18 @@ async fn status(hub: &Messenger) -> Option<String> {
         team_text(team),
         pnl_text(pnl)
     ))
+}
+
+/// (40차 3번 · 결정 25) `/stop`: [`crate::TEAM_STOP_PATH`]와 같은 함수로 전체 정지한다. 다시 시작은 웹에서만.
+fn stop(hub: &Messenger) -> String {
+    match hub.trading.owner_stop() {
+        Ok(Some(_)) => MESSENGER_STOPPED.to_string(),
+        Ok(None) => MESSENGER_ALREADY_STOPPED.to_string(),
+        Err(error) => {
+            tracing::warn!(%error, "메신저 /stop으로 전체 정지하지 못했습니다");
+            READ_FAILED.to_string()
+        }
+    }
 }
 
 /// 짧은 번호.
