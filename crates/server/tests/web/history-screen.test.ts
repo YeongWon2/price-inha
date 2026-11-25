@@ -182,9 +182,9 @@ describe("히스토리 화면 · 탭", () => {
     // 검증: V83 C30 F12
     const main = await open(trades(3));
     const tabs = [...main.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]')];
-    expect(tabs.map((node) => node.dataset.tab)).toEqual(["trades", "summary", "approvals"]);
-    expect(tabs.map((node) => node.textContent?.trim())).toEqual(["매매", "하루 정리", "승인 기록"]);
-    expect(tabs.map((node) => node.getAttribute("aria-selected"))).toEqual(["true", "false", "false"]);
+    expect(tabs.map((node) => node.dataset.tab)).toEqual(["trades", "summary", "approvals", "memos"]);
+    expect(tabs.map((node) => node.textContent?.trim())).toEqual(["매매", "하루 정리", "승인 기록", "결정 메모"]);
+    expect(tabs.map((node) => node.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"]);
     for (const node of tabs) {
       const target = node.getAttribute("aria-controls");
       expect(target, "탭은 판을 가리킨다").toBeTruthy();

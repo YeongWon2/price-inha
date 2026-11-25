@@ -69,6 +69,8 @@ describe("화면이 부르는 경로", () => {
         "/api/office/summon/arrived",
         "/api/office/summon/view",
         "/ws",
+        // 23번(결정 메모): 어제 메모 카드.
+        "/api/memos",
         ...APPROVALS,
       ]),
     );
@@ -81,7 +83,7 @@ describe("화면이 부르는 경로", () => {
     );
     // 29차 2번: 히스토리 화면은 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록 경로를 부른다.
     expect(sorted(SCREEN_PATHS.history)).toEqual(
-      sorted(["/api/session", "/api/trades", "/api/trades/{id}", "/api/daily-summary", "/api/approvals"]),
+      sorted(["/api/session", "/api/trades", "/api/trades/{id}", "/api/daily-summary", "/api/approvals", "/api/memos"]),
     );
     // 28차 2번: 규칙 화면은 규칙 읽기 · 개선안 목록 · 개선안 답하기 경로를 부른다.
     // 35차 2번 · 3번: 금지 종목 · 업종표 읽기 · 고치기 경로를 더 부른다.

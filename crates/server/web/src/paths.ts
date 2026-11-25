@@ -93,6 +93,8 @@ export const API = {
   teamStop: "/api/team/stop",
   // 알림 전달처 · 조용한 시간(server 40차 4 · 6번, 결정 24): 읽기 `GET` · 통째 바꾸기 `POST`(그 컴퓨터만).
   notifySettings: "/api/notify/settings",
+  // 결정 메모(additions.md 23번 · C25): `GET ?days=`(어제 메모 카드, 배열) · `GET ?before=&max=`(히스토리 탭, 쪽).
+  memos: "/api/memos",
 } as const;
 
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
