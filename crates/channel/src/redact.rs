@@ -23,10 +23,8 @@ impl OutText {
     /// `raw`를 `redactor`로 가려 만든다. 가리개가 실패하면 [`Error::Redaction`]이고 글을 만들지 않는다.
     /// 오류에 `raw`를 넣지 않는다.
     pub fn redacted(raw: &str, redactor: &dyn Redactor) -> Result<OutText, Error> {
-        let _ = redactor;
-        Ok(OutText {
-            text: raw.to_owned(),
-        })
+        let text = redactor.redact(raw).map_err(|_| Error::Redaction)?;
+        Ok(OutText { text })
     }
 
     /// 가린 글.

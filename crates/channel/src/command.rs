@@ -30,6 +30,35 @@ pub enum Command {
 ///   `@…` 꼴은 모두 [`Command::Unknown`]이다.
 /// - `/approve`(인자 유무와 상관없이)는 [`Command::ApproveNotHere`]다. `/approvals`와 헷갈리지 않는다.
 pub fn parse_command(text: &str, bot_username: Option<&str>) -> Command {
-    let _ = (text, bot_username);
-    Command::Help
+    let trimmed = text.trim();
+    let unknown = || Command::Unknown(trimmed.to_owned());
+    let Some(body) = trimmed.strip_prefix('/') else {
+        return unknown();
+    };
+    let mut words = body.split_whitespace();
+    let head = words.next().unwrap_or_default();
+    let name = match head.split_once('@') {
+        Some((name, target)) => {
+            let ours = bot_username
+                .map(|me| me.trim_start_matches('@'))
+                .is_some_and(|me| !me.is_empty() && me.eq_ignore_ascii_case(target));
+            if !ours {
+                return unknown();
+            }
+            name
+        }
+        None => head,
+    };
+    match name.to_lowercase().as_str() {
+        "status" => Command::Status,
+        "stop" => Command::Stop,
+        "help" => Command::Help,
+        "approvals" => Command::Approvals,
+        "approve" => Command::ApproveNotHere,
+        "reject" => match words.next() {
+            Some(id) => Command::Reject { id: id.to_owned() },
+            None => unknown(),
+        },
+        _ => unknown(),
+    }
 }
