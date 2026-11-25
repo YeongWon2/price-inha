@@ -12,7 +12,7 @@ use super::{App, Launch, Wiring};
 use crate::demo::{DEMO_AI_PAUSE, DemoWiring, demo_calendar};
 use crate::setup::load_watchlist;
 use crate::trading::{demo_sectors, load_rules_config};
-use crate::{AppError, CalendarFn, Reach, Settings, TeamWiring, TradingWiring};
+use crate::{AppError, CalendarFn, MessengerWiring, Reach, Settings, TeamWiring, TradingWiring};
 
 /// 실행 파일 `run`이 띄우는 조립 값 전부. [`run_assembly`]로 만들고 [`App::launch_run`]에 준다.
 #[derive(Clone)]
@@ -29,6 +29,9 @@ pub struct RunAssembly {
     /// `Duration::ZERO`. 시연 모드로 띄우면 팀의 가짜 AI가 [`crate::DemoAi::with_pause`]로 이 값을 쓴다.
     /// 시험은 이 칸만 줄인다([`DemoWiring`]은 그대로).
     pub demo_ai_pause: Duration,
+    /// (39차) 메신저 조립 값. 실행 파일은 [`MessengerWiring::default`](공식 텔레그램 주소). 시험은 가짜 서버 주소와
+    /// 짧은 시간을 넣는다. 시연 모드면 메신저 루프를 돌리지 않는다(`crate::messenger` 문서).
+    pub messenger: MessengerWiring,
 }
 
 /// 실행 파일 `run`의 조립: 실제 주소 · 실제 시계([`Wiring::default`]), 기본 주문 길, 공식 투자 팀
@@ -68,6 +71,7 @@ pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> R
         } else {
             Duration::ZERO
         },
+        messenger: MessengerWiring::default(),
     }
 }
 

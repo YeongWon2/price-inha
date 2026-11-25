@@ -42,6 +42,11 @@ describe("화면이 부르는 경로", () => {
         "/api/setup/doctor",
         // 31차 고침(결정 22): 알림음 설정을 서버에서 읽고 쓴다.
         "/api/setup/sound",
+        // 39차 2 · 7번: 메신저 상태 · 토큰 등록 · 지우기 · 페어링 승인 · 빼기.
+        "/api/messenger",
+        "/api/messenger/telegram",
+        "/api/messenger/pairing/approve",
+        "/api/messenger/pairing/revoke",
       ]),
     );
     expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));

@@ -16,6 +16,7 @@ pi-agent.workspace = true
 pi-ai.workspace = true
 pi-approval.workspace = true
 pi-backup.workspace = true
+pi-channel.workspace = true
 pi-data.workspace = true
 pi-exec.workspace = true
 pi-gate.workspace = true

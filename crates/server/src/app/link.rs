@@ -404,6 +404,20 @@ impl App {
         Box::pin(App::assemble(settings, wiring, launch, Some(reach), demo)).await
     }
 
+    /// (39차) [`App::launch_with`]가 하는 일에 더해 메신저를 `messenger` 조립 값으로 잇는다(`crate::messenger`
+    /// 문서의 계약: 경로 · 받기 루프 · 명령 · 나가는 알림). [`App::launch_with`]는 이것을
+    /// [`crate::MessengerWiring::default`]로 부른 것과 같다. 시연 모드(`settings.demo`)면 루프를 돌리지 않는다.
+    pub async fn launch_with_messenger(
+        settings: Settings,
+        wiring: Wiring,
+        launch: Launch,
+        reach: Reach,
+        messenger: crate::MessengerWiring,
+    ) -> Result<App, AppError> {
+        let _ = (settings, wiring, launch, reach, messenger);
+        todo!()
+    }
+
     /// (W5 3차) 지식 검색 창구(같은 저장소). 임베딩은 없다.
     pub fn knowledge(&self) -> Arc<Knowledge> {
         Arc::clone(&self.knowledge)

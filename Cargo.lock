@@ -2361,6 +2361,7 @@ dependencies = [
  "pi-ai",
  "pi-approval",
  "pi-backup",
+ "pi-channel",
  "pi-data",
  "pi-exec",
  "pi-gate",

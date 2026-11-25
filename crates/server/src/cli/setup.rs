@@ -34,7 +34,15 @@
 //!   건너뛰기. 거절되면 두 칸을 다시 묻는다(시도 제한이면 AI와 같다).
 //! - **종목 구역**: 쉼표로 나눈 종목 한 줄(빈 줄 = 건너뛰기). 거절되면 다시 묻는다. 저장한 종목 가운데 업종표에
 //!   없는 것이 있으면 [`SETUP_SECTOR_NOTICE`] 한 줄.
-//! - **메신저**: 이번 차수에는 [`SETUP_MESSENGER_LATER`] 한 줄만(구역 전체를 돌 때).
+//! - **메신저 구역**(39차): 구역 전체를 돌 때(`setup`)는 묻지 않는다 — 제목 "메신저"와 [`SETUP_MESSENGER_GUIDE`]
+//!   한 줄을 보이고 요약은 [`SETUP_SKIPPED`]다(37차의 [`SETUP_MESSENGER_LATER`] 줄을 이것으로 바꾼다 — 다른 구역의
+//!   답 차례는 그대로). `setup messenger`일 때만 묻는다: [`SETUP_MESSENGER_TOKEN_PROMPT`] → 봇 토큰 한 줄(터미널이면
+//!   보이지 않는 입력, `--stdin-answers`면 그 줄, 빈 줄 = 건너뛰기) → 도는 서버의 `crate::MESSENGER_TELEGRAM_PATH`로
+//!   등록(서버가 getMe로 확인한다 — 38차의 서버 신원 확인을 거친 뒤에만 보낸다). 거절되면 거절 글을 보이고 다시
+//!   묻는다(시도 제한이면 [`SETUP_FAILED`]). 됐으면 봇 이름과 [`SETUP_MESSENGER_SEND_HINT`]를 보이고
+//!   [`SETUP_MESSENGER_CODE_PROMPT`] → 코드 한 줄(빈 줄 = 건너뛰기) → `crate::MESSENGER_PAIRING_APPROVE_PATH`.
+//!   틀리면 `crate::MESSENGER_WRONG_CODE`를 보이고 다시 묻는다. 잠겼으면 [`SETUP_FAILED`]. 맞으면
+//!   [`SETUP_MESSENGER_PAIRED`]이고 [`SETUP_DONE`]. 토큰은 출력 · 기록 어디에도 다시 찍지 않는다.
 //! - **서비스 구역**: "계속 켜 둘까요?" 예/아니오(빈 줄 = 예). 예면 `service install`과 같은 일
 //!   (`--dry-run`이면 `service install --dry-run`과 같은 할 일 글만 보이고 쓰지도 부르지도 않는다).
 //!   아니오면 [`SETUP_RUN_HINT`].
@@ -87,6 +95,8 @@ pub enum SetupSection {
     Broker,
     /// 지켜볼 종목.
     Symbols,
+    /// (39차) 메신저(텔레그램) 연결: 토큰 → 확인 → 페어링 코드 → 승인. 구역 전체를 돌 때는 안내 한 줄만.
+    Messenger,
     /// 계속 켜 두기(서비스 등록).
     Service,
     /// 대시보드 열기.
@@ -94,21 +104,23 @@ pub enum SetupSection {
 }
 
 /// 구역을 주지 않았을 때 도는 차례.
-pub const SETUP_SECTIONS: [SetupSection; 5] = [
+pub const SETUP_SECTIONS: [SetupSection; 6] = [
     SetupSection::Ai,
     SetupSection::Broker,
     SetupSection::Symbols,
+    SetupSection::Messenger,
     SetupSection::Service,
     SetupSection::Open,
 ];
 
 impl SetupSection {
-    /// 명령 줄 · 요약 표에 쓰는 이름(`ai` · `broker` · `symbols` · `service` · `open`).
+    /// 명령 줄 · 요약 표에 쓰는 이름(`ai` · `broker` · `symbols` · `messenger` · `service` · `open`).
     pub const fn as_str(self) -> &'static str {
         match self {
             SetupSection::Ai => "ai",
             SetupSection::Broker => "broker",
             SetupSection::Symbols => "symbols",
+            SetupSection::Messenger => "messenger",
             SetupSection::Service => "service",
             SetupSection::Open => "open",
         }
@@ -144,6 +156,19 @@ pub const SETUP_SECTOR_NOTICE: &str =
     "업종표에 없는 종목은 규칙 화면에서 업종을 넣어야 살 수 있습니다";
 /// 메신저 구역 자리의 한 줄.
 pub const SETUP_MESSENGER_LATER: &str = "메신저는 나중에 `price-inha setup messenger`로 연결합니다";
+/// (39차) 구역 전체를 돌 때 메신저 구역 자리의 안내(묻지 않는다).
+pub const SETUP_MESSENGER_GUIDE: &str =
+    "메신저(텔레그램)는 `price-inha setup messenger`로 따로 연결합니다";
+/// (39차) 봇 토큰을 묻는 말(빈 줄 = 건너뛰기).
+pub const SETUP_MESSENGER_TOKEN_PROMPT: &str =
+    "텔레그램 봇 토큰(BotFather가 준 것, 빈 줄 = 건너뛰기)";
+/// (39차) 토큰이 확인된 뒤의 안내.
+pub const SETUP_MESSENGER_SEND_HINT: &str =
+    "봇에게 아무 말이나 보내세요. 받은 코드를 아래에 넣습니다";
+/// (39차) 페어링 코드를 묻는 말(빈 줄 = 건너뛰기).
+pub const SETUP_MESSENGER_CODE_PROMPT: &str = "페어링 코드";
+/// (39차) 승인이 끝났을 때.
+pub const SETUP_MESSENGER_PAIRED: &str = "메신저가 연결됐습니다";
 /// 계속 켜 두지 않을 때 · 서버를 띄우지 않을 때의 안내.
 pub const SETUP_RUN_HINT: &str = "`price-inha run`으로 켭니다";
 /// 끝 요약의 제목 줄.
@@ -324,6 +349,7 @@ impl Wizard<'_> {
             }
             SetupSection::Broker => broker::broker(&self.link, prompter).await,
             SetupSection::Symbols => symbols::symbols(&self.link, prompter).await,
+            SetupSection::Messenger => todo!(),
             SetupSection::Service => {
                 service::service(
                     self.settings,

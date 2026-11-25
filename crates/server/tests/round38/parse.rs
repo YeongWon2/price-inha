@@ -47,7 +47,11 @@ fn setup은_구역과_숨은_길을_읽는다() {
         "플래그만 주면 구역은 없다"
     );
     let names: Vec<&str> = SETUP_SECTIONS.iter().map(|s| s.as_str()).collect();
-    assert_eq!(names, ["ai", "broker", "symbols", "service", "open"]);
+    // 39차 8번: 메신저 구역이 종목 다음에 든다.
+    assert_eq!(
+        names,
+        ["ai", "broker", "symbols", "messenger", "service", "open"]
+    );
     for section in SETUP_SECTIONS {
         assert_eq!(SetupSection::parse(section.as_str()), Some(section));
     }

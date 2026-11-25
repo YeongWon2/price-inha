@@ -3,7 +3,7 @@
 
 use pi_market::Symbol;
 use price_inha::{
-    ANSWER_CLI, SETUP_ALREADY, SETUP_DOCTOR_HINT, SETUP_DONE, SETUP_MESSENGER_LATER,
+    ANSWER_CLI, SETUP_ALREADY, SETUP_DOCTOR_HINT, SETUP_DONE, SETUP_MESSENGER_GUIDE,
     SETUP_RUN_HINT, SETUP_SKIPPED, load_watchlist, save_watchlist,
 };
 
@@ -56,6 +56,7 @@ async fn 구역을_차례로_지나_끝_요약이_나온다() {
             ("ai", SETUP_DONE),
             ("broker", SETUP_DONE),
             ("symbols", SETUP_DONE),
+            ("messenger", SETUP_SKIPPED),
             ("service", SETUP_DONE),
             ("open", SETUP_DONE),
         ]),
@@ -67,7 +68,8 @@ async fn 구역을_차례로_지나_끝_요약이_나온다() {
         "0단계: 보관 폴더 위치를 보인다: {}",
         ran.stdout
     );
-    assert!(ran.stdout.contains(SETUP_MESSENGER_LATER), "{}", ran.stdout);
+    // 39차 8번: "나중에" 줄 대신 메신저 구역의 안내(구역 전체를 돌 때는 묻지 않는다).
+    assert!(ran.stdout.contains(SETUP_MESSENGER_GUIDE), "{}", ran.stdout);
     assert!(
         ran.stdout
             .contains(&format!("http://127.0.0.1:{}/", bench.port)),
@@ -119,6 +121,7 @@ async fn 이미_설정된_홈에서는_있음을_보이고_다시_할_구역을_
             ("ai", SETUP_SKIPPED),
             ("broker", SETUP_SKIPPED),
             ("symbols", SETUP_DONE),
+            ("messenger", SETUP_SKIPPED),
             ("service", SETUP_SKIPPED),
             ("open", SETUP_SKIPPED),
         ]),

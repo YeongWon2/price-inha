@@ -40,6 +40,12 @@ export const API = {
   setupDoctor: "/api/setup/doctor",
   // 알림음 켜기 · 끄기(31차 고침, 결정 22): 읽기 `GET` · 바꾸기 `POST` `{"enabled": bool}` — 서버가 둔다.
   setupSound: "/api/setup/sound",
+  // 메신저 묶음(server 39차 2 · 7번, 결정 24): 상태 `GET` · 토큰 등록 `POST` `{"token"}` · 지우기 `DELETE` ·
+  // 페어링 승인 `POST` `{"code"}` · 빼기 `POST`(바꾸는 것은 그 컴퓨터만).
+  messenger: "/api/messenger",
+  messengerTelegram: "/api/messenger/telegram",
+  messengerApprove: "/api/messenger/pairing/approve",
+  messengerRevoke: "/api/messenger/pairing/revoke",
   accessKey: "/api/access/key",
   accessUnlock: "/api/access/unlock",
   accessLog: "/api/access/log",
@@ -126,6 +132,11 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.setupDoctor,
     // 31차 고침(결정 22): 알림음 설정.
     API.setupSound,
+    // server 39차 2 · 7번: 메신저 상태 · 토큰 등록 · 지우기 · 페어링 승인 · 빼기.
+    API.messenger,
+    API.messengerTelegram,
+    API.messengerApprove,
+    API.messengerRevoke,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [

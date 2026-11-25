@@ -25,6 +25,9 @@
 //   (기본 켜짐, 31차 고침 · 결정 22). [`soundSetting`] 참고.
 //
 // 읽기 실패: 그 경로를 쓰는 자리만 오류 줄(`role="alert"`, `LOAD_FAILED`)을 보이고 다른 자리는 그대로 그린다.
+//
+// (39차 7번) 메신저 묶음 `messenger`: 자리 하나를 더 두고 `setup/messenger-view.ts`의 `mountMessenger`로 그린다
+// (`GET API.messenger`, 계약은 그 파일).
 import { API } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
