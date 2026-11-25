@@ -6,11 +6,14 @@ use pi_store::TeamState;
 use price_inha::{
     APPROVAL_ANSWER_PATH, KIND_OFFICE_APPROVAL, MESSENGER_APPROVE_ON_WEB,
     MESSENGER_APPROVE_ON_WEB_LINK, MESSENGER_HELP, MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED,
-    MESSENGER_STATUS_PENDING, MESSENGER_STOP_LATER, MESSENGER_UNKNOWN,
+    MESSENGER_STATUS_PENDING, MESSENGER_STOP_LATER, MESSENGER_UNKNOWN, OFFICE_PATH,
+    OFFICE_PENDING_APPROVALS,
 };
 use serde_json::{Value, json};
 
-use crate::common::{Bench, FakeTelegram, QUIET, events, is_pairing_reply, post, short, wait_for};
+use crate::common::{
+    Bench, FakeTelegram, QUIET, events, get, is_pairing_reply, post, short, wait_for,
+};
 
 /// 연결된 사람.
 const OWNER: i64 = 83_000_001;
@@ -51,6 +54,50 @@ async fn approve_on_web(
     let reply = post(bench.addr(), APPROVAL_ANSWER_PATH, &body).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     reply.body
+}
+
+/// 사무실 스냅샷의 기다리는 승인 번호들.
+async fn waiting_numbers(bench: &Bench) -> Vec<String> {
+    let reply = get(bench.addr(), OFFICE_PATH).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    reply.body[OFFICE_PENDING_APPROVALS]
+        .as_array()
+        .unwrap_or_else(|| panic!("{OFFICE_PENDING_APPROVALS} 칸은 배열이다: {}", reply.text))
+        .iter()
+        .filter_map(|row| row["number"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// 그 승인이 여전히 기다림(대기 목록에 있다)이고, 그 뒤 웹(지금 승인 길)에서 거절하면 거절된다.
+/// 웹 승인은 P12 승인 재점검(멈춘 시험 시계에서는 종목 상태가 "모름")에 걸리므로 거절 길로 본다(39차 시험 결함 고침 2).
+async fn still_waiting_then_reject_on_web(
+    bench: &Bench,
+    number: &ApprovalNumber,
+    fingerprint: &Fingerprint,
+) {
+    let waiting = waiting_numbers(bench).await;
+    assert!(
+        waiting.iter().any(|n| n == number.as_str()),
+        "승인은 여전히 기다림: {waiting:?}"
+    );
+    let body = json!({
+        "number": number.as_str(),
+        "fingerprint": fingerprint.as_str(),
+        "answer": "reject",
+    });
+    let reply = post(bench.addr(), APPROVAL_ANSWER_PATH, &body).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    assert_eq!(
+        reply.body["result"],
+        json!("rejected"),
+        "웹 거절 길은 그대로: {}",
+        reply.text
+    );
+    let after = waiting_numbers(bench).await;
+    assert!(
+        after.iter().all(|n| n != number.as_str()),
+        "거절한 승인은 대기 목록에서 빠진다: {after:?}"
+    );
 }
 
 // 검증: V90
@@ -140,8 +187,7 @@ async fn 없는_번호의_거절은_까닭을_답하고_아무것도_바꾸지_�
             .all(|card| card["state"] != json!("answered")),
         "기다리는 승인은 그대로"
     );
-    let web = approve_on_web(&bench, &number, &fingerprint).await;
-    assert_eq!(web["result"], json!("approved"), "{web}");
+    still_waiting_then_reject_on_web(&bench, &number, &fingerprint).await;
     bench.close().await;
 }
 
@@ -195,12 +241,7 @@ async fn 승인하려는_글에는_웹에서만이라고_답하고_승인은_그
             .all(|card| card["state"] != json!("answered")),
         "메신저로는 승인하지 않는다"
     );
-    let web = approve_on_web(&bench, &number, &fingerprint).await;
-    assert_eq!(
-        web["result"],
-        json!("approved"),
-        "웹 승인 길은 그대로: {web}"
-    );
+    still_waiting_then_reject_on_web(&bench, &number, &fingerprint).await;
     bench.close().await;
 }
 

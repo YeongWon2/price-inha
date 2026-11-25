@@ -5,12 +5,13 @@ use pi_approval::ApprovalNumber;
 use pi_secrets::ProviderKeys;
 use price_inha::{
     APPROVAL_ANSWER_PATH, KIND_OFFICE_APPROVAL, MESSENGER_REJECT_HINT, MESSENGER_WEB_ONLY,
+    OFFICE_PATH, OFFICE_PENDING_APPROVALS,
 };
 use serde_json::json;
 
 use crate::common::{
-    Bench, FakeTelegram, HYNIX, QUIET, TOKEN, events, fresh_home, post, register_provider, short,
-    wait_for,
+    Bench, FakeTelegram, HYNIX, QUIET, TOKEN, events, fresh_home, get, post, register_provider,
+    short, wait_for,
 };
 
 /// 연결된 사람.
@@ -122,13 +123,27 @@ async fn 보내기가_실패해도_승인_길은_그대로이고_정한_만큼�
         "물러서며 3번까지 보내 보고 버린다"
     );
 
+    // 승인 길이 도는지는 웹 거절로 본다: 웹 승인은 P12 승인 재점검(멈춘 시험 시계에서는 종목 상태가 "모름")에
+    // 걸리므로(39차 시험 결함 고침 2). 승인은 여전히 기다림(대기 목록에 있다)이고, 웹에서 거절하면 거절된다.
+    let office = get(bench.addr(), OFFICE_PATH).await;
+    assert_eq!(office.status, 200, "{}", office.text);
+    let waiting = office.body[OFFICE_PENDING_APPROVALS]
+        .as_array()
+        .unwrap_or_else(|| panic!("{OFFICE_PENDING_APPROVALS} 칸은 배열이다: {}", office.text));
+    assert!(
+        waiting
+            .iter()
+            .any(|row| row["number"] == json!(number.as_str())),
+        "승인은 여전히 기다림: {}",
+        office.text
+    );
     let body = json!({
         "number": number.as_str(),
         "fingerprint": fingerprint.as_str(),
-        "answer": "approve",
+        "answer": "reject",
     });
     let reply = post(bench.addr(), APPROVAL_ANSWER_PATH, &body).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
-    assert_eq!(reply.body["result"], json!("approved"), "{}", reply.text);
+    assert_eq!(reply.body["result"], json!("rejected"), "{}", reply.text);
     bench.close().await;
 }
