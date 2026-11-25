@@ -12,7 +12,8 @@
 // 색은 3D 층의 말풍선처럼 원본 고정 색(크림 말풍선 위의 녹색 계열)이다 — 다크 모드에서도 같은 말풍선 위에 보인다.
 
 /** 머리 위 표시의 종류. */
-export type MarkId = "thinking" | "writing" | "typing" | "waiting" | "failed" | "approval" | "done";
+export type MarkId = "thinking" | "writing" | "typing" | "waiting" | "failed" | "approval" | "done"
+  | "profit" | "loss";
 
 /** 머리 위 표시 하나: 글자 · 색(CSS 색 값) · 뜻(범례에 보일 쉬운 말). */
 export interface OverheadMark {
