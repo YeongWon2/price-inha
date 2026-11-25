@@ -492,7 +492,7 @@ fn 전체_정지가_되면_실전중_템플릿만_멈춤이_된다() {
 fn 거부된_팀_상태_변경은_템플릿을_바꾸지_않는다() {
     let (_dir, _path, store) = temp_store();
     let running = live(&store);
-    // 쉬는 중에서 전체 정지는 표에 없다.
+    // 쉬는 중에서 최대 손실로 전체 정지는 안 된다.
     let err = store
         .change_team_state(TeamChange {
             to: TeamState::FullStop,

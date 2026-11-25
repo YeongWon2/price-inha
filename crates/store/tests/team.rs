@@ -120,6 +120,12 @@ fn 허용_표에_없는_전이는_어떤_사유와_승인_표시로도_거부된
             let before = store.team_history().unwrap();
             for cause in TeamCause::ALL {
                 for owner_approved in [false, true] {
+                    // 20차: 쉬는 중 → 전체 정지는 내 정지 + 내 승인으로만 된다(최대 손실로는 안 된다).
+                    if (from, to, cause, owner_approved)
+                        == (Resting, FullStop, TeamCause::OwnerStop, true)
+                    {
+                        continue;
+                    }
                     let result = store.change_team_state(change(to, cause, owner_approved, 100));
                     assert_denied(result, from, to);
                 }
@@ -344,7 +350,8 @@ fn 거부된_시도는_기록을_남기지_않고_앞선_기록을_바꾸지_않
 fn 전체_정지로_가는_사유는_어디서든_최대_손실뿐이다() {
     for from in [Operating, DailyLimitHalt, AnomalyHalt] {
         for cause in TeamCause::ALL {
-            if cause == TeamCause::MaxLoss {
+            // 20차: 내 정지(OwnerStop)도 전체 정지로 간다 — 그 사유는 round20.rs에서 본다.
+            if cause == TeamCause::MaxLoss || cause == TeamCause::OwnerStop {
                 continue;
             }
             for owner_approved in [false, true] {

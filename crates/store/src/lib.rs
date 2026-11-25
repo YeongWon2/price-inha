@@ -157,8 +157,10 @@ impl Store {
     /// - 표에 없는 전이: [`DenyReason::NotAllowed`]
     /// - 전체 정지에서 나가는데 `owner_approved`가 거짓: [`DenyReason::OwnerApprovalRequired`]
     /// - 하루 한도 멈춤에서 쉬는 중으로 나가는데 사유가 `NextTradingDayStart`가 아님: [`DenyReason::NextTradingDayOnly`]
-    /// - 운용 중 · 하루 한도 멈춤 · 이상 감지 멈춤에서 전체 정지로 가는데 사유가 `MaxLoss`가 아님:
-    ///   [`DenyReason::MaxLossOnly`] (2차)
+    /// - 운용 중 · 하루 한도 멈춤 · 이상 감지 멈춤에서 전체 정지로 가는데 사유가 `MaxLoss`도 `OwnerStop`도 아님:
+    ///   [`DenyReason::MaxLossOnly`] (2차, 20차)
+    /// - (20차) 어느 상태에서든(전체 정지 말고) 사유 `OwnerStop`으로 전체 정지로 가는데 `owner_approved`가 거짓:
+    ///   [`DenyReason::OwnerApprovalRequired`]. 쉬는 중에서는 `OwnerStop` 말고는 [`DenyReason::NotAllowed`]
     /// - (9차) 전체 정지가 되면 실전중인 템플릿은 모두 같은 묶음 안에서 멈춤이 된다
     ///   ([`Store::stop_template`] 참고). 거부되면 템플릿도 그대로다.
     pub fn change_team_state(&self, change: TeamChange) -> Result<TeamStateRecord, StoreError> {

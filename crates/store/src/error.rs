@@ -72,7 +72,7 @@ pub enum DenyReason {
     /// 막힌 이유 종류와 출발 상태의 짝이 맞지 않는다
     /// (판단됨 ↔ 원칙 · 근거 부족, 승인대기 ↔ 승인 거절, 주문됨 ↔ 미체결 취소).
     BlockReasonMismatch,
-    /// 전체 정지로 가는 사유는 최대 손실([`crate::TeamCause::MaxLoss`])뿐이다.
+    /// 전체 정지로 가는 사유는 최대 손실([`crate::TeamCause::MaxLoss`])이나 내 정지([`crate::TeamCause::OwnerStop`])뿐이다.
     MaxLossOnly,
     /// 투자 팀이 전체 정지인 동안에는 실전 승격을 하지 않는다. (후보 일괄 처리)
     TeamFullStop,

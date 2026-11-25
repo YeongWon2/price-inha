@@ -23,15 +23,21 @@ pub struct TradeId(pub i64);
 /// |---|---|---|
 /// | 쉬는 중 | 운용 중 | |
 /// | 쉬는 중 | 이상 감지 멈춤 | |
+/// | 쉬는 중 | 전체 정지 | 사유가 [`TeamCause::OwnerStop`]이고 `owner_approved`가 참일 때만 (20차) |
 /// | 운용 중 | 쉬는 중 | |
 /// | 운용 중 | 하루 한도 멈춤 | |
 /// | 운용 중 | 이상 감지 멈춤 | |
-/// | 운용 중 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
+/// | 운용 중 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]이거나, [`TeamCause::OwnerStop`]이고 `owner_approved`가 참일 때만 |
 /// | 하루 한도 멈춤 | 쉬는 중 | 사유가 [`TeamCause::NextTradingDayStart`]일 때만 |
-/// | 하루 한도 멈춤 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
+/// | 하루 한도 멈춤 | 전체 정지 | 운용 중 → 전체 정지와 같다 |
 /// | 이상 감지 멈춤 | 쉬는 중 | |
-/// | 이상 감지 멈춤 | 전체 정지 | 사유가 [`TeamCause::MaxLoss`]일 때만 |
+/// | 이상 감지 멈춤 | 전체 정지 | 운용 중 → 전체 정지와 같다 |
 /// | 전체 정지 | 쉬는 중 | `owner_approved`가 참일 때만 |
+///
+/// 전체 정지로 가는 길의 거부 까닭(20차): 사유가 `OwnerStop`인데 표시가 없으면
+/// [`crate::DenyReason::OwnerApprovalRequired`], 운용 중 · 두 멈춤에서 그 밖의 사유면
+/// [`crate::DenyReason::MaxLossOnly`], 쉬는 중에서 `OwnerStop` 말고 다른 사유면 [`crate::DenyReason::NotAllowed`]
+/// (쉬는 중에서 `MaxLoss`로는 여전히 안 된다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TeamState {
     /// 운용 중
@@ -78,11 +84,13 @@ pub enum TeamCause {
     OwnerRestart,
     /// 백업을 새 폴더에 되살렸다([`crate::Store::mark_restored`]). 이 사유로 가는 길은 그 함수 하나다. (11차)
     Restored,
+    /// 내가 정지를 눌렀다. 전체 정지로 가며 "내 승인" 표시가 있어야 한다. (20차, 결정 25)
+    OwnerStop,
 }
 
 impl TeamCause {
     /// 모든 사유.
-    pub const ALL: [TeamCause; 9] = [
+    pub const ALL: [TeamCause; 10] = [
         TeamCause::TradingStart,
         TeamCause::MarketClose,
         TeamCause::NextTradingDayStart,
@@ -92,6 +100,7 @@ impl TeamCause {
         TeamCause::AnomalyCleared,
         TeamCause::OwnerRestart,
         TeamCause::Restored,
+        TeamCause::OwnerStop,
     ];
 }
 

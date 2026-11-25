@@ -55,6 +55,7 @@ pub(crate) fn team_cause_code(cause: TeamCause) -> &'static str {
         TeamCause::AnomalyCleared => "anomaly_cleared",
         TeamCause::OwnerRestart => "owner_restart",
         TeamCause::Restored => "restored",
+        TeamCause::OwnerStop => "owner_stop",
     }
 }
 
