@@ -3,6 +3,7 @@
 import { mountMenu } from "../ui/menu";
 import "./phone.css";
 import { API, SCREEN_ROOTS, approvalPath, decidePath, type Verb } from "../paths";
+import { renderApprovalExtras } from "../ui/approval-extras";
 
 // 공통 메뉴(server 26차 3번): 폰 화면은 메뉴 항목이 아니라 지금 화면 표시가 없다.
 mountMenu(document.getElementById("menu"), "phone");
@@ -117,6 +118,8 @@ async function showApproval(id: string): Promise<void> {
     card.dataset.approvalId = id;
     card.dataset.fingerprint = approval.fingerprint || "";
     $part(card, "summary").textContent = approval.summary || "";
+    // (50차 · C24) 투표 수 · 한도 적용 전 → 후(보여 주기용 — 지문과 상관없다).
+    renderApprovalExtras($part(card, "extras"), approval);
     $part(card, "fingerprint").textContent = approval.fingerprint || "";
     $part(card, "result").textContent = "";
     // 새 카드는 앞 카드의 보내는 중 표시를 이어받지 않는다(19차 5번).

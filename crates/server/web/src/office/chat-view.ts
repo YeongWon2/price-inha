@@ -26,6 +26,11 @@ export function chatLineElement(line: ChatLine, note?: string, extra?: string): 
       const tag = document.createElement("small");
       tag.className = "topic";
       tag.textContent = line.tag === "day" ? "하루 판단" : line.tag;
+      // (50차 · F7-7) 종목 표시는 누르거나 Enter로 근거 카드를 연다(office/basis-panel.ts).
+      if (line.tag !== "day") {
+        tag.dataset.symbol = line.tag;
+        tag.tabIndex = 0;
+      }
       who.append(" ", tag);
     }
     if (note) {

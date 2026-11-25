@@ -37,6 +37,8 @@ mod stop;
 mod templates;
 mod view;
 mod watch;
+// (50차) 승인 카드 보강: 투표 수 · 한도 적용 전 → 후.
+mod shown;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};

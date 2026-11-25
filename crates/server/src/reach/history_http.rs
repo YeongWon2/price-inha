@@ -216,6 +216,20 @@ fn trade_body(phone: &Phone, trade: &Trade, flow: &TradeFlow) -> Value {
     body
 }
 
+/// (50차 · C23) 매매 하나의 근거에 근거 카드 칸(담당별 의견 · 팀장 요약 · 찬반 수)을 더한다.
+fn with_card(
+    phone: &Phone,
+    mut body: Value,
+    (trade, flow, record): &(Trade, TradeFlow, pi_store::TradeOpinions),
+) -> Value {
+    let hide = |text: &str| phone.shown_reason(text);
+    let fields = crate::team::card::card_fields(trade, flow.side, record, &hide);
+    if let Value::Object(basis) = &mut body["basis"] {
+        basis.extend(fields);
+    }
+    body
+}
+
 async fn trade(State(phone): State<Arc<Phone>>, Path(id): Path<String>) -> Response {
     let Ok(id) = id.parse::<i64>() else {
         return refuse(StatusCode::BAD_REQUEST, "invalid_input");
@@ -224,9 +238,13 @@ async fn trade(State(phone): State<Arc<Phone>>, Path(id): Path<String>) -> Respo
     let read = phone
         .store
         .get_trade(id)
-        .and_then(|trade| Ok((trade, phone.store.trade_flow(id)?)));
+        .and_then(|trade| Ok((trade, phone.store.trade_flow(id)?)))
+        .and_then(|(trade, flow)| Ok((trade, flow, phone.store.trade_opinions(id)?)));
     match read {
-        Ok((trade, flow)) => reply(StatusCode::OK, trade_body(&phone, &trade, &flow)),
+        Ok(read) => {
+            let body = trade_body(&phone, &read.0, &read.1);
+            reply(StatusCode::OK, with_card(&phone, body, &read))
+        }
         Err(StoreError::TradeNotFound(_)) => refuse(StatusCode::NOT_FOUND, "not_found"),
         Err(error) => internal_error(error),
     }

@@ -22,6 +22,8 @@ import "./history.css";
 import { API, tradePath } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { button, card, emptyState, errorLine, loading } from "../ui/parts";
+import { readBasisCard } from "../ui/basis-card";
+import { renderBasisCard } from "../ui/basis-card-view";
 import {
   approvalRows,
   basisLines,
@@ -305,6 +307,8 @@ class HistoryScreen {
       const detail = await read<TradeDetail>(tradePath(id));
       const side = `방향 ${sideText(detail.side)} · 수량 ${detail.quantity === null ? "없음" : `${detail.quantity}주`}`;
       const node = renderDetail(basisLines(detail), flowRows(detail), side);
+      // (50차 · C23 · V68 · V69) 근거에 실린 담당별 의견 · 팀장 요약으로 근거 카드(사무실과 같은 카드).
+      node.append(renderBasisCard(readBasisCard(detail.basis)));
       node.id = `history-trade-${id}`;
       this.details.set(id, node);
       wait.replaceWith(node);

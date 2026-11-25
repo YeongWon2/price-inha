@@ -38,6 +38,8 @@ mod seen;
 mod talk;
 mod tools;
 mod wake;
+// (50차) 근거 카드 칸: 근거 경로 · 히스토리의 매매 하나가 함께 쓴다.
+pub(crate) mod card;
 
 use std::collections::HashMap;
 use std::sync::Arc;

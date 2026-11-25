@@ -149,11 +149,15 @@ impl Trading {
             Ok(inputs) => inputs,
             Err(blocked) => return self.blocked(&trade, blocked),
         };
-        let outcome = pi_rules::check(&request.draft, &inputs.context(self, &params, &request));
+        let context = inputs.context(self, &params, &request);
+        let outcome = pi_rules::check(&request.draft, &context);
         match outcome {
             Outcome::Blocked(blocked) => self.blocked(&trade, blocked),
             Outcome::NeedsApproval(pending) => {
-                self.ask_approval(&trade, request, pending, &inputs.calendar)
+                // (50차 · C24) 수량을 줄인 기록을 승인 카드에 싣는다(지문에는 들어가지 않는다).
+                let clamps = pi_rules::limit_clamps(&request.draft, &context);
+                let clamps = super::shown::clamp_notes(&clamps, pending.order().quantity)?;
+                self.ask_approval(&trade, request, pending, &inputs.calendar, clamps)
             }
             Outcome::Pass(passed) => {
                 let placed = self.execute(trade.id, purpose, passed, &params).await?;
@@ -306,6 +310,7 @@ impl Trading {
         request: OrderRequest,
         pending: PendingApproval,
         calendar: &MarketCalendar,
+        clamps: Vec<pi_approval::ClampNote>,
     ) -> Result<Placed, TradingError> {
         let now = self.clock.now();
         let close = calendar.today.sessions.iter().map(|s| s.end).max();
@@ -323,7 +328,14 @@ impl Trading {
             subject: subject.clone(),
             reason,
         };
-        let requested = self.approvals.request(ask).map_err(exec_text)?;
+        let extras = pi_approval::ShownExtras {
+            trade: Some(trade.id),
+            clamps,
+        };
+        let requested = self
+            .approvals
+            .request_with_extras(ask, extras)
+            .map_err(exec_text)?;
         let to = TradeState::AwaitingApproval;
         self.store.transition_trade(trade.id, to, millis(now))?;
         let waiting = Waiting {

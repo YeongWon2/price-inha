@@ -162,6 +162,9 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.officeSummonView,
     API.socket,
     ...APPROVALS,
+    // server 50차: 근거 패널 — 매매 목록(종목의 최근 매매 찾기) · 근거 카드 읽기.
+    API.trades,
+    "/api/trades/{id}/basis",
   ],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
   // 계좌 · 운용 화면(server 30차 2번 · 3번): 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결. 40차 2번: 전체 정지.
@@ -195,6 +198,5 @@ export function decidePath(id: number | string, verb: Verb): string {
 
 /** (server 50차 · C23) 근거 카드 읽기 경로 `/api/trades/{id}/basis`(번호는 주소 글자로 감싼다). */
 export function tradeBasisPath(id: number | string): string {
-  void id;
-  return "";
+  return tradePath(id) + "/basis";
 }

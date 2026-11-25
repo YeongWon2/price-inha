@@ -1,0 +1,54 @@
+/* 사무실 근거 패널(server 50차 · F7-7 · C23): 채팅 옆 칸 위쪽에 열리고 닫을 수 있다. 토큰(var(--…))만 쓴다. */
+.basis-panel {
+  order: -1;
+  display: grid;
+  gap: var(--space-2);
+  max-height: 45%;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunk);
+}
+
+.basis-panel[hidden] {
+  display: none;
+}
+
+.basis-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.basis-panel-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.basis-panel-close {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.basis-panel-note,
+.basis-panel-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.basis-panel-error {
+  color: var(--danger);
+}
+
+/* 논의 줄의 종목 표시는 누르면 근거 카드가 열린다. */
+.topic[data-symbol] {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}

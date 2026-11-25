@@ -58,11 +58,40 @@ async fn basis(State(crew): State<Arc<Crew>>, Path(id): Path<String>) -> Respons
     let Ok(id) = id.parse::<i64>() else {
         return not_found();
     };
-    match crew.journal.read_basis(TradeId(id)) {
-        Ok(summary) => reply(StatusCode::OK, json!({ "id": id, "summary": summary })),
-        Err(pi_journal::Error::Store(StoreError::TradeNotFound(_))) => not_found(),
+    let summary = match crew.journal.read_basis(TradeId(id)) {
+        Ok(summary) => summary,
+        Err(pi_journal::Error::Store(StoreError::TradeNotFound(_))) => return not_found(),
+        Err(error) => return failed(&TeamError::Journal(error.to_string())),
+    };
+    // (50차 · C23) 옛 칸 옆에 근거 카드 칸(담당별 의견 · 팀장 요약 · 찬반 수 · 자료 이름)을 더한다.
+    match basis_card(&crew, TradeId(id)) {
+        Ok(fields) => {
+            let mut body = json!({ "id": id, "summary": summary });
+            if let Value::Object(map) = &mut body {
+                map.extend(fields);
+            }
+            reply(StatusCode::OK, body)
+        }
+        Err(StoreError::TradeNotFound(_)) => not_found(),
         Err(error) => failed(&TeamError::Journal(error.to_string())),
     }
+}
+
+/// 근거 카드 칸(`super::card`)과 판단에 쓴 자료 이름(가린 글).
+fn basis_card(crew: &Crew, id: TradeId) -> Result<serde_json::Map<String, Value>, StoreError> {
+    use pi_ai::Redactor;
+    let trade = crew.store.get_trade(id)?;
+    let side = crew.store.trade_flow(id)?.side;
+    let record = crew.store.trade_opinions(id)?;
+    let hide = |text: &str| crew.redactor.redact(text);
+    let mut fields = super::card::card_fields(&trade, side, &record, &hide);
+    let sources: Vec<Value> = trade
+        .sources
+        .iter()
+        .map(|s| json!({ "name": hide(&s.name), "known_at": s.known_at.0 }))
+        .collect();
+    fields.insert("sources".to_string(), Value::Array(sources));
+    Ok(fields)
 }
 
 async fn proposals(State(crew): State<Arc<Crew>>) -> Response {

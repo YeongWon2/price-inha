@@ -6,8 +6,10 @@
 // - 카드: `root` 아래 `[data-approval="<번호>"]` 하나.
 // - 요약: `[data-part="summary"]`(글로만 넣는다 — textContent), 지문 앞 6자: `[data-part="code"]`,
 //   결과 글: `[data-part="result"]`, 단추: `button[data-verb="approve"]` · `button[data-verb="reject"]`.
+// - (50차 · C24) 보강 자리: `[data-part="extras"]`(투표 수 · 한도 전 → 후, ui/approval-extras.ts). 지문과 상관없다.
 
 import { approvalPath, decidePath, type Verb } from "../paths";
+import { renderApprovalExtras } from "../ui/approval-extras";
 
 /** 사무실 승인 이벤트 종류. */
 export const KIND_OFFICE_APPROVAL = "office.approval";
@@ -92,7 +94,10 @@ function newCard(root: HTMLElement, number: string, fetcher: FetchLike, resync?:
   );
   const result = textPart("p", "result", "muted");
   result.setAttribute("role", "status");
-  card.append(title, textPart("p", "summary"), code, row, result);
+  // (50차 · C24) 담당 투표 수 · 한도 적용 전 → 후 자리(두 칸이 없으면 숨는다).
+  const extras = textPart("div", "extras", "approval-extras");
+  extras.hidden = true;
+  card.append(title, textPart("p", "summary"), extras, code, row, result);
   root.append(card);
   return card;
 }
@@ -119,6 +124,7 @@ export function applyApproval(root: HTMLElement, payload: unknown, fetcher: Fetc
   const code = part(card, "code");
   if (summary) summary.textContent = approval.summary;
   if (code) code.textContent = approval.short_code.slice(0, CODE_LENGTH);
+  renderApprovalExtras(part(card, "extras"), payload);
 }
 
 function say(card: HTMLElement | null, text: string): void {
