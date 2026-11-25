@@ -1,4 +1,4 @@
-import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-gca8ff46.js";
+import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-jmbncwfy.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -42042,7 +42042,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 		placeRoomTags(width, height);
 		player?.placeTag(camera, width, height);
 		const spots = actors.spots(camera, width, height);
-		if (bubbles) bubbles.update(wall, spots, actors.walkers(), actors.canSee, width, height, actors.placeTag);
+		if (bubbles) bubbles.update(wall, spots, actors.walkers(), (a, b) => actors.canSee(a, b), width, height, (id, rect) => actors.placeTag(id, rect));
 		else {
 			const layout = layoutOffice(spots.map((s) => ({
 				agent: s.id,
@@ -42160,7 +42160,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 		dispose,
 		setPlayerLook: (look) => player?.setLook(look),
 		steerAgent: actors.steer,
-		agentAt: actors.at,
+		agentAt: (id) => actors.at(id),
 		playerAt: () => player?.pos() ?? null
 	};
 }

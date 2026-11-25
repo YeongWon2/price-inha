@@ -428,7 +428,7 @@ function byId(id: string): HTMLInputElement {
     if ($button) { $button.disabled = true; }
     setText($message, body.method === "cli" ? "확인하는 중…" : "저장하는 중…");
     $message.className = "msg";
-    fetch(SETUP_AI_PATH, {
+    void fetch(SETUP_AI_PATH, {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
@@ -486,7 +486,7 @@ function byId(id: string): HTMLInputElement {
       $button.disabled = true;
       setText($message, "저장하는 중…");
       $message.className = "msg";
-      fetch(request.path, {
+      void fetch(request.path, {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
@@ -584,7 +584,7 @@ function byId(id: string): HTMLInputElement {
         recipient: byId("f-backup-recipient").value.trim()
       };
       $button.disabled = true;
-      fetch(SETUP_BACKUP_PATH, {
+      void fetch(SETUP_BACKUP_PATH, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -674,7 +674,7 @@ function byId(id: string): HTMLInputElement {
     $button.addEventListener("click", function () {
       $button.disabled = true;
       hideAccessKey();
-      postJson(ACCESS_KEY_PATH, {})
+      void postJson(ACCESS_KEY_PATH, {})
         .then(function (reply: Data) {
           return reply.json().catch(function () { return null; }).then(function (data: Data) {
             if (reply.ok && data && data.access_key) {
@@ -721,7 +721,7 @@ function byId(id: string): HTMLInputElement {
       var symbols = $input.value.split(",")
         .map(function (code: Data) { return code.trim(); })
         .filter(function (code: Data) { return code.length > 0; });
-      register(SETUP_SYMBOLS_PATH, { symbols: symbols }, $message, $button).then(function (accepted: boolean) {
+      void register(SETUP_SYMBOLS_PATH, { symbols: symbols }, $message, $button).then(function (accepted: boolean) {
         if (accepted) { $input.value = ""; }
       });
     });
@@ -736,7 +736,7 @@ function byId(id: string): HTMLInputElement {
 
   function onFrame(text: Data) {
     var frame;
-    try { frame = JSON.parse(text); } catch (error) { return; }
+    try { frame = JSON.parse(text); } catch { return; }
     if (!frame || typeof frame.kind !== "string") { return; }
     if (typeof frame.seq === "number") {
       // 저장되는 이벤트: 이미 받은 번호는 다시 그리지 않는다.
@@ -765,7 +765,7 @@ function byId(id: string): HTMLInputElement {
     // 끊겼다가 다시 이을 때는 마지막으로 받은 번호 뒤부터 받는다.
     if (lastSeq !== null) { url += "?last_seq=" + encodeURIComponent(String(lastSeq)); }
     var socket: WebSocket;
-    try { socket = new WebSocket(url); } catch (error) { retryLater(); return; }
+    try { socket = new WebSocket(url); } catch { retryLater(); return; }
     var closed = false;
     function onClose() {
       if (closed) { return; }
@@ -781,7 +781,7 @@ function byId(id: string): HTMLInputElement {
       if (typeof event.data === "string") { onFrame(event.data); }
     };
     socket.onclose = onClose;
-    socket.onerror = function () { try { socket.close(); } catch (error) { /* 이미 닫힘 */ } onClose(); };
+    socket.onerror = function () { try { socket.close(); } catch { /* 이미 닫힘 */ } onClose(); };
   }
 
   // (server 31차 1번) 설정 화면 보강 묶음: 세션을 처음 얻은 뒤 한 번 단다(읽기 실패는 그 자리에만 보인다).

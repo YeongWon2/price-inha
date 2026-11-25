@@ -3468,7 +3468,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-f9scwmcs.js");
+		const { webglAvailable, createScene } = await import("./scene3d-cxybrbzk.js");
 		return {
 			webglAvailable,
 			createScene
@@ -4091,7 +4091,7 @@ async function main() {
 			renderLight();
 		}
 	}, 1e3);
-	toggle.addEventListener("click", async () => {
+	const onToggle = async () => {
 		if (state.view) {
 			showLight("chosen");
 			toggle.hidden = false;
@@ -4102,6 +4102,9 @@ async function main() {
 		} catch {
 			showLight("lost");
 		}
+	};
+	toggle.addEventListener("click", () => {
+		onToggle();
 	});
 }
 main();

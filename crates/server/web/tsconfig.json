@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noFallthroughCasesInSwitch": true,
-    "paths": { "vitest": ["./node_modules/vitest"] }
+    "paths": { "vitest": ["./node_modules/vitest"], "@playwright/test": ["./node_modules/@playwright/test"] }
   },
-  "include": ["src/**/*.ts", "../tests/web/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "../tests/web/**/*.ts", "../tests/e2e/**/*.ts", "vite.config.ts"]
 }

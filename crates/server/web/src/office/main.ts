@@ -697,7 +697,7 @@ async function main(): Promise<void> {
     const said = AGENT_IDS.map((id) => chatter.latest(id) ?? "").join("\u0001");
     if (said !== lightSaid) { lightSaid = said; renderLight(); }
   }, 1000);
-  toggle.addEventListener("click", async () => {
+  const onToggle = async () => {
     if (state.view) {
       showLight("chosen");
       toggle.hidden = false;
@@ -710,7 +710,8 @@ async function main(): Promise<void> {
         showLight("lost");
       }
     }
-  });
+  };
+  toggle.addEventListener("click", () => { void onToggle(); });
 }
 
 void main();

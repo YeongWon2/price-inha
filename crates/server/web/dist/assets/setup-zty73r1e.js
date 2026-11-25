@@ -1053,7 +1053,7 @@ function onFrame(text) {
 	var frame;
 	try {
 		frame = JSON.parse(text);
-	} catch (error) {
+	} catch {
 		return;
 	}
 	if (!frame || typeof frame.kind !== "string") return;
@@ -1080,7 +1080,7 @@ function openSocket() {
 	var socket;
 	try {
 		socket = new WebSocket(url);
-	} catch (error) {
+	} catch {
 		retryLater();
 		return;
 	}
@@ -1102,7 +1102,7 @@ function openSocket() {
 	socket.onerror = function() {
 		try {
 			socket.close();
-		} catch (error) {}
+		} catch {}
 		onClose();
 	};
 }

@@ -109,6 +109,16 @@ describe("관리 화면은 가볍다", () => {
       devDependencies?: Record<string, string>;
     };
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(["three"]);
-    expect(Object.keys(pkg.devDependencies ?? {}).sort()).toEqual(["jsdom", "typescript", "vite", "vitest"]);
+    // 36차(결정 23): 린트 · 브라우저 e2e 개발 의존성 넷이 더해졌다. 실행 의존성은 위처럼 three 하나다.
+    expect(Object.keys(pkg.devDependencies ?? {}).sort()).toEqual([
+      "@playwright/test",
+      "eslint",
+      "jsdom",
+      "typescript",
+      "typescript-6",
+      "typescript-eslint",
+      "vite",
+      "vitest",
+    ]);
   });
 });

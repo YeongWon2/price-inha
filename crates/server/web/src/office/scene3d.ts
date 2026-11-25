@@ -407,7 +407,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
     // (23차) 이름표 · 말풍선 · 말풍선 줄을 layout.ts로 한 번에 놓는다.
     const spots = actors.spots(camera, width, height);
     if (bubbles) {
-      bubbles.update(wall, spots, actors.walkers(), actors.canSee, width, height, actors.placeTag);
+      bubbles.update(wall, spots, actors.walkers(), (a, b) => actors.canSee(a, b), width, height, (id, rect) => actors.placeTag(id, rect));
     } else {
       const layout = layoutOffice(spots.map((s) => ({
         agent: s.id, visible: s.visible, foot: s.foot, head: s.head, tag: s.tag, bubble: null, railed: false,
@@ -490,7 +490,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
     setAgent, setLook: actors.setLook, tool, dispose,
     setPlayerLook: (look: string) => player?.setLook(look),
     steerAgent: actors.steer,
-    agentAt: actors.at,
+    agentAt: (id: string) => actors.at(id),
     playerAt: () => player?.pos() ?? null,
   };
 }

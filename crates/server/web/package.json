@@ -6,15 +6,27 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "vite build"
+    "build": "vite build",
+    "lint": "cd .. && eslint -c web/eslint.config.js --max-warnings 0 web/src tests/web tests/e2e",
+    "lint:tests": "cd .. && eslint -c web/eslint.config.js --max-warnings 0 tests/web tests/e2e",
+    "e2e": "playwright test -c playwright.config.mjs"
   },
   "dependencies": {
     "three": "0.187.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "eslint": "10.14.0",
     "jsdom": "31.0.0",
     "typescript": "7.0.2",
+    "typescript-6": "npm:typescript@6.0.3",
+    "typescript-eslint": "8.72.2",
     "vite": "8.3.6",
     "vitest": "5.1.0"
+  },
+  "overrides": {
+    "typescript-eslint": {
+      "typescript": "$typescript"
+    }
   }
 }

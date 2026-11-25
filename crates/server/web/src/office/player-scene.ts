@@ -5,7 +5,7 @@
 
 import { buildGrid, type Grid, type NavMap, type Point } from "./nav";
 import { cellOf, entranceCell, startCell, withBlockers, type EntranceMap } from "./pathfind";
-import { ArrowState, PlayerWalker, type Facing } from "./player";
+import { ArrowState, PlayerWalker } from "./player";
 import { createPlayerBody } from "./player3d";
 import { arrowOf, isTalkKey, isTypingTarget, preventsDefault } from "./player-keys";
 import { SpotSender, postSpot, type Fetcher, type Me, type Spot } from "./player-sync";
@@ -189,7 +189,7 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
     if (chooser && near.join() !== chooserFor) { closeChooser(); }
 
     const cell = walker.cell();
-    const spot: Spot = { x: cell.x, y: cell.y, dir: walker.facing() as Facing };
+    const spot: Spot = { x: cell.x, y: cell.y, dir: walker.facing() };
     const key = `${spot.x},${spot.y},${spot.dir}`;
     if (key !== lastSpot) {
       lastSpot = key;
