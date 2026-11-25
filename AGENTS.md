@@ -15,6 +15,7 @@ AI 에이전트 기반 자율 주식 투자 시스템. 서버는 Rust 한 프로
 | 원본(Hermes · DeskRPG · OpenClaw)의 동작 조사 | `docs/research/` |
 | 만든 것과 원본 동작의 대조표 | `docs/dev/conformance.md` |
 | 토스증권 API 요약 | `docs/dev/toss-api-notes.md` |
+| 준비해야 하는 키 · 토큰 · 계정 | `docs/dev/keys-needed.md` |
 
 ## 반드시 지키는 것
 
