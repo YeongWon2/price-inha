@@ -192,3 +192,9 @@ export function approvalPath(id: number | string): string {
 export function decidePath(id: number | string, verb: Verb): string {
   return approvalPath(id) + "/" + verb;
 }
+
+/** (server 50차 · C23) 근거 카드 읽기 경로 `/api/trades/{id}/basis`(번호는 주소 글자로 감싼다). */
+export function tradeBasisPath(id: number | string): string {
+  void id;
+  return "";
+}

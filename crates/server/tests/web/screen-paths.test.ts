@@ -70,6 +70,9 @@ describe("화면이 부르는 경로", () => {
         "/api/office/summon/view",
         "/ws",
         ...APPROVALS,
+        // 50차: 근거 패널 — 매매 목록(종목의 최근 매매 찾기) · 근거 카드 읽기.
+        "/api/trades",
+        "/api/trades/{id}/basis",
       ]),
     );
     expect(sorted(SCREEN_PATHS.phone)).toEqual(
