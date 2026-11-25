@@ -80,7 +80,20 @@ pub const PHONE_ASSETS_PREFIX: &str = "/phone/";
 /// `/ws?last_seq=`로 받는다, E3). 담당 id는 `pi_office::Agent::id`(`news` · `strategy` · `risk` · `review` ·
 /// `trader` · `leader`)다. (22차 1번) `"talk"` 칸에 최근 팀 대화([`OFFICE_TALK_PATH`]와 같은 줄, `last_seq`까지)를
 /// 이벤트 번호(`"seq"`)를 붙여 시각 순서로 준다. 화면은 이것으로 첫 화면을 그리고 그 뒤는 [`KIND_OFFICE_TALK`]로 받는다.
+/// (34차 1번, C27 · E49) [`OFFICE_PENDING_APPROVALS`] 칸에 아직 기다리는 승인 요청을 싣는다(다시 열어도 ✋를 다시 띄운다).
 pub const OFFICE_PATH: &str = "/api/office";
+
+/// (34차 1번, C27 · E49 · V62) [`OFFICE_PATH`] 스냅샷의 기다리는 승인 칸 이름.
+///
+/// 값은 결과가 기다림(`pending`)인 승인 요청만의 목록이고, 만든 시각이 이른 것부터다(같으면 번호 순).
+/// 한 줄은 정확히 `{"agent", "number", "created_at", "summary", "short_code"}`이다.
+///
+/// - `agent`: ✋를 띄울 담당 id(`pi_office::Agent::id`). 주문 → `"trader"`(매매 담당), 규칙 개선안 →
+///   `"review"`(복기 담당), 실전 승격 · 다시 시작 → `"leader"`(팀장).
+/// - `number`: 승인 번호(`pi_approval::ApprovalNumber` 글자). `created_at`: 만든 시각(유닉스 밀리초).
+/// - `summary`: 승인 카드와 같은 가린 사유 글(비밀 값은 가린다). `short_code`: 지문 앞 6자. 전체 지문은 싣지 않는다.
+/// - 승인 · 거절 · 답 없음 · 만료로 닫힌 요청은 싣지 않는다. 기다리는 것이 없으면 빈 목록(`[]`)이다.
+pub const OFFICE_PENDING_APPROVALS: &str = "pending_approvals";
 
 /// 담당에게 말하기(C5). `POST` `{"room": "team" | "direct", "agent": 담당 id, "text": 글,
 /// "sourceMessageId": 글 번호}` → 200 응답 객체(queued, `office.chat`과 같은 모양).
@@ -406,6 +419,12 @@ pub const KNOWLEDGE_TOOL: &str = "knowledge_search";
 /// `{"number": 승인 번호, "summary": 가린 내용, "short_code": 지문 앞 6자, "status": "pending"}`을 내고,
 /// 답이 나면(폰 · 사무실 어느 쪽이든 [`APPROVAL_DECIDE_PATH`] · [`crate::APPROVAL_ANSWER_PATH`]) 같은 번호로
 /// `status`가 `"approved"` · `"rejected"`인 것을 낸다. 승인 · 거절은 폰과 같은 경로 · 같은 지문 대조다.
+///
+/// (34차 1번, C27) 모든 승인 카드 이벤트에 두 칸을 더한다(옛 칸은 그대로):
+/// - `"agent"`: ✋를 띄울 담당 id. 주문 → `"trader"`, 규칙 개선안 → `"review"`, 실전 승격 · 다시 시작 → `"leader"`
+///   ([`OFFICE_PENDING_APPROVALS`]와 같은 규칙).
+/// - `"state"`: `"waiting"`(기다림) · `"answered"`(승인 · 거절) · `"expired"`(답 없음 · 만료로 닫힘).
+///   답 없음 · 만료로 닫힐 때도 같은 번호로 이 이벤트를 낸다.
 pub const KIND_OFFICE_APPROVAL: &str = "office.approval";
 
 /// (10차 10c 13번) 뜻 검색 설정. `GET` → `{"enabled", "base_url", "model"}`(처음에는 꺼짐 ·
