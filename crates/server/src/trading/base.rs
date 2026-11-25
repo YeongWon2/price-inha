@@ -280,7 +280,7 @@ impl Trading {
             authority,
             approvals,
             paper_config: wiring.paper,
-            rules: wiring.rules,
+            rules: super::rules_config::RulesHold::new(wiring.rules),
             calendars,
             paper_day: Mutex::new(None),
             quotes: Mutex::new(HashMap::new()),

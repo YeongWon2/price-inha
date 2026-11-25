@@ -31,6 +31,8 @@ mod money_safety;
 mod order;
 mod promote;
 mod retry;
+mod rules_config;
+mod rules_config_http;
 mod stop;
 mod templates;
 mod view;
@@ -64,6 +66,7 @@ pub(crate) use link::{
     AnsweredHook, ApprovalHook, CloseHook, DataHaltHook, Hooks, PROPOSAL_UNAVAILABLE, ProposalHook,
     StuckStopHook, approval_agent, approval_state_word, approval_status_word,
 };
+pub(crate) use rules_config::{demo_sectors, load as load_rules_config};
 pub(crate) use templates::change_of;
 pub(crate) use view::change_json;
 
@@ -350,7 +353,7 @@ pub struct Trading {
     authority: CheckAuthority,
     approvals: Approvals,
     paper_config: PaperConfig,
-    rules: RulesConfig,
+    rules: rules_config::RulesHold,
     calendars: Calendars,
     /// 모의계좌에 달력을 넣은 날짜.
     paper_day: Mutex<Option<NaiveDate>>,

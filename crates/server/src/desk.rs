@@ -193,6 +193,11 @@ impl Desk {
         self.secrets.redact(text)
     }
 
+    /// (35차) 보관 폴더.
+    pub(crate) fn home(&self) -> &std::path::Path {
+        &self.home
+    }
+
     /// 지금 지켜보는 종목.
     pub(crate) fn symbols(&self) -> Vec<Symbol> {
         self.watching().symbols.clone()

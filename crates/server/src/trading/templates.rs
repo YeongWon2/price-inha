@@ -217,6 +217,7 @@ impl Trading {
         self.record(crate::KIND_PROPOSAL, payload)
             .await
             .map_err(Refusal::Failed)?;
+        self.announce_proposal(&requested.number);
         Ok(json!({
             "state": "needs_approval",
             "proposal": proposal.id.0,

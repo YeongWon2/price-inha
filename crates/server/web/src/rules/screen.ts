@@ -9,6 +9,9 @@
 //   `[data-role="answer-result"]`에 남는다. 답하는 동안 그 줄의 단추는 막힌다.
 // - 읽기에 실패하면 본문에 "불러오지 못함 · 다시 시도" 오류 줄(`role="alert"`)과 `button[data-action="retry"]`(E57).
 //   메뉴는 그대로다.
+// - (server 35차 3번) 금지 종목 · 업종표 묶음(`GET` · `POST /api/rules/config`, 그리기는 config-view.ts): 띄울 때 한 번
+//   읽고, 이 묶음만 못 읽으면 그 묶음 안에만 못 읽음을 보인다(다른 묶음은 그대로). 고치던 줄(초안)은 저장하거나
+//   화면을 다시 열 때까지 남는다 — 개선안에 답한 뒤 다시 읽을 때도 지우지 않는다.
 import "../ui/admin.css";
 import "./rules.css";
 import { API } from "../paths";
@@ -25,6 +28,7 @@ import {
   type RulesReply,
 } from "./model";
 import { renderCaps, renderProposals, renderRules } from "./view";
+import { ConfigPanel } from "./config-panel";
 
 /** 빈 상태 줄에 `data-role`을 단다. */
 function empty(role: string, text: string): HTMLElement {
@@ -45,6 +49,8 @@ class RulesScreen {
   /** 개선안 번호 → 그 줄에 남길 답 결과 문구. */
   private readonly notes = new Map<number, AnswerMessage>();
   private busy = false;
+  /** 금지 종목 · 업종표 묶음(읽기 · 초안 · 저장). */
+  private readonly config = new ConfigPanel();
 
   constructor(main: HTMLElement) {
     main.append(this.body);
@@ -54,10 +60,14 @@ class RulesScreen {
     this.body.replaceChildren(loading());
   }
 
-  /** 규칙 · 개선안 목록을 읽어 다시 그린다. 하나라도 실패하면 오류 줄과 다시 시도. */
-  async load(): Promise<void> {
+  /**
+   * 규칙 · 개선안 목록을 읽어 다시 그린다. 하나라도 실패하면 오류 줄과 다시 시도. `withConfig`면 금지 종목 ·
+   * 업종표도 다시 읽는다(그 묶음의 실패는 그 묶음 안에만 보인다).
+   */
+  async load(withConfig = true): Promise<void> {
     try {
-      const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals)]);
+      const configRead = withConfig ? this.config.load() : Promise.resolve();
+      const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals), configRead]);
       if (!rules.ok || typeof rules.body !== "object" || rules.body === null) throw new Error(`rules ${rules.status}`);
       if (!proposals.ok || typeof proposals.body !== "object" || proposals.body === null) {
         throw new Error(`proposals ${proposals.status}`);
@@ -95,7 +105,7 @@ class RulesScreen {
       hint("위험을 키우는 개선안은 승인 뒤 냉각중이 되고 다음 거래일부터 반영됩니다."),
       list,
     );
-    this.body.replaceChildren(rulesCard, capsCard, proposalsCard);
+    this.body.replaceChildren(rulesCard, capsCard, this.config.element(), proposalsCard);
   }
 
   private rulesHint(rules: RulesReply): string {
@@ -142,7 +152,7 @@ class RulesScreen {
       this.notes.set(row.id, { kind: "failed", text: "서버와 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요." });
     }
     this.busy = false;
-    await this.load();
+    await this.load(false);
   }
 }
 

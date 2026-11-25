@@ -202,6 +202,7 @@ impl Crew {
             "mistake": mistake_word(mistake),
         });
         self.trading.record(KIND_PROPOSAL, payload).await?;
+        self.trading.announce_proposal(&requested.number);
         Ok(Some(proposal.id))
     }
 

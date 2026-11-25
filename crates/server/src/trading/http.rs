@@ -34,7 +34,8 @@ pub(crate) fn routes(trading: Arc<Trading>) -> Router {
         .route(TEMPLATES_VIEW_PATH, get(templates_view))
         .route(TEMPLATE_STOP_PATH, post(stop_template))
         .route(ACCOUNT_PATH, get(account))
-        .with_state(trading)
+        .with_state(Arc::clone(&trading))
+        .merge(super::rules_config_http::routes(trading))
 }
 
 /// (30차 1번) 모의계좌 읽기.

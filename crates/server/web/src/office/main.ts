@@ -446,7 +446,10 @@ function onFrame(text: string): void {
     else if (frame.kind === "office.chat") { applyChat(frame.payload as ChatResponse); }
     else if (frame.kind === KIND_OFFICE_TALK) { onTalk(frame.payload, frame.seq, !replayedOld(frame.payload)); }
     else if (frame.kind === KIND_OFFICE_APPROVAL) {
-      applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+      // (35차 6번) 답이 서버에서 실패하면 기다리는 승인을 다시 읽어 ✋를 맞춘다(소리 없이).
+      applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init), () => {
+        void refreshApprovals(false);
+      });
       marks?.onApproval(frame.payload);
     }
     else if (frame.kind === KIND_RULE_PROPOSAL) { void refreshApprovals(true); }

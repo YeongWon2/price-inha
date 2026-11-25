@@ -58,18 +58,24 @@ function textPart(tag: string, name: string, className = ""): HTMLElement {
   return element;
 }
 
-function verbButton(root: HTMLElement, number: string, verb: Verb, fetcher: FetchLike): HTMLButtonElement {
+function verbButton(
+  root: HTMLElement,
+  number: string,
+  verb: Verb,
+  fetcher: FetchLike,
+  resync?: Resync,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.verb = verb;
   button.textContent = verb === "approve" ? "승인" : "거절";
   button.addEventListener("click", () => {
-    void decideApproval(root, number, verb, fetcher);
+    void decideApproval(root, number, verb, fetcher, resync);
   });
   return button;
 }
 
-function newCard(root: HTMLElement, number: string, fetcher: FetchLike): HTMLElement {
+function newCard(root: HTMLElement, number: string, fetcher: FetchLike, resync?: Resync): HTMLElement {
   const card = document.createElement("article");
   card.className = "approval-card";
   card.dataset.approval = number;
@@ -80,7 +86,10 @@ function newCard(root: HTMLElement, number: string, fetcher: FetchLike): HTMLEle
   code.append("내용 지문 앞 6자 ", textPart("strong", "code"));
   const row = document.createElement("div");
   row.className = "row";
-  row.append(verbButton(root, number, "approve", fetcher), verbButton(root, number, "reject", fetcher));
+  row.append(
+    verbButton(root, number, "approve", fetcher, resync),
+    verbButton(root, number, "reject", fetcher, resync),
+  );
   const result = textPart("p", "result", "muted");
   result.setAttribute("role", "status");
   card.append(title, textPart("p", "summary"), code, row, result);
@@ -105,7 +114,7 @@ export function applyApproval(root: HTMLElement, payload: unknown, fetcher: Fetc
     existing?.remove();
     return;
   }
-  const card = existing ?? newCard(root, approval.number, fetcher);
+  const card = existing ?? newCard(root, approval.number, fetcher, resync);
   const summary = part(card, "summary");
   const code = part(card, "code");
   if (summary) summary.textContent = approval.summary;
@@ -147,6 +156,13 @@ export async function decideApproval(
   const outcome = await send(card, number, verb, fetcher);
   if (card) delete card.dataset.deciding;
   if (outcome !== "sent") lockVerbs(card, false);
+  if (outcome === "failed" && resync) {
+    try {
+      resync();
+    } catch {
+      // 다시 읽기가 실패해도 결과와 단추 상태는 그대로다(다음 이벤트 · 다시 열기에서 맞춰진다).
+    }
+  }
   return outcome;
 }
 

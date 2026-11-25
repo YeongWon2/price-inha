@@ -53,25 +53,61 @@ export type AddResult = { ok: true; draft: ConfigDraft } | { ok: false; problem:
 /** 저장 결과 문구: 저장함 · 실패(원격 403은 [`READONLY_TEXT`]가 든다, 400은 값이 올바르지 않다는 글). */
 export type SaveMessage = { kind: "saved"; text: string } | { kind: "failed"; text: string };
 
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function bannedRow(value: unknown): BannedRow | null {
+  if (!isObject(value)) return null;
+  const { market, symbol } = value;
+  if ((market !== "kr" && market !== "us") || typeof symbol !== "string") return null;
+  return { market, symbol };
+}
+
+function sectorRow(value: unknown): SectorRow | null {
+  if (!isObject(value)) return null;
+  const { symbol, sector } = value;
+  if (typeof symbol !== "string" || typeof sector !== "string") return null;
+  return { symbol, sector };
+}
+
+/** 배열의 줄마다 확인한다. 하나라도 틀리면 없음. */
+function rowsOf<T>(value: unknown, row: (item: unknown) => T | null): T[] | null {
+  if (!Array.isArray(value)) return null;
+  const rows: T[] = [];
+  for (const item of value) {
+    const checked = row(item);
+    if (checked === null) return null;
+    rows.push(checked);
+  }
+  return rows;
+}
+
 /**
  * 읽기 응답 몸통을 확인해 값으로 바꾼다. 모양이 맞지 않으면(칸이 없거나 종류가 다름) 없음.
  * 모르는 칸은 버린다.
  */
 export function readConfig(body: unknown): RulesConfigReply | null {
-  void body;
-  throw new Error("todo");
+  if (!isObject(body) || typeof body.editable !== "boolean") return null;
+  const banned = rowsOf(body.banned, bannedRow);
+  const sectors = rowsOf(body.sectors, sectorRow);
+  const unsectored = rowsOf(body.unsectored, (item) => (typeof item === "string" ? item : null));
+  if (!banned || !sectors || !unsectored) return null;
+  return { banned, sectors, editable: body.editable, unsectored };
 }
 
 /** 종목 글자인가(앞뒤 공백을 뗀 뒤 영문 · 숫자 · `.` · `-` 1~32자). */
 export function isSymbol(text: string): boolean {
-  void text;
-  throw new Error("todo");
+  return /^[A-Za-z0-9.-]{1,32}$/.test(text.trim());
 }
 
 /** 읽은 값에서 초안을 만든다(줄을 복사한다 — 읽은 값을 바꾸지 않는다). */
 export function draftOf(reply: RulesConfigReply): ConfigDraft {
-  void reply;
-  throw new Error("todo");
+  return {
+    banned: reply.banned.map((row) => ({ ...row })),
+    sectors: reply.sectors.map((row) => ({ ...row })),
+  };
 }
 
 /**
@@ -79,17 +115,18 @@ export function draftOf(reply: RulesConfigReply): ConfigDraft {
  * 같은 (시장, 종목)이 이미 있으면 더하지 않고 까닭을 준다. 받은 초안은 바꾸지 않는다.
  */
 export function addBanned(draft: ConfigDraft, market: string, symbol: string): AddResult {
-  void draft;
-  void market;
-  void symbol;
-  throw new Error("todo");
+  const code = symbol.trim();
+  if (market !== "kr" && market !== "us") return { ok: false, problem: "시장은 국내 · 미국 가운데 고릅니다" };
+  if (!isSymbol(code)) return { ok: false, problem: "종목은 영문 · 숫자 · 점 · 줄표 1~32자입니다" };
+  if (draft.banned.some((row) => row.market === market && row.symbol === code)) {
+    return { ok: false, problem: "이미 금지 종목에 있습니다" };
+  }
+  return { ok: true, draft: { ...draft, banned: [...draft.banned, { market, symbol: code }] } };
 }
 
 /** 그 차례의 금지 종목 줄을 뺀 새 초안(차례 밖이면 같은 줄들). */
 export function removeBanned(draft: ConfigDraft, index: number): ConfigDraft {
-  void draft;
-  void index;
-  throw new Error("todo");
+  return { ...draft, banned: draft.banned.filter((_, at) => at !== index) };
 }
 
 /**
@@ -97,23 +134,30 @@ export function removeBanned(draft: ConfigDraft, index: number): ConfigDraft {
  * [`SECTOR_MAX_CHARS`]자를 넘거나, 같은 종목이 이미 있으면 더하지 않고 까닭을 준다. 받은 초안은 바꾸지 않는다.
  */
 export function addSector(draft: ConfigDraft, symbol: string, sector: string): AddResult {
-  void draft;
-  void symbol;
-  void sector;
-  throw new Error("todo");
+  const code = symbol.trim();
+  const name = sector.trim();
+  const length = [...name].length;
+  if (!isSymbol(code)) return { ok: false, problem: "종목은 영문 · 숫자 · 점 · 줄표 1~32자입니다" };
+  if (length < 1 || length > SECTOR_MAX_CHARS) {
+    return { ok: false, problem: `업종 이름은 1~${SECTOR_MAX_CHARS}자입니다` };
+  }
+  if (draft.sectors.some((row) => row.symbol === code)) {
+    return { ok: false, problem: "이미 업종이 있는 종목입니다" };
+  }
+  return { ok: true, draft: { ...draft, sectors: [...draft.sectors, { symbol: code, sector: name }] } };
 }
 
 /** 그 차례의 업종표 줄을 뺀 새 초안(차례 밖이면 같은 줄들). */
 export function removeSector(draft: ConfigDraft, index: number): ConfigDraft {
-  void draft;
-  void index;
-  throw new Error("todo");
+  return { ...draft, sectors: draft.sectors.filter((_, at) => at !== index) };
 }
 
 /** 저장 요청 몸통 `{"banned": [{market, symbol}], "sectors": [{symbol, sector}]}`(초안의 차례 그대로, 다른 칸 없음). */
 export function saveBody(draft: ConfigDraft): { banned: BannedRow[]; sectors: SectorRow[] } {
-  void draft;
-  throw new Error("todo");
+  return {
+    banned: draft.banned.map(({ market, symbol }) => ({ market, symbol })),
+    sectors: draft.sectors.map(({ symbol, sector }) => ({ symbol, sector })),
+  };
 }
 
 /**
@@ -121,8 +165,8 @@ export function saveBody(draft: ConfigDraft): { banned: BannedRow[]; sectors: Se
  * 잇는다), 없으면 없음.
  */
 export function unsectoredLine(reply: RulesConfigReply): string | null {
-  void reply;
-  throw new Error("todo");
+  if (reply.unsectored.length === 0) return null;
+  return `업종이 없어 살 수 없는 종목: ${reply.unsectored.join(", ")}`;
 }
 
 /**
@@ -131,7 +175,9 @@ export function unsectoredLine(reply: RulesConfigReply): string | null {
  * 실패이고 "다시 시도"가 든다.
  */
 export function saveMessage(status: number, body: unknown): SaveMessage {
-  void status;
   void body;
-  throw new Error("todo");
+  if (status === 200) return { kind: "saved", text: "저장했습니다. 다음 주문 전 점검부터 씁니다" };
+  if (status === 403) return { kind: "failed", text: `${READONLY_TEXT}` };
+  if (status === 400) return { kind: "failed", text: "값이 올바르지 않아 저장하지 않았습니다" };
+  return { kind: "failed", text: "저장하지 못했습니다. 잠시 뒤 다시 시도하세요" };
 }

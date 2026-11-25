@@ -336,7 +336,7 @@ impl App {
     ) -> Result<App, AppError> {
         // 되살리기 중 꺼져 남은 작업 폴더(보관 폴더 옆)를 지운다.
         crate::reach::clear_restore_leftover(&settings.home);
-        demo.fix_calendar(settings.market, &mut launch);
+        let demo_sectors = demo.prepare(&settings, &mut launch)?;
         let (secrets, store) = open_home(&settings, launch.secrets)?;
         let verifier = key_verifier(&wiring, launch.team.as_ref(), reach.as_ref());
         let desk = open_desk(&settings, &wiring, &secrets, verifier).await?;
@@ -348,6 +348,7 @@ impl App {
             wiring: launch.trading,
         };
         let trading = Trading::open(parts).await?;
+        trading.keep_demo_sectors(demo_sectors);
         let team = team_with_limit(launch.team, &settings, &desk);
         let models = crate::setup_doctor::models_of(team.as_ref());
         let crew = open_crew(

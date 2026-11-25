@@ -27,17 +27,17 @@ function textPart(tag, name, className = "") {
 	if (className) element.className = className;
 	return element;
 }
-function verbButton(root, number, verb, fetcher) {
+function verbButton(root, number, verb, fetcher, resync) {
 	const button = document.createElement("button");
 	button.type = "button";
 	button.dataset.verb = verb;
 	button.textContent = verb === "approve" ? "승인" : "거절";
 	button.addEventListener("click", () => {
-		decideApproval(root, number, verb, fetcher);
+		decideApproval(root, number, verb, fetcher, resync);
 	});
 	return button;
 }
-function newCard(root, number, fetcher) {
+function newCard(root, number, fetcher, resync) {
 	const card = document.createElement("article");
 	card.className = "approval-card";
 	card.dataset.approval = number;
@@ -48,7 +48,7 @@ function newCard(root, number, fetcher) {
 	code.append("내용 지문 앞 6자 ", textPart("strong", "code"));
 	const row = document.createElement("div");
 	row.className = "row";
-	row.append(verbButton(root, number, "approve", fetcher), verbButton(root, number, "reject", fetcher));
+	row.append(verbButton(root, number, "approve", fetcher, resync), verbButton(root, number, "reject", fetcher, resync));
 	const result = textPart("p", "result", "muted");
 	result.setAttribute("role", "status");
 	card.append(title, textPart("p", "summary"), code, row, result);
@@ -69,7 +69,7 @@ function applyApproval(root, payload, fetcher, resync) {
 		existing?.remove();
 		return;
 	}
-	const card = existing ?? newCard(root, approval.number, fetcher);
+	const card = existing ?? newCard(root, approval.number, fetcher, resync);
 	const summary = part(card, "summary");
 	const code = part(card, "code");
 	if (summary) summary.textContent = approval.summary;
@@ -102,6 +102,9 @@ async function decideApproval(root, number, verb, fetcher, resync) {
 	const outcome = await send$1(card, number, verb, fetcher);
 	if (card) delete card.dataset.deciding;
 	if (outcome !== "sent") lockVerbs(card, false);
+	if (outcome === "failed" && resync) try {
+		resync();
+	} catch {}
 	return outcome;
 }
 async function send$1(card, number, verb, fetcher) {
@@ -3465,7 +3468,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-nonvh3r8.js");
+		const { webglAvailable, createScene } = await import("./scene3d-f9scwmcs.js");
 		return {
 			webglAvailable,
 			createScene
@@ -3824,7 +3827,9 @@ function onFrame(text) {
 		else if (frame.kind === "office.chat") applyChat(frame.payload);
 		else if (frame.kind === "office.talk") onTalk(frame.payload, frame.seq, !replayedOld(frame.payload));
 		else if (frame.kind === "office.approval") {
-			applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init));
+			applyApproval($("approvals"), frame.payload, (input, init) => fetch(input, init), () => {
+				refreshApprovals(false);
+			});
 			marks?.onApproval(frame.payload);
 		} else if (frame.kind === "rule_proposal") refreshApprovals(true);
 		else if (frame.kind === "office.notice") compose?.onNotice(frame.payload);

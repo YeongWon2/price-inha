@@ -9,7 +9,7 @@ use pi_paper::{
 };
 use pi_rules::{
     ApiBudget, BlockKind, Blocked, Book, CheckContext, Outcome, Passed, PendingApproval, Purpose,
-    Reason, TeamStatus, TradeStage, Violation,
+    Reason, RulesConfig, TeamStatus, TradeStage, Violation,
 };
 use pi_store::{BlockReason, Trade, TradeId, TradeState};
 use pi_template::{RiskParams, UnfilledCancel};
@@ -34,6 +34,8 @@ pub(super) struct Inputs {
     open: Vec<ApprovedOrder>,
     trades_today: u32,
     team: TeamStatus,
+    /// (35차) 이 점검에 쓰는 금지 종목 · 업종표(그때의 값).
+    config: RulesConfig,
 }
 
 impl Inputs {
@@ -47,7 +49,7 @@ impl Inputs {
         CheckContext {
             now: self.now,
             params,
-            config: &trading.rules,
+            config: &self.config,
             market_rules: trading.market_rules(request.draft.market),
             calendar: &self.calendar,
             quote: &self.quote,
@@ -214,6 +216,7 @@ impl Trading {
             open,
             trades_today: u32::try_from(bought).unwrap_or(u32::MAX),
             team,
+            config: self.rules_now(),
         }))
     }
 

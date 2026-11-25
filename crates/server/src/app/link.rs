@@ -111,14 +111,19 @@ async fn office_card(linked: &Linked, trading: &Trading, number: &ApprovalNumber
     }
 }
 
-/// (10c 14번) 승인 요청에 답이 나면 같은 번호의 사무실 승인 카드로 결과를 낸다.
-fn answered_hook(linked: &Arc<Linked>, trading: Weak<Trading>) -> crate::trading::AnsweredHook {
+/// (10c 14번) 승인 요청에 답이 나면 같은 번호의 사무실 승인 카드로 결과를 낸다(`answered`).
+/// (35차 5번) 규칙 개선안의 승인 요청이 생기면 기다림 카드를 낸다(`answered` 거짓 — 폰 알림은 없다).
+fn card_hook(
+    linked: &Arc<Linked>,
+    trading: Weak<Trading>,
+    answered: bool,
+) -> crate::trading::AnsweredHook {
     let linked = Arc::clone(linked);
     Box::new(move |number| {
         let (linked, trading) = (Arc::clone(&linked), trading.clone());
         tokio::spawn(async move {
             if let Some(trading) = trading.upgrade() {
-                office_card(&linked, &trading, &number, true).await;
+                office_card(&linked, &trading, &number, answered).await;
             }
         });
     })
@@ -260,7 +265,8 @@ pub(super) fn attach(
     }
     trading.hook(Hooks {
         approval: approval_hook(linked, Arc::downgrade(trading)),
-        answered: answered_hook(linked, Arc::downgrade(trading)),
+        answered: card_hook(linked, Arc::downgrade(trading), true),
+        proposal: card_hook(linked, Arc::downgrade(trading), false),
         closed: close_hook(linked, Arc::downgrade(trading), crew.map(Arc::downgrade)),
         data_halt: data_halt_hook(linked),
         stuck_stop: stuck_stop_hook(linked),

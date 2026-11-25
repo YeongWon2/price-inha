@@ -43,6 +43,8 @@ pub(crate) struct Hooks {
     pub(crate) closed: CloseHook,
     pub(crate) data_halt: DataHaltHook,
     pub(crate) stuck_stop: StuckStopHook,
+    /// (35차 5번) 규칙 개선안의 승인 요청이 생겼을 때(승인 번호): 사무실 승인 카드만 낸다(폰 알림은 그대로).
+    pub(crate) proposal: AnsweredHook,
 }
 
 /// 승인 결과의 글자.
@@ -136,6 +138,13 @@ impl Trading {
     pub(super) fn announce_approval(&self, number: &ApprovalNumber, summary: &str) {
         if let Some(hooks) = self.hooks.get() {
             (hooks.approval)(number.clone(), summary.to_string());
+        }
+    }
+
+    /// (35차 5번) 규칙 개선안의 승인 요청을 사무실에 알린다(`office.approval` 한 번, 폰 알림은 그대로).
+    pub(crate) fn announce_proposal(&self, number: &ApprovalNumber) {
+        if let Some(hooks) = self.hooks.get() {
+            (hooks.proposal)(number.clone());
         }
     }
 
