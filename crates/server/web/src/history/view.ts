@@ -34,13 +34,15 @@ import {
 } from "./model";
 
 /** 탭 이름. */
-export type HistoryTab = "trades" | "summary" | "approvals";
+export type HistoryTab = "trades" | "summary" | "approvals" | "memos";
 
 /** 탭 차례와 글. */
 export const TABS: readonly (readonly [HistoryTab, string])[] = [
   ["trades", "매매"],
   ["summary", "하루 정리"],
   ["approvals", "승인 기록"],
+  // 23번: 결정 메모(어제 메모의 지난 목록).
+  ["memos", "결정 메모"],
 ];
 
 /** 탭 단추의 id. */

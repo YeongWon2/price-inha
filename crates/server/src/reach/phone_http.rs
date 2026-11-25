@@ -233,5 +233,6 @@ pub(crate) fn routes(phone: Arc<Phone>) -> Router {
         .route(APPROVAL_DECIDE_PATH, post(decide))
         .route(DAILY_SUMMARY_PATH, get(summary))
         .merge(super::history_http::routes())
+        .merge(super::memo_http::routes())
         .with_state(phone)
 }

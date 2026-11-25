@@ -163,6 +163,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.officeSummonArrived,
     API.officeSummonView,
     API.socket,
+    // 23번: 어제 메모 카드.
+    API.memos,
     ...APPROVALS,
   ],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
@@ -182,7 +184,7 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   // server 35차 3번: 금지 종목 · 업종표 읽기 · 고치기.
   rules: [API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig],
   // 히스토리 화면(server 29차 2번): 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록.
-  history: [API.session, API.trades, "/api/trades/{id}", API.dailySummary, API.approvalLog],
+  history: [API.session, API.trades, "/api/trades/{id}", API.dailySummary, API.approvalLog, API.memos],
 };
 
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
