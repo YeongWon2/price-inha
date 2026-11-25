@@ -5,6 +5,7 @@
 #   scripts/nightly.sh mutants [-p 패키지...]  변이 시험(기본: pi-rules pi-paper pi-exec pi-gate). 보고만.
 #   scripts/nightly.sh coverage               워크스페이스 줄 커버리지를 크레이트별 표로. 보고만.
 #   scripts/nightly.sh stress <runs> [cargo test 인자...]   간헐 실패 찾기: 여러 번 돌려 실패 줄만 모은다.
+#   scripts/nightly.sh e2e <runs>             브라우저 e2e(결정 23)를 여러 번 돌려 흔들리는지 · 걸린 시간을 본다.
 #   scripts/nightly.sh all                    audit · mutants · coverage 를 차례로(오래 걸린다).
 # 결과는 target/nightly/ 에 남는다(.gitignore). 네트워크가 필요한 것은 audit 뿐이다.
 # 실제 증권사 · AI 서버를 부르지 않는다(테스트는 로컬 가짜 서버만 쓴다). 비밀값을 쓰지 않는다.
@@ -75,6 +76,26 @@ PY
   return 0
 }
 
+run_e2e() {
+  local runs="${1:?몇 번 돌릴지 준다: scripts/nightly.sh e2e 3}" m w i fails=0 t0 t1
+  for m in $MODULES; do
+    for w in $(module_web "$m"); do
+      web_deps "$w" || return 1
+      web_e2e_browser "$w" || { echo "✗ 고치기: (cd $w && npx playwright install chromium)"; return 1; }
+      for i in $(seq 1 "$runs"); do
+        t0=$(date +%s)
+        if web_e2e "$m" "$w" >"$OUT/e2e.txt" 2>&1; then t1=$(date +%s); echo "== $m ${i}번째 통과 ($((t1 - t0))초)"
+        else
+          t1=$(date +%s); fails=$((fails + 1)); echo "== $m ${i}번째 실패 ($((t1 - t0))초)"
+          grep -E '✘|Error:' "$OUT/e2e.txt" | head -12
+        fi
+      done
+    done
+  done
+  echo "실패: $fails / $runs (모듈마다)"
+  [ "$fails" -eq 0 ]
+}
+
 run_stress() {
   local runs="${1:?몇 번 돌릴지 준다: scripts/nightly.sh stress 20 -p pi-ai}"; shift
   local sel=("$@")
@@ -96,6 +117,7 @@ case "$cmd" in
   mutants) run_mutants "$@" ;;
   coverage) run_coverage ;;
   stress) run_stress "$@" ;;
+  e2e) run_e2e "$@" ;;
   all) a=0; run_audit || a=1; run_mutants; run_coverage; exit "$a" ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

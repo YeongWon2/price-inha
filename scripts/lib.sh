@@ -58,6 +58,39 @@ web_dist_fresh() { # 지금 dist 가 소스로 다시 빌드한 것과 같은가
   [ "$before" = "$after" ] || { echo "빌드하니 dist 가 바뀌었다 — 고치기: npm --prefix $w run build 결과를 함께 커밋한다"; return 1; }
 }
 
+# 화면 린트(결정 23): ESLint + typescript-eslint. 규칙은 <web>/eslint.config.js(src 는 엄격, 시험은 느슨한 묶음).
+web_lint() { npm --prefix "$1" run --silent lint; }
+
+# 브라우저 e2e(결정 23)가 쓸 Playwright chromium(headless shell)이 받아져 있는가. 받지 않는다(용량 · 네트워크) — 없으면 실패.
+web_e2e_browser() {
+  (cd "$1" && node -e '
+const fs = require("fs"), os = require("os"), path = require("path");
+const list = JSON.parse(fs.readFileSync("node_modules/playwright-core/browsers.json", "utf8")).browsers;
+const shell = list.find((b) => b.name === "chromium-headless-shell");
+const env = process.env.PLAYWRIGHT_BROWSERS_PATH;
+const home = os.homedir();
+const base = env && env !== "0" ? env
+  : env === "0" ? path.join("node_modules", "playwright-core", ".local-browsers")
+  : process.platform === "darwin" ? path.join(home, "Library", "Caches", "ms-playwright")
+  : process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || home, "ms-playwright")
+  : path.join(process.env.XDG_CACHE_HOME || path.join(home, ".cache"), "ms-playwright");
+const dir = path.join(base, `chromium_headless_shell-${shell.revision}`);
+if (!fs.existsSync(path.join(dir, "INSTALLATION_COMPLETE"))) {
+  console.log(`Playwright chromium(headless shell ${shell.revision})이 없다: ${dir}`);
+  process.exit(1);
+}')
+}
+
+# 브라우저 e2e(결정 23): 시연 서버를 띄워 화면을 기계가 누른다. 실행 파일을 먼저 맞춘다(바뀐 것이 없으면 그대로).
+web_e2e() { # web_e2e <모듈> <web 폴더>
+  # shellcheck disable=SC2046
+  cargo build -q $(module_pkgs "$1") --bins || return 1
+  npm --prefix "$2" run --silent e2e
+}
+
+# 검사를 끈 곳(화면 · 시험 TS): 린트 · 형 검사를 끄는 주석과 시험 건너뛰기 · 하나만 돌리기. verify.sh 9번.
+WEB_OFF_RX='(//|/\*)[[:space:]]*(eslint-disable|eslint-enable|eslint[[:space:]]|@ts-(ignore|nocheck|expect-error))|\b(it|test|describe)\.(only|skip|fixme)\(|\bx(it|test|describe)\('
+
 # 지시서의 "## 필수 번호" 아래 줄에서 번호를 뽑는다.
 required_ids() {
   awk '/^## 필수 번호/{p=1;next} /^## /{p=0} p' "docs/dev/modules/$1.md" \

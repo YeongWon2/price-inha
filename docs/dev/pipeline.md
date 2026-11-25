@@ -26,11 +26,11 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 | N0 계획 | 조정자 | `dev.md`의 작업 번호, `docs/research/`의 조사 문서 | 모듈로 나누고 작업 지시서를 쓴다. 지시서마다 원본(Hermes · DeskRPG · OpenClaw)의 어느 동작을 따르는지 적는다. 조사 문서가 얇으면 먼저 더 뜯는다 | `docs/dev/modules/<모듈>.md` | `docs/dev/`, 워크스페이스 뼈대 |
 | R 대조 (다시 연 모듈만) | 모듈마다 에이전트 1 (N1과 다른 에이전트) | 지시서의 이번 차수 절, 잠겨 있던 시험, 결정 · 사용자 말 | 낡을 수 있는 시험 · 문서마다 유지 · 고침 · 지움 · 열어 둠을 정한다 | 지시서 이번 차수 절 아래 `### 대조` 표(시험 · 문서 경로 \| 판정 \| 근거) | `docs/dev/modules/<모듈>.md`뿐 |
 | GR 표 확인 | 기계 | | `pipeline.py gate GR <모듈>`: 이번 차수의 대조 표가 있고(다시 연 때보다 `### 대조`가 늘었다), 판정이 넷 가운데 하나이고, "지움" 줄마다 근거 칸에 `사용자 "…"` · `결정 <번호>` · `지시서 <N>차` 가운데 하나가 있다(형식 검사) | 지시서 커밋(실행기) | |
-| N1 테스트 작성 | 모듈마다 에이전트 1 | 작업 지시서 | 공개 API 뼈대(몸통은 `todo!()`)와 테스트를 **전부** 쓴다 | `crates/<모듈>/tests/*.rs`, 컴파일되는 뼈대 | `crates/<모듈>/` |
-| G1 red 확인 | 기계 | | `scripts/red.sh <모듈>`: 컴파일되고, 테스트가 실패하고, 필수 번호가 다 있다. 다시 연 모듈은 잠금 판(`red/<모듈>`이 가리키던 판) 대비 지운 시험 파일 · 시험 함수가 대조 표의 "지움"에 다 있어야 한다(없으면 "대조 표에 없는 시험을 지웠다"). 동작 잠금 모드면 "실패한다" 대신 "지금 구현에서 모두 통과한다" | `red/<모듈>` 태그(조정자가 커밋 뒤 붙임) | |
+| N1 테스트 작성 | 모듈마다 에이전트 1 | 작업 지시서 | 공개 API 뼈대(몸통은 `todo!()`)와 테스트를 **전부** 쓴다. 화면이 바뀌는 차수면 브라우저 e2e 시험(`crates/<모듈>/tests/e2e/*.spec.ts`)도 쓴다 — red 때는 돌리지 않고(문법 · 형 · 시험 린트만) G2에서 돈다. 영상은 찍지 않는다(결정 23) | `crates/<모듈>/tests/*.rs`, 컴파일되는 뼈대 | `crates/<모듈>/` |
+| G1 red 확인 | 기계 | | `scripts/red.sh <모듈>`: 컴파일되고, 테스트가 실패하고, 필수 번호가 다 있다. 화면이 있으면 화면 형 검사(tsc: 화면 · vitest 시험 · e2e 시험)와 시험 린트도 통과해야 한다(e2e는 돌리지 않는다). 다시 연 모듈은 잠금 판(`red/<모듈>`이 가리키던 판) 대비 지운 시험 파일 · 시험 함수가 대조 표의 "지움"에 다 있어야 한다(없으면 "대조 표에 없는 시험을 지웠다"). 동작 잠금 모드면 "실패한다" 대신 "지금 구현에서 모두 통과한다" | `red/<모듈>` 태그(조정자가 커밋 뒤 붙임) | |
 | N2 구현 | 모듈마다 에이전트 1 (N1과 다른 에이전트) | 작업 지시서, 잠긴 테스트 | 테스트가 통과할 때까지 구현한다 | `crates/<모듈>/src/` | `crates/<모듈>/src/`, 자기 `Cargo.toml` |
 | G2 기계 검사 | 기계 | | `scripts/verify.sh` | 통과 또는 실패 목록 | |
-| N3 AI 검토 | 구현하지 않은 에이전트 | 스펙, 지시서, 바뀐 코드 | 기계가 못 보는 것(스펙과 맞는가, 보안, 빠진 경우)을 판단한다 | 판정과 근거(`파일:줄`) | 없음 (읽기 전용) |
+| N3 AI 검토 | 구현하지 않은 에이전트 | 스펙, 지시서, 바뀐 코드 | 기계가 못 보는 것(스펙과 맞는가, 보안, 빠진 경우)을 판단한다. 화면 확인은 영상이 아니라 G2의 브라우저 e2e 결과로 본다 — 화면이 바뀌었는데 e2e 시험이 그 흐름을 덮지 않으면 빠진 경우로 적는다(결정 23) | 판정과 근거(`파일:줄`) | 없음 (읽기 전용) |
 | G3 사람 확인 | 사용자 | 요약 | 커밋 · push를 정한다 | | |
 
 **동작 잠금 모드** (QMIT 결정 2): 리팩토링 · 옮기기처럼 동작을 바꾸지 않는 차수는 red 대신 "바꾸기 전과 뒤 모두 통과"로 증명한다. `pipeline.py reopen <모듈> --lock <이유>`(또는 `start N1 <모듈> --lock`)로 그 차수를 동작 잠금 모드로 둔다. 그러면 G1(`red.sh <모듈> --lock`)은 시험이 **지금 구현에서 모두 통과**해야 통과하고, N2 뒤 G2도 당연히 통과해야 한다. 모드는 상태 파일(`mode`)에 남고 `status`에 "동작 잠금"으로 보인다.
@@ -69,13 +69,15 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 | 2 | clippy (실행 코드는 엄격, 테스트는 `unwrap` 허용) | `unsafe` · `unwrap` · `expect` · `panic!` · `todo!` · `dbg!` · `println!` · 문서 주석 없는 공개 항목 등이 있다 |
 | 3 | `cargo test --workspace` | 테스트가 깨진다 |
 | 3w | 화면(Vite, `crates/<모듈>/web/package.json`이 있을 때): `npm ci` · `npm run typecheck` · `npm test`(vitest) · `npm run build` 뒤 `web/dist`가 그대로인가 | 화면 형 오류 · 화면 시험 실패 · 커밋한 `dist`가 소스와 다르다(빌드 결과를 함께 커밋한다). 화면 시험은 `crates/<모듈>/tests/web/*.test.ts`에 두어 잠금이 같이 덮는다. G1(red)은 Rust 시험이나 화면 시험 가운데 하나라도 실패하면 red다 |
+| 3l | 화면 린트 (`npm run lint`: ESLint + typescript-eslint, 규칙은 `crates/<모듈>/web/eslint.config.js`, 결정 23) | 실행 코드(`web/src`)에서 형 정보를 쓰는 규칙(recommendedTypeChecked · 기다리지 않은 Promise · Promise 오용 · `any` · `==` · 안 쓰는 매개변수)이나 금지 속성(`innerHTML` · `outerHTML` · `insertAdjacentHTML` · `document.write` · `eval` · `localStorage` · `sessionStorage` · `indexedDB` · `document.cookie`)에 걸린다. 시험(`tests/web` · `tests/e2e`)은 느슨한 묶음(기다리지 않은 Promise · `==`). 인라인 주석으로 규칙을 끌 수 없다(`noInlineConfig`) |
+| 3e | 브라우저 e2e (`npm run e2e`: Playwright, chromium headless 하나 · 병렬 1 · 재시도 0, 결정 23) | 시험(`crates/<모듈>/tests/e2e/*.spec.ts`)이 실패한다. 전역 준비가 임시 홈으로 시연 서버(가짜 시세 · 가짜 AI · 모의계좌)를 빈 포트에 띄우고 끝나면 지운다. 모든 시험에서 화면 오류(`pageerror`)와 바깥 요청을 실패로 보고, 서버가 바깥으로 나가려던 요청(기록 프록시)이 있으면 실패로 본다. chromium이 없으면 실패 — 고치기 `npx playwright install chromium`. trace · 스크린샷은 저장소 밖 임시 폴더(`$TMPDIR/price-inha-e2e`)에만. 영상은 찍지 않는다 |
 | 4 | 잠긴 테스트 비교 | red 뒤에 테스트를 고쳤다 |
 | 5 | 필수 번호 | 지시서의 필수 번호가 테스트에 없다 |
 | 5b | 원본 동작 근거 | 지시서에 "원본 동작 근거" 절이 없거나, 따르는 조사 문서를 가리키지 않는다(원본에 없는 기능이면 "원본에 없음"이라고 적어야 한다) |
 | 6 | 아키텍처 · 컨벤션 (`scripts/check_arch.py`) | `docs/dev/architecture.toml`의 규칙을 어겼다: 의존 방향, 허용되지 않은 바깥 의존, 금지된 의존, 금지 모양(돈에 부동소수점, 주문 API 호출, 키 파일 직접 읽기, 라이브러리의 환경 변수 읽기 등), 구조(실행 파일 하나, `error.rs`), 크기(파일 · 함수 줄 수) |
 | 7 | 비밀 글자 | 키처럼 생긴 글자나 `.env` · `auth.json`이 저장소에 있다 |
 | 8 | 바깥 주소 | 테스트가 실제 증권사 · AI 주소를 쓴다 |
-| 9 | 검사 끄기 | `#[ignore]`나 지시서에 없는 `#[allow]`가 있다 |
+| 9 | 검사 끄기 | `#[ignore]`나 지시서에 없는 `#[allow]`가 있다. 화면 · 시험 TS(`.ts` · `.js` · `.mjs` · `.html`)에 `eslint-disable` · `@ts-ignore` · `@ts-nocheck` · `@ts-expect-error` 주석이나 `.skip` · `.only` · `.fixme`가 있다(결정 23) |
 | 10 | 공급망 (`cargo deny --offline check licenses bans sources`, 설정은 루트 `deny.toml`) | 허용 목록 밖 라이선스, crates.io 밖 출처(git · 다른 레지스트리), 금지 크레이트(`openssl-sys` · `native-tls`)가 의존 나무에 있다. cargo-deny가 없으면 ✗와 설치 안내(`cargo install cargo-deny --version <scripts/lib.sh DENY_VERSION> --locked`) |
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
@@ -176,6 +178,7 @@ GitHub CI는 쓰지 않는다(2026-11-24 사용자). 게이트 자체를 재는 
 | `scripts/nightly.sh mutants [-p 패키지…]` | `cargo-mutants`로 돈 · 안전 핵심 크레이트(기본 `pi-rules` · `pi-paper` · `pi-exec` · `pi-gate`)의 시험이 일부러 넣은 버그를 잡는지(caught · missed) |
 | `scripts/nightly.sh coverage` | `cargo-llvm-cov`로 워크스페이스 줄 커버리지를 크레이트별 표로 |
 | `scripts/nightly.sh stress <번> [cargo test 인자…]` | 간헐 실패 찾기: 여러 번 돌려 실패 줄만 모은다 |
+| `scripts/nightly.sh e2e <번>` | 브라우저 e2e를 여러 번 돌려 흔들리는지 · 한 번에 걸린 시간을 본다(결정 23) |
 | `scripts/nightly.sh all` | audit · mutants · coverage 차례로 |
 
 놓친 변이가 보이면 해당 모듈을 다시 열 때(reopen) 시험을 보강하는 근거로 쓴다. 도구 판은 발행 14일 넘은 것만 고정한다(공급망 규칙 8 · 9): cargo-mutants 27.1.0, cargo-llvm-cov 0.9.1. 도구가 없으면 스크립트가 설치 명령을 알려 준다.

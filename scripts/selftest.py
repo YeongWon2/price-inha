@@ -139,6 +139,60 @@ def add_dep(fx, crate_dir, line):
     p.write_text(p.read_text().replace("[dependencies]\n", "[dependencies]\n" + line + "\n"))
 
 
+def lint_cases(tmp):
+    web = ROOT / "crates/server/web"
+    if not (web / "node_modules/.package-lock.json").exists():
+        sh(["bash", "-c", ". scripts/lib.sh && web_deps crates/server/web"], ROOT)
+    base = tmp / "lintfx"
+    w = base / "web"
+    w.mkdir(parents=True)
+    for f in ["package.json", "tsconfig.json", "eslint.config.js"]:
+        shutil.copy(web / f, w / f)
+    shutil.copytree(web / "src", w / "src")
+    (w / "node_modules").symlink_to(web / "node_modules")
+    for d, f in [("tests/web", "ok.test.ts"), ("tests/e2e", "ok.spec.ts")]:
+        (base / d).mkdir(parents=True)
+        (base / d / f).write_text("export {};\n")
+    lint = ["npm", "run", "--silent", "lint"]
+
+    def lcase(name, files, expect, should_fail=True):
+        for rel, text in files.items():
+            (base / rel).write_text(text, encoding="utf-8")
+        code, out = sh(lint, w)
+        for rel in files:
+            (base / rel).unlink()
+        good = (code != 0) == should_fail and all(e in out for e in ([expect] if isinstance(expect, str) else expect))
+        results.append((good, name))
+        print(("✓ " if good else "✗ ") + name)
+        if not good:
+            print(f"    기대: {'실패' if should_fail else '통과'} + {expect!r} / 실제 종료 코드 {code}")
+            print("    " + "\n    ".join(out.strip().splitlines()[-12:]))
+
+    src = "web/src/zz-probe.ts"
+    lcase("화면 린트: 지금 소스는 통과", {}, "", should_fail=False)
+    lcase("화면 린트: innerHTML 을 잡는다", {src: "export function f(e: HTMLElement): void {\n  e.innerHTML = \"x\";\n}\n"},
+          "no-restricted-properties")
+    lcase("화면 린트: localStorage 를 잡는다", {src: "export function f(): void {\n  localStorage.clear();\n}\n"},
+          "no-restricted-globals")
+    lcase("화면 린트: 기다리지 않은 Promise 를 잡는다", {src: "export function f(): void {\n  fetch(\"/x\");\n}\n"},
+          "no-floating-promises")
+    lcase("화면 린트: any 를 잡는다", {src: "export const v: any = 1;\n"}, "no-explicit-any")
+    lcase("화면 린트: == 를 잡는다", {src: "export function f(a: unknown): boolean {\n  return a == 1;\n}\n"}, "eqeqeq")
+    lcase("화면 린트: 인라인 주석으로 규칙을 꺼도 꺼지지 않는다",
+          {src: "/* eslint-disable */\nexport const v: any = 1;\n"}, "no-explicit-any")
+    lcase("화면 린트: e2e 시험의 기다리지 않은 Promise 를 잡는다",
+          {"tests/e2e/bad.spec.ts": "export function f(p: Promise<number>): void {\n  p.then(() => 1);\n}\n"},
+          "no-floating-promises")
+
+    empty = tmp / "no-browsers"
+    empty.mkdir()
+    code, out = sh(["bash", "-c", ". scripts/lib.sh && web_e2e_browser crates/server/web"], ROOT,
+                   {"PLAYWRIGHT_BROWSERS_PATH": str(empty)})
+    good = code != 0 and "Playwright chromium" in out
+    results.append((good, "브라우저 e2e: chromium 이 없으면 실패로 본다"))
+    print(("✓ " if good else "✗ ") + "브라우저 e2e: chromium 이 없으면 실패로 본다")
+
+
 def main():
     py = sys.executable
     arch = [py, "scripts/check_arch.py"]
@@ -300,9 +354,23 @@ def main():
         case(fx, "#[ignore] 로 테스트를 끄면 잡는다",
              lambda: append(fx, "crates/store/src/lib.rs", "#[cfg(test)]\nmod t {\n    #[test]\n    #[ignore]\n    fn x() {}\n}"),
              verify, "✗ 9 검사를 끈 곳")
+        # 결정 23: 화면 · 시험 TS 에서 린트 · 형 검사를 끄거나 시험을 건너뛰는 것도 "검사를 끈 곳"이다.
+        probe = "crates/store/src/probe.ts"
+        case(fx, "eslint-disable 주석으로 린트를 끄면 잡는다",
+             lambda: (fx / probe).write_text("// eslint-disable-next-line\nexport const x = 1;\n"), verify + ["store"], "✗ 9 검사를 끈 곳")
+        case(fx, "@ts-ignore 로 형 검사를 끄면 잡는다",
+             lambda: (fx / probe).write_text("// @ts-ignore\nexport const x: number = \"1\";\n"), verify + ["store"], "✗ 9 검사를 끈 곳")
+        case(fx, "시험을 .skip · .only 로 건너뛰면 잡는다",
+             lambda: (fx / probe).write_text('test.skip("x", () => {});\n'), verify + ["store"], "✗ 9 검사를 끈 곳")
+        case(fx, "설명 글 속의 eslint-disable 낱말은 잡지 않는다",
+             lambda: (fx / probe).write_text("// 검사를 끄는 주석(eslint-disable)은 쓰지 않는다.\nexport const x = 1;\n"),
+             verify + ["store"], "G2 통과", should_fail=False)
         case(fx, "red 태그 없이 모듈 검사를 하면 잡는다",
              lambda: sh(["git", "tag", "-d", "red/ai"], fx), verify + ["ai"], "✗ 4 red 태그 없음: ai")
         sh(["git", "tag", "-f", "red/ai"], fx)
+
+        # --- 화면 린트 규칙 (결정 23): 진짜 eslint.config.js 를 지금 화면 소스 복사본에 돌린다(node_modules 는 빌려 쓴다).
+        lint_cases(tmp)
 
         # --- 영향 범위 (QMIT 결정 6, scripts/affected.py)
         aff = f"{py} scripts/affected.py --base HEAD"

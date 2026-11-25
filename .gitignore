@@ -9,3 +9,7 @@ target/
 *.sqlite
 *.sqlite-*
 auth.json
+# 브라우저 e2e(결정 23) 결과는 저장소 밖 임시 폴더에 둔다 — 혹시 기본 자리에 생겨도 올리지 않는다.
+test-results/
+playwright-report/
+blob-report/

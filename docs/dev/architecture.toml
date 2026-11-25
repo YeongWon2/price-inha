@@ -149,8 +149,11 @@ new_fix = "{dep} 를 더하지 말고 멈춰 조정자에게 알린다. 조정�
 
 # 화면(npm) 의존 이름의 허용 목록(QMIT 결정 8). crates/*/web/package.json 의 dependencies · devDependencies
 # 이름이 여기 밖이면 ARCH-WEB-DEP. 더하는 것은 ARCH-DEP-NEW 와 같이 사용자 승인으로만.
+# 결정 23(2026-11-26 사용자, 화면 린트 · 브라우저 e2e): eslint · typescript-eslint(린트), @playwright/test(e2e),
+# typescript-6(= npm:typescript@6.0.3 별칭 — typescript-eslint 8.72 가 TypeScript 7 을 읽지 못해 린트만 6.0.3 으로 읽는다).
+# 모두 개발 의존이고 실행 묶음(dist)에 실리지 않는다.
 [web]
-allowed = ["three", "jsdom", "typescript", "vite", "vitest"]
+allowed = ["three", "jsdom", "typescript", "vite", "vitest", "eslint", "typescript-eslint", "typescript-6", "@playwright/test"]
 
 # 공급망 발행일 검사(scripts/supply.py): 기준 판에 없던 새 판은 이 날수가 지나야 들인다(QMIT 결정 8).
 [supply]

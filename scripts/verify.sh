@@ -13,6 +13,10 @@ run() { # run <이름> <명령...>
   local name="$1"; shift
   if out=$("$@" 2>&1); then ok "$name"; else bad "$name"; printf '%s\n' "$out" | tail -60; fi
 }
+run_fix() { # run_fix <이름> <고치기> <명령...>: 실패하면 고치는 법을 함께 말한다
+  local name="$1" fix="$2"; shift 2
+  if out=$("$@" 2>&1); then ok "$name"; else bad "$name — 고치기: $fix"; printf '%s\n' "$out" | tail -60; fi
+}
 
 picked=0 # 모듈을 사람이 골랐는가(그때만 red 태그 없음을 실패로 본다)
 if [ "${1:-}" = "--affected" ]; then
@@ -70,6 +74,17 @@ for m in $mods; do
     run "3w 화면 형 검사 (tsc): $m" npm --prefix "$w" run --silent typecheck
     run "3w 화면 시험 (vitest): $m" npm --prefix "$w" test --silent
     run "3w 화면 빌드 · dist 대조: $m" web_dist_fresh "$w"
+    # 3l 화면 린트 · 3e 브라우저 e2e (결정 23)
+    run_fix "3l 화면 린트 (eslint): $m" \
+      "아래 [규칙]이 가리킨 코드를 고친다(eslint-disable 같은 주석으로 끄지 않는다). 잠긴 시험이 걸리거나 규칙이 틀렸으면 멈추고 알린다" \
+      web_lint "$w"
+    if ! bout=$(web_e2e_browser "$w" 2>&1); then
+      bad "3e 브라우저 e2e (playwright): $m — 브라우저 없음. $bout — 고치기: (cd $w && npx playwright install chromium)"
+    else
+      run_fix "3e 브라우저 e2e (playwright): $m" \
+        "아래 실패한 시험을 본다(trace · 스크린샷: ${TMPDIR:-/tmp}/price-inha-e2e, 시연 서버 로그: ${TMPDIR:-/tmp}/price-inha-e2e-server.log). 잠긴 시험은 고치지 않고 화면 · 서버 코드를 고친다. 시험이 틀렸으면 멈추고 알린다" \
+        web_e2e "$m" "$w"
+    fi
   done
 done
 
@@ -129,9 +144,13 @@ for m in $mods; do
 done
 [ "$oh_any" -eq 0 ] && ok "8 테스트에 바깥 주소 없음"
 
-# 9 검사 끄기
+# 9 검사 끄기 (Rust 의 #[ignore] · #[allow], 화면 · 시험 TS 의 eslint-disable · @ts-ignore · .skip · .only — 결정 23)
 off=$(grep -rnE '#!?\[(cfg_attr\([^]]*)?(ignore|allow)\b' $srcdirs --include='*.rs' 2>/dev/null)
-if [ -n "$off" ]; then bad "9 검사를 끈 곳 — 고치기: #[ignore] · #[allow]를 지우고 원인을 고친다"; printf '%s\n' "$off"
+offw=$(grep -rnE "$WEB_OFF_RX" $srcdirs --include='*.ts' --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.html' \
+  --exclude-dir=node_modules --exclude-dir=dist 2>/dev/null)
+if [ -n "$off$offw" ]; then
+  bad "9 검사를 끈 곳 — 고치기: #[ignore] · #[allow] · eslint-disable · @ts-ignore · .skip · .only 를 지우고 원인을 고친다"
+  printf '%s\n' "$off" "$offw" | grep -v '^$'
 else ok "9 검사를 끈 곳 없음"; fi
 
 # 10 공급망 (cargo-deny, QMIT 결정 8): 라이선스 · 금지 크레이트 · 출처(crates.io 만). 오프라인으로 되는 것만.

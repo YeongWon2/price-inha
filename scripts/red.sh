@@ -34,6 +34,12 @@ wcode=0
 for w in $(module_web "$m"); do
   if ! command -v npm >/dev/null; then say "✗ 화면 시험: npm 없음 — 고치기: Node.js LTS 를 설치한다"; fail=1; continue; fi
   if ! web_deps "$w" >/tmp/pi-red-web-$m.log 2>&1; then say "✗ 화면 의존성 (npm ci) 실패"; tail -20 /tmp/pi-red-web-$m.log; fail=1; continue; fi
+  # 브라우저 e2e(결정 23)는 G1 에서 돌리지 않는다(느리다 — G2 가 돈다). 잠그기 전에 시험 파일이 문법 · 형(tsc)과
+  # 시험 린트(기다리지 않은 Promise 등)는 맞는지만 본다 — 잠근 뒤에는 시험을 고칠 수 없다.
+  if tout=$(npm --prefix "$w" run --silent typecheck 2>&1); then say "✓ 화면 형 검사 (tsc: 화면 · vitest 시험 · e2e 시험)"
+  else say "✗ 화면 형 검사 (tsc) — 고치기: 아래 오류를 고친다(뼈대에 쓰는 이름이 있어야 한다)"; printf '%s\n' "$tout" | head -20; fail=1; fi
+  if tout=$(npm --prefix "$w" run --silent lint:tests 2>&1); then say "✓ 시험 린트 (eslint: tests/web · tests/e2e)"
+  else say "✗ 시험 린트 — 고치기: 아래 [규칙]을 시험 코드에서 고친다(주석으로 끄지 않는다)"; printf '%s\n' "$tout" | tail -20; fail=1; fi
   if wout=$(npm --prefix "$w" test --silent 2>&1); then say "  화면 시험 (vitest): 통과"
   else wcode=1; say "  화면 시험 (vitest): 실패 — $(printf '%s\n' "$wout" | grep -E 'Tests? .*(failed|passed)' | tail -1)"; fi
 done
