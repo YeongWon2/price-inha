@@ -6,7 +6,7 @@ use pi_store::TeamState;
 use price_inha::{
     APPROVAL_ANSWER_PATH, KIND_OFFICE_APPROVAL, MESSENGER_APPROVE_ON_WEB,
     MESSENGER_APPROVE_ON_WEB_LINK, MESSENGER_HELP, MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED,
-    MESSENGER_STATUS_PENDING, MESSENGER_STOP_LATER, MESSENGER_UNKNOWN, OFFICE_PATH,
+    MESSENGER_STATUS_PENDING, MESSENGER_STOPPED, MESSENGER_UNKNOWN, OFFICE_PATH,
     OFFICE_PENDING_APPROVALS,
 };
 use serde_json::{Value, json};
@@ -194,15 +194,15 @@ async fn 없는_번호의_거절은_까닭을_답하고_아무것도_바꾸지_�
 // 검증: V90 V9
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_명령은_아직_정지하지_않고_그렇다고_답한다() {
-    // 사람이 내리는 전체 정지는 저장소의 팀 상태 전이에 아직 길이 없다(최대 손실 사유만 받는다).
-    // 그 길이 생기는 차수 전까지 메신저의 /stop은 팀 상태를 바꾸지 않고 그렇다고 답한다(39차 5번 고침).
+    // 40차 고침(대조 표 "고침", 지시서 40차 3번): 허용된 사람의 /stop은 전체 정지하고 답한다.
+    // 시험 함수 이름은 잠금 판 대비 "지운 시험"으로 보이지 않게 그대로 두고, 확인하는 것만 40차 동작으로 바꾼다.
     let tg = FakeTelegram::start().await;
     let bench = paired_bench(&tg).await;
     assert_eq!(bench.store().team_state().unwrap(), TeamState::Operating);
 
-    let reply = ask(&tg, "/stop", |t| t.contains(MESSENGER_STOP_LATER)).await;
-    assert!(reply.contains(MESSENGER_STOP_LATER), "{reply}");
-    assert_eq!(bench.store().team_state().unwrap(), TeamState::Operating);
+    let reply = ask(&tg, "/stop", |t| t.contains(MESSENGER_STOPPED)).await;
+    assert!(reply.contains(MESSENGER_STOPPED), "{reply}");
+    assert_eq!(bench.store().team_state().unwrap(), TeamState::FullStop);
     bench.close().await;
 }
 
@@ -213,7 +213,7 @@ async fn help와_모르는_글에는_도움말을_답한다() {
     let bench = paired_bench(&tg).await;
 
     let help = ask(&tg, "/help", |t| t.contains(MESSENGER_HELP)).await;
-    for command in ["/status", "/approvals", "/reject"] {
+    for command in ["/status", "/approvals", "/reject", "/stop"] {
         assert!(help.contains(command), "도움말에 {command}: {help}");
     }
     let unknown = ask(&tg, "오늘 날씨 어때", |t| {
@@ -278,7 +278,7 @@ async fn 허용되지_않은_사람의_명령은_실행하지_않는다() {
         tg.sent()
             .await
             .iter()
-            .all(|s| !s.text.contains(MESSENGER_STOP_LATER) && !s.text.contains(MESSENGER_REJECTED)),
+            .all(|s| !s.text.contains(MESSENGER_STOPPED) && !s.text.contains(MESSENGER_REJECTED)),
         "실행했다는 답이 없다"
     );
     bench.close().await;

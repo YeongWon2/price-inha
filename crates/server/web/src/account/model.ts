@@ -98,6 +98,17 @@ export interface HoldingRow {
   trend: Trend | null;
 }
 
+/**
+ * 전체 정지 확인 글(server 40차 2번, 결정 25): 누르면 `window.confirm`으로 한 번 묻는다.
+ */
+export const STOP_CONFIRM = "새 주문이 모두 막힙니다. 보유의 손절은 계속 돕니다. 다시 시작은 이 화면에서만 됩니다.";
+
+/** 전체 정지 단추 글. */
+export const STOP_LABEL = "전체 정지";
+
+/** 전체 정지(`POST /api/team/stop`)의 결과(server 40차 2번). */
+export type StopResult = { kind: "stopped"; state: string } | { kind: "refused"; reason: string };
+
 /** 다시 시작(`POST /api/team/restart`)의 결과. */
 export type RestartResult =
   | { kind: "restarted"; state: string; notice: string | null }
@@ -292,4 +303,33 @@ export function restartText(result: RestartResult): string {
     case "refused":
       return `다시 시작하지 못했습니다 — ${result.reason}`;
   }
+}
+
+/**
+ * "전체 정지" 단추를 보이는가(server 40차 2번): 전체 정지가 아닌 모든 상태(모르는 글자 포함)에서 보이고, 이미 전체
+ * 정지면 보이지 않는다(그때는 지금의 "다시 시작"만 보인다 — [`canRestart`]).
+ */
+export function canStop(state: string): boolean {
+  void state;
+  throw new Error("todo");
+}
+
+/**
+ * 전체 정지 응답을 결과로 읽는다(server 40차 1 · 2번):
+ * - 200 `{"state"}` → 정지됨(바뀐 상태 글자).
+ * - 409 `{"error": "already_stopped"}` → 거절, 이유 "이미 전체 정지입니다".
+ * - 그 밖(`message`가 있으면 그 글, 없으면 "서버가 받지 않았습니다") → 거절.
+ */
+export function stopResult(status: number, body: unknown): StopResult {
+  void status;
+  void body;
+  throw new Error("todo");
+}
+
+/**
+ * 전체 정지 결과 글: 정지됨은 "전체 정지했습니다 — 지금 상태: <상태 글>", 거절은 "전체 정지하지 못했습니다 — <이유>".
+ */
+export function stopText(result: StopResult): string {
+  void result;
+  throw new Error("todo");
 }

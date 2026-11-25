@@ -22,8 +22,10 @@ pub const MESSENGER_REJECTED: &str = "거절했습니다";
 pub const MESSENGER_NO_SUCH_APPROVAL: &str = "그 번호의 기다리는 승인이 없습니다";
 /// 이미 끝난 승인일 때.
 pub const MESSENGER_APPROVAL_DONE: &str = "이미 끝난 승인입니다";
-/// 전체 정지했을 때.
-pub const MESSENGER_STOP_LATER: &str = "정지는 아직 메신저에서 할 수 없습니다";
+/// (40차 3번) `/stop`으로 전체 정지했을 때.
+pub const MESSENGER_STOPPED: &str = "전체 정지했습니다. 다시 시작은 웹에서만 합니다";
+/// (40차 3번) `/stop`을 받았는데 이미 전체 정지일 때.
+pub const MESSENGER_ALREADY_STOPPED: &str = "이미 전체 정지입니다. 다시 시작은 웹에서만 합니다";
 /// 승인을 뜻하는 글에 대한 답.
 pub const MESSENGER_APPROVE_ON_WEB: &str = "승인은 웹에서만 받습니다";
 /// 도움말.
@@ -43,8 +45,9 @@ pub(crate) async fn answer(hub: &Messenger, text: &str, bot: Option<&str>) -> St
         Command::Status => status(hub).await.unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Approvals => approvals(hub).unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Reject { id } => reject(hub, &id).await,
-        // 39차 고침: 사람이 내리는 정지의 길이 저장소에 생기기 전까지 팀 상태를 바꾸지 않는다.
-        Command::Stop => MESSENGER_STOP_LATER.to_string(),
+        // 40차 3번(N1 뼈대): 아직 정지하지 않는다. N2가 [`crate::TEAM_STOP_PATH`]와 같은 길로 잇고
+        // [`MESSENGER_STOPPED`] · [`MESSENGER_ALREADY_STOPPED`]로 답한다.
+        Command::Stop => MESSENGER_UNKNOWN.to_string(),
         Command::Help => MESSENGER_HELP.to_string(),
         Command::ApproveNotHere => MESSENGER_APPROVE_ON_WEB.to_string(),
         Command::Unknown(_) => MESSENGER_UNKNOWN.to_string(),

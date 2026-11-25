@@ -89,6 +89,10 @@ export const API = {
   account: "/api/account",
   team: "/api/team",
   teamRestart: "/api/team/restart",
+  // 전체 정지(server 40차 1 · 2번, 결정 25): `POST`(몸통 없음) — 원격 세션도 된다. 다시 시작은 [`API.teamRestart`].
+  teamStop: "/api/team/stop",
+  // 알림 전달처 · 조용한 시간(server 40차 4 · 6번, 결정 24): 읽기 `GET` · 통째 바꾸기 `POST`(그 컴퓨터만).
+  notifySettings: "/api/notify/settings",
 } as const;
 
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
@@ -137,6 +141,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.messengerTelegram,
     API.messengerApprove,
     API.messengerRevoke,
+    // server 40차 6번: 알림 전달처 · 조용한 시간.
+    API.notifySettings,
   ],
   keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
   office: [
@@ -158,8 +164,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     ...APPROVALS,
   ],
   phone: [API.pushKey, API.pushSubscribe, API.notices, API.dailySummary, ...APPROVALS],
-  // 계좌 · 운용 화면(server 30차 2번 · 3번): 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결.
-  account: [API.session, API.account, API.team, API.teamRestart, API.socket],
+  // 계좌 · 운용 화면(server 30차 2번 · 3번): 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결. 40차 2번: 전체 정지.
+  account: [API.session, API.account, API.team, API.teamRestart, API.teamStop, API.socket],
   // 템플릿 화면(server 27차 4번): 읽기 · 고르기 · 값 맞추기 · 멈추기, "실전 운용 시작"은 승인 카드 읽기 · 승인.
   templates: [
     API.session,

@@ -47,6 +47,8 @@ describe("화면이 부르는 경로", () => {
         "/api/messenger/telegram",
         "/api/messenger/pairing/approve",
         "/api/messenger/pairing/revoke",
+        // 40차 4 · 6번: 알림 전달처 · 조용한 시간 읽기 · 바꾸기.
+        "/api/notify/settings",
       ]),
     );
     expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));
@@ -73,9 +75,9 @@ describe("화면이 부르는 경로", () => {
     expect(sorted(SCREEN_PATHS.phone)).toEqual(
       sorted(["/api/push/key", "/api/push/subscribe", "/api/notices", "/api/daily-summary", ...APPROVALS]),
     );
-    // 30차 2번 · 3번: 계좌 화면은 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결 경로를 부른다.
+    // 30차 2번 · 3번: 계좌 화면은 계좌 읽기 · 팀 상태 · 다시 시작 · 실시간 연결 경로를 부른다. 40차 1 · 2번: 전체 정지.
     expect(sorted(SCREEN_PATHS.account)).toEqual(
-      sorted(["/api/session", "/api/account", "/api/team", "/api/team/restart", "/ws"]),
+      sorted(["/api/session", "/api/account", "/api/team", "/api/team/restart", "/api/team/stop", "/ws"]),
     );
     // 29차 2번: 히스토리 화면은 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록 경로를 부른다.
     expect(sorted(SCREEN_PATHS.history)).toEqual(

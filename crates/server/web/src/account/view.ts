@@ -73,6 +73,16 @@ export function renderTeam(team: TeamReply, onRestart: () => void): HTMLElement 
   return node;
 }
 
+/**
+ * (server 40차 2번) 전체 정지 자리(`data-role="stop"`): 위험 단추 모양의 `button[data-action="stop"]`(글
+ * `STOP_LABEL`). 단추를 누르면 `onStop`을 부른다. 팀 상태 카드([`renderTeam`])가 `canStop(state)`일 때만 단다 —
+ * 이미 전체 정지면 이 자리 없이 지금의 "다시 시작"만 보인다.
+ */
+export function renderStop(onStop: () => void): HTMLElement {
+  void onStop;
+  throw new Error("todo");
+}
+
 /** 이름 · 값 한 쌍(`data-role`은 값에 단다). */
 function stat(label: string, value: string, role: string): { box: HTMLElement; value: HTMLElement } {
   const box = el("div", "acc-stat");

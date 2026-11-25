@@ -87,6 +87,20 @@ pub const TEAM_PATH: &str = "/api/team";
 ///   하루 한도 멈춤은 다음 거래일 시작에만 풀리므로 이것도 409 [`RESTART_NOT_STOPPED`]다.
 pub const TEAM_RESTART_PATH: &str = "/api/team/restart";
 
+/// (40차 1번 · 결정 25 · F4 · R14-1) 사람이 내리는 전체 정지. `POST`, 몸통 없음 또는 `{}`. 세션과 같은 출처가 있어야
+/// 한다(세션이 없으면 401). **원격 세션으로도 된다** — 정지는 위험을 줄이는 쪽이라 이 컴퓨터로 막지 않는다
+/// (다시 시작 [`TEAM_RESTART_PATH`]의 규칙은 그대로다).
+///
+/// - 팀이 전체 정지가 아니면(운용 중 · 쉬는 중 · 하루 한도 멈춤 · 이상 감지 멈춤) 전체 정지로 바꾼다
+///   (사유 `TeamCause::OwnerStop`, `owner_approved` 참, 기록의 까닭 글 "내가 정지"). 응답은 다시 시작과 같은 모양:
+///   200 `{"state": "full_stop"}`(바뀐 팀 상태 글자, 쓰는 템플릿 안내가 있으면 `"notice"`도).
+/// - 이미 전체 정지면 409 `{"error": `[`STOP_ALREADY_STOPPED`]`}`이고 기록을 더하지 않는다.
+/// - 정지한 뒤는 최대 손실 전체 정지와 같다: 새 주문은 막히고 보유의 손절 · 파는 주문은 계속 돌며(F4), 실전중
+///   템플릿은 멈춤이 된다(저장소). 최대 손실 전체 정지 때 나가는 이벤트 · 알림이 그대로 나간다(까닭 글만 "내가 정지").
+/// - 다시 시작은 사람이 계좌 화면에서만 한다(결정 20). 담당(AI) 도구에는 이 길이 없다.
+/// - 메신저 `/stop`(허용된 사람)도 이 길과 같은 함수를 탄다(`crate::messenger` 문서).
+pub const TEAM_STOP_PATH: &str = "/api/team/stop";
+
 /// 승인 답하기(C7). `POST` `{"number": 승인 번호, "fingerprint": 화면 지문(64자), "answer": "approve" | 그 밖}`.
 /// 세션과 같은 출처가 있어야 한다. 응답은 언제나 200 `{"result": "approved" | "rejected", "reason": 글자 | null}`.
 ///
@@ -197,6 +211,8 @@ pub const TEMPLATE_NOT_LIVE: &str = "not_live";
 pub const RESTART_KEYS_REQUIRED: &str = "keys_required";
 /// 다시 시작 거부: 팀이 다시 시작할 멈춤 상태가 아니다.
 pub const RESTART_NOT_STOPPED: &str = "not_stopped";
+/// (40차 1번) 전체 정지 거부: 이미 전체 정지다([`TEAM_STOP_PATH`]).
+pub const STOP_ALREADY_STOPPED: &str = "already_stopped";
 /// 승인 답 결과의 이유: 승인한 뒤 실행할 내용이 바뀌었다(E7).
 pub const ANSWER_CONTENT_CHANGED: &str = "content_changed";
 /// 승인 답 결과의 이유: 화면 지문이 요청의 지문과 다르다(E7).

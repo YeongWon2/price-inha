@@ -52,12 +52,16 @@
 //!   - `/reject <짧은 번호>` → 지금 승인 길의 거절과 같은 일(사무실 승인 이벤트가 answered가 된다, 메신저가 했다고
 //!     남긴다). 답 [`MESSENGER_REJECTED`]. 그 번호의 기다리는 승인이 없으면 [`MESSENGER_NO_SUCH_APPROVAL`],
 //!     이미 끝났으면 [`MESSENGER_APPROVAL_DONE`].
-//!   - `/stop` → 팀 상태를 바꾸지 않는다(사람이 내리는 정지의 길이 저장소에 생기는 차수 전까지). 답 [`MESSENGER_STOP_LATER`].
-//!   - `/help` → [`MESSENGER_HELP`]. 승인을 뜻하는 글(`ApproveNotHere`) → [`MESSENGER_APPROVE_ON_WEB`](승인 상태는
+//!   - (40차 3번 · 결정 25) `/stop` → [`crate::TEAM_STOP_PATH`]와 같은 길로 전체 정지한다(사유 `OwnerStop`, 내 승인
+//!     표시). 답 [`MESSENGER_STOPPED`]. 이미 전체 정지면 팀 상태 · 기록을 그대로 두고 [`MESSENGER_ALREADY_STOPPED`].
+//!     메신저로 다시 시작은 여전히 안 된다(웹에서만, 결정 20 · 24).
+//!   - `/help` → [`MESSENGER_HELP`](40차 3번: `/stop`이 다시 든다 — `/status` · `/approvals` · `/reject` · `/stop` ·
+//!     `/help`). 승인을 뜻하는 글(`ApproveNotHere`) → [`MESSENGER_APPROVE_ON_WEB`](승인 상태는
 //!     그대로). 그 밖 → [`MESSENGER_UNKNOWN`].
 //!   - 메신저로는 승인 · 재개 · 규칙 변경 · 실전 승격을 하지 않는다. 계산 · 요약은 서버가 한다.
 //! - **나가는 알림**(`messenger/outbound.rs`): 폰 푸시로 가는 알림(`pi_notify::NoticeKind` 모두)을 허용된 사람의
-//!   대화에도 보낸다. 글은 그 알림의 제목 · 본문이고 `OutText::redacted`(가리개는 비밀 보관소)를 거친다 — 가리기에
+//!   대화에도 보낸다. (40차 4 · 5 · 7번) 종류별로 메신저를 끈 알림 · 조용한 시간에 미루는 급하지 않은 알림은 보내지
+//!   않는다 — 판단은 알림이 나가는 한곳(`Linked::deliver`)이 [`crate::NOTIFY_SETTINGS_PATH`]의 설정으로 한다. 글은 그 알림의 제목 · 본문이고 `OutText::redacted`(가리개는 비밀 보관소)를 거친다 — 가리기에
 //!   실패하면 보내지 않고 기록만. 승인 요청 알림에는 [`MESSENGER_REJECT_HINT`]` <짧은 번호>`[`MESSENGER_WEB_ONLY`]를
 //!   붙인다. 허용된 사람이 없으면 보내지 않는다. 보내기 실패는 팀의 일을 막지 않는다(물러서며
 //!   [`MessengerWiring::send_attempts`]번까지, 그래도 안 되면 버리고 기록).
@@ -78,9 +82,10 @@ use pi_secrets::ProviderKeys;
 
 pub use book::{MESSENGER_BOOK_FILE, MESSENGER_CURSOR_FILE};
 pub use commands::{
-    MESSENGER_APPROVAL_DONE, MESSENGER_APPROVE_ON_WEB, MESSENGER_APPROVE_ON_WEB_LINK,
-    MESSENGER_HELP, MESSENGER_NO_APPROVALS, MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED,
-    MESSENGER_SHORT_ID_LEN, MESSENGER_STATUS_PENDING, MESSENGER_STOP_LATER, MESSENGER_UNKNOWN,
+    MESSENGER_ALREADY_STOPPED, MESSENGER_APPROVAL_DONE, MESSENGER_APPROVE_ON_WEB,
+    MESSENGER_APPROVE_ON_WEB_LINK, MESSENGER_HELP, MESSENGER_NO_APPROVALS,
+    MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED, MESSENGER_SHORT_ID_LEN,
+    MESSENGER_STATUS_PENDING, MESSENGER_STOPPED, MESSENGER_UNKNOWN,
 };
 pub(crate) use http::routes;
 pub use http::{

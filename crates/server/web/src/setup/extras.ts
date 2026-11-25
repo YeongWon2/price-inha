@@ -28,6 +28,9 @@
 //
 // (39차 7번) 메신저 묶음 `messenger`: 자리 하나를 더 두고 `setup/messenger-view.ts`의 `mountMessenger`로 그린다
 // (`GET API.messenger`, 계약은 그 파일).
+//
+// (40차 6번) 알림 묶음 `notify`: 메신저 묶음 다음에 자리 하나를 더 두고 `setup/notify-view.ts`의 `mountNotify`로
+// 그린다(`GET API.notifySettings`, 계약은 그 파일). 40차 N1 뼈대에는 아직 달지 않았다(N2가 단다).
 import { API } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";

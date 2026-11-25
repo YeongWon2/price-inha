@@ -8,6 +8,11 @@
 // - 전체 정지일 때만 `button[data-action="restart"]`가 있다. 누르면 `window.confirm(RESTART_CONFIRM)`을 묻고, 예일 때만
 //   `POST /api/team/restart`(몸통 없음)를 보낸다. 결과(`restartText`)는 `data-role="restart-result"`(`role="status"`)에
 //   보이고, 그 뒤 팀 상태와 계좌를 다시 읽는다. 아니오면 아무것도 보내지 않는다.
+// - (40차 2번, 결정 25) 전체 정지가 아니면 팀 상태 카드에 `button[data-action="stop"]`(view.ts `renderStop`)이 있다.
+//   누르면 `window.confirm(STOP_CONFIRM)`을 묻고, 예일 때만 `POST /api/team/stop`(몸통 없음)을 보낸다. 성공(`stopText`)은
+//   `data-role="stop-result"`(`role="status"`)에, 실패는 `data-role="stop-error"`(`role="alert"`, `stopText`의 거절 글)에
+//   보이고, 어느 쪽이든 그 뒤 팀 상태와 계좌를 다시 읽는다(전체 정지면 단추 대신 "다시 시작"이 보인다). 아니오면
+//   아무것도 보내지 않는다. 결과 · 오류 줄은 다시 그려도 남는다.
 // - 읽기(팀 상태 · 계좌 가운데 하나라도)에 실패하면 `role="alert"` 오류 줄(LOAD_FAILED)과 `button[data-action="retry"]`,
 //   다시 시도하면 둘을 다시 읽는다.
 // - 실시간: 같은 출처의 `/ws`(`ws:` · `wss:`)를 열고 `REFRESH_KINDS`의 이벤트를 받으면 둘을 다시 읽는다. 이와 별개로
