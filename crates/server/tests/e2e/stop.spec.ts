@@ -27,10 +27,14 @@ test("계좌 화면에서 전체 정지를 누르고 확인하면 전체 정지�
 
   await expect(page.locator('[data-role="team-state"]')).toContainText("전체 정지");
   await expect(page.locator('[data-role="stop-result"]')).toContainText("전체 정지했습니다");
+  // server 41차 고침(대조 표 "고침", 지시서 41차 7번): 내가 정지한 글 하나만 보이고 최대 손실 글은 보이지 않는다.
+  await expect(card).toContainText("내가 전체 정지를 눌렀습니다");
+  await expect(card).not.toContainText("최대 손실 한도에 닿아");
   await expect(page.locator('button[data-action="restart"]')).toBeVisible();
   await expect(page.locator('button[data-action="stop"]')).toHaveCount(0);
 
   await page.reload();
   await expect(page.locator('[data-role="team-state"]')).toContainText("전체 정지");
+  await expect(page.locator('[data-role="team"]')).toContainText("내가 전체 정지를 눌렀습니다");
   await expect(page.locator('button[data-action="restart"]')).toBeVisible();
 });

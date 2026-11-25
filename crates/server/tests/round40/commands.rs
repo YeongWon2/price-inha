@@ -5,9 +5,9 @@ use pi_approval::{ApprovalNumber, Fingerprint};
 use pi_store::TeamState;
 use price_inha::{
     APPROVAL_ANSWER_PATH, KIND_OFFICE_APPROVAL, MESSENGER_APPROVE_ON_WEB,
-    MESSENGER_APPROVE_ON_WEB_LINK, MESSENGER_HELP, MESSENGER_NO_SUCH_APPROVAL, MESSENGER_REJECTED,
-    MESSENGER_STATUS_PENDING, MESSENGER_STOPPED, MESSENGER_UNKNOWN, OFFICE_PATH,
-    OFFICE_PENDING_APPROVALS,
+    MESSENGER_APPROVE_ON_WEB_LINK, MESSENGER_ASK_HINT, MESSENGER_HELP, MESSENGER_NO_SUCH_APPROVAL,
+    MESSENGER_REJECTED, MESSENGER_STATUS_PENDING, MESSENGER_STOPPED, MESSENGER_UNKNOWN,
+    OFFICE_PATH, OFFICE_PENDING_APPROVALS,
 };
 use serde_json::{Value, json};
 
@@ -212,15 +212,19 @@ async fn help와_모르는_글에는_도움말을_답한다() {
     let tg = FakeTelegram::start().await;
     let bench = paired_bench(&tg).await;
 
+    // 41차 고침(대조 표 "고침", 지시서 41차 3 · 4번): 도움말에 `/notice`와 "@담당" 안내가 더해지고, 지목 없는 글의 답에
+    // "@담당" 안내가 더해진다. 지목 없는 글에 도움말을 답하는 것은 그대로다.
     let help = ask(&tg, "/help", |t| t.contains(MESSENGER_HELP)).await;
-    for command in ["/status", "/approvals", "/reject", "/stop"] {
+    for command in ["/status", "/approvals", "/reject", "/stop", "/notice"] {
         assert!(help.contains(command), "도움말에 {command}: {help}");
     }
+    assert!(help.contains(MESSENGER_ASK_HINT), "{help}");
     let unknown = ask(&tg, "오늘 날씨 어때", |t| {
         t.contains(MESSENGER_UNKNOWN)
     })
     .await;
     assert!(unknown.contains(MESSENGER_UNKNOWN), "{unknown}");
+    assert!(unknown.contains(MESSENGER_ASK_HINT), "{unknown}");
     bench.close().await;
 }
 

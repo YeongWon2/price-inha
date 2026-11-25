@@ -47,6 +47,22 @@
 //! - 미룬 푸시를 조용한 시간이 끝난 뒤 내보내는 것은 notify가 지금 하는 만큼(`release_held` — 폰 푸시만)이다.
 //!   메신저로 미룬 글을 나중에 내보내는 길은 새로 만들지 않는다.
 //! - 설정을 읽지 못하면 기본(모두 보냄)으로 — 알림이 조용히 사라지지 않게.
+//!
+//! ## (41차 2번, 결정 26) 팀 논의 종류 [`NOTIFY_TEAM_TALK_KIND`]
+//!
+//! - 읽기의 `kinds` 맨 끝(여섯 `NoticeKind` 줄 다음)에 한 줄 더 있다:
+//!   `{"kind": "team_talk", "label": "팀 논의", "push": null, "messenger": 참|거짓, "locked": false}`. `push`가 `null`인
+//!   것은 폰 칸이 없다는 뜻이다(논의 글은 폰 푸시로 가지 않는다). 기본 `messenger`는 참(켜짐). 잠긴 종류가 아니다.
+//! - 바꾸기 몸통에서 이 줄은 **있어도 되고 없어도 된다**: 있으면 그 `messenger`(참/거짓이 아니면 400 `invalid_input`)를
+//!   저장하고 `push`는 무엇이 와도 보지 않는다. 없으면 지금 값 그대로다. 여섯 `NoticeKind` 줄의 규칙은 그대로다.
+//! - [`NOTIFY_KIND_LABELS`] · [`NOTIFY_LOCKED_KINDS`]는 `NoticeKind` 여섯 그대로다(이 종류는 따로 둔다).
+//! - 조용한 시간에 든 동안의 논의 글은 메신저로 보내지 않고 버린다(`crate::messenger` 문서).
+
+/// (41차 2번) 팀 논의 글(메신저로 흐르는 `office.talk`)의 알림 설정 종류 글자. 폰 칸은 없다.
+pub const NOTIFY_TEAM_TALK_KIND: &str = "team_talk";
+
+/// (41차 2번) [`NOTIFY_TEAM_TALK_KIND`]의 화면 글.
+pub const NOTIFY_TEAM_TALK_LABEL: &str = "팀 논의";
 
 /// 알림 전달처 설정을 읽고(`GET`) 통째로 바꾸는(`POST`, 이 컴퓨터에서만) 경로.
 pub const NOTIFY_SETTINGS_PATH: &str = "/api/notify/settings";

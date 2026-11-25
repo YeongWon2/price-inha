@@ -100,7 +100,21 @@ pub const TEAM_RESTART_PATH: &str = "/api/team/restart";
 ///   템플릿은 멈춤이 된다(저장소). 최대 손실 전체 정지 때 나가는 이벤트 · 알림이 그대로 나간다(까닭 글만 "내가 정지").
 /// - 다시 시작은 사람이 계좌 화면에서만 한다(결정 20). 담당(AI) 도구에는 이 길이 없다.
 /// - 메신저 `/stop`(허용된 사람)도 이 길과 같은 함수를 탄다(`crate::messenger` 문서).
+/// - (41차 6번 · 40차 검토) **전체 정지 알림**: 팀이 전체 정지가 되면(최대 손실 `TeamCause::MaxLoss`든 내가 정지
+///   `TeamCause::OwnerStop`든 — 화면 · 메신저 `/stop` 모두) 멈춤 알림(`pi_notify::NoticeKind::Stall` — 잠긴 종류, 급함)을
+///   낸다. 제목 [`STOP_NOTICE_TITLE`], 본문은 까닭([`STOP_NOTICE_MAX_LOSS`] 또는 [`STOP_NOTICE_OWNER`])과
+///   [`STOP_NOTICE_RESTART`]를 `" · "`로 이은 것이다. 전체 정지로 바뀐 한 번에 한 번만 낸다(이미 전체 정지면 내지
+///   않는다). 전달처는 알림 설정대로(폰 · 메신저), 급한 알림이라 조용한 시간에도 간다.
 pub const TEAM_STOP_PATH: &str = "/api/team/stop";
+
+/// (41차 6번) 전체 정지 알림의 제목.
+pub const STOP_NOTICE_TITLE: &str = "전체 정지";
+/// (41차 6번) 전체 정지 알림 본문의 까닭: 최대 손실.
+pub const STOP_NOTICE_MAX_LOSS: &str = "최대 손실 한도";
+/// (41차 6번) 전체 정지 알림 본문의 까닭: 내가 정지(화면 · 메신저).
+pub const STOP_NOTICE_OWNER: &str = "내가 정지";
+/// (41차 6번) 전체 정지 알림 본문의 다시 시작 안내.
+pub const STOP_NOTICE_RESTART: &str = "다시 시작은 계좌 화면에서";
 
 /// 승인 답하기(C7). `POST` `{"number": 승인 번호, "fingerprint": 화면 지문(64자), "answer": "approve" | 그 밖}`.
 /// 세션과 같은 출처가 있어야 한다. 응답은 언제나 200 `{"result": "approved" | "rejected", "reason": 글자 | null}`.

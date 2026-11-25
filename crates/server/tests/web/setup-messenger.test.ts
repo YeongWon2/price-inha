@@ -11,7 +11,6 @@ import {
   PAIRED_TEXT,
   PAIRING_HINT,
   REMOTE_NOTE,
-  SLACK_SOON,
   STATE_LABELS,
   WRONG_CODE,
 } from "../../web/src/setup/messenger-model";
@@ -151,7 +150,9 @@ describe("메신저 묶음 · 상태별 그림", () => {
     expect(has(box, '[data-role="messenger-pairing"]')).toBe(false);
     expect(has(box, '[data-role="messenger-paired"]')).toBe(false);
     expect(has(box, '[data-role="messenger-bot"]')).toBe(false);
-    expect(text(box, '[data-role="messenger-slack"]')).toContain(SLACK_SOON);
+    // server 41차 고침(대조 표 "고침", 지시서 41차 8번 · 결정 26): "슬랙은 준비 중" 줄이 없어진다.
+    expect(has(box, '[data-role="messenger-slack"]'), "슬랙 줄이 없다").toBe(false);
+    expect(box.textContent ?? "").not.toContain("슬랙");
   });
 
   it("받는 중이고 연결된 사람이 없으면 봇 이름 · 지우기 · 페어링 안내와 코드 칸이 있다", async () => {

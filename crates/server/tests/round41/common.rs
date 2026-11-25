@@ -672,6 +672,8 @@ pub fn messenger_wiring(tg: &FakeTelegram) -> MessengerWiring {
         backoff_initial: BACKOFF_INITIAL,
         backoff_max: BACKOFF_MAX,
         send_attempts: 3,
+        // 41차: 묶음 창 칸이 더해졌다(이 발판은 팀을 잇지 않아 논의 글이 없다) — 기본값.
+        ..MessengerWiring::default()
     }
 }
 

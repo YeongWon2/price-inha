@@ -2,11 +2,14 @@
 // 서버 계약: `crates/server/src/notify_settings.rs` 모듈 문서(`GET` · `POST /api/notify/settings`). 계산 · 검사는
 // 서버가 하고 화면은 그린다(잠긴 종류 · 시각 글자 검사도 서버가 한다 — 화면은 서버의 400 · 403을 오류 줄로 보인다).
 
-/** 종류 한 줄(`GET`의 `kinds[]`). `kind`는 서버의 종류 글자(`approval_request` 등), `label`은 화면 글. */
+/**
+ * 종류 한 줄(`GET`의 `kinds[]`). `kind`는 서버의 종류 글자(`approval_request` 등), `label`은 화면 글.
+ * (server 41차 2번) `push`가 `null`이면 폰 칸이 없는 종류다(지금은 [`TEAM_TALK_KIND`] "팀 논의" 하나 — 메신저 칸만).
+ */
 export interface NotifyKindRow {
   kind: string;
   label: string;
-  push: boolean;
+  push: boolean | null;
   messenger: boolean;
   /** 끌 수 없는 종류(두 전달처를 모두 끌 수 없다). */
   locked: boolean;
@@ -28,6 +31,15 @@ export interface NotifySettings {
 
 /** 묶음 제목. */
 export const NOTIFY_TITLE = "알림";
+/**
+ * (server 41차 2번 · 결정 26) 팀 논의 종류 글자(서버 `NOTIFY_TEAM_TALK_KIND`). `GET`의 `kinds` 맨 끝에 `push: null`로 온다.
+ * 표에는 알림 종류 줄(`tr[data-kind]`)과 따로 `tr[data-role="notify-talk"]` 한 줄로 그린다(폰 칸 자리에
+ * [`NO_PUSH_TEXT`], 메신저 칸 `input[type=checkbox][name="messenger"]`만). 저장 몸통에는 받은 차례 그대로
+ * `{"kind": "team_talk", "push": null, "messenger"}`로 싣는다.
+ */
+export const TEAM_TALK_KIND = "team_talk";
+/** 폰 칸이 없는 줄의 폰 칸 자리 글. */
+export const NO_PUSH_TEXT = "폰 없음";
 /** 잠긴 줄의 표시 글. */
 export const LOCKED_TEXT = "끌 수 없음";
 /** 잠긴 종류 안내(표 아래 한 줄). */

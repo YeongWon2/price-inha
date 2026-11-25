@@ -6,6 +6,9 @@
 // - `notify-kinds`: 표. 종류마다 `tr[data-kind="<종류 글자>"]` 한 줄(서버가 준 차례) — 종류 글(`label`) · 폰 칸
 //   `input[type=checkbox][name="push"]` · 메신저 칸 `input[type=checkbox][name="messenger"]`. 잠긴 줄은
 //   `data-locked="true"`이고 [`LOCKED_TEXT`]가 보인다(칸은 그대로 켜고 끌 수 있다 — 둘 다 끄면 서버가 400).
+//   (server 41차 2번) 폰 칸이 없는 종류(`push` `null` — "팀 논의" [`TEAM_TALK_KIND`])는 `tr[data-kind]`가 아니라
+//   같은 표의 `tr[data-role="notify-talk"]` 한 줄이다: 종류 글 · 폰 칸 자리에 [`NO_PUSH_TEXT`](입력 칸 없음) · 메신저 칸
+//   `input[type=checkbox][name="messenger"]`. 저장 몸통에는 받은 차례 그대로 `push: null`로 싣는다.
 // - `notify-quiet`: 조용한 시간 — 켜기 `input#notify-quiet-on`(checkbox) · 시작 `input#notify-quiet-start` · 끝
 //   `input#notify-quiet-end`(값은 `HH:MM` 글자) · [`QUIET_NOTE`].
 // - 이 컴퓨터(`editable`)면 저장 `button[data-action="notify-save"]` → `POST API.notifySettings`(`saveBody`의 모양,
@@ -69,7 +72,7 @@ function kindRow(tbody: HTMLTableSectionElement, row: NotifyKindRow, editable: b
   const name = tr.insertCell();
   name.append(el("span", "", row.label));
   if (row.locked) name.append(" ", badge(LOCKED_TEXT, "warning"));
-  tr.insertCell().append(toggle("push", row.push, `${row.label} 폰 알림`, editable));
+  tr.insertCell().append(toggle("push", row.push ?? false, `${row.label} 폰 알림`, editable));
   tr.insertCell().append(toggle("messenger", row.messenger, `${row.label} 메신저 알림`, editable));
 }
 

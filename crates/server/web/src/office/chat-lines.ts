@@ -52,3 +52,24 @@ export function chatLine(entry: ChatEntry, names: Readonly<Record<string, string
 export function pendingLabel(line: ChatLine): string {
   return `${line.name ?? ""}: ${PENDING_TEXT}`;
 }
+
+/** (server 41차 3번) 메신저에서 온 팀 방 글에 붙는 표시(이름 옆 작은 덧말). */
+export const VIA_MESSENGER_TEXT = "메신저에서";
+
+/** 메신저에서 온 팀 방 글 한 줄: 채팅 패널에 그릴 것과 이름 옆 덧말. */
+export interface ViaMessenger {
+  /** 내 글 줄(`kind: "me"`, `key`는 `sourceMessageId`, `text`는 글). */
+  entry: ChatEntry;
+  /** [`VIA_MESSENGER_TEXT`]. */
+  note: string;
+}
+
+/**
+ * (server 41차 3번) 실시간 연결로 받은 `office.message` 내용 하나를 읽는다. `via`가 `"messenger"`이고 `room` ·
+ * `text` · `sourceMessageId`가 글자이면 그 글의 내 글 줄과 "메신저에서" 덧말을, 그 밖(화면에서 보낸 글 — `via` 없음 ·
+ * 모양이 틀림)이면 `null`을 준다. 사무실 화면은 이 줄을 채팅 패널에 더하고 덧말을 이름 옆에 단다(`chatLineElement`의 `note`).
+ */
+export function fromMessenger(payload: unknown): ViaMessenger | null {
+  void payload;
+  throw new Error("todo");
+}

@@ -28,10 +28,24 @@ pub const MESSENGER_STOPPED: &str = "전체 정지했습니다. 다시 시작은
 pub const MESSENGER_ALREADY_STOPPED: &str = "이미 전체 정지입니다. 다시 시작은 웹에서만 합니다";
 /// 승인을 뜻하는 글에 대한 답.
 pub const MESSENGER_APPROVE_ON_WEB: &str = "승인은 웹에서만 받습니다";
-/// 도움말.
-pub const MESSENGER_HELP: &str = "/status 팀 상태 · /approvals 기다리는 승인 · /reject <번호> 거절 · /stop 전체 정지 · /help 도움말";
+/// 도움말. (41차 3 · 4번) `/notice`와 `@담당` 안내([`MESSENGER_ASK_HINT`]와 같은 글)가 든다.
+pub const MESSENGER_HELP: &str = "/status 팀 상태 · /approvals 기다리는 승인 · /reject <번호> 거절 · /stop 전체 정지 · /notice <글> 전체 공지 · /help 도움말 · 담당에게 물으려면 @전략 처럼 이름을 붙여 보내세요";
 /// 모르는 글에 대한 도움말 한 줄.
 pub const MESSENGER_UNKNOWN: &str = "모르는 명령입니다 — /help";
+/// (41차 3번) 담당에게 묻는 법 안내. 지목이 없는 글의 답([`MESSENGER_UNKNOWN`] 다음 줄)과 도움말에 든다.
+pub const MESSENGER_ASK_HINT: &str = "담당에게 물으려면 @전략 처럼 이름을 붙여 보내세요";
+/// (41차 3번) 묻는 글이 사무실 보내기 간격(`crate::OFFICE_SEND_INTERVAL`) 안에 또 왔을 때.
+pub const MESSENGER_ASK_TOO_FAST: &str = "너무 자주 보냈습니다 — 잠시 뒤에 다시 보내 주세요";
+/// (41차 3번) 묻는 글이 사무실 글 길이 상한(`crate::OFFICE_TEXT_MAX`자)을 넘었을 때.
+pub const MESSENGER_ASK_TOO_LONG: &str = "글이 너무 깁니다 — 500자 안으로 보내 주세요";
+/// (41차 3번) 하루 AI 호출 상한에 걸려 담당이 답하지 못할 때(AI를 부르지 않는다).
+pub const MESSENGER_ASK_CAPPED: &str = "오늘 AI 호출 상한에 닿아 담당이 답할 수 없습니다";
+/// (41차 4번) `/notice` 뒤에 글이 없을 때(공지를 만들지 않는다).
+pub const MESSENGER_NOTICE_EMPTY: &str = "공지할 글을 /notice 뒤에 적어 주세요";
+/// (41차 4번) 공지 확인 답들을 묶은 메시지의 머리(뒤에 담당마다 `"<표시 이름>: <확인 답>"` 줄).
+pub const MESSENGER_NOTICE_ACKS: &str = "공지를 남겼습니다. 담당들의 확인:";
+/// (41차 3번) 메신저에서 온 사무실 팀 방 글 이벤트(`crate::KIND_OFFICE_MESSAGE`)의 `"via"` 값.
+pub const MESSENGER_VIA: &str = "messenger";
 
 /// 승인 웹 길(메신저 글에는 바깥 주소를 만들어 넣지 않는다 — 이 컴퓨터에서 여는 명령).
 const OPEN_HINT: &str = "price-inha open";

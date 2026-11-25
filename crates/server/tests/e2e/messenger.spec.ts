@@ -16,7 +16,9 @@ test("설정 화면에 메신저 묶음이 보이고 꺼짐 · 가린 토큰 칸
   await expect(box.locator('[data-role="messenger-state"]')).toHaveAttribute("data-state", "off");
   await expect(box.locator("input#messenger-token")).toHaveAttribute("type", "password");
   await expect(box.locator("input#messenger-token")).toHaveAttribute("autocomplete", "new-password");
-  await expect(box.locator('[data-role="messenger-slack"]')).toContainText("준비 중");
+  // server 41차 고침(대조 표 "고침", 지시서 41차 8번 · 결정 26): "슬랙은 준비 중" 줄이 없어진다.
+  await expect(box.locator('[data-role="messenger-slack"]')).toHaveCount(0);
+  await expect(box).not.toContainText("슬랙");
 });
 
 test("시연 모드에서 토큰을 등록하려 하면 시연 안내가 뜨고 꺼짐 그대로다", async ({ page }) => {

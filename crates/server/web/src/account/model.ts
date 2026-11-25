@@ -105,8 +105,11 @@ export interface HoldingRow {
  */
 export const STOP_CONFIRM = "새 주문이 모두 막힙니다. 보유의 손절은 계속 돕니다. 다시 시작은 이 화면에서만 됩니다.";
 
-/** (server 40차) 내가 내린 전체 정지일 때 정지 안내(`FULL_STOP_TEXT`) 뒤에 덧붙이는 글. */
-export const OWNER_STOP_TEXT = "이번 전체 정지는 내가 누른 정지입니다(최대 손실 때문이 아닙니다).";
+/**
+ * (server 40차 · 41차 7번) 내가 내린 전체 정지(`stop_cause` `"owner_stop"`)일 때의 정지 안내. 41차부터 팀 카드는 까닭에
+ * 맞는 글 **하나만** 보인다: 내가 정지면 이 글만, 그 밖(최대 손실 · 까닭 모름)이면 [`FULL_STOP_TEXT`]만.
+ */
+export const OWNER_STOP_TEXT = "내가 전체 정지를 눌렀습니다. 새 주문이 모두 막혀 있습니다. 사람이 다시 시작해야 다시 돕니다.";
 
 /** 전체 정지 단추 글. */
 export const STOP_LABEL = "전체 정지";

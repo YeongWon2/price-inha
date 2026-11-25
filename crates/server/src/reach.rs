@@ -283,7 +283,8 @@ pub const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 /// 채팅 답의 전체 시간 제한.
 pub const CHAT_TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
 /// 저장되는 이벤트 종류: 팀 방의 사용자 글. 내용 `{"room": "team", "agent": 담당 id, "text": 가린 글,
-/// "sourceMessageId": 글 번호}`.
+/// "sourceMessageId": 글 번호}`. (41차 3번) 메신저에서 온 글은 `"via": `[`crate::MESSENGER_VIA`]가 더 붙는다
+/// (사무실 채팅이 "메신저에서" 표시를 단다). 화면에서 온 글에는 `via`가 없다.
 pub const KIND_OFFICE_MESSAGE: &str = "office.message";
 /// 사무실 거부: 입력이 잘못됐다.
 pub const OFFICE_BAD_INPUT: &str = "invalid_input";

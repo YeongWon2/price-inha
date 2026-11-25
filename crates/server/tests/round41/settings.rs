@@ -5,7 +5,7 @@
 use pi_notify::NoticeKind;
 use price_inha::{
     NOTIFY_KIND_LABELS, NOTIFY_LOCKED_KINDS, NOTIFY_LOCKED_OFF, NOTIFY_SETTINGS_FILE,
-    NOTIFY_SETTINGS_PATH,
+    NOTIFY_SETTINGS_PATH, NOTIFY_TEAM_TALK_KIND,
 };
 use reqwest::Method;
 use serde_json::{Value, json};
@@ -86,10 +86,19 @@ async fn 기본은_모든_종류가_두_전달처로_가고_잠긴_종류가_표
         .iter()
         .filter_map(|row| row["kind"].as_str())
         .collect();
-    let all: Vec<&str> = NoticeKind::ALL.iter().map(|kind| kind.name()).collect();
-    assert_eq!(names, all, "지금의 NoticeKind 모두, 그 차례로");
+    // 41차 고침(대조 표 "고침", 지시서 41차 2번): "팀 논의" 종류가 맨 끝에 하나 더해진다(폰 칸 없음 — 그 줄의 모양은
+    // round42/settings.rs가 본다). 아래 여섯 종류의 단언은 그대로다.
+    let mut all: Vec<&str> = NoticeKind::ALL.iter().map(|kind| kind.name()).collect();
+    all.push(NOTIFY_TEAM_TALK_KIND);
+    assert_eq!(
+        names, all,
+        "지금의 NoticeKind 모두, 그 차례로(그다음 팀 논의)"
+    );
     for row in kinds {
         let kind = row["kind"].as_str().unwrap();
+        if kind == NOTIFY_TEAM_TALK_KIND {
+            continue;
+        }
         assert_eq!(row["push"], json!(true), "{row}");
         assert_eq!(row["messenger"], json!(true), "{row}");
         assert_eq!(
