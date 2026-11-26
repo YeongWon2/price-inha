@@ -107,7 +107,7 @@ fn current_uid(home: &Path) -> Option<u32> {
     uid.ok()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

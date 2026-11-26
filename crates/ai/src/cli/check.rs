@@ -394,7 +394,7 @@ fn auth_status(out: &Output, version: CliVersion) -> CliStatus {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

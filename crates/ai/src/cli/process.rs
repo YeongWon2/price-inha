@@ -437,7 +437,7 @@ fn reap(mut child: Child) {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
