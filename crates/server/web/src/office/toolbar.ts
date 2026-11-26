@@ -22,6 +22,9 @@ export const TOOLS: readonly { id: ToolId; label: string }[] = [
 /** 조작 안내 글. */
 export const CONTROLS_HINT = "방향키 이동 · / 대화 · 끌기 화면 이동";
 
+/** (다듬기 E 10번) 따라가기 중 자동 카메라 도움말. */
+export const AUTO_CAMERA_REST_HINT = "";
+
 /** 달아 놓은 도구 줄. */
 export interface Toolbar {
   /** 도구 줄 요소(`role="toolbar"`). */
