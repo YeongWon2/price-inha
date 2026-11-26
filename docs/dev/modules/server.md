@@ -1338,3 +1338,11 @@ office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_
 
 - 원본 동작 근거: 기능마다 위 표의 설계서 번호와 `docs/research/invest-agent-teams.md`(근거 카드 · 진행 단계 · 결정 메모) · `agent-office-refs.md` · `metaverse-office-refs.md`(순찰 · 연출).
 - 시험으로 확인할 것: 위 표의 새 시험과 기존 시험이 합친 구현에서 모두 통과한다(동작 잠금).
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 폴더 `crates/server/tests/round50/` · `round51/` · `round52/` · `round53/` · `round42e/`와 새 vitest · e2e 파일 | 유지 | 기능 A~E의 새 시험(작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과). 지운 기존 시험 없음 |
+| 기능 브랜치가 기존 시험에 더한 줄(`screen-paths.test.ts`의 경로 · `history-screen.test.ts`의 탭 목록 · `office-legend.test.ts`의 표시 둘) | 고침 | 기능 A · B · C · D가 경로 · 탭 · 표시를 더했다 — 목록에 그 항목만 더했다(다른 단언은 그대로) |
+| 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다(합친 구현에서 모두 통과해야 한다) |
