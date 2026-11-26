@@ -31,6 +31,7 @@ mod marks;
 mod money_safety;
 mod order;
 mod promote;
+mod promote_turn;
 mod retry;
 mod rules_config;
 mod rules_config_http;

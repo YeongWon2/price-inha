@@ -14,6 +14,7 @@ use crate::{DB_FILE, Settings};
 
 mod host;
 mod ollama;
+mod settle;
 
 use host::{check_access_key, check_address, check_backup, check_service};
 use ollama::check_ollama;

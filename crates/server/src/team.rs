@@ -31,6 +31,7 @@ mod news;
 mod notes;
 mod notices;
 mod poll;
+mod proposal_seen;
 mod quota;
 mod review;
 mod rules;

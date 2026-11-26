@@ -7,6 +7,9 @@ use crate::error::Error;
 use crate::record::{self, Record};
 use crate::subject::{OrderSubject, Side, Subject};
 
+/// 막힌 까닭 글([`DueHandling::Blocked`])을 처리 기록에 남기는 상한(글자 수). 넘으면 앞에서부터 이만큼만 남긴다.
+pub const BLOCKED_REASON_MAX_CHARS: usize = 200;
+
 /// 답 없음 · 만료로 닫힌 주문 요청을 호출하는 쪽이 어떻게 처리했는지(E22).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DueHandling {

@@ -18,7 +18,7 @@ pub use approvals::{
     Notice, Requested, WaitTimes,
 };
 pub use error::{Error, RejectReason};
-pub use handling::DueHandling;
+pub use handling::{BLOCKED_REASON_MAX_CHARS, DueHandling};
 pub use shown::{ClampNote, ShownExtras};
 pub use subject::{
     Fingerprint, OrderSubject, OrderType, Side, SignalKind, Subject, canonical_json, fingerprint,
