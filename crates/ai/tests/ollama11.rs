@@ -136,7 +136,11 @@ async fn 켠_길도_보내는_글을_가리고_리다이렉트를_따라가지_�
     assert_eq!(reply.vectors, vec![vec![0.5, 0.25]]);
     let sent = server.received_requests().await.unwrap();
     let body: Value = serde_json::from_slice(&sent[0].body).unwrap();
-    assert_eq!(body["input"], json!(["손절 기록 [가림]"]), "가린 글만 나간다");
+    assert_eq!(
+        body["input"],
+        json!(["손절 기록 [가림]"]),
+        "가린 글만 나간다"
+    );
 
     let moved = MockServer::start().await;
     Mock::given(method("POST"))

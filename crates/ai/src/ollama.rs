@@ -2,6 +2,8 @@
 //!
 //! 요청 · 응답 모양은 Ollama 공식 API 문서(`docs/api.md` "Generate Embeddings" ·
 //! "List Local Models", `docs/api/errors.mdx`)를 따른다. 주소는 루프백만 받는다(V23).
+//! (결정 34) 같은 집 다른 기기의 Ollama는 켜야만 쓴다: [`OllamaEmbeddingProvider::on_private_network`]만
+//! 사설망 주소([`ollama_reach`])를 받는다.
 
 mod reach;
 mod wire;
@@ -124,7 +126,7 @@ impl OllamaEmbeddingProvider {
         config: OllamaConfig,
         limits: AnthropicLimits,
     ) -> Result<Self, AiError> {
-        if ollama_reach(&config.base_url) != OllamaReach::Loopback {
+        if ollama_reach(&config.base_url) == OllamaReach::Outside {
             return Err(AiError::InsecureBaseUrl);
         }
         let loopback = [

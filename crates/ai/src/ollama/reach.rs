@@ -24,9 +24,6 @@ pub enum OllamaReach {
 
 /// `base_url`이 닿는 곳. `http` · `https`가 아니거나 읽을 수 없으면 [`OllamaReach::Outside`].
 pub fn ollama_reach(base_url: &str) -> OllamaReach {
-    if !base_url.is_empty() {
-        return OllamaReach::Outside; // red 뼈대
-    }
     let Ok(url) = reqwest::Url::parse(base_url) else {
         return OllamaReach::Outside;
     };
@@ -82,7 +79,9 @@ pub(crate) fn is_home_addr(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => {
             ip.is_loopback()
                 || is_private_v6(ip)
-                || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback() || is_private_v4(v4))
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| v4.is_loopback() || is_private_v4(v4))
         }
     }
 }
@@ -144,7 +143,10 @@ mod tests {
         ] {
             assert_eq!(ollama_reach(outside), OllamaReach::Outside, "{outside}");
         }
-        assert_eq!(ollama_reach("http://127.0.0.1:11434"), OllamaReach::Loopback);
+        assert_eq!(
+            ollama_reach("http://127.0.0.1:11434"),
+            OllamaReach::Loopback
+        );
     }
 
     #[test]
