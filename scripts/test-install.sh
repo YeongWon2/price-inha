@@ -122,7 +122,7 @@ EXTRA_ENV="PRICE_INHA_ARCH=riscv64" inst_run "$t/h10" --from "$rel" --prefix "$t
 if [ "$code" -ne 0 ] && [ ! -e "$t/p10" ] && has "지원하지 않는 CPU: riscv64"; then ok "지원하지 않는 CPU 는 까닭을 말하고 끝난다"
 else bad "지원하지 않는 CPU (종료 $code)"; show; fi
 EXTRA_ENV="PRICE_INHA_OS=MINGW64_NT-10.0" inst_run "$t/h10" --from "$rel" --prefix "$t/p10" --no-setup
-if [ "$code" -ne 0 ] && has "윈도는 이번 범위 밖"; then ok "윈도는 범위 밖이라고 말하고 끝난다"
+if [ "$code" -ne 0 ] && has "install.ps1"; then ok "윈도에서는 install.ps1 을 쓰라고 말하고 끝난다"
 else bad "윈도 (종료 $code)"; show; fi
 
 # 11 http 주소는 거절한다(받기 전에)

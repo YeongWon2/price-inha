@@ -37,7 +37,7 @@ usage() {
   PRICE_INHA_PREFIX       --prefix 와 같다
   PRICE_INHA_HOME         보관 폴더(지울 때 알려 주는 위치. 기본 ~/.price-inha)
 
-지원: macOS(arm64 · x86_64), Linux(x86_64 · arm64). 윈도는 이번 범위 밖이다.
+지원: macOS(arm64 · x86_64), Linux(x86_64 · arm64). 윈도는 PowerShell 에서 install.ps1 을 쓴다.
 EOF
 }
 
@@ -130,7 +130,7 @@ case "$sys" in
   Darwin) os=macos ;;
   Linux) os=linux ;;
   MINGW* | MSYS* | CYGWIN* | Windows*)
-    die "윈도는 이번 범위 밖이다($sys). WSL 의 Linux 에서 돌리거나, README 의 '소스로 짓기'를 따른다" ;;
+    die "윈도($sys)에서는 이 스크립트 대신 PowerShell 한 줄 설치를 쓴다: irm https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.ps1 | iex" ;;
   *) die "지원하지 않는 운영체제: $sys — 지원: macOS(arm64 · x86_64), Linux(x86_64 · arm64). README 의 '소스로 짓기'를 따른다" ;;
 esac
 case "$mach" in

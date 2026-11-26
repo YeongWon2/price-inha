@@ -466,7 +466,7 @@ Sustainable Use License라서 방식만 본다. 서비스 등록이 없는 가�
 | `price-inha-v<버전>-x86_64-apple-darwin.tar.gz` | macOS Intel |
 | `price-inha-v<버전>-x86_64-unknown-linux-musl.tar.gz` | Linux x64 (musl 정적 링크 — glibc 버전에 매이지 않아 Hermes의 glibc/musl 판별이 필요 없다) |
 | `price-inha-v<버전>-aarch64-unknown-linux-musl.tar.gz` | Linux arm64 |
-| `price-inha-v<버전>-x86_64-pc-windows-msvc.zip` | Windows x64 |
+| `price-inha-v<버전>-x86_64-pc-windows-msvc.zip` | Windows x64 (만든 것: `price-inha-v<버전>-windows-x86_64.zip` — gnu 대상으로 맥에서 교차 빌드, 결정 27) |
 | `SHA256SUMS` | 위 파일 전부의 `<해시>  <파일 이름>` |
 | `install.sh`, `install.ps1` | 그 릴리스의 설치 스크립트(스크립트도 버전과 함께 고정된다) |
 
