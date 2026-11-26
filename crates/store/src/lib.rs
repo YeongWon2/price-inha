@@ -12,8 +12,10 @@
 //! - 거부된 호출은 아무것도 바꾸지 않는다.
 
 mod approval;
+mod archive;
 mod chunkmeta;
 mod codec;
+mod embed_q8;
 mod error;
 mod fact;
 mod history;
@@ -37,6 +39,7 @@ mod session;
 mod team;
 mod template;
 mod trade;
+mod usage;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -44,6 +47,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use rusqlite::{Connection, TransactionBehavior};
 
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, NewApprovalRequest};
+pub use archive::{
+    ArchiveBatch, ArchiveCategory, ArchiveExport, NewArchiveBatch,
+    fingerprint as archive_fingerprint,
+};
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use history::{ApprovalLine, HISTORY_PAGE_MAX, TemplateHistoryLine, TradeFlow, TradeListItem};
@@ -80,6 +87,7 @@ pub use session::{
 pub use template::{
     CriteriaPass, NewTemplate, Template, TemplateId, TemplateRevision, TemplateState,
 };
+pub use usage::{ReclaimReport, StorageUsage, UsageGroup, measure_file};
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
 /// (10차) 10차의 표(세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료)를 더하며 6으로 올린다.

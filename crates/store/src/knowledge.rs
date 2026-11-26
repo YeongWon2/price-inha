@@ -135,7 +135,10 @@ pub struct ChunkEmbedding {
     /// 차원 수.
     pub dims: u32,
     /// 벡터의 바이트. 받은 그대로 BLOB에 둔다(리틀 엔디언 부동소수 묶음은 knowledge 모듈이 만든다). 길이 = 차원 × 4.
+    /// (21차) `quantized`가 참이면 정수 양자화 바이트(크기 값 4바이트 + 차원마다 1바이트, 길이 = 차원 + 4).
     pub bytes: Vec<u8>,
+    /// (21차, 결정 31) 정수 양자화 바이트인가([`Store::set_chunk_embedding_q8`]로 둔 것).
+    pub quantized: bool,
 }
 
 impl Store {
@@ -472,5 +475,10 @@ fn score_of(relevance_micros: i64) -> i64 {
 fn decode(model: String, dims: i64, bytes: Vec<u8>) -> Result<ChunkEmbedding, StoreError> {
     let dims = u32::try_from(dims)
         .map_err(|_| StoreError::Incompatible(format!("임베딩 차원 값이 이상하다: {dims}")))?;
-    Ok(ChunkEmbedding { model, dims, bytes })
+    Ok(ChunkEmbedding {
+        model,
+        dims,
+        bytes,
+        quantized: false,
+    })
 }
