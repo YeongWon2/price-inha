@@ -103,6 +103,7 @@ impl Running {
             backoff_initial: Duration::from_secs(3),
             backoff_max: Duration::from_secs(7),
             send_attempts: 1,
+            ..MessengerWiring::default()
         };
         let app = tokio::time::timeout(STEP, App::launch_run(settings, assembly))
             .await

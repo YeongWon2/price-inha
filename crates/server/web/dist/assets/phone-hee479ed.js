@@ -1,4 +1,5 @@
-import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-drn5z1qq.js";
+import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-n8p14elz.js";
+import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
 // src/phone/main.ts
 mountMenu(document.getElementById("menu"), "phone");
 var OFFICE_PATH = SCREEN_ROOTS.office;
@@ -88,6 +89,7 @@ async function showApproval(id) {
 		card.dataset.approvalId = id;
 		card.dataset.fingerprint = approval.fingerprint || "";
 		$part(card, "summary").textContent = approval.summary || "";
+		renderApprovalExtras($part(card, "extras"), approval);
 		$part(card, "fingerprint").textContent = approval.fingerprint || "";
 		$part(card, "result").textContent = "";
 		delete card.dataset.deciding;

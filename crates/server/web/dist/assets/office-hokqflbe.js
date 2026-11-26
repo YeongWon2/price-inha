@@ -1,5 +1,7 @@
-import { a as approvalPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-drn5z1qq.js";
-import { n as soundEnabled } from "./sound-pref-ddms2yvj.js";
+import { a as approvalPath, c as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-n8p14elz.js";
+import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
+import { n as soundEnabled } from "./sound-pref-o69137ml.js";
+import { i as readMemoList, o as renderBasisCard, r as pendingCount, s as readBasisCard, t as cardMemos } from "./memo-model-hf3oys60.js";
 var PENDING$1 = "pending";
 var CODE_LENGTH = 6;
 function parse(payload) {
@@ -51,7 +53,9 @@ function newCard(root, number, fetcher, resync) {
 	row.append(verbButton(root, number, "approve", fetcher, resync), verbButton(root, number, "reject", fetcher, resync));
 	const result = textPart("p", "result", "muted");
 	result.setAttribute("role", "status");
-	card.append(title, textPart("p", "summary"), code, row, result);
+	const extras = textPart("div", "extras", "approval-extras");
+	extras.hidden = true;
+	card.append(title, textPart("p", "summary"), extras, code, row, result);
 	root.append(card);
 	return card;
 }
@@ -74,6 +78,7 @@ function applyApproval(root, payload, fetcher, resync) {
 	const code = part(card, "code");
 	if (summary) summary.textContent = approval.summary;
 	if (code) code.textContent = approval.short_code.slice(0, CODE_LENGTH);
+	renderApprovalExtras(part(card, "extras"), payload);
 }
 function say(card, text) {
 	const result = card ? part(card, "result") : null;
@@ -225,6 +230,10 @@ function chatLineElement(line, note, extra) {
 			const tag = document.createElement("small");
 			tag.className = "topic";
 			tag.textContent = line.tag === "day" ? "하루 판단" : line.tag;
+			if (line.tag !== "day") {
+				tag.dataset.symbol = line.tag;
+				tag.tabIndex = 0;
+			}
 			who.append(" ", tag);
 		}
 		if (note) {
@@ -285,6 +294,18 @@ var OVERHEAD_MARKS = [
 		glyph: "✓",
 		color: "#2f6b47",
 		label: "일을 마침(잠깐 보였다 사라져요)"
+	},
+	{
+		id: "profit",
+		glyph: "🎉",
+		color: "#c0392b",
+		label: "익절로 팔림 — 수익률이 잠깐 보여요"
+	},
+	{
+		id: "loss",
+		glyph: "🍵",
+		color: "#2f5d9e",
+		label: "손절로 팔림 — 손실률이 잠깐 보여요"
 	}
 ];
 var legendCount = 0;
@@ -1005,22 +1026,110 @@ var DEFAULT_LOOKS = {
 function lookInfo(id) {
 	return LOOKS.find((look) => look.id === id);
 }
+// src/office/me-pick.ts
+/** 답 몸통 → 이름 · 외형. 모양이 틀리면 `null`. */
+function parseMeLook(body) {
+	if (typeof body !== "object" || body === null) return null;
+	const { name, look } = body;
+	return typeof name === "string" && typeof look === "string" ? {
+		name,
+		look
+	} : null;
+}
+/** `fetcher`로 서버에 보내는 "나" 줄. `current`는 지금 값, `keep`은 바뀐 값을 화면에 알린다. */
+function createMePick(fetcher, current, keep) {
+	return {
+		current,
+		async save(change) {
+			const reply = await fetcher(API.officeMe, {
+				method: "POST",
+				credentials: "same-origin",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(change)
+			});
+			if (!reply.ok) throw new Error(`나 바꾸기 거절 ${reply.status}`);
+			const me = parseMeLook(await reply.json());
+			if (me === null) throw new Error("나 바꾸기 답의 모양이 틀립니다");
+			return me;
+		},
+		applied: keep
+	};
+}
 // src/office/look-picker.ts
+/** "나"를 고른 자리(담당 id와 겹치지 않는다). */
+var ME = "@me";
+/** 실패 안내. */
+var FAILED$1 = "바꾸지 못했습니다(연결을 확인하세요).";
 /** 외형 이름(모르면 id). */
 function lookName(id) {
 	const info = lookInfo(id);
 	return info ? info.name : id;
+}
+function tabButton(text, selected, onClick) {
+	const b = document.createElement("button");
+	b.type = "button";
+	b.setAttribute("role", "tab");
+	b.setAttribute("aria-selected", String(selected));
+	b.textContent = text;
+	b.addEventListener("click", onClick);
+	return b;
+}
+/** 분류마다 외형 단추 묶음. `pressed`가 지금 외형, 누르면 `onPick`. */
+function lookGroups(pressed, busy, onPick) {
+	return LOOK_CATEGORIES.map((category) => {
+		const group = document.createElement("section");
+		group.className = "looks-group";
+		const h = document.createElement("h3");
+		h.textContent = category.label;
+		const list = document.createElement("div");
+		list.className = "looks-list";
+		for (const look of LOOKS.filter((l) => l.category === category.id)) {
+			const b = document.createElement("button");
+			b.type = "button";
+			b.className = "look";
+			b.disabled = busy;
+			b.setAttribute("aria-pressed", String(pressed === look.id));
+			const name = document.createElement("strong");
+			name.textContent = look.name;
+			const sub = document.createElement("span");
+			sub.textContent = look.subtitle;
+			b.append(name, sub);
+			b.addEventListener("click", () => onPick(look.id));
+			list.append(b);
+		}
+		group.append(h, list);
+		return group;
+	});
+}
+/** "나"의 이름 칸 · 이름 바꾸기 단추. */
+function nameForm(now, busy, onSave) {
+	const form = document.createElement("div");
+	form.className = "looks-me";
+	const label = document.createElement("label");
+	label.htmlFor = "me-name";
+	label.textContent = "내 이름";
+	const input = document.createElement("input");
+	input.id = "me-name";
+	input.type = "text";
+	input.autocomplete = "off";
+	input.value = now?.name ?? "";
+	const save = document.createElement("button");
+	save.type = "button";
+	save.dataset.action = "me-name";
+	save.textContent = "이름 바꾸기";
+	save.disabled = busy;
+	save.addEventListener("click", () => onSave(input.value.trim()));
+	form.append(label, input, save);
+	return form;
 }
 /** 외형 고르기 칸을 만든다. 돌려준 함수로 연다(담당을 정해 열 수 있다). */
 function createLookPicker(o) {
 	let agent = o.agents[o.agents.length - 1];
 	let busy = false;
 	let message = "";
-	function render() {
-		const looks = o.current();
-		o.panel.replaceChildren();
-		const head = document.createElement("div");
-		head.className = "looks-head";
+	function head() {
+		const top = document.createElement("div");
+		top.className = "looks-head";
 		const title = document.createElement("strong");
 		title.textContent = "담당 외형";
 		const close = document.createElement("button");
@@ -1029,69 +1138,68 @@ function createLookPicker(o) {
 		close.addEventListener("click", () => {
 			o.panel.hidden = true;
 		});
-		head.append(title, close);
+		top.append(title, close);
+		return top;
+	}
+	function select(id) {
+		agent = id;
+		message = "";
+		render();
+	}
+	function render() {
+		const looks = o.current();
+		const me = o.me?.current() ?? null;
+		o.panel.replaceChildren();
 		const tabs = document.createElement("div");
 		tabs.className = "looks-agents";
 		tabs.setAttribute("role", "tablist");
+		if (o.me) tabs.append(tabButton(`나 · ${me?.name ?? ""}`, agent === ME, () => select(ME)));
 		for (const id of o.agents) {
-			const b = document.createElement("button");
-			b.type = "button";
-			b.setAttribute("role", "tab");
-			b.setAttribute("aria-selected", String(id === agent));
-			b.textContent = `${o.nameOf(id)} · ${lookName(looks[id] ?? DEFAULT_LOOKS[id] ?? "")}`;
-			b.addEventListener("click", () => {
-				agent = id;
-				message = "";
-				render();
-			});
-			tabs.append(b);
+			const label = `${o.nameOf(id)} · ${lookName(looks[id] ?? DEFAULT_LOOKS[id] ?? "")}`;
+			tabs.append(tabButton(label, id === agent, () => select(id)));
 		}
 		const note = document.createElement("p");
 		note.className = "looks-note";
 		note.setAttribute("role", "status");
 		note.textContent = message;
-		o.panel.append(head, tabs, note);
-		for (const category of LOOK_CATEGORIES) {
-			const group = document.createElement("section");
-			group.className = "looks-group";
-			const h = document.createElement("h3");
-			h.textContent = category.label;
-			const list = document.createElement("div");
-			list.className = "looks-list";
-			for (const look of LOOKS.filter((l) => l.category === category.id)) {
-				const b = document.createElement("button");
-				b.type = "button";
-				b.className = "look";
-				b.disabled = busy;
-				b.setAttribute("aria-pressed", String(looks[agent] === look.id));
-				const name = document.createElement("strong");
-				name.textContent = look.name;
-				const sub = document.createElement("span");
-				sub.textContent = look.subtitle;
-				b.append(name, sub);
-				b.addEventListener("click", () => {
-					pick(look.id);
-				});
-				list.append(b);
-			}
-			group.append(h, list);
-			o.panel.append(group);
-		}
+		o.panel.append(head(), tabs, note);
+		if (agent === ME) o.panel.append(nameForm(me, busy, (name) => {
+			if (name !== "") saveMe({ name });
+		}));
+		const pressed = agent === ME ? me?.look : looks[agent];
+		o.panel.append(...lookGroups(pressed, busy, (look) => {
+			agent === ME ? saveMe({ look }) : pick(look);
+		}));
 	}
-	async function pick(look) {
+	/** 바꾸기 하나를 잠근 채 돌린다: 됐으면 그 안내, 실패면 실패 안내. */
+	async function run(work) {
 		if (busy) return;
 		busy = true;
 		message = "바꾸는 중…";
 		render();
 		try {
-			const looks = await o.choose(agent, look);
-			o.applied(looks);
-			message = `${o.nameOf(agent)}: ${lookName(look)}(으)로 바꿨습니다.`;
+			message = await work();
 		} catch {
-			message = "바꾸지 못했습니다(연결을 확인하세요).";
+			message = FAILED$1;
 		}
 		busy = false;
 		render();
+	}
+	function pick(look) {
+		return run(async () => {
+			const looks = await o.choose(agent, look);
+			o.applied(looks);
+			return `${o.nameOf(agent)}: ${lookName(look)}(으)로 바꿨습니다.`;
+		});
+	}
+	function saveMe(change) {
+		const me = o.me;
+		if (!me) return Promise.resolve();
+		return run(async () => {
+			const next = await me.save(change);
+			me.applied(next);
+			return change.look ? `나: ${lookName(next.look)}(으)로 바꿨습니다.` : `이름을 ${next.name}(으)로 바꿨습니다.`;
+		});
 	}
 	return {
 		open(which) {
@@ -2405,6 +2513,42 @@ function createSummonScene(options) {
 		}
 	};
 }
+// src/office/summon-tab.ts
+/** 팀 방 담당 탭 뒤의 작은 부르기 아이콘 글. */
+var SUMMON_ICON = "📣";
+/** 아이콘 단추의 class(부르기 단추 class에 더한다). */
+var ICON_CLASS = "summon-icon";
+/** 팀 방 대화 키. */
+var ROOM_TEAM$1 = "team";
+/** "○○ 부르기". */
+function summonLabel(name) {
+	return `${name} 부르기`;
+}
+/**
+* `tabs`(탭 줄: `keys` 순서의 탭 단추들)에 부르기 단추를 단다. 앞서 단 부르기 단추는 먼저 뗀다.
+* `conversation`이 담당이면 끝에 그 담당 단추 하나, 팀 방이면 담당 탭마다 아이콘 단추.
+*/
+function placeSummons(tabs, keys, conversation, nameOf, onSummon) {
+	for (const old of tabs.querySelectorAll(`button.${SUMMON_BUTTON_CLASS}`)) old.remove();
+	if (conversation !== ROOM_TEAM$1) {
+		const button = summonButton(conversation, onSummon);
+		button.textContent = summonLabel(nameOf(conversation));
+		tabs.append(button);
+		return;
+	}
+	const tabList = [...tabs.querySelectorAll("[role=\"tab\"]")];
+	keys.forEach((key, index) => {
+		const tab = tabList[index];
+		if (key === ROOM_TEAM$1 || !tab) return;
+		const button = summonButton(key, onSummon);
+		const label = summonLabel(nameOf(key));
+		button.classList.add(ICON_CLASS);
+		button.textContent = SUMMON_ICON;
+		button.title = label;
+		button.setAttribute("aria-label", label);
+		tab.after(button);
+	});
+}
 // src/office/mention-editor.ts
 /** 칩의 class. */
 var CHIP_CLASS = "mention-chip";
@@ -3028,6 +3172,18 @@ var TOOLS = [
 ];
 /** 조작 안내 글. */
 var CONTROLS_HINT = "방향키 이동 · / 대화 · 끌기 화면 이동";
+/** (다듬기 E 10번) 따라가기 중 자동 카메라 도움말. */
+var AUTO_CAMERA_REST_HINT = "내 캐릭터를 따라가는 중에는 자동 카메라가 쉽니다";
+/**
+* (다듬기 E 10번) "따라가기"가 켜져 있으면 같은 문서의 "자동 카메라" 단추(`#auto-camera`)를 흐리게(`data-resting`) 하고
+* 도움말(title)을 단다. 꺼지면 걷는다. 동작 · `aria-pressed` · 글은 건드리지 않는다. 단추가 없으면 아무것도 하지 않는다.
+*/
+function restAutoCamera(doc, following) {
+	const button = doc.getElementById("auto-camera");
+	if (!button) return;
+	button.dataset.resting = following ? "true" : "false";
+	button.title = following ? AUTO_CAMERA_REST_HINT : "";
+}
 /**
 * `root` 안에 도구 줄을 단다: [`TOOLS`] 순서의 `<button type="button" data-tool="{id}">{label}</button>` 8개.
 * 단추를 누르면 `onTool(id)`. "따라가기" 단추는 `aria-pressed`로 켜짐을 보인다(처음 `following`).
@@ -3050,6 +3206,7 @@ function mountToolbar(root, onTool, following = true) {
 	}
 	const setFollowing = (on) => {
 		follow?.setAttribute("aria-pressed", on ? "true" : "false");
+		restAutoCamera(doc, on);
 	};
 	setFollowing(following);
 	root.appendChild(bar);
@@ -3280,6 +3437,1058 @@ function trimLines(lines, responses, keep = 200) {
 		if (status === "complete" || status === "failed") responses.delete(line.requestId);
 	}
 }
+// src/office/basis-panel.ts
+/** 종목의 최근 매매를 찾을 때 읽는 매매 목록 한 쪽의 크기. */
+var LOOKUP_MAX = 50;
+var TITLE = "근거 카드";
+var FAILED = "근거를 불러오지 못했어요. 다시 눌러 주세요.";
+function make(tag, className, text) {
+	const node = document.createElement(tag);
+	node.className = className;
+	if (text !== void 0) node.textContent = text;
+	return node;
+}
+async function readJson(fetcher, url) {
+	const reply = await fetcher(url, {
+		credentials: "same-origin",
+		cache: "no-store"
+	});
+	if (!reply.ok) throw new Error(`${url} ${reply.status}`);
+	return reply.json();
+}
+/** 매매 목록 응답에서 그 종목의 첫(가장 최근) 매매 번호. */
+function latestOf(list, symbol) {
+	const trades = typeof list === "object" && list !== null ? list.trades : null;
+	if (!Array.isArray(trades)) return null;
+	for (const item of trades) {
+		if (typeof item !== "object" || item === null) continue;
+		const row = item;
+		if (row.symbol === symbol && typeof row.id === "number") return row.id;
+	}
+	return null;
+}
+/** 자리(`host`) 끝에 근거 패널을 붙인다. */
+function mountBasisPanel(host, fetcher) {
+	const element = make("section", "basis-panel");
+	element.dataset.role = "basis-panel";
+	element.setAttribute("aria-label", TITLE);
+	element.hidden = true;
+	const head = make("div", "basis-panel-head");
+	const title = make("h2", "basis-panel-title", TITLE);
+	title.dataset.part = "title";
+	const close = make("button", "basis-panel-close", "닫기");
+	close.type = "button";
+	close.dataset.action = "close-basis";
+	head.append(title, close);
+	const body = make("div", "basis-panel-body");
+	body.dataset.role = "basis-body";
+	body.setAttribute("aria-live", "polite");
+	element.append(head, body);
+	host.append(element);
+	const show = (heading, ...nodes) => {
+		title.textContent = heading;
+		body.replaceChildren(...nodes);
+		element.hidden = false;
+	};
+	const failed = () => {
+		const line = make("p", "basis-panel-error", FAILED);
+		line.setAttribute("role", "alert");
+		show(TITLE, line);
+	};
+	const openTrade = async (id) => {
+		try {
+			const card = readBasisCard(await readJson(fetcher, tradeBasisPath(id)));
+			show(`${TITLE} · 매매 ${id}번`, renderBasisCard(card));
+		} catch {
+			failed();
+		}
+	};
+	const openSymbol = async (symbol) => {
+		let id;
+		try {
+			id = latestOf(await readJson(fetcher, `${API.trades}?max=${LOOKUP_MAX}`), symbol);
+		} catch {
+			failed();
+			return;
+		}
+		if (id === null) {
+			show(`${TITLE} · ${symbol}`, make("p", "basis-panel-note", `${symbol} 종목의 매매가 아직 없어요.`));
+			return;
+		}
+		await openTrade(id);
+	};
+	const panel = {
+		element,
+		openTrade,
+		openSymbol,
+		close: () => {
+			element.hidden = true;
+		}
+	};
+	close.addEventListener("click", () => panel.close());
+	return panel;
+}
+/** 이벤트가 난 곳의 종목 표시(`.topic[data-symbol]`)의 종목. */
+function symbolAt(event) {
+	return (event.target instanceof Element ? event.target.closest(".topic[data-symbol]") : null)?.dataset.symbol ?? null;
+}
+/** 채팅 줄(`log`)의 종목 표시(`.topic[data-symbol]`)를 누르거나 Enter를 치면 패널로 그 종목을 연다. */
+function bindTopicClicks(log, panel) {
+	log.addEventListener("click", (event) => {
+		const symbol = symbolAt(event);
+		if (symbol) panel.openSymbol(symbol);
+	});
+	log.addEventListener("keydown", (event) => {
+		if (event.key !== "Enter") return;
+		const symbol = symbolAt(event);
+		if (!symbol) return;
+		event.preventDefault();
+		panel.openSymbol(symbol);
+	});
+}
+var MODES = [
+	"normal",
+	"wrap_up",
+	"leader_only"
+];
+var LEVELS = [
+	"low",
+	"mid",
+	"high"
+];
+var MODE_TEXT = {
+	normal: "",
+	wrap_up: "정리 모드",
+	leader_only: "팀장 몫만"
+};
+/** 몫이 없을 때의 칸 글. */
+var NONE = "—";
+function isObj$1(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function count(value) {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+/** 수이거나 null(없음). 둘 다 아니면 undefined(틀림). */
+function maybe(value) {
+	if (value === null) return null;
+	return count(value) ?? void 0;
+}
+function levelOf(value) {
+	if (value === null) return null;
+	return LEVELS.find((one) => one === value);
+}
+function readMember$1(value) {
+	if (!isObj$1(value) || typeof value.agent !== "string") return null;
+	const used = count(value.used);
+	const share = maybe(value.share);
+	const ratio = maybe(value.ratio);
+	const level = levelOf(value.level);
+	if (used === null || share === void 0 || ratio === void 0 || level === void 0) return null;
+	return {
+		agent: value.agent,
+		used,
+		share,
+		ratio,
+		level
+	};
+}
+/** 받은 내용을 읽는다. 모양이 틀리면 null. */
+function readBudget(payload) {
+	if (!isObj$1(payload) || !Array.isArray(payload.members)) return null;
+	const limit = maybe(payload.limit);
+	const used = count(payload.used);
+	const reserve = count(payload.reserve);
+	const mode = MODES.find((one) => one === payload.mode);
+	const ratio = maybe(payload.ratio);
+	const level = levelOf(payload.level);
+	if (limit === void 0 || used === null || reserve === null || !mode || ratio === void 0 || level === void 0) return null;
+	const members = payload.members.map(readMember$1);
+	if (members.some((one) => one === null)) return null;
+	return {
+		limit,
+		used,
+		reserve,
+		mode,
+		ratio,
+		level,
+		members
+	};
+}
+function clamp(value) {
+	return Math.min(1, Math.max(0, value));
+}
+/** 위 줄 바의 그리기 값. */
+function budgetBar(budget) {
+	const base = {
+		mode: budget.mode,
+		modeText: MODE_TEXT[budget.mode],
+		level: budget.level
+	};
+	if (budget.limit === null || budget.limit <= 0) return {
+		...base,
+		unlimited: true,
+		text: `AI 상한 없음 · 오늘 ${budget.used}번`,
+		fill: null,
+		reserveFrom: null
+	};
+	return {
+		...base,
+		unlimited: false,
+		text: `AI ${budget.used}/${budget.limit}`,
+		fill: clamp(budget.ratio ?? budget.used / budget.limit),
+		reserveFrom: clamp((budget.limit - budget.reserve) / budget.limit)
+	};
+}
+/** 몫 글: 소수 둘째 자리까지(끝의 0은 뺀다). */
+function shareText(share) {
+	return String(Math.round(share * 100) / 100);
+}
+/** 담당별 사용 표(서버가 준 순서 그대로). */
+function budgetRows(budget, nameOf) {
+	return budget.members.map((member) => ({
+		agent: member.agent,
+		name: nameOf(member.agent),
+		used: `${member.used}번`,
+		share: member.share === null ? NONE : shareText(member.share),
+		percent: member.ratio === null ? NONE : `${Math.round(member.ratio * 100)}%`,
+		level: member.level,
+		fill: member.ratio === null ? null : clamp(member.ratio)
+	}));
+}
+// src/office/budget-view.ts
+function el$1(tag, className, text) {
+	const node = document.createElement(tag);
+	if (className) node.className = className;
+	if (text !== void 0) node.textContent = text;
+	return node;
+}
+function percent(value) {
+	return `${Math.round(value * 1e3) / 10}%`;
+}
+function tableHead() {
+	const head = el$1("thead");
+	const row = el$1("tr");
+	for (const title of [
+		"담당",
+		"쓴 수",
+		"몫",
+		"사용률"
+	]) row.appendChild(el$1("th", void 0, title));
+	head.appendChild(row);
+	return head;
+}
+function renderRows(body, budget, nameOf) {
+	body.replaceChildren(...budgetRows(budget, nameOf).map((row) => {
+		const line = el$1("tr");
+		line.dataset.agent = row.agent;
+		if (row.level) line.dataset.level = row.level;
+		const name = el$1("th", void 0, row.name);
+		name.scope = "row";
+		const meter = el$1("span", "budget-mini");
+		const fill = el$1("span", "budget-mini-fill");
+		fill.style.width = row.fill === null ? "0%" : percent(row.fill);
+		meter.appendChild(fill);
+		meter.hidden = row.fill === null;
+		const ratio = el$1("td", void 0, row.percent);
+		ratio.prepend(meter);
+		line.append(name, el$1("td", void 0, row.used), el$1("td", void 0, row.share), ratio);
+		return line;
+	}));
+}
+/** 위 줄에 잔량 바를 단다. */
+function mountBudget(bar, options) {
+	const wrap = el$1("div", "budget-wrap");
+	const button = el$1("button", "budget");
+	button.type = "button";
+	button.setAttribute("aria-expanded", "false");
+	button.title = "오늘 AI 호출 — 누르면 담당별 사용";
+	const text = el$1("span", "budget-text", "AI …");
+	const mode = el$1("span", "budget-mode");
+	const track = el$1("span", "budget-track");
+	const fill = el$1("span", "budget-fill");
+	const reserve = el$1("span", "budget-reserve");
+	track.append(fill, reserve);
+	button.append(text, track, mode);
+	const table = el$1("table", "budget-table");
+	table.hidden = true;
+	table.appendChild(el$1("caption", void 0, "담당별 오늘 AI 사용"));
+	table.appendChild(tableHead());
+	const body = el$1("tbody");
+	table.appendChild(body);
+	wrap.append(button, table);
+	bar.appendChild(wrap);
+	button.addEventListener("click", () => {
+		table.hidden = !table.hidden;
+		button.setAttribute("aria-expanded", String(!table.hidden));
+	});
+	const apply = (payload) => {
+		const budget = readBudget(payload);
+		if (!budget) return;
+		const shown = budgetBar(budget);
+		text.textContent = shown.text;
+		mode.textContent = shown.modeText;
+		mode.hidden = shown.modeText === "";
+		button.dataset.mode = shown.mode;
+		button.dataset.unlimited = String(shown.unlimited);
+		if (shown.level) button.dataset.level = shown.level;
+		else delete button.dataset.level;
+		track.hidden = shown.unlimited;
+		fill.style.width = shown.fill === null ? "0%" : percent(shown.fill);
+		reserve.style.left = shown.reserveFrom === null ? "100%" : percent(shown.reserveFrom);
+		renderRows(body, budget, options.nameOf);
+	};
+	const load = async () => {
+		try {
+			const reply = await options.fetcher(API.teamBudget, {
+				credentials: "same-origin",
+				cache: "no-store"
+			});
+			if (!reply.ok) return;
+			apply(await reply.json());
+		} catch {}
+	};
+	return {
+		load,
+		apply
+	};
+}
+/** 단계 표시: 대기 ○ · 진행 ● · 완료 ✓ · 오류 !. */
+var STAGE_MARK = {
+	waiting: "○",
+	running: "●",
+	done: "✓",
+	error: "!"
+};
+var STAGE_TEXT = {
+	waiting: "대기",
+	running: "진행",
+	done: "완료",
+	error: "오류"
+};
+var STAGES = Object.keys(STAGE_MARK);
+function isObj(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function whole(value) {
+	return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+function readMember(value) {
+	if (!isObj(value) || typeof value.agent !== "string") return null;
+	const state = STAGES.find((one) => one === value.state);
+	const retryMax = whole(value.retry_max) ?? 3;
+	const retry = value.retry === void 0 || value.retry === null ? null : whole(value.retry);
+	if (!state || value.retry !== void 0 && value.retry !== null && retry === null) return null;
+	return {
+		agent: value.agent,
+		state,
+		retry,
+		retryMax
+	};
+}
+/** 받은 내용을 읽는다. 모양이 틀리면 null. */
+function readProgress(payload) {
+	if (!isObj(payload) || !Array.isArray(payload.members)) return null;
+	const calls = whole(payload.calls);
+	const startedAt = whole(payload.started_at);
+	const at = whole(payload.at);
+	if (calls === null || startedAt === null || at === null) return null;
+	const members = payload.members.map(readMember);
+	if (members.some((one) => one === null)) return null;
+	const list = members;
+	return {
+		room: typeof payload.room === "string" ? payload.room : "",
+		topic: typeof payload.topic === "string" ? payload.topic : "",
+		members: list,
+		calls,
+		done: whole(payload.done) ?? list.filter((one) => one.state === "done").length,
+		startedAt,
+		at,
+		closed: payload.closed === true
+	};
+}
+/** 담당마다 표시 · 글. 다시 시도 중(진행 · 오류에 retry가 있으면)이면 "다시 시도 n/3". */
+function progressRows(progress, nameOf) {
+	return progress.members.map((member) => {
+		const retrying = member.retry !== null && member.state === "running";
+		return {
+			agent: member.agent,
+			name: nameOf(member.agent),
+			state: member.state,
+			mark: STAGE_MARK[member.state],
+			label: retrying ? `다시 시도 ${member.retry}/${member.retryMax}` : STAGE_TEXT[member.state]
+		};
+	});
+}
+/** 경과 글 m:ss(음수는 0:00). */
+function elapsedText(ms) {
+	const seconds = Math.max(0, Math.floor(ms / 1e3));
+	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+/** 아래 한 줄: "담당 n/6 · 호출 n · 경과 m:ss". `sinceReceivedMs`는 이 내용을 받은 뒤 흐른 시간. */
+function progressSummary(progress, sinceReceivedMs) {
+	const elapsed = progress.at - progress.startedAt + (progress.closed ? 0 : Math.max(0, sinceReceivedMs));
+	return `담당 ${progress.done}/${progress.members.length} · 호출 ${progress.calls} · 경과 ${elapsedText(elapsed)}`;
+}
+function el(tag, className, text) {
+	const node = document.createElement(tag);
+	if (className) node.className = className;
+	if (text !== void 0) node.textContent = text;
+	return node;
+}
+/** 옆 패널 맨 위에 진행 단계 칸을 단다. */
+function mountProgress(host, nameOf) {
+	const panel = el("section", "progress");
+	panel.setAttribute("aria-label", "논의 진행 단계");
+	panel.setAttribute("role", "status");
+	panel.hidden = true;
+	const title = el("div", "progress-topic");
+	const list = el("ul", "progress-list");
+	const summary = el("div", "progress-summary");
+	panel.append(title, list, summary);
+	host.prepend(panel);
+	let shown = null;
+	let receivedAt = 0;
+	const hide = () => {
+		shown = null;
+		panel.hidden = true;
+	};
+	const apply = (payload, now) => {
+		if (payload === null || payload === void 0) {
+			hide();
+			return;
+		}
+		const progress = readProgress(payload);
+		if (!progress) return;
+		shown = progress;
+		receivedAt = now;
+		title.textContent = progress.topic;
+		list.replaceChildren(...progressRows(progress, nameOf).map((row) => {
+			const item = el("li");
+			item.dataset.agent = row.agent;
+			item.dataset.state = row.state;
+			item.append(el("span", "progress-mark", row.mark), el("span", "progress-name", row.name), el("span", "progress-label", row.label));
+			return item;
+		}));
+		panel.dataset.closed = String(progress.closed);
+		summary.textContent = progressSummary(progress, 0);
+		panel.hidden = false;
+	};
+	const tick = (now) => {
+		if (!shown) return;
+		if (shown.closed && now - receivedAt >= 5e3) {
+			hide();
+			return;
+		}
+		summary.textContent = progressSummary(shown, now - receivedAt);
+	};
+	return {
+		apply,
+		tick
+	};
+}
+var EMPTY_TEXT = "아직 정산된 결정 메모가 없습니다. 팀이 사거나 판 결정은 5거래일 뒤 수익률과 교훈으로 정산됩니다.";
+var FAILED_TEXT = "어제 메모를 불러오지 못했습니다. 잠시 뒤 다시 읽습니다.";
+function node(tag, className, text) {
+	const made = document.createElement(tag);
+	made.className = className;
+	if (text !== void 0) made.textContent = text;
+	return made;
+}
+/** 정산된 메모 한 줄. */
+function memoItem(row) {
+	const item = node("li", "memo-item");
+	item.dataset.trade = String(row.trade);
+	item.dataset.verdict = row.verdict;
+	const head = node("div", "memo-head");
+	const result = node("span", "memo-result", row.result);
+	result.dataset.verdict = row.verdict;
+	const facts = [
+		row.symbol,
+		row.decision,
+		row.returnText,
+		row.holdText
+	].filter((part) => part !== "");
+	head.append(result, node("span", "memo-facts", facts.join(" · ")));
+	item.append(head, node("p", "memo-lesson", row.lesson));
+	return item;
+}
+/** 카드 몸통을 그린다. */
+function render(body, rows, pending) {
+	const parts = [];
+	if (rows.length === 0) {
+		const empty = node("p", "memo-empty", EMPTY_TEXT);
+		empty.dataset.role = "empty";
+		parts.push(empty);
+	} else {
+		const list = node("ul", "memo-list");
+		list.dataset.role = "memo-list";
+		list.append(...rows.map(memoItem));
+		parts.push(list);
+	}
+	if (pending > 0) {
+		const waiting = node("p", "memo-pending", `정산 대기 ${pending}건`);
+		waiting.dataset.role = "memo-pending";
+		parts.push(waiting);
+	}
+	body.replaceChildren(...parts);
+}
+/** 자리에 어제 메모 카드를 단다(읽기는 `refresh()`). */
+function mountMemoCard(root, fetcher) {
+	const card = node("div", "memo-card");
+	card.dataset.role = "memo-card";
+	const body = node("div", "memo-body");
+	card.append(node("h2", "memo-title", "어제 메모"), body);
+	root.replaceChildren(card);
+	const url = `${API.memos}?days=7`;
+	const refresh = async () => {
+		try {
+			const reply = await fetcher(url, { cache: "no-store" });
+			if (!reply.ok) throw new Error(`${url} ${reply.status}`);
+			const list = readMemoList(await reply.json());
+			render(body, cardMemos(list), pendingCount(list));
+		} catch {
+			const failed = node("p", "memo-failed", FAILED_TEXT);
+			failed.setAttribute("role", "alert");
+			body.replaceChildren(failed);
+		}
+	};
+	const onEvent = async (kind) => {
+		if (kind === "office.memo") await refresh();
+	};
+	return {
+		refresh,
+		onEvent
+	};
+}
+/** 연출이 보이는 시간(밀리초, N12: 익절 1.5초 · 손절 2.0초). */
+var EFFECT_SHOW_MS = {
+	take_profit: 1500,
+	stop_loss: 2e3
+};
+/** 연출 종류 → 머리 위 표시. */
+var MARK_OF = {
+	take_profit: "profit",
+	stop_loss: "loss"
+};
+/** `office.effect` 내용을 읽는다(모양이 틀리면 `null`). */
+function readEffect(payload) {
+	if (typeof payload !== "object" || payload === null) return null;
+	const p = payload;
+	if (p.kind !== "take_profit" && p.kind !== "stop_loss") return null;
+	if (typeof p.agent !== "string" || typeof p.trade !== "number" || typeof p.at !== "number") return null;
+	const pct = typeof p.return_pct === "string" ? Number(p.return_pct) : NaN;
+	return {
+		kind: p.kind,
+		agent: p.agent,
+		trade: p.trade,
+		symbol: typeof p.symbol === "string" ? p.symbol : "",
+		at: p.at,
+		returnPct: Number.isFinite(pct) ? pct : null
+	};
+}
+/** 수익률 글: 부호와 소수 한 자리(`+4.0%`, `-6.1%`). 없으면 빈 글. */
+function effectText(effect) {
+	if (effect.returnPct === null) return "";
+	const fixed = effect.returnPct.toFixed(1);
+	return effect.returnPct > 0 ? `+${fixed}%` : `${fixed}%`;
+}
+/** 연출 줄: 한 번에 하나씩 차례로 보인다. */
+var EffectQueue = class {
+	slots = [];
+	/** 이미 넣은 연출(매매 · 종류). */
+	seen = /* @__PURE__ */ new Set();
+	/** 연출 하나를 `now`에 받는다. 숨은 화면 · 옛 것 · 이미 받은 것이면 버리고 거짓. */
+	push(effect, now, hidden) {
+		const key = `${effect.trade}|${effect.kind}`;
+		if (hidden || now - effect.at > 1e4 || this.seen.has(key)) return false;
+		this.seen.add(key);
+		this.drop(now);
+		const last = this.slots[this.slots.length - 1];
+		const start = Math.max(now, last ? last.end : now);
+		this.slots.push({
+			effect,
+			start,
+			end: start + EFFECT_SHOW_MS[effect.kind]
+		});
+		return true;
+	}
+	drop(now) {
+		this.slots = this.slots.filter((s) => s.end > now);
+	}
+	/** `now`에 보이는 연출(없으면 `undefined`). */
+	current(now) {
+		this.drop(now);
+		const slot = this.slots.find((s) => s.start <= now && now < s.end);
+		if (!slot) return void 0;
+		const mark = markOf(MARK_OF[slot.effect.kind]);
+		return {
+			agent: slot.effect.agent,
+			mark: mark.id,
+			glyph: mark.glyph,
+			color: mark.color,
+			text: effectText(slot.effect),
+			label: mark.label
+		};
+	}
+	/** 마지막으로 넣은 연출이 보이기 시작하는 · 끝나는 시각(줄이 비었으면 `undefined`). */
+	last() {
+		const slot = this.slots[this.slots.length - 1];
+		return slot ? {
+			start: slot.start,
+			end: slot.end
+		} : void 0;
+	}
+	/** 줄을 비운다(탭이 숨었을 때). */
+	clear() {
+		this.slots = [];
+	}
+};
+// src/office/effect-scene.ts
+/** 연출 표시 요소 하나: 글자 · 수익률 글, 쉬운 뜻은 `aria-label`. 글은 textContent로만 넣는다. */
+function effectElement(shown, name) {
+	const span = document.createElement("span");
+	span.className = "mark-effect";
+	span.dataset.mark = shown.mark;
+	span.dataset.effect = shown.mark;
+	span.style.color = shown.color;
+	span.setAttribute("role", "img");
+	span.setAttribute("aria-label", `${name} · ${shown.label}${shown.text ? ` ${shown.text}` : ""}`);
+	const glyph = document.createElement("span");
+	glyph.className = "mark-effect-glyph";
+	glyph.textContent = shown.glyph;
+	glyph.setAttribute("aria-hidden", "true");
+	span.append(glyph);
+	if (shown.text) {
+		const text = document.createElement("span");
+		text.className = "mark-effect-text";
+		text.textContent = shown.text;
+		text.setAttribute("aria-hidden", "true");
+		span.append(text);
+	}
+	return span;
+}
+/** 연출을 만든다. `names`는 담당 이름(쉬운 뜻에 쓴다). */
+function createEffects(names) {
+	const queue = new EffectQueue();
+	const listeners = [];
+	const changed = () => {
+		for (const listener of listeners) listener();
+	};
+	const nameOf = (agent) => names[agent] ?? agent;
+	document.addEventListener("visibilitychange", () => {
+		if (document.hidden) {
+			queue.clear();
+			changed();
+		}
+	});
+	function layer(stage) {
+		const host = document.createElement("div");
+		host.className = "overhead-effects";
+		stage.appendChild(host);
+		let box = null;
+		let key = "";
+		let size = {
+			width: 64,
+			height: 26
+		};
+		const hide = () => {
+			box?.remove();
+			box = null;
+			key = "";
+		};
+		return {
+			place(now, spots, taken, _own, screen) {
+				const shown = queue.current(now);
+				const spot = shown ? spots.find((s) => s.id === shown.agent && s.visible) : void 0;
+				if (!shown || !spot) {
+					hide();
+					return;
+				}
+				const next = `${shown.agent}|${shown.mark}|${shown.text}`;
+				if (next !== key || !box) {
+					hide();
+					box = document.createElement("div");
+					box.className = "overhead-effect";
+					box.append(effectElement(shown, nameOf(shown.agent)));
+					host.append(box);
+					key = next;
+					const rect = box.getBoundingClientRect();
+					size = {
+						width: rect.width || 64,
+						height: rect.height || 26
+					};
+				}
+				const [placed] = placeMarks([{
+					agent: shown.agent,
+					head: spot.head,
+					size
+				}], taken, screen);
+				box.style.transform = `translate(${Math.round(placed.rect.x)}px, ${Math.round(placed.rect.y)}px)`;
+			},
+			dispose() {
+				host.remove();
+			}
+		};
+	}
+	function wrap(marks) {
+		return {
+			onApproval: (payload) => marks.onApproval(payload),
+			sync: (list, ringNew) => marks.sync(list, ringNew),
+			work: (agent, before, after, now) => marks.work(agent, before, after, now),
+			layer(stage) {
+				const inner = marks.layer(stage);
+				const own = layer(stage);
+				return {
+					place(now, spots, taken, ownRects, screen) {
+						inner.place(now, spots, taken, ownRects, screen);
+						own.place(now, spots, taken, ownRects, screen);
+					},
+					dispose() {
+						inner.dispose();
+						own.dispose();
+					}
+				};
+			},
+			badges(agent, now) {
+				const out = marks.badges(agent, now);
+				const shown = queue.current(now);
+				if (shown && shown.agent === agent) out.push(effectElement(shown, nameOf(agent)));
+				return out;
+			},
+			onChange(listener) {
+				marks.onChange(listener);
+				listeners.push(listener);
+			}
+		};
+	}
+	return {
+		onEffect(payload) {
+			const effect = readEffect(payload);
+			if (!effect) return;
+			const now = Date.now();
+			if (!queue.push(effect, now, document.hidden)) return;
+			changed();
+			const slot = queue.last();
+			if (!slot) return;
+			if (slot.start > now) window.setTimeout(changed, slot.start - now + 20);
+			window.setTimeout(changed, slot.end - now + 20);
+		},
+		wrap
+	};
+}
+// src/office/patrol.ts
+/** 순찰 수치(시간은 밀리초, 빠르기는 칸/초). */
+var PATROL_RULES = {
+	/** 한가한 지 이 시간 뒤부터(원본 20초). */
+	idleMinMs: 2e4,
+	/** 이 시간 안에(원본 45초). */
+	idleMaxMs: 45e3,
+	/** 한 번에 들르는 곳은 이만큼까지(원본 3곳). */
+	maxStops: 3,
+	/** 한 곳에 머무는 시간(원본 3.0초). */
+	dwellMs: 3e3,
+	/** 산책 걷기 빠르기(원본 55px/s, 칸 32px). */
+	speed: 55 / 32,
+	/** 동시에 순찰하는 담당 수의 상한. */
+	maxWalkers: 2,
+	/** 이 시간 안에 닿지 못하면(길이 막힘) 그만두고 자리로. */
+	giveUpMs: 3e4
+};
+/** 담당의 자리 · 일로 순찰해도 되는가: 일이 한가하고 회의 자리가 아니며 다른 걸음(부름 · 멘션)이 없다. */
+function isFree(view, steered) {
+	return view.work === "idle" && view.place !== "meeting" && !steered;
+}
+/** 들르는 방(논의하는 미팅룸 · 담당 책상이 있는 워크스테이션은 빼고). */
+var SPOT_ROOMS = [
+	"lounge",
+	"entry-lounge",
+	"round-meeting",
+	"director"
+];
+/** 곁에 들르는 가구(탕비 · 복사기 · 화이트보드). */
+var SPOT_FURNITURE = [
+	"studio_counter",
+	"office_printer",
+	"whiteboard"
+];
+/** 논의하는 미팅룸(순찰로 들어가지 않는다). */
+var MEETING_ROOM = "conference";
+/** 걸을 수 있는 칸을 찾는 가장 먼 거리(칸). */
+var SEARCH_RADIUS = 4;
+function key(p) {
+	return `${p.x},${p.y}`;
+}
+/** `from` 둘레에서 가까운 차례로 조건에 맞는 첫 칸(없으면 `null`). */
+function nearestCell(from, ok) {
+	for (let r = 0; r <= SEARCH_RADIUS; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+		if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+		const p = {
+			x: from.x + dx,
+			y: from.y + dy
+		};
+		if (ok(p)) return p;
+	}
+	return null;
+}
+/** 지도에서 순찰할 곳(걸을 수 있고 담당 자리가 아닌 칸, 겹치지 않음): 방 가운데 · 가구 곁. */
+function patrolSpots(map, walkable) {
+	const reserved = /* @__PURE__ */ new Set();
+	for (const a of Object.values(map.agents)) {
+		reserved.add(key(a.desk));
+		reserved.add(key(a.rest));
+	}
+	for (const s of map.meeting_seats) reserved.add(key(s));
+	const meeting = map.rooms.filter((r) => r.id === MEETING_ROOM);
+	const inMeeting = (p) => meeting.some((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+	const out = [];
+	const ok = (p) => walkable(p.x, p.y) && !reserved.has(key(p)) && !inMeeting(p) && !out.some((o) => key(o) === key(p));
+	const add = (p) => {
+		if (p) out.push(p);
+	};
+	for (const id of SPOT_ROOMS) {
+		const room = map.rooms.find((r) => r.id === id);
+		if (!room) continue;
+		const inRoom = (p) => p.x >= room.x && p.x < room.x + room.w && p.y >= room.y && p.y < room.y + room.h;
+		add(nearestCell({
+			x: room.x + Math.floor(room.w / 2),
+			y: room.y + Math.floor(room.h / 2)
+		}, (p) => inRoom(p) && ok(p)));
+	}
+	for (const f of map.furniture) {
+		if (!SPOT_FURNITURE.includes(f.kind)) continue;
+		add(nearestCell({
+			x: f.x + Math.floor(f.w / 2),
+			y: f.y + Math.floor(f.h / 2)
+		}, ok));
+	}
+	return out;
+}
+var SEATED = {
+	phase: "seated",
+	idleSince: null,
+	wait: 0
+};
+/** 순찰 일정 판. */
+var Patrol = class {
+	spots;
+	random;
+	states = /* @__PURE__ */ new Map();
+	/** `spots`: 순찰할 곳. `random`은 [0, 1)을 주는 함수(시험은 고정 값을 넘긴다). */
+	constructor(spots, random = Math.random) {
+		this.spots = spots;
+		this.random = random;
+	}
+	state(agent) {
+		return this.states.get(agent) ?? SEATED;
+	}
+	/** 그 담당이 지금 순찰 중인가(자리를 떠나 있음). */
+	patrolling(agent) {
+		return this.state(agent).phase !== "seated";
+	}
+	walkers() {
+		return [...this.states.values()].filter((s) => s.phase !== "seated").length;
+	}
+	/** 들를 곳: 1 ~ [`PATROL_RULES.maxStops`]곳을 서로 다르게(넣어 준 난수로). */
+	pickStops() {
+		const count = Math.min(this.spots.length, 1 + Math.floor(this.random() * PATROL_RULES.maxStops));
+		const left = [...this.spots];
+		const stops = [];
+		while (stops.length < count && left.length > 0) {
+			const i = Math.min(left.length - 1, Math.floor(this.random() * left.length));
+			stops.push(left.splice(i, 1)[0]);
+		}
+		return stops;
+	}
+	/** 자리에 앉아 한가한 담당: 기다린 시간이 차고 자리가 있으면 순찰을 시작한다. */
+	fromSeat(agent, s, now) {
+		if (s.idleSince === null) {
+			const wait = PATROL_RULES.idleMinMs + this.random() * (PATROL_RULES.idleMaxMs - PATROL_RULES.idleMinMs);
+			this.states.set(agent, {
+				phase: "seated",
+				idleSince: now,
+				wait
+			});
+			return null;
+		}
+		if (now - s.idleSince < s.wait || this.spots.length === 0 || this.walkers() >= PATROL_RULES.maxWalkers) return null;
+		const stops = this.pickStops();
+		if (stops.length === 0) return null;
+		this.states.set(agent, {
+			phase: "going",
+			stops,
+			index: 0,
+			since: now
+		});
+		return {
+			agent,
+			to: stops[0]
+		};
+	}
+	step(agent, free, now) {
+		const s = this.state(agent);
+		if (!free) {
+			this.states.set(agent, SEATED);
+			return s.phase === "seated" ? null : {
+				agent,
+				to: null,
+				cancel: true
+			};
+		}
+		switch (s.phase) {
+			case "seated": return this.fromSeat(agent, s, now);
+			case "going":
+				if (now - s.since < PATROL_RULES.giveUpMs) return null;
+				this.states.set(agent, {
+					phase: "returning",
+					since: now
+				});
+				return {
+					agent,
+					to: null
+				};
+			case "dwelling": {
+				if (now < s.until) return null;
+				const next = s.index + 1;
+				if (next < s.stops.length) {
+					this.states.set(agent, {
+						phase: "going",
+						stops: s.stops,
+						index: next,
+						since: now
+					});
+					return {
+						agent,
+						to: s.stops[next]
+					};
+				}
+				this.states.set(agent, {
+					phase: "returning",
+					since: now
+				});
+				return {
+					agent,
+					to: null
+				};
+			}
+			case "returning":
+				if (now - s.since < PATROL_RULES.giveUpMs) return null;
+				this.states.set(agent, SEATED);
+				return {
+					agent,
+					to: null,
+					cancel: true
+				};
+		}
+	}
+	/** 지금(`now`) 담당들을 보고 걷기 지시들을 돌려준다(없으면 빈 목록). */
+	tick(agents, now) {
+		const out = [];
+		for (const a of agents) {
+			const order = this.step(a.id, a.free, now);
+			if (order) out.push(order);
+		}
+		return out;
+	}
+	/** 걷던 담당이 `now`에 닿았다: 들를 곳이면 머물기, 자리면 다시 한가를 센다. */
+	arrived(agent, now) {
+		const s = this.state(agent);
+		if (s.phase === "going") this.states.set(agent, {
+			phase: "dwelling",
+			stops: s.stops,
+			index: s.index,
+			until: now + PATROL_RULES.dwellMs
+		});
+		else if (s.phase === "returning") {
+			this.states.set(agent, SEATED);
+			this.fromSeat(agent, SEATED, now);
+		}
+	}
+};
+// src/office/patrol-scene.ts
+/** 순찰을 굴리는 간격(밀리초). */
+var TICK_MS = 250;
+/** 순찰을 시작한다. 멈추는 함수를 돌려준다. */
+function startPatrol(options) {
+	const grid = buildGrid(options.map);
+	const spots = patrolSpots(options.map, (x, y) => grid.walkable(x, y));
+	const reduced = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+	let patrol = new Patrol(spots, options.random);
+	/** 다른 쪽(부르기 · 멘션)이 걸음을 건 담당. */
+	const external = /* @__PURE__ */ new Set();
+	let wrapped = null;
+	let base = null;
+	let mine = false;
+	/** 새 장면이면 걸음 걸기를 감싸고 순찰을 처음부터 센다. */
+	function wrap(view) {
+		if (wrapped === view) return;
+		wrapped = view;
+		external.clear();
+		patrol = new Patrol(spots, options.random);
+		const inner = view.steerAgent.bind(view);
+		base = inner;
+		view.steerAgent = (id, steer) => {
+			if (!mine) inner(id, noteExternal(id, steer));
+			else inner(id, steer);
+		};
+	}
+	/** 다른 쪽이 건 걸음을 적는다: 풀면 지우고, 자리로 돌아가는 걸음이면 닿을 때 지운다. */
+	function noteExternal(id, steer) {
+		if (steer === null) {
+			external.delete(id);
+			return steer;
+		}
+		external.add(id);
+		if (steer.to !== null) return steer;
+		const done = steer.onArrive;
+		return {
+			...steer,
+			onArrive: () => {
+				external.delete(id);
+				done?.();
+			}
+		};
+	}
+	function steer(id, value) {
+		if (!base) return;
+		mine = true;
+		try {
+			base(id, value);
+		} finally {
+			mine = false;
+		}
+	}
+	function send(order) {
+		if (order.cancel) {
+			if (!external.has(order.agent)) steer(order.agent, null);
+			return;
+		}
+		const agent = order.agent;
+		steer(agent, {
+			to: order.to,
+			speed: PATROL_RULES.speed,
+			onArrive: () => patrol.arrived(agent, Date.now())
+		});
+	}
+	function tick() {
+		const view = options.view();
+		if (!view) {
+			wrapped = null;
+			base = null;
+			return;
+		}
+		wrap(view);
+		if (document.hidden) return;
+		const off = options.light() || Boolean(reduced?.matches);
+		const agents = [...options.agents()].map(([id, v]) => ({
+			id,
+			free: !off && isFree(v, external.has(id))
+		}));
+		for (const order of patrol.tick(agents, Date.now())) send(order);
+	}
+	const timer = window.setInterval(tick, TICK_MS);
+	return () => window.clearInterval(timer);
+}
 // \0vite/preload-helper.js
 var scriptRel = /* @__PURE__ */ (function detectScriptRel() {
 	const relList = typeof document !== "undefined" && document.createElement("link").relList;
@@ -3445,6 +4654,13 @@ var compose = null;
 var summons = null;
 /** (34차) 머리 위 ✋ · ✓ · 승인 알림음 · 범례. */
 var marks = null;
+/** (51차) 위 줄 하루 AI 잔량 바 · 옆 패널 논의 진행 단계. */
+var budgetView = null;
+var progressView = null;
+/** (23번) 옆 패널의 어제 메모 카드. */
+var memoCard = null;
+/** (24차 3번) 익절 · 손절 연출(머리 위 표시 층을 감싼다). */
+var effects = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 var replayUntil = 0;
 function renderLight() {
@@ -3489,7 +4705,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-eezswvqs.js");
+		const { webglAvailable, createScene } = await import("./scene3d-ox8wbo4o.js");
 		return {
 			webglAvailable,
 			createScene
@@ -3606,8 +4822,8 @@ function renderTabs() {
 		b.textContent = (key === ROOM_TEAM ? "팀 방" : nameOf(key)) + glyph;
 		b.addEventListener("click", () => selectConversation(key));
 		tabs.append(b);
-		if (key !== ROOM_TEAM) tabs.append(summonButton(key, (agent) => void summons?.summon(agent)));
 	}
+	placeSummons(tabs, [ROOM_TEAM, ...AGENT_IDS], state.conversation, nameOf, (agent) => void summons?.summon(agent));
 	$("chat-to-wrap").hidden = true;
 	compose?.setTeam(state.conversation === ROOM_TEAM);
 	renderCaption();
@@ -3857,6 +5073,10 @@ function onFrame(text) {
 		else if (frame.kind === "office.notice_ack") compose?.onAck(frame.payload);
 		else if (frame.kind === "office.summon") summons?.onEvent(frame.payload);
 		else if (frame.kind === "office.message") onMessengerLine(frame.payload);
+		else if (frame.kind === "team.ai_used") budgetView?.apply(frame.payload);
+		else if (frame.kind === "office.progress") progressView?.apply(frame.payload, Date.now());
+		else if (frame.kind === "office.memo") memoCard?.onEvent(frame.kind);
+		else if (frame.kind === "office.effect") effects?.onEffect(frame.payload);
 	}
 }
 /** (server 41차 3번) 메신저에서 온 팀 방 글: 팀 탭에 내 글 줄로 더하고 이름 옆에 "메신저에서"를 단다. */
@@ -3947,6 +5167,7 @@ async function loadSnapshot() {
 		for (const talk of snap.talk ?? []) if (typeof talk.seq === "number") onTalk(talk, talk.seq, false);
 		if (typeof snap.last_seq === "number") state.lastSeq = snap.last_seq;
 		marks?.sync(snap.pending_approvals, false);
+		progressView?.apply(snap.progress ?? null, Date.now());
 	} catch {}
 }
 /** (34차 1번 · 5번) 기다리는 승인만 다시 읽어 맞춘다(다시 이을 때 · 개선안 요청이 생겼을 때). */
@@ -4024,6 +5245,7 @@ async function start() {
 			await loadSnapshot();
 			await compose?.load();
 		}
+		budgetView?.load();
 		openSocket();
 	} catch {
 		setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
@@ -4084,9 +5306,19 @@ async function main() {
 		legendRoot: legend,
 		gestures: document
 	});
+	effects = createEffects(state.names);
+	marks = effects.wrap(marks);
 	marks.onChange(() => {
 		if (!$("light").hidden) renderLight();
 	});
+	budgetView = mountBudget($("bar"), {
+		fetcher: (url, init) => fetch(url, init),
+		nameOf
+	});
+	progressView = mountProgress($("chat"), nameOf);
+	setInterval(() => {
+		progressView?.tick(Date.now());
+	}, 1e3);
 	wireChat();
 	renderTabs();
 	renderLog(true);
@@ -4097,7 +5329,15 @@ async function main() {
 		nameOf,
 		current: () => state.looks,
 		choose: chooseLook,
-		applied: () => applyLooks()
+		applied: () => applyLooks(),
+		me: createMePick((url, init) => fetch(url, init), () => state.me, (me) => {
+			if (state.me) state.me = {
+				...state.me,
+				...me
+			};
+			state.view?.setPlayerLook(me.look);
+			state.view?.setPlayerName(me.name);
+		})
 	});
 	$("look-toggle").addEventListener("click", () => {
 		if (!$("looks").hidden) {
@@ -4107,6 +5347,8 @@ async function main() {
 		picker.open(state.conversation === ROOM_TEAM ? void 0 : state.conversation);
 	});
 	await start();
+	memoCard = mountMemoCard($("memos"), (url, init) => fetch(url, init));
+	memoCard.refresh();
 	const narrow = window.matchMedia("(max-width: 760px)").matches;
 	const toggle = $("view-toggle");
 	if (!state.map || narrow) {
@@ -4121,6 +5363,12 @@ async function main() {
 	}
 	wireCameraTools();
 	wireAutoCamera();
+	if (state.map) startPatrol({
+		map: state.map,
+		view: () => state.view,
+		agents: () => state.agents,
+		light: () => !$("light").hidden
+	});
 	setInterval(renderCaption, CAPTION_TICK_MS);
 	let lightSaid = "";
 	setInterval(() => {
@@ -4148,4 +5396,5 @@ async function main() {
 	});
 }
 main();
+bindTopicClicks($("chat-log"), mountBasisPanel($("chat"), (input, init) => fetch(input, init)));
 export { bubbleWidth as A, followStep as C, bubbleCandidates as D, LANE_AREA_RATIO as E, overlap as M, bubbleText as O, FOLLOW_LERP as S, LOOKS as T, buildGrid as _, agentClick as a, SpotSender as b, slashAction as c, cellOf as d, entranceCell as f, ACTOR_RADIUS as g, withBlockers as h, showChooser as i, insideScreen as j, bubbleWhere as k, talkHint as l, startCell as m, speakerOrbit as n, distance as o, pathTo as p, setHint as r, nearbyAgents as s, easeInOut as t, tooFar as u, clearLine as v, DEFAULT_LOOKS as w, postSpot as x, findPath as y };

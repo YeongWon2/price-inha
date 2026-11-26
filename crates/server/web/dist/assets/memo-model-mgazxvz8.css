@@ -1,0 +1,133 @@
+/*
+ * 근거 카드 모양(server 50차 · C23 · V68 · V69). 토큰(var(--…))만 쓴다.
+ * 방향은 칩의 색(강세 --up · 약세 --down · 중립 흐린 글자)으로, 확신도는 색과 다른 채널(칸 수 막대)로 보인다.
+ * 기권은 점선 칩이다(0점과 다르게 보인다).
+ */
+.basis-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+}
+
+.basis-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.basis-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.basis-muted {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.basis-votes,
+.basis-sources {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.basis-rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.basis-row {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.basis-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.basis-name {
+  font-weight: 600;
+}
+
+.basis-chip {
+  padding: 0 var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+}
+
+.basis-row[data-tone="bull"] .basis-chip {
+  color: var(--up);
+}
+
+.basis-row[data-tone="bear"] .basis-chip {
+  color: var(--down);
+}
+
+.basis-row[data-tone="neutral"] .basis-chip {
+  color: var(--text-muted);
+}
+
+.basis-row[data-tone="abstain"] .basis-chip {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.basis-meter {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.basis-meter-seg {
+  width: var(--space-3);
+  height: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.basis-meter-seg[data-on="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.basis-horizon {
+  color: var(--text-muted);
+}
+
+.basis-reason,
+.basis-summary,
+.basis-decision,
+.basis-flip {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.basis-leader {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.basis-flip-label {
+  color: var(--warning);
+  font-weight: 600;
+}

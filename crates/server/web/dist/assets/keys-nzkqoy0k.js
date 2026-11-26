@@ -1,4 +1,4 @@
-import { n as API, t as mountMenu } from "./menu-drn5z1qq.js";
+import { n as API, t as mountMenu } from "./menu-n8p14elz.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 // src/keys/main.ts
 mountMenu(document.getElementById("menu"), "keys");
@@ -14,7 +14,8 @@ var REASONS = {
 	unreachable: "확인할 곳에 닿지 못했습니다",
 	invalid_input: "칸을 다시 확인하세요",
 	body_too_large: "값이 너무 깁니다",
-	save_failed: "저장하지 못했습니다"
+	save_failed: "저장하지 못했습니다",
+	retired_item: "예전의 한 칸짜리 자료 키는 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다"
 };
 function byId(id) {
 	return document.getElementById(id);

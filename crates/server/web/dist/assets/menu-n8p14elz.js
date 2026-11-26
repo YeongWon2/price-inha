@@ -61,7 +61,9 @@ var API = {
 	team: "/api/team",
 	teamRestart: "/api/team/restart",
 	teamStop: "/api/team/stop",
-	notifySettings: "/api/notify/settings"
+	notifySettings: "/api/notify/settings",
+	teamBudget: "/api/team/budget",
+	memos: "/api/memos"
 };
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
 function tradePath(id) {
@@ -97,15 +99,18 @@ API.session, API.socket, API.setup, API.setupKeys, API.setupSymbols, API.setupAi
 	API.officeSummon,
 	API.officeSummonArrived,
 	API.officeSummonView,
+	API.teamBudget,
 	API.socket,
-	...APPROVALS
+	API.memos,
+	...APPROVALS,
+	API.trades
 ], [
 	API.pushKey,
 	API.pushSubscribe,
 	API.notices,
 	API.dailySummary,
 	...APPROVALS
-], API.session, API.account, API.team, API.teamRestart, API.teamStop, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.session, API.trades, API.dailySummary, API.approvalLog;
+], API.session, API.account, API.team, API.teamRestart, API.teamStop, API.socket, API.session, API.templatesView, API.templates, API.templatesAdjust, API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.session, API.trades, API.dailySummary, API.approvalLog, API.memos;
 /** 승인 카드 읽기 경로 `/api/approvals/{id}`(폰과 같다, 번호는 주소 글자로 감싼다). */
 function approvalPath(id) {
 	return API.approvals + encodeURIComponent(String(id));
@@ -113,6 +118,10 @@ function approvalPath(id) {
 /** 승인 · 거절 경로 /api/approvals/{id}/approve · reject(폰과 같다). */
 function decidePath(id, verb) {
 	return approvalPath(id) + "/" + verb;
+}
+/** (server 50차 · C23) 근거 카드 읽기 경로 `/api/trades/{id}/basis`(번호는 주소 글자로 감싼다). */
+function tradeBasisPath(id) {
+	return tradePath(id) + "/basis";
 }
 /** 메뉴 항목 여섯(사무실 · 계좌 · 템플릿 · 규칙 · 히스토리 · 설정 차례). */
 var MENU_ITEMS = [
@@ -157,4 +166,4 @@ function mountMenu(slot, current) {
 	if (here && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, here.offsetLeft - nav.clientWidth / 2 + here.offsetWidth / 2);
 	return nav;
 }
-export { approvalPath as a, tradePath as c, SCREEN_ROOTS as i, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, templateStopPath as s, mountMenu as t };
+export { approvalPath as a, tradeBasisPath as c, SCREEN_ROOTS as i, tradePath as l, API as n, decidePath as o, OFFICE_LOOK_PATHS as r, templateStopPath as s, mountMenu as t };

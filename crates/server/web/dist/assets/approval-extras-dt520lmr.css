@@ -1,0 +1,21 @@
+/* 승인 카드 보강 줄(server 50차 · C24): 담당 투표 수 · 한도 적용 전 → 후. 토큰(var(--…))만 쓴다. */
+.approval-extras {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-1) 0;
+}
+
+.approval-extras[hidden] {
+  display: none;
+}
+
+.approval-extra {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.approval-extra-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}

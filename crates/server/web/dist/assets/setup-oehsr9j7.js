@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-drn5z1qq.js";
+import { n as API, t as mountMenu } from "./menu-n8p14elz.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-ddms2yvj.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-o69137ml.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -191,6 +191,21 @@ function actionButton(label, action, kind = "default") {
 	node.dataset.action = action;
 	return node;
 }
+/** (다듬기 E 7번) 성공 답의 `notice`(토큰 지우기의 BotFather 폐기 안내 등). 글이 아니면 `null`. */
+function noticeOf(body) {
+	const notice = typeof body === "object" && body !== null ? body.notice : null;
+	return typeof notice === "string" && notice !== "" ? notice : null;
+}
+/** 새로 그린 묶음의 결과 자리에 안내 한 줄(`messenger-notice`)을 넣는다(없으면 그대로). */
+function withNotice(box, notice) {
+	const message = box.querySelector("[data-role=\"messenger-message\"]");
+	if (notice !== null && message) {
+		const line = el("p", "hint", notice);
+		line.dataset.role = "messenger-notice";
+		message.append(line);
+	}
+	return box;
+}
 /** 단추를 누르면 `ask()`가 만든 요청을 보내고, 됐으면 다시 읽어 묶음을 새로 그린다. 실패면 결과 자리에 오류 줄. */
 function wire(box, message, node, ask) {
 	node.addEventListener("click", () => {
@@ -199,16 +214,18 @@ function wire(box, message, node, ask) {
 		(async () => {
 			const { method, url, body } = ask();
 			let text = null;
+			let notice = null;
 			try {
 				const reply = await call(method, url, body);
 				if (!reply.ok) text = messengerError(reply.status, reply.body);
+				else notice = noticeOf(reply.body);
 			} catch {
 				text = LOAD_FAILED;
 			}
 			if (text === null) {
 				const next = await readStatus();
 				if (next !== null) {
-					box.replaceWith(messengerBlock(next));
+					box.replaceWith(withNotice(messengerBlock(next), notice));
 					return;
 				}
 				text = LOAD_FAILED;
@@ -738,6 +755,8 @@ function diagnosisTable(reply) {
 		tr.dataset.key = item.key;
 		tr.cells[1]?.append(badge(DIAG_LABELS[item.status], DIAG_TONES[item.status]));
 		tr.cells[3]?.setAttribute("data-role", "todo");
+		tr.cells[2]?.classList.add("setup-diag-text");
+		tr.cells[3]?.classList.add("setup-diag-text");
 	});
 	const wrap = el("div", "setup-extra-wrap");
 	wrap.append(grid);
@@ -956,6 +975,7 @@ var ITEM_LABELS = {
 };
 var REASONS = {
 	"key_rejected": "키가 맞지 않습니다. 값을 확인하세요.",
+	"retired_item": "예전의 한 칸짜리 자료 키는 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다.",
 	"unreachable": "확인할 서버에 닿지 않습니다. 잠시 뒤에 다시 하세요.",
 	"invalid_input": "입력이 잘못됐습니다. 빈 칸이나 너무 짧은 값이 없는지 확인하세요.",
 	"too_many_attempts": "시도가 너무 많습니다. 잠시 뒤에 다시 하세요.",
@@ -1126,7 +1146,7 @@ function showSetupStatus(status) {
 	setText(byId("ai-limit-now"), formatAiLimit(readAiLimit(status)));
 	var symbols = Array.isArray(status.symbols) ? status.symbols : [];
 	var fixed = status.symbols_source === "argument";
-	setText($symbolsNow, symbols.length === 0 ? "" : "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : ""));
+	setText($symbolsNow, symbols.length === 0 ? "" : "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : status.symbols_source === "demo" ? " (시연용 기본 종목 — 종목을 등록하면 그것으로 바뀝니다)" : ""));
 	showView(status.started === true, status.demo === true);
 }
 function loadSetup() {
