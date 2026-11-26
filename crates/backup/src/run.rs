@@ -33,6 +33,8 @@ pub struct Backup {
     settings: BackupSettings,
     store: Store,
     secrets: Arc<SecretStore>,
+    /// (결정 31) 함께 담을 보관 폴더.
+    archive_dir: Option<PathBuf>,
 }
 
 /// 성공한 올리기.
@@ -105,13 +107,14 @@ impl Backup {
             settings,
             store,
             secrets,
+            archive_dir: None,
         })
     }
 
     /// (결정 31) 보관 폴더(`archive/`)의 보관 파일(`*.jsonl`)도 묶음에 담는다. 폴더가 없으면 스냅샷만 담는다.
-    pub fn with_archive_dir(self, dir: PathBuf) -> Self {
-        let _ = dir;
-        todo!()
+    pub fn with_archive_dir(mut self, dir: PathBuf) -> Self {
+        self.archive_dir = Some(dir);
+        self
     }
 
     /// 한 번 올린다. `now`가 이번 백업 시각이다(파일 이름 · manifest · 상태 기록).
@@ -211,20 +214,28 @@ impl Backup {
         let path = work.path().to_owned();
         work.close().map_err(|e| BackupError::io(path, e))?;
 
+        let mut files = vec![BundleFile {
+            path: SNAPSHOT_FILE.to_owned(),
+            bytes,
+        }];
+        if let Some(dir) = &self.archive_dir {
+            files.extend(crate::archive::bundle_files(dir)?);
+        }
+        let listed = files
+            .iter()
+            .map(|f| ManifestFile {
+                path: f.path.clone(),
+                size: f.bytes.len() as u64,
+                sha256: sha256_hex(&f.bytes),
+            })
+            .collect();
         let bundle = Bundle {
             manifest: Manifest {
                 version: MANIFEST_VERSION,
                 created_at: now,
-                files: vec![ManifestFile {
-                    path: SNAPSHOT_FILE.to_owned(),
-                    size: bytes.len() as u64,
-                    sha256: sha256_hex(&bytes),
-                }],
+                files: listed,
             },
-            files: vec![BundleFile {
-                path: SNAPSHOT_FILE.to_owned(),
-                bytes,
-            }],
+            files,
         };
         if bundle
             .files

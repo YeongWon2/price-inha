@@ -16,6 +16,7 @@
 //! 키 파일 이름은 직접 쓰지 않는다. 스냅샷만 담으므로 키 파일은 처음부터 대상이 아니다
 //! (`pi_secrets::BACKUP_EXCLUDED_FILES`, `ARCH-SECRET-FILES`).
 
+mod archive;
 mod bundle;
 mod error;
 mod remote;
