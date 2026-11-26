@@ -55,6 +55,12 @@ pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> R
         } else {
             settings.symbols.clone()
         };
+        // (다듬기 E 1번) 종목이 없으면 시연 기본 종목에 시연 업종을 넣는다(파일에 쓰지 않는다).
+        let watched = if watched.is_empty() {
+            crate::demo::demo_symbols(settings.market)
+        } else {
+            watched
+        };
         trading.rules.sectors = demo_sectors(&watched);
     }
     RunAssembly {
@@ -87,6 +93,8 @@ pub(crate) struct DemoRun {
     pub(crate) ai_pause: Duration,
     /// (35차 4번) 조립이 준 업종표를 시연 업종으로 따로 쥐고, 업종이 없는 지켜보는 종목에 더한다.
     pub(crate) sectors: bool,
+    /// (다듬기 E 1번) 지켜보는 종목이 없으면 시연 기본 종목([`crate::demo_symbols`])을 조립 값으로 쓴다.
+    pub(crate) default_symbols: bool,
 }
 
 impl DemoRun {
@@ -133,6 +141,7 @@ impl App {
                 offline: true,
                 ai_pause: assembly.demo_ai_pause,
                 sectors: true,
+                default_symbols: true,
             }
         } else {
             DemoRun::default()

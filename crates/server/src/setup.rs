@@ -187,15 +187,18 @@ pub enum SymbolsSource {
     Saved,
     /// 없다.
     None,
+    /// (다듬기 E 1번) 키도 종목도 없는 시연의 시연용 기본 종목([`crate::demo_symbols`]). 조립 값이라 파일에 쓰지 않는다.
+    Demo,
 }
 
 impl SymbolsSource {
-    /// 설정 상태의 `symbols_source`에 적는 글자: `argument` · `saved` · `none`.
+    /// 설정 상태의 `symbols_source`에 적는 글자: `argument` · `saved` · `none` · (시연 기본 종목) `demo`.
     pub const fn as_str(self) -> &'static str {
         match self {
             SymbolsSource::Argument => "argument",
             SymbolsSource::Saved => "saved",
             SymbolsSource::None => "none",
+            SymbolsSource::Demo => "demo",
         }
     }
 }

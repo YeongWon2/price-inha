@@ -236,7 +236,8 @@ function byId(id: string): HTMLInputElement {
     var symbols = Array.isArray(status.symbols) ? status.symbols : [];
     var fixed = status.symbols_source === "argument";
     setText($symbolsNow, symbols.length === 0 ? "" :
-      "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : ""));
+      "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" :
+        status.symbols_source === "demo" ? " (시연용 기본 종목 — 종목을 등록하면 그것으로 바뀝니다)" : ""));
     showView(status.started === true, status.demo === true);
   }
 

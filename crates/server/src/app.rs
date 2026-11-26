@@ -284,6 +284,9 @@ impl App {
         let (secrets, store) = open_home(&settings, launch.secrets)?;
         let verifier = key_verifier(&wiring, launch.team.as_ref(), reach.as_ref());
         let desk = open_desk(&settings, &wiring, &secrets, verifier).await?;
+        if demo.default_symbols {
+            desk.use_demo_symbols(crate::demo::demo_symbols(settings.market));
+        }
         let parts = TradingParts {
             store: store.clone(),
             clock: Arc::clone(&wiring.clock),
