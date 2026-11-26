@@ -156,7 +156,8 @@ pub(super) async fn open_gate(
         .protected_routes(setup_http::status_routes(Arc::clone(&view)))
         // (31차 고침 · 결정 22) 알림음 켜기 · 끄기: 세션이면(원격 포함) 읽고 바꾼다.
         .protected_routes(crate::setup_sound::routes(settings.home.clone()))
-        .protected_routes(page::keys_routes())
+        // (기능 H 2번) 키 화면은 설정 화면과 같은 관문: 그 컴퓨터는 세션 없이, 밖에서는 원격 세션이 있어야 열린다.
+        .public_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
         .local_routes(setup_http::register_routes(Arc::clone(view.desk())))

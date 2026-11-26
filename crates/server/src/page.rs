@@ -148,13 +148,15 @@ pub(crate) fn serve(headers: &HeaderMap, rel: &str, cache: &'static str) -> Resp
         .into_response()
 }
 
-/// 세션 경로: 다른 기기의 키 입력 화면이 다는 자리.
+/// 키 입력 화면이 다는 자리.
 fn keys_paths() -> [&'static str; 1] {
     [crate::KEYS_PAGE_PATH]
 }
 
-/// 세션 경로(`GateBuilder::protected_routes`): 다른 기기의 키 입력 화면(`GET` [`crate::KEYS_PAGE_PATH`]).
-/// 원격 기기는 TOTP 로그인으로 세션을 받은 뒤에만 연다. 화면은 [`crate::REMOTE_KEYS_PATH`]로 보낸다.
+/// 공개 경로(`GateBuilder::public_routes`, 기능 H 2번): 키 입력 화면(`GET` [`crate::KEYS_PAGE_PATH`]).
+/// 관문 규칙이 설정 화면과 같다: 그 컴퓨터(루프백 · 전달 머리글 없음)는 세션 없이 열리고 화면이 세션을 얻는다.
+/// 다른 기기는 관문이 원격 세션을 먼저 보므로 접속 키로 들어온 뒤에만 연다. 화면은 HTML뿐이고 값을 다루는 길
+/// ([`crate::REMOTE_KEYS_PATH`] · 등록 여부 읽기)은 세션 경로 그대로다.
 pub(crate) fn keys_routes() -> Router {
     keys_paths()
         .into_iter()

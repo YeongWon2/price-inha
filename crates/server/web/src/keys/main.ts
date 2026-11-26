@@ -1,9 +1,11 @@
-// 다른 기기의 키 입력 화면(`/keys`). 세션 경로라 로그인한 뒤에만 열린다. 키 값은 원격 등록 경로로
+// 키 입력 화면(`/keys`). 다른 기기는 접속 키로 로그인한 뒤에만 열리고, 그 컴퓨터는 세션 없이 열려 화면이 세션을
+// 얻는다(`session.ts`, 기능 H 2번). 키 값은 원격 등록 경로로
 // 본문에만 실어 보내고, 화면 · 브라우저 저장소 어디에도 남기지 않으며, 서버 답으로 칸을 다시 채우지 않는다.
 import { mountMenu } from "../ui/menu";
 import "./keys.css";
 import { API } from "../paths";
 import { applyKeyFieldRules, submitKeyFields } from "./field";
+import { ensureKeysSession } from "./session";
 
 // 공통 메뉴(server 26차 3번): 키 화면은 메뉴 항목이 아니라 지금 화면 표시가 없다.
 mountMenu(document.getElementById("menu"), "keys");
@@ -189,4 +191,5 @@ Object.keys(SLOT_FIELDS).forEach((item) => {
   fields[SLOT_FIELDS[item]] = "k-slot-" + item;
   wire("k-slot-" + item + "-button", "k-slot-" + item + "-msg", item, fields);
 });
-loadSlots();
+// 그 컴퓨터에서 세션 없이 바로 열었으면 세션을 먼저 얻고(기능 H 2번) 등록 여부를 읽는다.
+void ensureKeysSession((path, init) => fetch(path, init), location.hostname).then(loadSlots);
