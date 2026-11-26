@@ -453,6 +453,9 @@ pub const SEMANTIC_SETTINGS_FILE: &str = "semantic-settings.json";
 /// 뜻 검색 설정 거부: Ollama 주소가 루프백이 아니다.
 pub const SEMANTIC_LOOPBACK_ONLY: &str = "loopback_only";
 
+/// (65차, 결정 34) 뜻 검색 설정 거부: 같은 집 다른 기기를 켰는데 주소가 루프백도 사설망도 아니다.
+pub const SEMANTIC_PRIVATE_ONLY: &str = "private_only";
+
 /// 뜻 검색의 기본 임베딩 모델(결정 15번, Ollama `bge-m3`, 1024차원).
 pub const DEFAULT_EMBED_MODEL: &str = "bge-m3";
 

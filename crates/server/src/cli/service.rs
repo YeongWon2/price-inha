@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 use crate::cli::runner::{CommandLine, CommandRunner};
 use crate::error::ServiceError;
 
+mod env_note;
 mod listen;
 mod render;
 mod steps;
 
+pub use env_note::service_env_notes;
 use render::{between, plist_working_dir, xml_unescape};
 use steps::{OnFailure, Step, plan_report};
 
@@ -182,6 +184,16 @@ pub struct ServiceStatus {
     pub running: bool,
     /// 정의가 가리키는 보관 폴더.
     pub home: Option<PathBuf>,
+    /// (65차) 마지막으로 끝났을 때의 종료 코드(macOS `launchctl print`의 `last exit code`). 한 번도 끝나지 않았거나
+    /// 다른 운영체제면 없음.
+    pub last_exit_code: Option<i32>,
+}
+
+impl ServiceStatus {
+    /// (65차) 계속 죽는가: 도는 중이 아니고 마지막 종료 코드가 0이 아니다(서비스 관리자가 다시 띄우려는 중).
+    pub fn keeps_dying(&self) -> bool {
+        false // red 뼈대
+    }
 }
 
 /// 서비스 관리.
@@ -377,6 +389,7 @@ impl<'a> Service<'a> {
                 installed: false,
                 running: false,
                 home: None,
+                last_exit_code: None,
             });
         }
         let (command, running_word): (CommandLine, Option<&[&str]>) = match self.setup.os {
@@ -404,6 +417,7 @@ impl<'a> Service<'a> {
             installed: true,
             running,
             home,
+            last_exit_code: None,
         })
     }
 

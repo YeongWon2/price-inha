@@ -14,6 +14,7 @@ mod error;
 mod feed;
 mod keys;
 mod log;
+mod log_file;
 mod messenger;
 mod notify_settings;
 mod page;
@@ -30,6 +31,7 @@ mod setup_sound;
 mod slots;
 mod team;
 mod trading;
+mod update_check;
 
 pub use access_http::{ACCESS_KEY_PATH, ACCESS_LOG_PATH, ACCESS_UNLOCK_PATH};
 pub use ai_link::{
@@ -173,4 +175,12 @@ pub use trading::{
     TEAM_PATH, TEAM_RESTART_PATH, TEAM_RESTING, TEAM_STOP_PATH, TEMPLATE_ADJUST_PATH,
     TEMPLATE_NOT_LIVE, TEMPLATE_OVER_CAP, TEMPLATE_PATH, TEMPLATE_STOP_PATH, TEMPLATES_VIEW_PATH,
     Trading, TradingWiring,
+};
+// (65차) 운영 다듬기 · 새 판 알리기 · 같은 집 다른 기기 Ollama(결정 34).
+pub use cli::service_env_notes;
+pub use log_file::{LOG_FILE_KEEP, LOG_FILE_MAX_BYTES, RotatingLogFile};
+pub use reach::SEMANTIC_PRIVATE_ONLY;
+pub use update_check::{
+    UPDATE_CHECK_FILE, UpdateCheckError, UpdateNotice, check_for_update, is_newer_version,
+    read_update_notice, spawn_update_check, update_check_url,
 };

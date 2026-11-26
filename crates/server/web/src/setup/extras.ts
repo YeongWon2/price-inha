@@ -63,6 +63,10 @@ export interface SemanticSettings {
   enabled: boolean;
   base_url: string;
   model: string;
+  /** (65차, 결정 34) 같은 집 다른 기기(사설망) Ollama를 켰나. 없으면 꺼짐. */
+  private_network?: boolean;
+  /** (65차) 서버가 주는 "임베딩을 이 컴퓨터 밖(사설망 …)으로 보냄" 줄. 루프백이면 없음. */
+  outside?: string | null;
 }
 
 /** 담당 모델 한 줄(설정 상태의 `models`). */
