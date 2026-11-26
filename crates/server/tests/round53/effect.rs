@@ -38,19 +38,38 @@ async fn 익절로_팔리면_매매_담당에게_익절_연출과_수익률이_�
     let trade = bench.hold(HYNIX).await;
     bench.quote(HYNIX, ENTRY + 4_000, 1).await;
     let placed = bench
-        .place(order(trade, HYNIX, Purpose::TakeProfit, ENTRY + 4_000, bench.now()))
+        .place(order(
+            trade,
+            HYNIX,
+            Purpose::TakeProfit,
+            ENTRY + 4_000,
+            bench.now(),
+        ))
         .await;
     assert!(matches!(placed, Placed::Ordered(_)), "{placed:?}");
-    assert!(effects_of(&bench, trade).is_empty(), "팔리기 전에는 내지 않는다");
+    assert!(
+        effects_of(&bench, trade).is_empty(),
+        "팔리기 전에는 내지 않는다"
+    );
     bench.quote(HYNIX, ENTRY + 4_000, 1).await;
     assert_eq!(bench.trade_state(trade), TradeState::Sold);
-    wait_for("익절 연출 이벤트", || !effects_of(&bench, trade).is_empty()).await;
+    wait_for("익절 연출 이벤트", || {
+        !effects_of(&bench, trade).is_empty()
+    })
+    .await;
     let effect = effects_of(&bench, trade).remove(0);
     assert_eq!(effect["kind"], "take_profit", "{effect}");
     assert_eq!(effect["agent"], "trader", "연출은 매매 담당에게: {effect}");
     assert_eq!(effect["symbol"], HYNIX, "{effect}");
-    assert_eq!(effect["at"].as_i64(), Some(bench.now().timestamp_millis()), "{effect}");
-    assert_eq!(effect["return_pct"], "4.00", "산 값 100,000 · 판 값 104,000: {effect}");
+    assert_eq!(
+        effect["at"].as_i64(),
+        Some(bench.now().timestamp_millis()),
+        "{effect}"
+    );
+    assert_eq!(
+        effect["return_pct"], "4.00",
+        "산 값 100,000 · 판 값 104,000: {effect}"
+    );
     // 시세가 더 와도 한 매매에 한 번만 낸다.
     bench.quote(HYNIX, ENTRY + 4_000, 1).await;
     bench.quote(HYNIX, ENTRY + 5_000, 1).await;
@@ -68,14 +87,22 @@ async fn 손절로_팔리면_손절_연출과_음수_수익률이_실린다() {
     bench.quote(HYNIX, STOP - 1_000, 1).await;
     bench.quote(HYNIX, STOP - 1_000, 1).await;
     assert_eq!(bench.trade_state(trade), TradeState::Sold);
-    wait_for("손절 연출 이벤트", || !effects_of(&bench, trade).is_empty()).await;
+    wait_for("손절 연출 이벤트", || {
+        !effects_of(&bench, trade).is_empty()
+    })
+    .await;
     let effect = effects_of(&bench, trade).remove(0);
     assert_eq!(effect["kind"], "stop_loss", "{effect}");
     assert_eq!(effect["agent"], "trader", "{effect}");
     let value = pct(&effect);
-    assert!(value < -5.0 && value > -7.0, "손절값 아래에서 팔렸다: {effect}");
     assert!(
-        effect["return_pct"].as_str().is_some_and(|t| t.starts_with('-')),
+        value < -5.0 && value > -7.0,
+        "손절값 아래에서 팔렸다: {effect}"
+    );
+    assert!(
+        effect["return_pct"]
+            .as_str()
+            .is_some_and(|t| t.starts_with('-')),
         "손실은 - 글자로 시작한다: {effect}"
     );
     bench.close().await;
@@ -90,7 +117,13 @@ async fn 팔리지_않은_익절이나_청산은_연출하지_않는다() {
     // 목표값에 닿지 않는 시세: 익절 지정가 주문은 걸려만 있다.
     bench.quote(HYNIX, ENTRY + 1_000, 1).await;
     let placed = bench
-        .place(order(waiting, HYNIX, Purpose::TakeProfit, ENTRY + 4_000, bench.now()))
+        .place(order(
+            waiting,
+            HYNIX,
+            Purpose::TakeProfit,
+            ENTRY + 4_000,
+            bench.now(),
+        ))
         .await;
     assert!(matches!(placed, Placed::Ordered(_)), "{placed:?}");
     bench.quote(HYNIX, ENTRY + 1_000, 1).await;

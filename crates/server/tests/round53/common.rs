@@ -28,8 +28,8 @@ use pi_store::{
     UnixMillis,
 };
 use price_inha::{
-    App, DayPlan, OrderRequest, Placed, RULES_CONFIG_PATH, RunAssembly, Settings, TEMPLATE_ADJUST_PATH,
-    TEMPLATE_PATH, Trading, Upstreams, run_assembly, save_watchlist,
+    App, DayPlan, OrderRequest, Placed, RULES_CONFIG_PATH, RunAssembly, Settings,
+    TEMPLATE_ADJUST_PATH, TEMPLATE_PATH, Trading, Upstreams, run_assembly, save_watchlist,
 };
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
@@ -310,7 +310,8 @@ impl Bench {
 
     /// 시계를 `seconds`초 옮긴다(실제로 자지 않는다).
     pub fn pass(&self, seconds: i64) {
-        self.clock.set(self.now() + chrono::Duration::seconds(seconds));
+        self.clock
+            .set(self.now() + chrono::Duration::seconds(seconds));
     }
 
     /// 매매하기 좋게 만든다: 스윙 템플릿을 고르고 종목 비중 10%로 맞추고, 사고팔 종목의 업종을 정한 뒤 오늘 매매하기로
@@ -407,7 +408,9 @@ impl Bench {
     pub async fn hold(&self, symbol: &str) -> TradeId {
         self.quote(symbol, ENTRY, 1).await;
         let trade = self.judged(symbol);
-        let placed = self.place(order(trade, symbol, Purpose::NewEntry, ENTRY, self.now())).await;
+        let placed = self
+            .place(order(trade, symbol, Purpose::NewEntry, ENTRY, self.now()))
+            .await;
         assert!(
             matches!(placed, Placed::Ordered(_)),
             "한도 안의 사는 주문은 바로 나간다: {placed:?}"

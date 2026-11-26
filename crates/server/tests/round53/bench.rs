@@ -16,10 +16,23 @@ async fn 발판이_서고_사서_보유중을_거쳐_익절로_팔린다() {
     let trade = bench.hold(HYNIX).await;
     bench.quote(HYNIX, ENTRY + 4_000, 1).await;
     let placed = bench
-        .place(order(trade, HYNIX, Purpose::TakeProfit, ENTRY + 4_000, bench.now()))
+        .place(order(
+            trade,
+            HYNIX,
+            Purpose::TakeProfit,
+            ENTRY + 4_000,
+            bench.now(),
+        ))
         .await;
-    assert!(matches!(placed, Placed::Ordered(_)), "익절이 나간다: {placed:?}");
+    assert!(
+        matches!(placed, Placed::Ordered(_)),
+        "익절이 나간다: {placed:?}"
+    );
     bench.quote(HYNIX, ENTRY + 4_000, 1).await;
-    assert_eq!(bench.trade_state(trade), TradeState::Sold, "목표값 시세에 팔린다");
+    assert_eq!(
+        bench.trade_state(trade),
+        TradeState::Sold,
+        "목표값 시세에 팔린다"
+    );
     bench.close().await;
 }
