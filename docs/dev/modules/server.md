@@ -1346,3 +1346,35 @@ office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_
 | 새 시험 폴더 `crates/server/tests/round50/` · `round51/` · `round52/` · `round53/` · `round42e/`와 새 vitest · e2e 파일 | 유지 | 기능 A~E의 새 시험(작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과). 지운 기존 시험 없음 |
 | 기능 브랜치가 기존 시험에 더한 줄(`screen-paths.test.ts`의 경로 · `history-screen.test.ts`의 탭 목록 · `office-legend.test.ts`의 표시 둘) | 고침 | 기능 A · B · C · D가 경로 · 탭 · 표시를 더했다 — 목록에 그 항목만 더했다(다른 단언은 그대로) |
 | 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다(합친 구현에서 모두 통과해야 한다) |
+
+## 43차 병렬로 만든 기능 다섯(F~J)을 합쳐 잠근다 (2026-11-27 조정자, 결정 28 — 사용자 "이어서해" · "cli 구독으로 할거야… 윈도우 컴퓨터에서 cli를 설치해서 알아서 다 setup이 되게끔")
+
+동작 잠금 차수다. 42차와 같은 방식으로 기능 다섯을 별도 작업 폴더에서 red(시험 커밋) → green(구현 커밋)으로 만들고 조정자가 main에 합쳤다. 이 차수는 합친 결과가 모든 시험을 통과하는지 보고 새 시험을 잠근다. 새 동작은 더하지 않는다(합치며 필요했던 맞춤만).
+
+| 기능 | 무엇 | 근거 | 새 시험 |
+|---|---|---|---|
+| F | 하루 AI 상한을 턴 단위로 센다 · 논의에 남은 호출 · 팀장 예비분 · 정리 문턱을 넘긴다 | N14 · E52 · V53 · R1-5 (42차 backlog "상한 셈의 단위") | `round54/` · vitest `setup-ai-limit-turns` |
+| G | 실제 시세 모드의 결정 메모 정산: 기록된 하루 시작 · 마감으로 거래일을 센다 | R7-4 · M11 · N20 · V70 (42차 backlog) | `round55/` |
+| H | 팀 방의 부르기 아이콘 없앰 · 키 화면(`/keys`)을 그 컴퓨터에서는 세션 없이 바로 · e2e 임시 폴더를 실행마다 따로 | 42차 backlog · R19 | `round56/` · vitest `keys-session` · e2e `keys` |
+| I | 담당별 AI 모델 고르기(`GET/POST /api/setup/models` · `team-models.json` · 설정 화면 묶음) | R19 · 결정 24 | `round57/` · vitest `setup-models` · e2e `setup-models` |
+| J | 윈도 지원: 프로세스 끝내기 · 자동 실행 등록 · `claude` 실행 파일 찾기 · 브라우저 열기의 윈도 갈래, `install.ps1`, `release.sh --target` | 결정 27 · 사용자 "윈도우 컴퓨터에서… git clone 안 받아도 되게끔" | `round58/` · `scripts/test-install.sh` 15~17 |
+
+합치며 맞춘 것: 겹쳐 등록된 `/keys` 경로 하나(병합이 옛 세션 경로 줄을 되살려 서버가 켜지지 않았다) · 화면 빌드 결과 다시 만들기.
+
+기능별로 만들지 못한 것 · 남은 문제는 `docs/dev/backlog.md`에 있다(관망 결정 메모는 store · journal 차수가 필요 · 윈도 실기 확인 등).
+
+- 원본 동작 근거: 기능마다 위 표의 설계서 번호. J의 설치 길은 `docs/research/install-and-cli.md` 8장(OpenClaw · Hermes의 한 줄 설치 — 받아서 실행 파일을 놓고 설정 마법사로 잇는다).
+- 시험으로 확인할 것: 위 표의 새 시험과 기존 시험이 합친 구현에서 모두 통과한다(동작 잠금).
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 폴더 `crates/server/tests/round54/` ~ `round58/`와 새 vitest(`keys-session` · `setup-ai-limit-turns` · `setup-models`) · e2e(`keys.spec.ts` · `setup-models.spec.ts` · `support/run-dir.mjs`) | 유지 | 기능 F~J의 새 시험(작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과). 지운 기존 시험 없음 |
+| `round22/ai_cap.rs` · `round51/budget.rs` · `round52/settle.rs` | 고침 | 기능 F: 상한의 단위가 "논의 수"에서 "AI 턴 수"로 바뀌었다(N14 · 42차 backlog의 사용자 요청 항목). 옛 시험이 상한 값을 논의 수로 잡았던 자리만 턴 수 기준으로 맞췄다 |
+| `round13/keys.rs` · `web/screen-paths.test.ts` | 고침 | 기능 H: `/keys` 화면이 설정 화면과 같은 관문(그 컴퓨터는 세션 없이, 밖에서는 원격 세션)으로 바뀌었다. 값을 다루는 길(`/api/remote/keys`)의 단언은 그대로 |
+| `web/office-summon-tab.test.ts` · `e2e/office.spec.ts` | 고침 | 기능 H: 팀 방에서 부르기 아이콘을 없앴다(42차 backlog) — 그 아이콘을 보던 단언만 "없다"로 바꿨다 |
+| `e2e/support/demo-server.mjs` | 고침 | 기능 H: 임시 폴더를 실행마다 따로 잡는다(병렬 실행에서 trace 파일이 서로 지워지던 결함). 시험 뜻은 그대로 |
+| `round54/wrap.rs`의 `상한_10이면_첫_논의가_정리_모드로_넘어가고_…` | 고침 | 시험 결함. 정리 모드는 "새 라운드를 열기 전에 남은 호출이 문턱 이하"일 때 든다(N14 · agent `wrap_up_due`). 상한 10에서 첫 논의는 턴 6개쯤으로 끝나 남은 호출이 문턱(4)보다 많다 — 첫 논의에서 정리 모드가 들 수 없다. 문턱에 닿을 때까지 논의를 이어 열어 정리 모드가 드는 것과 쓴 수 · 예비분 단언을 본다(단언은 그대로) |
+| `round57/common.rs`의 `Asked.last` 칸 | 고침 | 시험 결함(모양). 어디서도 읽지 않는 칸이라 clippy(테스트)가 막는다 — 칸만 지운다 |
+| 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다(합친 구현에서 모두 통과해야 한다) |
