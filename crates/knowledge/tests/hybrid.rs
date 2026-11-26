@@ -151,12 +151,20 @@ impl Fixture {
 }
 
 fn refs(output: &SearchOutput) -> Vec<String> {
-    output.results.iter().map(|h| h.record_ref.clone()).collect()
+    output
+        .results
+        .iter()
+        .map(|h| h.record_ref.clone())
+        .collect()
 }
 
 fn code_of(output: &SearchOutput) -> Option<String> {
     match &output.semantic {
-        SemanticStatus::Unavailable { code, warning, action } => {
+        SemanticStatus::Unavailable {
+            code,
+            warning,
+            action,
+        } => {
             assert!(!warning.is_empty() && !action.is_empty(), "{output:?}");
             Some(code.clone())
         }
@@ -175,25 +183,42 @@ async fn 뜻이_가까운_조각은_키워드가_맞지_않아도_나온다() {
         .knowledge
         .search(&SearchRequest::keywords("하락"), UnixMillis(T0))
         .unwrap();
-    assert!(keyword.results.is_empty(), "키워드로는 맞는 것이 없다: {keyword:?}");
+    assert!(
+        keyword.results.is_empty(),
+        "키워드로는 맞는 것이 없다: {keyword:?}"
+    );
 
     let out = f.hybrid(&SearchRequest::keywords("하락")).await;
     assert_eq!(out.mode, SearchMode::Semantic);
     assert_eq!(out.semantic, SemanticStatus::Available);
-    assert_eq!(refs(&out).first().map(String::as_str), Some("T-down"), "{out:?}");
-    assert!(!refs(&out).contains(&"T-up".to_string()), "방향이 다른 것은 벡터 점수가 0이다");
+    assert_eq!(
+        refs(&out).first().map(String::as_str),
+        Some("T-down"),
+        "{out:?}"
+    );
+    assert!(
+        !refs(&out).contains(&"T-up".to_string()),
+        "방향이 다른 것은 벡터 점수가 0이다"
+    );
     let semantic = f
         .knowledge
         .semantic_search("하락", UnixMillis(T0))
         .await
         .unwrap();
-    assert_eq!(refs(&semantic), refs(&out), "semantic_search는 하이브리드와 같은 길");
+    assert_eq!(
+        refs(&semantic),
+        refs(&out),
+        "semantic_search는 하이브리드와 같은 길"
+    );
 }
 
 // 검증: D10
 #[tokio::test]
 async fn 합은_벡터_0_7과_다시_잰_키워드_0_3이다() {
-    assert_eq!((VECTOR_WEIGHT_MICROS, TEXT_WEIGHT_MICROS), (700_000, 300_000));
+    assert_eq!(
+        (VECTOR_WEIGHT_MICROS, TEXT_WEIGHT_MICROS),
+        (700_000, 300_000)
+    );
     let f = open(0);
     f.trade("T-vector", "주가가 크게 떨어졌다");
     f.trade("T-both", "하락 추세 손절 하락 하락");
@@ -232,7 +257,10 @@ async fn 자동_회상이면_바깥_자료는_벡터_후보에서도_빠진다()
     f.trade("T-down", "보유 종목이 떨어졌다");
     f.embed_all().await;
     let explicit = f.hybrid(&SearchRequest::keywords("하락")).await;
-    assert!(refs(&explicit).contains(&"news:1".to_string()), "{explicit:?}");
+    assert!(
+        refs(&explicit).contains(&"news:1".to_string()),
+        "{explicit:?}"
+    );
     let recall = SearchRequest {
         auto_recall: true,
         ..SearchRequest::keywords("하락")
@@ -245,7 +273,10 @@ async fn 자동_회상이면_바깥_자료는_벡터_후보에서도_빠진다()
         sources: vec![KnowledgeSource::Team],
         ..SearchRequest::keywords("하락")
     };
-    assert!(f.hybrid(&only_trades).await.results.is_empty(), "종류 · 등급 거르기도 같다");
+    assert!(
+        f.hybrid(&only_trades).await.results.is_empty(),
+        "종류 · 등급 거르기도 같다"
+    );
 }
 
 // 검증: D10 V23
@@ -255,7 +286,11 @@ async fn 다시_만들기가_끝나지_않았으면_키워드_결과와_reindexi
     f.trade("T-1", "손절 기준을 늦게 지켰다");
     let out = f.hybrid(&SearchRequest::keywords("손절")).await;
     assert_eq!(code_of(&out).as_deref(), Some("reindexing"), "{out:?}");
-    assert_eq!(refs(&out), vec!["T-1".to_string()], "키워드 결과가 함께 온다");
+    assert_eq!(
+        refs(&out),
+        vec!["T-1".to_string()],
+        "키워드 결과가 함께 온다"
+    );
     assert_eq!(
         f.embedder.queries.load(Ordering::SeqCst),
         0,
@@ -269,7 +304,10 @@ async fn 질의_임베딩이_안_되면_오류가_아니라_키워드_결과와_
     let f = open(0);
     f.trade("T-1", "손절 기준을 늦게 지켰다");
     f.embed_all().await;
-    for (mode, code) in [(UNAVAILABLE, "embedder_unavailable"), (FAILED, "embedder_failed")] {
+    for (mode, code) in [
+        (UNAVAILABLE, "embedder_unavailable"),
+        (FAILED, "embedder_failed"),
+    ] {
         f.embedder.set(mode);
         let out = f.hybrid(&SearchRequest::keywords("손절")).await;
         assert_eq!(code_of(&out).as_deref(), Some(code), "{out:?}");
@@ -309,7 +347,11 @@ async fn 질의는_embed_query를_지난다() {
     f.embed_all().await;
     f.embedder.set(QUERY_TURNS_UP);
     let out = f.hybrid(&SearchRequest::keywords("하락")).await;
-    assert_eq!(refs(&out).first().map(String::as_str), Some("T-up"), "{out:?}");
+    assert_eq!(
+        refs(&out).first().map(String::as_str),
+        Some("T-up"),
+        "{out:?}"
+    );
     assert!(f.embedder.queries.load(Ordering::SeqCst) >= 1);
 }
 
