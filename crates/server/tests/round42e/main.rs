@@ -7,6 +7,7 @@
 //! - `demo_chat`: 4번 — 시연용 가짜 AI의 채팅 답은 표시 이름 · 물음 되받기 · "(시연)".
 //! - `diagnosis`: 5번 — 시연 진단의 "AI 연결" 줄은 시연용 가짜 AI(고른 방식은 뒤에 그대로). 표의 줄바꿈은 vitest
 //!   `setup-diag-wrap.test.ts`가 본다.
+//! - `doctor_telegram`: 6번 — `price-inha doctor` 키 줄 끝에 텔레그램 봇 토큰 있음 · 없음(값 없이).
 
 mod common;
 mod data_key;
@@ -14,3 +15,4 @@ mod demo_chat;
 mod demo_symbols;
 mod diagnosis;
 mod doctor_cli;
+mod doctor_telegram;

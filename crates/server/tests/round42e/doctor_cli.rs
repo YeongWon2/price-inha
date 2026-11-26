@@ -3,7 +3,9 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use pi_secrets::{Credentials, KeyKind, KeySlot, SecretStore, Verifier, VerifyFailure};
+use pi_secrets::{
+    Credentials, KeyKind, KeySlot, ProviderKeys, SecretStore, Verifier, VerifyFailure,
+};
 use price_inha::{
     CheckItem, CommandLine, CommandOutput, CommandRunner, InstallOptions, Os, Service,
     ServiceSetup, Settings, doctor,
@@ -20,6 +22,14 @@ impl Verifier for AcceptAll {
     async fn verify_slot(
         &self,
         _slot: KeySlot,
+        _values: &Credentials,
+    ) -> Result<(), VerifyFailure> {
+        Ok(())
+    }
+
+    async fn verify_provider(
+        &self,
+        _keys: ProviderKeys,
         _values: &Credentials,
     ) -> Result<(), VerifyFailure> {
         Ok(())
