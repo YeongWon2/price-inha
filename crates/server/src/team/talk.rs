@@ -218,10 +218,11 @@ impl Crew {
         if let Some(news) = news.filter(|news| news.dropped > 0) {
             self.log_dropped(&request_room(trade.id), news.dropped);
         }
+        // (23번 · 기능 G) 판단됨이 된 매매의 결정 메모(M11). 논의 결과가 아니라 저장된 판단으로 남겨, 판단 뒤 도구가
+        // 실패해 논의가 오류로 끝나도 남는다.
+        self.note_decision(trade.id);
         self.attach(trade.id, &gathered)?;
         let outcome = result.map_err(|error| TeamError::Agent(error.to_string()))?;
-        // (23번) 판단됨이 된 매매의 결정 메모(M11).
-        self.note_decision(trade.id, &outcome);
         Ok(Discussed {
             trade: trade.id,
             outcome,

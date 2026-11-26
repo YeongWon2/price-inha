@@ -44,6 +44,8 @@ pub(crate) mod card;
 // (51차) 하루 AI 잔량 · 논의 진행 단계.
 mod budget;
 mod progress;
+// (기능 G) 결정 메모 정산의 거래일 달력(기록된 하루 시작 · 마감).
+mod memo_days;
 
 use std::collections::HashMap;
 use std::sync::Arc;
