@@ -28,11 +28,16 @@ fn mode_of(limit: u32, used: u64) -> &'static str {
 
 // 검증: N14 E52 V53 R1-5
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn 상한_10이면_첫_논의가_정리_모드로_넘어가고_예비분을_남긴_채_팀장이_판단한다() {
+async fn 상한_10이면_논의가_정리_모드로_넘어가고_예비분을_남긴_채_팀장이_판단한다() {
     let bench = Plan::demo().ai_limit(10).start(morning()).await;
     let before = settled_prompts(&bench).await;
     bench.demo_ai().script(DemoTurn::Verdict, WATCH_VERDICT);
-    let done = discuss_result(&bench, "정리 모드 시험")
+    // 정리 모드는 새 라운드를 열기 전에 남은 호출을 본다(N14): 상한 10의 첫 논의는 문턱(4)보다 많이 남긴 채
+    // 끝나므로, 문턱에 닿는 둘째 논의에서 정리 모드가 든다.
+    discuss_result(&bench, "정리 모드 시험 첫째")
+        .await
+        .expect("남은 호출이 있으면 논의가 열린다");
+    let done = discuss_result(&bench, "정리 모드 시험 둘째")
         .await
         .expect("남은 호출이 있으면 논의가 열린다");
     let spent = bench.prompts().len() - before;

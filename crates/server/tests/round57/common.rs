@@ -138,12 +138,11 @@ fn kr_calendar(date: NaiveDate) -> MarketCalendar {
 
 // ───────────── 가짜 AI ─────────────
 
-/// 가짜 AI가 받은 요청 하나: 역할 id(시스템 글의 `담당 id: …`) · 요청의 `model` · 마지막 사용자 글.
+/// 가짜 AI가 받은 요청 하나: 역할 id(시스템 글의 `담당 id: …`) · 요청의 `model`.
 #[derive(Debug, Clone)]
 pub struct Asked {
     pub role: String,
     pub model: String,
-    pub last: String,
 }
 
 fn text_of(value: &Value) -> String {
@@ -216,7 +215,7 @@ impl FakeAi {
                 let last = last_user_text(&body);
                 let model = body["model"].as_str().unwrap_or_default().to_string();
                 let text = ai_reply(&role, &last);
-                log.lock().unwrap().push(Asked { role, model, last });
+                log.lock().unwrap().push(Asked { role, model });
                 ResponseTemplate::new(200)
                     .set_delay(Duration::from_millis(delay.load(Ordering::SeqCst)))
                     .set_body_json(json!({
