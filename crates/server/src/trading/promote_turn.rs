@@ -67,12 +67,18 @@ mod tests {
     #[test]
     fn 판이_바뀌었거나_상태가_바뀌었거나_다른_템플릿이면_그대로가_아니다() {
         let before = template(1, 3, TemplateState::Simulating);
-        assert!(!still_same(&before, Some(&template(1, 4, TemplateState::Simulating))));
+        assert!(!still_same(
+            &before,
+            Some(&template(1, 4, TemplateState::Simulating))
+        ));
         assert!(!still_same(
             &before,
             Some(&template(1, 3, TemplateState::PromotionPending))
         ));
-        assert!(!still_same(&before, Some(&template(2, 3, TemplateState::Simulating))));
+        assert!(!still_same(
+            &before,
+            Some(&template(2, 3, TemplateState::Simulating))
+        ));
         assert!(!still_same(&before, None));
     }
 

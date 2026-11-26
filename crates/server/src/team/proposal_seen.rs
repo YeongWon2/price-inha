@@ -61,7 +61,7 @@ mod tests {
 
     fn store() -> (tempfile::TempDir, Store) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(&dir.path().join("pi.sqlite")).unwrap();
+        let store = Store::open(dir.path().join("pi.sqlite")).unwrap();
         (dir, store)
     }
 
@@ -82,7 +82,11 @@ mod tests {
         store.append("other", &json!({"x": 2})).unwrap();
         store.append(KIND, &json!({"id": 2})).unwrap();
         let (third, read) = seen.read_counted(&store, KIND).unwrap();
-        assert_eq!(third, vec![json!({"id": 1}), json!({"id": 2})], "난 차례대로");
+        assert_eq!(
+            third,
+            vec![json!({"id": 1}), json!({"id": 2})],
+            "난 차례대로"
+        );
         assert_eq!(read, 2, "뒤에 생긴 것만 읽는다");
     }
 

@@ -32,7 +32,6 @@ mod notes;
 mod notices;
 mod poll;
 mod proposal_seen;
-mod wake_session;
 mod quota;
 mod review;
 mod rules;
@@ -41,6 +40,7 @@ mod seen;
 mod talk;
 mod tools;
 mod wake;
+mod wake_session;
 // (50차) 근거 카드 칸: 근거 경로 · 히스토리의 매매 하나가 함께 쓴다.
 pub(crate) mod card;
 // (51차) 하루 AI 잔량 · 논의 진행 단계.

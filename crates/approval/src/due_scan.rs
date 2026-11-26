@@ -12,9 +12,7 @@
 //! 새 바닥은 `top + 1`, 2번, 3번에서 처리 기록이 없는 것의 번호 가운데 가장 작은 것이다. 1 → 2 → 3 차례라
 //! 그 사이에 닫힌 요청은 2번(기다림이었다)이나 3번(이미 닫혔다)에 잡힌다.
 
-use pi_store::{
-    ApprovalLine, ApprovalStatus, HISTORY_PAGE_MAX, Store, StoreError, UnixMillis,
-};
+use pi_store::{ApprovalLine, ApprovalStatus, HISTORY_PAGE_MAX, Store, StoreError, UnixMillis};
 use serde_json::Value;
 
 use crate::approvals::ApprovalNumber;

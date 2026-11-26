@@ -26,13 +26,13 @@ mod due;
 mod effect;
 mod http;
 mod link;
+mod live_block;
 mod marks;
 #[cfg(test)]
 mod money_safety;
 mod order;
 mod promote;
 mod promote_turn;
-mod live_block;
 mod retry;
 mod rules_config;
 mod rules_config_http;
