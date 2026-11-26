@@ -83,8 +83,13 @@ test("공지를 보내면 공지 띠와 담당 여섯의 확인이 답함이 된
 test("부르기를 누르면 그 담당의 1:1 대화가 열린다", async ({ page }) => {
   await openOffice(page);
   await expect(page.locator('#chat-tabs [role="tab"][aria-selected="true"]')).toHaveText(/^팀 방/);
-  await page.locator('button.summon[data-agent="strategy"]').click();
-  // 담당이 내 곁까지 걸어온 뒤 1:1 대화를 연다(summon-scene).
+  // 대조(기능 H 1번): 팀 방 탭 줄에는 부르기 단추가 없다 — 전략 탭을 고른 뒤 탭 줄 끝의 "전략 부르기"를 누른다.
+  await expect(page.locator("#chat-tabs button.summon")).toHaveCount(0);
+  await page.locator('#chat-tabs [role="tab"]', { hasText: /^전략/ }).click();
+  const arrived = page.waitForRequest((r) => r.url().endsWith("/api/office/summon/arrived"), { timeout: 40_000 });
+  await page.locator("#chat-tabs").getByRole("button", { name: "전략 부르기" }).click();
+  // 담당이 내 곁까지 걸어온 뒤 도착을 알리고 1:1 대화를 연다(summon-scene).
+  await arrived;
   await expect(page.locator('#chat-tabs [role="tab"][aria-selected="true"]')).toHaveText(/^전략/, { timeout: 40_000 });
   await expect(page.locator("#chat-input")).toBeVisible();
 });
