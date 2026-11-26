@@ -4,9 +4,16 @@
 mod common;
 
 use common::{t, temp_store};
-use pi_store::{ChunkId, KnowledgeKind, KnowledgeSource, NewKnowledgeRecord, SCHEMA_VERSION, Store};
+use pi_store::{
+    ChunkId, KnowledgeKind, KnowledgeSource, NewKnowledgeRecord, SCHEMA_VERSION, Store,
+};
 
-fn record(kind: KnowledgeKind, source: KnowledgeSource, key: &str, chunks: &[&str]) -> NewKnowledgeRecord {
+fn record(
+    kind: KnowledgeKind,
+    source: KnowledgeSource,
+    key: &str,
+    chunks: &[&str],
+) -> NewKnowledgeRecord {
     NewKnowledgeRecord {
         kind,
         source,
@@ -19,10 +26,20 @@ fn record(kind: KnowledgeKind, source: KnowledgeSource, key: &str, chunks: &[&st
 /// 조각 넷: 매매(f32 · 모델 m) · 복기(q8 · 모델 m) · 바깥 자료(q8 · 모델 다른 것) · 실수(임베딩 없음).
 fn seeded(store: &Store) -> Vec<ChunkId> {
     let trade = store
-        .index_record(record(KnowledgeKind::Trade, KnowledgeSource::Team, "T-1", &["삼성전자 매수"]))
+        .index_record(record(
+            KnowledgeKind::Trade,
+            KnowledgeSource::Team,
+            "T-1",
+            &["삼성전자 매수"],
+        ))
         .unwrap()[0];
     let review = store
-        .index_record(record(KnowledgeKind::Review, KnowledgeSource::Mine, "T-1", &["손절 늦음"]))
+        .index_record(record(
+            KnowledgeKind::Review,
+            KnowledgeSource::Mine,
+            "T-1",
+            &["손절 늦음"],
+        ))
         .unwrap()[0];
     let external = store
         .index_record(record(
@@ -33,7 +50,12 @@ fn seeded(store: &Store) -> Vec<ChunkId> {
         ))
         .unwrap()[0];
     let mistake = store
-        .index_record(record(KnowledgeKind::Mistake, KnowledgeSource::Team, "T-1", &["실수 late_stop"]))
+        .index_record(record(
+            KnowledgeKind::Mistake,
+            KnowledgeSource::Team,
+            "T-1",
+            &["실수 late_stop"],
+        ))
         .unwrap()[0];
     store
         .set_chunk_embedding(trade, "m", 1, &1.0_f32.to_le_bytes())
@@ -88,7 +110,9 @@ fn 쪽을_넘겨_끝까지_읽고_개수_0이면_빈_목록이다() {
     let first = store.chunk_vectors("m", None, 1).unwrap();
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].chunk.id, ids[0]);
-    let second = store.chunk_vectors("m", Some(first[0].chunk.id), 1).unwrap();
+    let second = store
+        .chunk_vectors("m", Some(first[0].chunk.id), 1)
+        .unwrap();
     assert_eq!(second.len(), 1);
     assert_eq!(second[0].chunk.id, ids[1]);
     assert!(
@@ -106,7 +130,12 @@ fn 기록을_다시_올려_조각이_바뀌면_옛_벡터는_나오지_않고_�
     let (_dir, _path, store) = temp_store();
     seeded(&store);
     store
-        .index_record(record(KnowledgeKind::Review, KnowledgeSource::Mine, "T-1", &["손절 기준 바꿈"]))
+        .index_record(record(
+            KnowledgeKind::Review,
+            KnowledgeSource::Mine,
+            "T-1",
+            &["손절 기준 바꿈"],
+        ))
         .unwrap();
     let found = store.chunk_vectors("m", None, 10).unwrap();
     assert_eq!(found.len(), 1, "바뀐 복기의 옛 임베딩은 함께 지워졌다");
