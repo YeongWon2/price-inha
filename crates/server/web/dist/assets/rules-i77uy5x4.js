@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/config-panel-c5kcv5g8.js","assets/menu-n8p14elz.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
-import { n as API, t as mountMenu } from "./menu-n8p14elz.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/config-panel-la7rztgw.js","assets/menu-g4dweas1.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
+import { n as API, t as mountMenu } from "./menu-g4dweas1.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
@@ -285,7 +285,7 @@ var RulesScreen = class {
 			this.configSlot.replaceChildren(loading());
 			try {
 				const { ConfigPanel } = await __vitePreload(async () => {
-					const { ConfigPanel } = await import("./config-panel-c5kcv5g8.js");
+					const { ConfigPanel } = await import("./config-panel-la7rztgw.js");
 					return { ConfigPanel };
 				}, __vite__mapDeps([0,1,2,3,4,5,6]));
 				this.config ??= new ConfigPanel();

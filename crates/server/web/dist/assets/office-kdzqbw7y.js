@@ -1,6 +1,6 @@
-import { a as approvalPath, c as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-n8p14elz.js";
+import { a as approvalPath, c as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-g4dweas1.js";
 import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
-import { n as soundEnabled } from "./sound-pref-o69137ml.js";
+import { n as soundEnabled } from "./sound-pref-l2lvmzqx.js";
 import { i as readBasisCard } from "./basis-card-f0d1wup9.js";
 import { n as renderBasisCard } from "./basis-card-view-dxesydpj.js";
 import { i as readMemoList, r as pendingCount, t as cardMemos } from "./memo-model-pzip3mr0.js";
@@ -2517,10 +2517,6 @@ function createSummonScene(options) {
 	};
 }
 // src/office/summon-tab.ts
-/** 팀 방 담당 탭 뒤의 작은 부르기 아이콘 글. */
-var SUMMON_ICON = "📣";
-/** 아이콘 단추의 class(부르기 단추 class에 더한다). */
-var ICON_CLASS = "summon-icon";
 /** 팀 방 대화 키. */
 var ROOM_TEAM$1 = "team";
 /** "○○ 부르기". */
@@ -2528,29 +2524,16 @@ function summonLabel(name) {
 	return `${name} 부르기`;
 }
 /**
-* `tabs`(탭 줄: `keys` 순서의 탭 단추들)에 부르기 단추를 단다. 앞서 단 부르기 단추는 먼저 뗀다.
-* `conversation`이 담당이면 끝에 그 담당 단추 하나, 팀 방이면 담당 탭마다 아이콘 단추.
+* `tabs`(탭 줄)에 부르기 단추를 단다. 앞서 단 부르기 단추는 먼저 뗀다.
+* `conversation`이 담당이면 끝에 그 담당 단추 하나, 팀 방이면 아무것도 달지 않는다.
+* `_keys`(탭 순서)는 부르는 쪽(main.ts)과의 약속으로 받아만 둔다.
 */
-function placeSummons(tabs, keys, conversation, nameOf, onSummon) {
+function placeSummons(tabs, _keys, conversation, nameOf, onSummon) {
 	for (const old of tabs.querySelectorAll(`button.${SUMMON_BUTTON_CLASS}`)) old.remove();
-	if (conversation !== ROOM_TEAM$1) {
-		const button = summonButton(conversation, onSummon);
-		button.textContent = summonLabel(nameOf(conversation));
-		tabs.append(button);
-		return;
-	}
-	const tabList = [...tabs.querySelectorAll("[role=\"tab\"]")];
-	keys.forEach((key, index) => {
-		const tab = tabList[index];
-		if (key === ROOM_TEAM$1 || !tab) return;
-		const button = summonButton(key, onSummon);
-		const label = summonLabel(nameOf(key));
-		button.classList.add(ICON_CLASS);
-		button.textContent = SUMMON_ICON;
-		button.title = label;
-		button.setAttribute("aria-label", label);
-		tab.after(button);
-	});
+	if (conversation === ROOM_TEAM$1) return;
+	const button = summonButton(conversation, onSummon);
+	button.textContent = summonLabel(nameOf(conversation));
+	tabs.append(button);
 }
 // src/office/mention-editor.ts
 /** 칩의 class. */
@@ -4605,7 +4588,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-s5r1b0vt.js");
+		const { webglAvailable, createScene } = await import("./scene3d-in0y0lvj.js");
 		return {
 			webglAvailable,
 			createScene

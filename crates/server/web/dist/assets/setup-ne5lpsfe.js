@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-n8p14elz.js";
+import { n as API, t as mountMenu } from "./menu-g4dweas1.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-o69137ml.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-l2lvmzqx.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -615,6 +615,196 @@ async function mountNotify(root) {
 	const settings = await readSettings();
 	root.replaceChildren(settings === null ? failedBlock$1() : notifyBlock(settings));
 }
+// src/setup/models-view.ts
+/** "직접 입력" 고르기의 값. */
+var MODEL_CUSTOM = "__custom__";
+/** "직접 입력" 고르기의 글. */
+var MODEL_CUSTOM_LABEL = "직접 입력";
+/** 비용 안내. */
+var MODELS_COST_NOTE = "비싼 모델은 하루 AI 호출 상한과 비용에 영향을 줍니다.";
+/** 언제 쓰이나 안내. */
+var MODELS_APPLY_NOTE = "바꾼 모델은 다시 켜지 않아도 다음 AI 턴부터 쓰입니다. 도는 논의는 시작할 때의 모델로 끝납니다.";
+/** 다른 기기 안내. */
+var MODELS_REMOTE_NOTE = "담당 모델은 이 컴퓨터에서만 바꿀 수 있습니다.";
+/** 저장 안내. */
+var MODELS_SAVED = "저장했습니다. 다음 AI 턴부터 쓰입니다.";
+/** 바꾸기 실패 까닭 → 화면 글. */
+var MODELS_ERRORS = {
+	invalid_input: "모델 이름은 영문 소문자 · 숫자 · '-' · '.'로 쓰고, 첫 글자는 영문이나 숫자, 64자까지입니다.",
+	local_only: MODELS_REMOTE_NOTE
+};
+/** 객체면 그대로, 아니면 빈 객체. */
+function record$1(value) {
+	return value !== null && typeof value === "object" ? value : {};
+}
+/** 칸 넷이 모두 글자인 줄들만. */
+function strings(list, keys) {
+	if (!Array.isArray(list)) return [];
+	return list.map(record$1).filter((row) => keys.every((key) => typeof row[key] === "string"));
+}
+/** 답이 고르기 표 모양이면 그 값. */
+function modelsReplyOf(value) {
+	const body = record$1(value);
+	if (!Array.isArray(body.roles) || typeof body.editable !== "boolean") return null;
+	const roles = strings(body.roles, [
+		"agent",
+		"name",
+		"model",
+		"default"
+	]);
+	if (roles.length === 0) return null;
+	return {
+		roles,
+		choices: strings(body.choices, [
+			"id",
+			"label",
+			"note"
+		]),
+		editable: body.editable
+	};
+}
+/** 바꾸기 실패 까닭 → 화면 글. */
+function errorText(status, body) {
+	const reason = record$1(body).error;
+	if (status === 403) return MODELS_REMOTE_NOTE;
+	if (typeof reason === "string" && MODELS_ERRORS[reason]) return MODELS_ERRORS[reason];
+	return LOAD_FAILED;
+}
+/** 고르기 · 직접 입력 칸을 그 모델로 맞춘다(목록에 없으면 직접 입력). */
+function show(inputs, model, choices) {
+	const listed = choices.some((choice) => choice.id === model);
+	inputs.pick.value = listed ? model : MODEL_CUSTOM;
+	inputs.typed.value = listed ? "" : model;
+	inputs.typed.hidden = listed;
+}
+/** 한 담당의 고르기 · 직접 입력 칸을 만든다. */
+function rowInputs(row, choices, editable) {
+	const pick = el("select", "ui-input");
+	pick.name = `model-${row.agent}`;
+	pick.setAttribute("aria-label", `${row.name} 모델`);
+	for (const choice of choices) {
+		const option = el("option", "", `${choice.label} — ${choice.note}`);
+		option.value = choice.id;
+		pick.append(option);
+	}
+	const custom = el("option", "", MODEL_CUSTOM_LABEL);
+	custom.value = MODEL_CUSTOM;
+	pick.append(custom);
+	const typed = el("input", "ui-input");
+	typed.name = `model-custom-${row.agent}`;
+	typed.setAttribute("aria-label", `${row.name} 모델 직접 입력`);
+	pick.disabled = !editable;
+	typed.disabled = !editable;
+	const inputs = {
+		agent: row.agent,
+		pick,
+		typed
+	};
+	show(inputs, row.model, choices);
+	pick.addEventListener("change", () => {
+		typed.hidden = pick.value !== MODEL_CUSTOM;
+		if (!typed.hidden) typed.focus();
+	});
+	return inputs;
+}
+/** 고른 값(직접 입력이면 앞뒤 공백을 뗀 칸 값). */
+function picked(inputs) {
+	return inputs.pick.value === "__custom__" ? inputs.typed.value.trim() : inputs.pick.value;
+}
+/** 담당 줄 표와 줄마다의 입력 칸. */
+function rowsTable(reply) {
+	const grid = table([
+		"담당",
+		"모델",
+		"직접 입력",
+		"기본값"
+	], reply.roles.map((row) => [
+		row.name,
+		"",
+		"",
+		row.default
+	]));
+	const lines = grid.tBodies[0]?.rows ?? [];
+	return {
+		grid,
+		inputs: reply.roles.map((row, index) => {
+			const made = rowInputs(row, reply.choices, reply.editable);
+			const tr = lines[index];
+			if (tr) {
+				tr.dataset.agent = row.agent;
+				tr.cells[1]?.append(made.pick);
+				tr.cells[2]?.append(made.typed);
+			}
+			return made;
+		})
+	};
+}
+/** 고르기 표를 그린다(`data-role="models"`). 저장 · 되돌리기는 이 자리 안에서 다시 그린다. */
+function modelsTable(initial) {
+	let current = initial;
+	const wrap = el("div", "setup-extra-wrap");
+	const result = el("div", "setup-extra-message");
+	result.dataset.role = "models-result";
+	result.setAttribute("aria-live", "polite");
+	let inputs = [];
+	const paint = () => {
+		const made = rowsTable(current);
+		inputs = made.inputs;
+		wrap.replaceChildren(made.grid);
+	};
+	const notes = [el("p", "hint", MODELS_COST_NOTE), el("p", "hint", MODELS_APPLY_NOTE)];
+	const node = card("담당 모델", wrap, ...notes);
+	node.dataset.role = "models";
+	node.classList.add("setup-extra");
+	paint();
+	if (!current.editable) {
+		node.append(el("p", "hint", MODELS_REMOTE_NOTE));
+		return node;
+	}
+	const save = button("저장", "accent");
+	save.dataset.action = "save-models";
+	const reset = button("기본값으로 되돌리기");
+	reset.dataset.action = "reset-models";
+	const send = (roles) => {
+		save.disabled = true;
+		reset.disabled = true;
+		result.replaceChildren();
+		call("POST", API.setupModels, { roles }).then((reply) => {
+			const next = reply.ok ? modelsReplyOf(reply.body) : null;
+			if (!next) return result.replaceChildren(errorLine(errorText(reply.status, reply.body)));
+			current = next;
+			paint();
+			result.replaceChildren(el("p", "hint", MODELS_SAVED));
+		}).catch(() => result.replaceChildren(errorLine(LOAD_FAILED))).finally(() => {
+			save.disabled = false;
+			reset.disabled = false;
+		});
+	};
+	save.addEventListener("click", () => send(inputs.map((row) => ({
+		agent: row.agent,
+		model: picked(row)
+	}))));
+	reset.addEventListener("click", () => send(current.roles.map((row) => ({
+		agent: row.agent,
+		model: row.default
+	}))));
+	const actions = el("div", "setup-extra-actions");
+	actions.append(save, reset);
+	node.append(actions, result);
+	return node;
+}
+/**
+* 고르기 표를 읽어 `root` 안의 보기 줄(`[data-role="models"]`)을 표로 바꾼다. 읽지 못하거나 모양이 다르면 보기 줄
+* 그대로다. 던지지 않는다.
+*/
+async function upgradeModels(root) {
+	try {
+		const reply = await call("GET", API.setupModels);
+		const models = reply.ok ? modelsReplyOf(reply.body) : null;
+		const line = root.querySelector("[data-role=\"models\"]");
+		if (models && line) line.replaceWith(modelsTable(models));
+	} catch {}
+}
 // src/setup/extras.ts
 /** 시장 글자 → 화면 이름. */
 var MARKET_LABELS = {
@@ -632,8 +822,8 @@ var AGENT_LABELS = {
 	trader: "매매",
 	leader: "팀장"
 };
-/** 모델 줄의 안내(보기만). */
-var MODELS_NOTE = "담당 모델은 지금 보기만 합니다. 바꾸는 길은 아직 없습니다.";
+/** 모델 줄의 안내(고르기 표를 읽기 전 · 읽지 못했을 때의 보기 줄). */
+var MODELS_NOTE = "지금 쓰는 담당 모델입니다. 고르기 표를 읽으면 이 자리에서 바꿀 수 있습니다.";
 /** 모델 목록이 비었을 때(팀을 잇지 않은 서버). */
 var MODELS_NONE = "팀이 이어져 있지 않아 쓰는 모델이 없습니다.";
 /** 뜻 검색 주소 안내. */
@@ -903,6 +1093,7 @@ async function mountSetupExtras(root) {
 		swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
 		swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
 	});
+	const models = status.then(() => upgradeModels(root));
 	const semantic = read(API.setupSemantic).then((body) => {
 		const settings = semanticOf(body);
 		swap(slots.semantic, settings === null ? failedBlock("semantic", titles.semantic) : semanticCard(settings));
@@ -923,6 +1114,7 @@ async function mountSetupExtras(root) {
 		messenger,
 		notify
 	]);
+	await models;
 }
 // src/setup/main.ts
 mountMenu(document.getElementById("menu"), "setup");

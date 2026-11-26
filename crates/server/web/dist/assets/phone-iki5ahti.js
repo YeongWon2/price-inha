@@ -1,4 +1,4 @@
-import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-n8p14elz.js";
+import { a as approvalPath, i as SCREEN_ROOTS, n as API, o as decidePath, t as mountMenu } from "./menu-g4dweas1.js";
 import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
 // src/phone/main.ts
 mountMenu(document.getElementById("menu"), "phone");

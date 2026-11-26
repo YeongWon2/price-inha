@@ -79,3 +79,5 @@
 .setup-extra-check { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: var(--space-2); }
 /* (다듬기 E 5번) 진단 표의 긴 "본 것" · "할 일"은 줄바꿈한다(가로 스크롤 대신). */
 td.setup-diag-text { white-space: normal; overflow-wrap: anywhere; min-width: 12em; }
+/* (57차) 담당 모델 고르기 표의 단추 줄. */
+.setup-extra-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }

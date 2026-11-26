@@ -1,5 +1,33 @@
-import { n as API, t as mountMenu } from "./menu-n8p14elz.js";
+import { n as API, t as mountMenu } from "./menu-g4dweas1.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
+// src/keys/session.ts
+/** 세션이 없을 때의 HTTP 상태. */
+var NO_SESSION = 401;
+/** 주소 이름이 그 컴퓨터(루프백)인가: `localhost` · `127.x.x.x` · `::1`(대괄호 포함). */
+function isLoopbackHost(host) {
+	const name = host.toLowerCase();
+	if (name === "localhost" || name === "::1" || name === "[::1]") return true;
+	const parts = name.split(".");
+	return parts.length === 4 && parts[0] === "127" && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+/** 세션을 쓸 수 있게 됐는지 돌려준다(이미 있었거나 그 컴퓨터라 새로 얻었으면 참). 실패해도 던지지 않는다. */
+async function ensureKeysSession(fetcher, host) {
+	try {
+		const probe = await fetcher(API.setupSlots, {
+			credentials: "same-origin",
+			cache: "no-store"
+		});
+		if (probe.ok) return true;
+		if (probe.status !== NO_SESSION || !isLoopbackHost(host)) return false;
+		return (await fetcher(API.session, {
+			method: "POST",
+			credentials: "same-origin",
+			cache: "no-store"
+		})).ok;
+	} catch {
+		return false;
+	}
+}
 // src/keys/main.ts
 mountMenu(document.getElementById("menu"), "keys");
 var SLOT_FIELDS = {
@@ -131,4 +159,4 @@ Object.keys(SLOT_FIELDS).forEach((item) => {
 	fields[SLOT_FIELDS[item]] = "k-slot-" + item;
 	wire("k-slot-" + item + "-button", "k-slot-" + item + "-msg", item, fields);
 });
-loadSlots();
+ensureKeysSession((path, init) => fetch(path, init), location.hostname).then(loadSlots);
