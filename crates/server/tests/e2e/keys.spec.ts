@@ -7,6 +7,6 @@ test("키 화면을 세션 없이 바로 열면 화면이 세션을 얻고 등�
   const opened = await page.goto("/keys");
   expect(opened?.status(), "세션 없이 키 화면이 열린다").toBe(200);
   await expect(page.getByRole("heading", { name: "키 등록" })).toBeVisible();
-  expect((await session).status(), "화면이 세션을 얻는다").toBe(200);
+  expect((await session).ok(), "화면이 세션을 얻는다(세션 경로는 204로 답한다)").toBe(true);
   await expect(page.locator("#k-slot-dart-reg")).toHaveText(/^\(등록(됨| 안 됨)\)$/);
 });
