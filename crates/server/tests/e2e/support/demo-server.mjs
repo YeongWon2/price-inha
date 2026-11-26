@@ -3,7 +3,8 @@
 // - AI · 증권사 키처럼 보이는 환경 변수는 넘기지 않는다(ANTHROPIC_API_KEY 등). 시연 모드는 가짜 시세 · 가짜 AI · 모의계좌다.
 // - 바깥 요청 기록: 서버의 HTTP(S)_PROXY 를 이 프로세스의 기록용 프록시로 돌려, 루프백 밖으로 나가려던 요청을
 //   (프록시 설정을 따르는 HTTP 클라이언트라면) 막고 적는다. 하나라도 있으면 끝낼 때 실패로 알린다.
-// - 끝나면 서버를 끄고 임시 폴더를 지운다. 서버 로그는 저장소 밖 임시 폴더(price-inha-e2e-server.log)에 남긴다.
+// - 끝나면 서버를 끄고 임시 폴더를 지운다. 서버 로그는 실행마다 따로 쓰는 저장소 밖 임시 폴더
+//   (PI_E2E_RUN_DIR/server.log — 통과하면 support/run-dir.mjs 가 지우고, 실패하면 남겨 경로를 알린다)에 남긴다.
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
@@ -122,7 +123,9 @@ export default async function globalSetup() {
     }
     proxy.close();
     try {
-      copyFileSync(log, path.join(os.tmpdir(), "price-inha-e2e-server.log"));
+      // 실행마다 따로 쓰는 폴더(playwright.config.mjs 의 PI_E2E_RUN_DIR — 기능 H 3번)에 남긴다.
+      const runDir = process.env.PI_E2E_RUN_DIR ?? mkdtempSync(path.join(os.tmpdir(), "price-inha-e2e-"));
+      copyFileSync(log, path.join(runDir, "server.log"));
     } catch {
       // 로그를 못 남겨도 시험 결과와는 무관
     }

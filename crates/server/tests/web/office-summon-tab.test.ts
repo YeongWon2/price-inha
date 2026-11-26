@@ -1,11 +1,11 @@
 // 다듬기 E 3번: 담당 탭 줄의 "부르기". 1:1 담당 탭을 고르면 탭 줄 오른쪽 끝에 "○○ 부르기" 단추 하나만 둔다.
-// 팀 방에서는 글 단추를 두지 않고 담당 탭마다 작은 아이콘 단추(`.summon-icon`, 이름은 aria-label)만 붙인다 — 잠긴 e2e
-// "부르기를 누르면 그 담당의 1:1 대화가 열린다"가 팀 방에서 `button.summon[data-agent]`를 누르기 때문이다.
+// 팀 방에서는 부르기 단추 · 아이콘을 두지 않는다(기능 H 1번 대조 — 예전에는 잠긴 e2e가 팀 방에서 아이콘을 눌러
+// 담당 탭마다 작은 아이콘을 붙였다. e2e는 이제 담당 탭을 고른 뒤 "○○ 부르기"를 누른다).
 // 가벼운 화면 목록의 부르기 단추(`summonButton`, 글 "부르기")는 그대로다.
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { SUMMON_BUTTON, SUMMON_BUTTON_CLASS, summonButton } from "../../web/src/office/summon-view";
-import { SUMMON_ICON, placeSummons, summonLabel } from "../../web/src/office/summon-tab";
+import { placeSummons, summonLabel } from "../../web/src/office/summon-tab";
 
 const AGENTS = ["scout", "strategy", "risk", "review", "trader", "leader"];
 const NAMES: Record<string, string> = {
@@ -50,22 +50,11 @@ describe("담당 탭 줄의 부르기", () => {
   });
 
   it("팀 방에서는 글 단추 없이 담당 탭마다 작은 아이콘 단추만 탭 바로 뒤에 붙인다", () => {
+    // 대조(기능 H 1번): 팀 방 탭 줄에는 부르기 단추 · 아이콘을 아예 그리지 않는다(e2e가 담당 탭을 먼저 고른다).
     const tabs = tabRow();
-    const called: string[] = [];
-    placeSummons(tabs, ["team", ...AGENTS], "team", nameOf, (agent) => called.push(agent));
-    const buttons = summons(tabs);
-    expect(buttons.map((b) => b.dataset.agent)).toEqual(AGENTS);
-    for (const button of buttons) {
-      const agent = button.dataset.agent ?? "";
-      expect(button.classList.contains("summon-icon")).toBe(true);
-      expect(button.textContent).toBe(SUMMON_ICON);
-      expect(button.textContent).not.toContain(SUMMON_BUTTON);
-      expect(button.getAttribute("aria-label")).toBe(summonLabel(nameOf(agent)));
-      expect(button.title).toBe(summonLabel(nameOf(agent)));
-      expect(button.previousElementSibling?.textContent, "자기 탭 바로 뒤").toBe(nameOf(agent));
-    }
-    buttons[1].click();
-    expect(called).toEqual(["strategy"]);
+    placeSummons(tabs, ["team", ...AGENTS], "team", nameOf, () => undefined);
+    expect(summons(tabs)).toHaveLength(0);
+    expect(tabs.querySelectorAll(".summon-icon")).toHaveLength(0);
   });
 
   it("다시 그리면 앞서 붙인 부르기 단추를 남기지 않는다", () => {
