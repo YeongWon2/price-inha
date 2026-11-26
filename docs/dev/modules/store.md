@@ -356,3 +356,22 @@ server 21차 1번(실전중 템플릿의 위험을 키우는 사용자 변경은
 | 모든 사유(`TeamCause`)의 목록 · 개수 · 저장 글자를 정확히 비교하는 단언 | 고침 | 지시서 20차 1번: 사유 하나가 는다 — 그 하나만 더한다 |
 | 저장소 판 번호를 정확히 보는 단언 | 고침 | 지시서 20차 4번: 판을 올렸을 때만, 새 판 번호로 |
 | 그 밖의 store 시험 | 유지 | 다른 전이 · 다른 표는 그대로 |
+
+## 21차 작업 (2026-11-27 조정자, 결정 31 — 사용자 "경량화 작업도 해야 해" · "노이즈는 최대한 제거하고 가져갈 규칙 기억들만 쌓는다")
+
+동작 잠금 차수다. 별도 작업 폴더(기능 M, 결정 28 방식)에서 red → green으로 만든 판 12를 main에 합쳤고, 이 차수는 합친 구현에서 시험이 모두 통과하는지 보고 잠근다.
+
+1. **판 12**: `archive_batches`(쌓기만, `UNIQUE(category, period)`)를 더하고, `events_no_delete` · `room_events_no_delete`를 "보관 묶음이 덮는 줄(묶음의 종류 · 기간 · rowid 이하)만 지울 수 있는" 좁은 길로 다시 만든다. 표의 마지막 줄과 시각 없는 줄, 묶음 밖의 줄은 지금처럼 막힌다. 그 밖의 지울 수 없는 표(access_log · team_history · 감사 표)는 그대로다.
+2. `archive_export` / `archive_commit`(같은 묶음을 다시 골라 줄 수 · 지문이 맞을 때만 묶음 줄을 남기고 지운다) · `storage_usage` / `measure_file`(읽기 전용) · `reclaim_space`(incremental vacuum, 판 12 전 파일은 처음 한 번 VACUUM) · `knowledge_embeddings_q8` · `set_chunk_embedding_q8` · `knowledge_chunks_older`.
+
+- 원본 동작 근거: `docs/research/openclaw.md` 3.4(오래된 대화를 요약으로 바꾸고 원문은 따로) · 3.6(기억은 요약, 원문 기록 아님). 감사 기록을 지우지 않는 것과 좁은 지우기 길은 결정 31(우리 것).
+- 시험으로 확인할 것: 판 11 → 12 이전, 좁은 길만 되고 그 밖은 막힘, 감사 표는 안 지워짐, 보관 · 확인 · 지우기, 쓰임 재기, q8 임베딩 저장.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 `crates/store/tests/round21.rs` · `tests/fixtures/v11.db` | 고침 | 기능 M의 새 시험. `옛_파일에서도_보관하지_않은_줄은_sql로_지울_수_없다`의 `access_log` · `team_history` 두 줄은 시험 결함 — 판 11 시험 파일에서 두 표가 비어 있어 `DELETE`가 오류 없이 지나간다(막힘은 지운 줄이 있을 때 걸리는 트리거). 두 줄을 빼고 `events` · `room_events` 단언은 그대로 둔다(두 표의 막힘은 `schema_v4.rs` · round10이 이미 본다) |
+| `migrate.rs` · `round9_migrate.rs` · `round10.rs` · `round11.rs` · `round12_schema.rs` · `round13.rs` · `round15.rs` · `round18.rs` · `round19.rs` · `round20.rs` | 고침 | 판 번호 11 → 12만(판 올림이 이 차수의 목적, 결정 31) |
+| `schema_v4.rs`의 "보호 트리거는 버전 2 때의 것이 모두 남아 있다(글자까지 같다)" | 고침 | 판 12가 `events_no_delete` · `room_events_no_delete`를 좁은 지우기 길로 다시 만드는 것이 결정 31의 목적이라 그 둘은 글자가 바뀐다. 그 둘은 이름이 남아 있는지만 보고, 그 밖의 보호 트리거는 지금처럼 글자까지 본다. 바로 위의 "보호가 그대로 막는다"(`DELETE FROM events` 오류) 단언은 그대로 |
+| 그 밖의 store 시험 | 유지 | 동작이 바뀌지 않는다 |
