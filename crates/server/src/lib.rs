@@ -60,6 +60,7 @@ pub use cli::{
 pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,
 };
+pub use demo::demo_symbols;
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,

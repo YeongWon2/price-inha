@@ -104,6 +104,13 @@ pub(crate) fn demo_symbol(market: Market) -> Symbol {
     }
 }
 
+/// (다듬기 E 1번) 키도 종목도 없는 시연(실행 파일의 `--demo` 조립)이 지켜보는 시연용 기본 종목. 첫째는
+/// [`demo_symbol`]이다. 조립 값일 뿐 보관 폴더에 쓰지 않는다(E56). 설정 상태의 출처는 `"demo"`.
+pub fn demo_symbols(market: Market) -> Vec<Symbol> {
+    let _ = market;
+    todo!()
+}
+
 /// (24차 3번) 시연용 가짜 공시를 내는 간격의 기본값(실행 파일의 `--demo` 조립, 3분).
 pub const DEMO_DISCLOSURE_EVERY: Duration = Duration::from_secs(180);
 
