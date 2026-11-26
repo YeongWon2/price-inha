@@ -1378,3 +1378,29 @@ office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_
 | `round54/wrap.rs`의 `상한_10이면_첫_논의가_정리_모드로_넘어가고_…` | 고침 | 시험 결함. 정리 모드는 "새 라운드를 열기 전에 남은 호출이 문턱 이하"일 때 든다(N14 · agent `wrap_up_due`). 상한 10에서 첫 논의는 턴 6개쯤으로 끝나 남은 호출이 문턱(4)보다 많다 — 첫 논의에서 정리 모드가 들 수 없다. 문턱에 닿을 때까지 논의를 이어 열어 정리 모드가 드는 것과 쓴 수 · 예비분 단언을 본다(단언은 그대로) |
 | `round57/common.rs`의 `Asked.last` 칸 | 고침 | 시험 결함(모양). 어디서도 읽지 않는 칸이라 clippy(테스트)가 막는다 — 칸만 지운다 |
 | 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다(합친 구현에서 모두 통과해야 한다) |
+
+## 44차 별도 작업 폴더의 기능 셋(K 모이기 · L 팀 지침 · M 경량화)을 합쳐 잠근다 (2026-11-27 조정자, 결정 29 · 30 · 31 · 28)
+
+동작 잠금 차수다. 기능 셋을 별도 작업 폴더에서 red → green으로 만들고 조정자가 main에 합쳤다. 이 차수는 합친 결과가 모든 시험을 통과하는지 보고 새 시험을 잠근다(같은 날 office 7차 · journal 7차 · agent 12차 · store 21차 · knowledge 5차 · backup 5차를 먼저 잠갔다).
+
+| 기능 | 무엇 | 근거 | 새 시험 |
+|---|---|---|---|
+| K | 멘션하면 멘션된 담당 모두가 글을 보내는 순간 곧바로 내 곁으로 온다(팀 방 글 · 메신저 팀 방 글 · 답 속 이어 말하기 — `reach/office_gather.rs`, 답 턴 시작 때 부르던 길은 지움). 담당을 누르거나 목록 · 탭 · 3D · `/`로 1:1을 열면 대화가 곧바로 열리고 그 담당이 내 곁으로 온다(내 캐릭터는 걷지 않는다, `/`는 모든 담당이 가까운 순 후보). 여럿이 오면 내 둘레 빈 칸을 맨해튼 고리 1 → 2 → 3 차례로 하나씩 나눠 준다(`web/src/office/gather.ts`). 윈도 교차 빌드 경고 둘 정리 | 결정 29 · F10 | `round59/` · vitest `office-gather` · e2e `office-gather` |
+| L | 2층 팀 지침: 장부 `team-guidelines.json`(0600) · 논의를 열 때 판단 글에 상한 안의 지침 블록 · 쓰임 기록 · 하루 정리 때 성적 · 승격 · 회고 · `guideline` 이벤트 · `GET /api/guidelines` · `POST /api/guidelines/{id}/retire`(그 컴퓨터만) · 규칙 화면 "팀 지침(AI가 배운 것)" 묶음 | 결정 30 | `round60/` · vitest `rules-guidelines` · e2e `guidelines` |
+| M | 기록 쓰임 재기(`GET /api/setup/storage` · doctor · 설정 진단 `storage` 줄) · 보관 기간(`--archive-keep-days`, 기본 90일)이 지난 팀 방 대화 · 화면 이벤트 · AI 사용 세부 · 바깥 자료 조각을 주 단위 `archive/<종류>-<YYYY-Www>.jsonl`(0600)과 요약 한 행으로 바꾸고, 파일의 줄 수 · SHA-256을 확인한 뒤에만 DB에서 지운다(하루 한 번 16시 뒤) | 결정 31 | `round61/` · vitest `setup-storage` |
+
+합치며 맞춘 것: 화면 빌드 결과 다시 만들기. 남은 문제는 `docs/dev/backlog.md`(보관 파일 gzip 없음 · 모의계좌 스냅샷이 기록량의 대부분 · 메신저 팀 방 글 모이기의 직접 시험 없음 · 지침 성적의 서버 끝 시험 없음 등).
+
+- 원본 동작 근거: K — `docs/research/office-deep.md` · `agent-office-refs.md`(부르기 · 길 찾기), 모이는 때는 결정 29(사용자). L — `docs/research/hermes-agent.md` 3.6 · `docs/research/openclaw.md` 3.6(기억 글자 상한 · 정해진 자리 · 기억은 정책을 강제하지 않는다), 두 층은 결정 30(사용자). M — `docs/research/openclaw.md` 3.4 · 3.6(오래된 대화는 요약으로, 원문은 따로), 결정 31.
+- 시험으로 확인할 것: 위 표의 새 시험과 기존 시험이 합친 구현에서 모두 통과한다(동작 잠금).
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 `round59/` · `round60/` · `round61/`, vitest `office-gather` · `rules-guidelines` · `setup-storage`, e2e `office-gather.spec.ts` · `guidelines.spec.ts` | 유지 | 기능 K · L · M의 새 시험(작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과) |
+| `round61/measure.rs`의 `진단은_저장소_뒤에_기록_줄을_늘_문제_아님으로_낸다` | 고침 | 시험 결함. 진단 줄의 순서는 잠긴 기존 시험이 정한다(round16 앞부분 `Home · Database · Keys · Address · AccessKey · Service`, round22 끝 `Ollama · AiDailyLimit`) — 기록 줄은 Database 바로 뒤에 올 수 없고 백업 줄 뒤에 둔다. 순서 단언을 "Backup 바로 뒤"로 바꾸고 나머지 단언은 그대로 |
+| `web/office-player-nearby.test.ts`("멀면 그 담당 옆 빈 칸까지 걸어간다" · "갈 수 있는 옆 칸이 없으면 아무 일 없다") · `web/office-summon.test.ts`("곁에 빈 칸이 없으면 그 자리에 선다") · `e2e/office.spec.ts`(부르기 → 1:1) | 고침 | 결정 29: 말을 걸면 내 캐릭터가 걷지 않고 담당이 온다(`walk` → `come`), 올 수 없어도 대화는 연다(`none` → `open`), 네 이웃이 차면 바깥 고리로(`stay` → 바깥 칸 `walk`), 탭 고르기만으로 불려 온다(도착 기다림을 탭 누르기 앞으로) |
+| `web/screen-paths.test.ts` · `web/rules-screen.test.ts`(경로 표) | 고침 | 결정 30: 규칙 화면이 `/api/guidelines` · `/api/guidelines/{id}/retire`를 부른다 — 목록에 두 경로만 더함 |
+| `round33/doctor.rs`(DIAGNOSIS_ITEMS) · `e2e/admin.spec.ts`(진단 줄 7 → 8) | 고침 | 결정 31: 진단에 기록 쓰임(`storage`) 한 줄을 더함 |
+| 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다 |
