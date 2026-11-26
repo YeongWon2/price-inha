@@ -1404,3 +1404,12 @@ office 크레이트에는 이미 있다(office 5 · 6차): 멘션 읽기(`parse_
 | `web/screen-paths.test.ts` · `web/rules-screen.test.ts`(경로 표) | 고침 | 결정 30: 규칙 화면이 `/api/guidelines` · `/api/guidelines/{id}/retire`를 부른다 — 목록에 두 경로만 더함 |
 | `round33/doctor.rs`(DIAGNOSIS_ITEMS) · `e2e/admin.spec.ts`(진단 줄 7 → 8) | 고침 | 결정 31: 진단에 기록 쓰임(`storage`) 한 줄을 더함 |
 | 그 밖의 server 시험 | 유지 | 동작이 바뀌지 않는다 |
+
+#### 44차 보강 (2026-11-27 조정자, G2의 e2e 실패에서)
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| `e2e/office-gather.spec.ts`의 "팀 방에서 둘을 멘션해 보내면 둘 다 곧바로 내 곁으로 오는 중이 된다" | 고침 | 시험 결함(경합). `page.goto("/office/")` 바로 뒤에 `/api/office`를 불러, 화면이 세션을 얻기 전이면 401이 난다(혼자 돌리면 통과, 전체 실행에서 실패). 두 번째 시험처럼 `openOffice`(내 이름표가 보일 때까지)를 기다린다. 단언은 그대로 |
+| 그 밖의 server 시험 | 유지 | 44차 대조 그대로 |
