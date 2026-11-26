@@ -15,7 +15,7 @@ mod rank;
 mod reindex;
 mod search;
 
-pub use archive::OldRecord;
+pub use archive::{ARCHIVE_REF_PREFIX, OldRecord};
 pub use chunk::{CHUNK_OVERLAP, CHUNK_TOKENS, INDEX_PREFIX_CHARS, TextChunk, split_chunks};
 pub use condition::{Condition, TradeCatalog, TradeRecord};
 pub use embed::{EmbedReport, Embedder, SemanticStatus, SharedEmbedder};
@@ -344,7 +344,7 @@ impl Knowledge {
     }
 
     /// 임베딩이 없는 조각(그 모델 기준)에 임베딩을 `max`개까지 만들어 둔다. 한 번 부를 때 포트는 많아야 한 번 부른다.
-    /// 값은 리틀 엔디언 f32 묶음 바이트로 둔다. 포트가 없으면 아무것도 하지 않고 `unavailable`이 참이다.
+    /// (2차, 결정 31) 값은 정수 양자화 바이트([`quantize`])로 둔다. 포트가 없으면 아무것도 하지 않고 `unavailable`이 참이다.
     /// 포트가 실패했거나 개수 · 차원이 약속과 다르면 [`Error::Embedder`]이고 아무것도 두지 않는다.
     pub async fn embed_missing(&self, max: usize) -> Result<EmbedReport, Error> {
         self.run_embed_missing(max).await

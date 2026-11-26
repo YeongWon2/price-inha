@@ -73,9 +73,10 @@ impl crate::Knowledge {
             ));
         }
         for ((id, _), vector) in targets.iter().zip(&vectors) {
-            let bytes: Vec<u8> = vector.iter().flat_map(|v| v.to_le_bytes()).collect();
+            // (2차, 결정 31) 정수 양자화로 줄여 둔다(옛 f32 줄은 읽기만 하고, 다시 넣을 때 이 모양으로 바뀐다).
+            let bytes = crate::quant::quantize(vector);
             self.store
-                .set_chunk_embedding(*id, embedder.model(), dims, &bytes)?;
+                .set_chunk_embedding_q8(*id, embedder.model(), dims, &bytes)?;
         }
         Ok(EmbedReport {
             embedded: targets.len(),
