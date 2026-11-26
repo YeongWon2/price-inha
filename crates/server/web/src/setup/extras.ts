@@ -219,6 +219,9 @@ export function diagnosisTable(reply: unknown): HTMLElement {
     tr.dataset.key = item.key;
     tr.cells[1]?.append(badge(DIAG_LABELS[item.status], DIAG_TONES[item.status]));
     tr.cells[3]?.setAttribute("data-role", "todo");
+    // (다듬기 E 5번) 긴 "본 것" · "할 일"은 줄바꿈한다(가로로 밀리지 않게).
+    tr.cells[2]?.classList.add("setup-diag-text");
+    tr.cells[3]?.classList.add("setup-diag-text");
   });
   const wrap = el("div", "setup-extra-wrap");
   wrap.append(grid);

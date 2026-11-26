@@ -4,10 +4,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { diagnosisTable } from "../../web/src/setup/extras";
+import { CSS_SOURCES } from "./source-graph";
 
-const css = import.meta.glob<string>("../../web/src/setup/setup.css", { query: "?raw", import: "default", eager: true })[
-  "../../web/src/setup/setup.css"
-];
+const css = CSS_SOURCES["../../web/src/setup/setup.css"];
 
 const LONG = "증권사 키 있음 · AI 연결 없음 · DART 키(선택) 없음 · ECOS 키(선택) 없음 · FRED 키(선택) 없음 · 백업 GitHub 토큰(선택) 없음";
 

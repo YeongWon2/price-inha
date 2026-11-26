@@ -192,6 +192,10 @@ impl SetupView {
             AiMethod::ApiKey => "API 키",
             AiMethod::Cli => "Claude Code CLI",
         };
+        // (다듬기 E 4 · 5번) 시연은 시연용 가짜 AI로 돈다("키 등록" 줄의 "AI 연결 없음"과 어긋나지 않게).
+        if self.desk.demo() {
+            return Check::info("AI 연결", format!("시연용 가짜 AI (고른 연결: {method})"));
+        }
         Check::info("AI 연결", method)
     }
 
