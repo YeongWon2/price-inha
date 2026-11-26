@@ -1,11 +1,13 @@
 //! (23번, R7-4 · M11 · C25 · E54 · N20) 결정 메모(어제 메모)와 팀을 잇는 곳.
 //!
 //! - 팀장 판단이 사기 · 팔기로 끝나 매매가 판단됨이 되면 결정 메모를 정산 대기로 남긴다
-//!   (`pi_journal::Journal::record_decision`, 결정 날 = 그 시각의 시장 날짜). 지켜보기는 매매가 판단됨이 되지 않아
-//!   메모가 없다(M11 "판단됨이 된 매매마다 하나").
+//!   (`pi_journal::Journal::record_decision`, 결정 날 = 그 시각의 시장 날짜). (기능 G) 판단은 논의 결과가 아니라
+//!   **저장된 판단**(매매의 방향 — `pi_store::Store::trade_side`)으로 읽는다. 그래서 판단 뒤 도구가 실패해 논의가
+//!   오류로 끝나도 메모가 남는다. 지켜보기는 매매가 판단됨이 되지 않고 방향도 없어 메모가 없다(M11 "판단됨이 된
+//!   매매마다 하나" — store의 결정 메모는 판단된 사기 · 팔기만 받는다).
 //! - 하루 마감(복기 앞)에 정산할 것이 있으면 정산한다(`Journal::settle_memos`). 종가는 서버가 그날 정규장 마지막 시세를
 //!   남기는 저장 이벤트(`reference_prices`)에서 읽고(그 날짜로 처음 남은 것), 기준 지수 시세는 없어 초과수익은 비운다.
-//!   거래일은 주문 길의 달력이다. 교훈은 복기 담당 턴(원본: 2~4문장 반성, `docs/research/invest-agent-teams.md` D-1)이고
+//!   거래일은 주문 길의 달력과 서버가 남긴 하루 시작 · 마감 기록이다([`super::memo_days`], 기능 G). 교훈은 복기 담당 턴(원본: 2~4문장 반성, `docs/research/invest-agent-teams.md` D-1)이고
 //!   하루 AI 호출 상한에 들되 팀장 예비분은 쓰지 않는다(공지 확인 답과 같은 몫). 몫이 없거나 답이 없으면 그 메모는
 //!   정산 대기로 남아 다음 마감에 다시 한다(journal 규칙). 닫힌 메모마다 `office.memo` `{"trade", "state"}`를 남긴다.
 //! - 다음 논의의 자료에 지난 교훈을 넣는다(`Journal::memo_brief`: 같은 종목 최근 5건의 결정 + 교훈, 다른 종목 최근
@@ -18,16 +20,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use chrono::NaiveDate;
-use pi_agent::{DataItem, Decision, DiscussionOutcome, Role};
-use pi_journal::{ClosePrices, LessonInput, LessonWriter, Redactor, SettlePorts, TradingCalendar};
+use pi_agent::{DataItem, Role};
+use pi_journal::{ClosePrices, LessonInput, LessonWriter, Redactor, SettlePorts};
 use pi_store::{DecisionMemo, DecisionMemoState, TradeId, TradeSide, UnixMillis};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use super::Crew;
 use super::demo_ai::REVIEW_HEAD;
+use super::memo_days::MemoCalendar;
+use crate::SecretsRedactor;
 use crate::reach::KIND_OFFICE_MEMO;
-use crate::{SecretsRedactor, Trading};
 
 /// 서버가 그날 정규장 마지막 시세를 남기는 저장 이벤트 종류(`trading::watch`의 것과 같은 이름).
 const KIND_REFERENCE_PRICES: &str = "reference_prices";
@@ -111,31 +114,6 @@ impl ClosePrices for Closes {
     }
 }
 
-/// 주문 길의 달력. 날짜의 달력을 모르면(시세 흐름 달력은 오늘 것만 안다) 오늘 달력의 앞 영업일만 잇는다.
-struct Calendar<'a> {
-    trading: &'a Trading,
-    today: NaiveDate,
-}
-
-impl TradingCalendar for Calendar<'_> {
-    fn next_trading_day(&self, _symbol: &str, date: &str) -> Option<String> {
-        let day = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
-        if let Some(calendar) = self.trading.calendar_on(day) {
-            return Some(ymd(calendar.next_business_day.date));
-        }
-        let calendar = self.trading.calendar_on(self.today)?;
-        if calendar.previous_business_day.date != day {
-            return None;
-        }
-        let next = if calendar.today.is_holiday() {
-            calendar.next_business_day.date
-        } else {
-            calendar.today.date
-        };
-        Some(ymd(next))
-    }
-}
-
 /// 첫 셈: 교훈이 필요한 메모를 모으고 답하지 않는다.
 #[derive(Default)]
 struct Wanted(Mutex<Vec<LessonInput>>);
@@ -208,12 +186,16 @@ fn state_word(state: DecisionMemoState) -> &'static str {
 }
 
 impl Crew {
-    /// 판단이 사기 · 팔기면 결정 메모를 정산 대기로 남긴다. 남기지 못하면 경고만 남긴다(논의는 그대로다).
-    pub(super) fn note_decision(&self, trade: TradeId, outcome: &DiscussionOutcome) {
-        let side = match outcome.decision {
-            Decision::Buy => TradeSide::Buy,
-            Decision::Sell => TradeSide::Sell,
-            Decision::Watch(_) => return,
+    /// 저장된 판단이 사기 · 팔기면 결정 메모를 정산 대기로 남긴다(기능 G: 논의가 판단 뒤 오류로 끝나도 남는다).
+    /// 방향이 없으면(판단 전 · 지켜보기) 남기지 않는다. 남기지 못하면 경고만 남긴다(논의는 그대로다).
+    pub(super) fn note_decision(&self, trade: TradeId) {
+        let side = match self.store.trade_side(trade) {
+            Ok(Some(side)) => side,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(%error, trade = trade.0, "판단의 방향을 읽지 못해 결정 메모를 남기지 못했다");
+                return;
+            }
         };
         let now = self.clock.now();
         let date = ymd(self.trading.date_of(now));
@@ -234,10 +216,7 @@ impl Crew {
         let now = self.clock.now();
         let today = self.trading.date_of(now);
         let closes = Closes::read(&self.store);
-        let calendar = Calendar {
-            trading: &self.trading,
-            today,
-        };
+        let calendar = MemoCalendar::read(&self.store, &self.trading, today);
         let hide = Hide(&self.redactor);
         let at = UnixMillis(now.timestamp_millis());
         let wanted = Wanted::default();
