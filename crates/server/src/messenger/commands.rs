@@ -2,7 +2,7 @@
 //! 실전 승격은 하지 않는다(결정 24). 계산 · 요약은 서버가 한다.
 
 use pi_approval::{ApprovalView, Subject};
-use pi_channel::{Command, parse_command};
+use pi_channel::Command;
 use pi_store::{ApprovalStatus, TeamState};
 use rust_decimal::Decimal;
 
@@ -52,9 +52,10 @@ const OPEN_HINT: &str = "price-inha open";
 /// 계산이 실패했을 때.
 const READ_FAILED: &str = "지금 상태를 읽지 못했습니다 — 잠시 뒤에 다시 해 주세요";
 
-/// 허용된 사람의 글 하나에 대한 답(가리기 전 글). 승인 · 재개 · 규칙 변경 · 실전 승격은 하지 않는다.
-pub(crate) async fn answer(hub: &Messenger, text: &str, bot: Option<&str>) -> String {
-    match parse_command(text, bot) {
+/// 허용된 사람의 명령 하나에 대한 답(가리기 전 글). 승인 · 재개 · 규칙 변경 · 실전 승격은 하지 않는다.
+/// (41차) 명령이 아닌 글(`/notice` · `@담당`)은 `ask.rs`가 먼저 나눈다 — 여기에 온 [`Command::Unknown`]은 모르는 명령이다.
+pub(crate) async fn answer(hub: &Messenger, command: Command) -> String {
+    match command {
         Command::Status => status(hub).await.unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Approvals => approvals(hub).unwrap_or_else(|| READ_FAILED.to_string()),
         Command::Reject { id } => reject(hub, &id).await,

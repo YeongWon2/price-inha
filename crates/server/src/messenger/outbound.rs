@@ -54,10 +54,15 @@ impl Messenger {
         }
         let raw = compose(kind, title, body, short.as_deref());
         let me = Arc::clone(self);
-        tokio::spawn(async move { me.deliver(&raw).await });
+        tokio::spawn(async move { me.send_owner(&raw).await });
     }
 
-    async fn deliver(&self, raw: &str) {
+    /// 허용된 사람의 대화로 글 하나를 보낸다(가린 글만, 실패하면 물러서며 정한 횟수까지). 허용된 사람이 없으면
+    /// 보내지 않는다. (41차) 논의 글 · 담당 답 · 공지 확인 답도 이 길로 나간다 — 나가는 글은 명령으로 읽지 않는다.
+    pub(crate) async fn send_owner(&self, raw: &str) {
+        if self.demo || self.state() == LoopState::Unauthorized {
+            return;
+        }
         let owner = match self.with_gate(|gate| gate.allowed()) {
             Ok(Some(owner)) => owner,
             Ok(None) => return,

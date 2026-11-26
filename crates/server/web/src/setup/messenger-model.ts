@@ -37,8 +37,6 @@ export const PAIRING_HINT = "봇에게 아무 말이나 보내면 코드가 옵�
 export const PAIRED_TEXT = "연결됨";
 /** 다른 기기에서 볼 때(보기만). 403의 글이기도 하다. */
 export const REMOTE_NOTE = "이 컴퓨터에서만 바꿀 수 있습니다";
-/** 슬랙 줄. */
-export const SLACK_SOON = "슬랙은 준비 중입니다";
 /** 시연 모드에서 등록하려 할 때(서버 `MESSENGER_DEMO_REFUSED`와 같은 글). */
 export const DEMO_REFUSED = "시연 모드에서는 메신저를 쓰지 않습니다";
 /** 틀린 코드(400, 서버 `MESSENGER_WRONG_CODE`와 같은 글). */

@@ -6,7 +6,7 @@ export const KEEP_LINES = 200;
 
 /** 채팅 줄: 내 말 또는 응답 자리. */
 export type Line =
-  | { kind: "me"; id: string; room: string; agent: string; text: string; failed?: boolean }
+  | { kind: "me"; id: string; room: string; agent: string; text: string; failed?: boolean; note?: string }
   | { kind: "resp"; requestId: string };
 
 /** 응답 표의 값에서 정리가 보는 부분(상태). */

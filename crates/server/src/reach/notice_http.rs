@@ -22,7 +22,7 @@ use super::{OFFICE_BAD_INPUT, OFFICE_NOTICES_DEFAULT, OFFICE_TOO_FAST};
 const REPLIES_KEEP: usize = 100;
 
 /// 담당에게 보내는 확인 답 턴의 글(공지 글이 그대로 들어간다).
-fn ack_prompt(text: &str) -> String {
+pub(super) fn ack_prompt(text: &str) -> String {
     format!(
         "[전체 공지] {text}\n\n사용자가 팀 전체에 보낸 공지입니다. 받았다는 확인을 한 줄로 짧게 답하세요. \
          규칙 · 승인 · 팀 상태는 공지로 바뀌지 않습니다."
@@ -65,7 +65,11 @@ fn notice_json(notice: &Notice) -> Value {
 }
 
 /// 받은 공지의 답 `{"notice", "acks"}`. 확인 턴을 받은 담당의 글을 남기고 그 담당들을 돌려준다.
-fn posted_reply(desk: &OfficeDesk, posted: &NoticePost, prompt: &str) -> (Value, Vec<Agent>) {
+pub(super) fn posted_reply(
+    desk: &OfficeDesk,
+    posted: &NoticePost,
+    prompt: &str,
+) -> (Value, Vec<Agent>) {
     let mut turns = Vec::new();
     let mut acks = Vec::with_capacity(posted.acks.len());
     for ack in &posted.acks {

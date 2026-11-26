@@ -24,6 +24,7 @@ import {
   LOCKED_NOTE,
   LOCKED_TEXT,
   NOTIFY_TITLE,
+  NO_PUSH_TEXT,
   QUIET_NOTE,
   REMOTE_NOTE,
   SAVED_TEXT,
@@ -64,15 +65,32 @@ function toggle(name: "push" | "messenger", checked: boolean, label: string, edi
   return input;
 }
 
-/** 종류 한 줄(`tr[data-kind]`, 잠긴 줄은 `data-locked="true"`와 [`LOCKED_TEXT`]). */
+/**
+ * (server 41차 2번) 폰 칸이 없는 종류 한 줄(`tr[data-role="notify-talk"]`, 종류 글자는 `data-talk`): 종류 글 · 폰 칸
+ * 자리 글 [`NO_PUSH_TEXT`] · 메신저 칸.
+ */
+function talkRow(tbody: HTMLTableSectionElement, row: NotifyKindRow, editable: boolean): void {
+  const tr = tbody.insertRow();
+  tr.dataset.role = "notify-talk";
+  tr.dataset.talk = row.kind;
+  tr.insertCell().append(el("span", "", row.label));
+  tr.insertCell().append(el("span", "", NO_PUSH_TEXT));
+  tr.insertCell().append(toggle("messenger", row.messenger, `${row.label} 메신저 알림`, editable));
+}
+
+/** 종류 한 줄(`tr[data-kind]`, 잠긴 줄은 `data-locked="true"`와 [`LOCKED_TEXT`]). 폰 칸이 없으면 [`talkRow`]. */
 function kindRow(tbody: HTMLTableSectionElement, row: NotifyKindRow, editable: boolean): void {
+  if (row.push === null) {
+    talkRow(tbody, row, editable);
+    return;
+  }
   const tr = tbody.insertRow();
   tr.dataset.kind = row.kind;
   if (row.locked) tr.dataset.locked = "true";
   const name = tr.insertCell();
   name.append(el("span", "", row.label));
   if (row.locked) name.append(" ", badge(LOCKED_TEXT, "warning"));
-  tr.insertCell().append(toggle("push", row.push ?? false, `${row.label} 폰 알림`, editable));
+  tr.insertCell().append(toggle("push", row.push, `${row.label} 폰 알림`, editable));
   tr.insertCell().append(toggle("messenger", row.messenger, `${row.label} 메신저 알림`, editable));
 }
 
@@ -114,12 +132,14 @@ function currentValues(box: HTMLElement, settings: NotifySettings): NotifySettin
     box.querySelector<HTMLInputElement>(selector)?.checked ?? fallback;
   const value = (selector: string, fallback: string): string =>
     box.querySelector<HTMLInputElement>(selector)?.value ?? fallback;
-  const lines = [...box.querySelectorAll<HTMLTableRowElement>("tr[data-kind]")];
+  const lines = [...box.querySelectorAll<HTMLTableRowElement>('tr[data-kind], tr[data-role="notify-talk"]')];
   const kinds = settings.kinds.map((row) => {
-    const line = lines.find((tr) => tr.dataset.kind === row.kind);
+    const line = lines.find((tr) => (row.push === null ? tr.dataset.talk : tr.dataset.kind) === row.kind);
     const flag = (name: string): boolean | undefined =>
       line?.querySelector<HTMLInputElement>(`input[name="${name}"]`)?.checked;
-    return { ...row, push: flag("push") ?? row.push, messenger: flag("messenger") ?? row.messenger };
+    // 폰 칸이 없는 종류는 `push`를 받은 그대로(`null`) 싣는다.
+    const push = row.push === null ? null : (flag("push") ?? row.push);
+    return { ...row, push, messenger: flag("messenger") ?? row.messenger };
   });
   const quiet = {
     enabled: checked("#notify-quiet-on", settings.quiet.enabled),

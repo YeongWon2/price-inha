@@ -3,14 +3,14 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Instant;
 
 use pi_channel::{Gatekeeper, PairingBook, Telegram, TelegramConfig};
 use pi_market::Clock;
 use pi_office::EventSink;
 use pi_secrets::SecretStore;
-use pi_store::Store;
+use pi_store::{Store, UnixMillis};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -19,7 +19,7 @@ use zeroize::Zeroizing;
 use super::book::FileBook;
 use super::status::{KIND_MESSENGER, LoopState};
 use super::{MessengerWiring, TELEGRAM_KEYS};
-use crate::reach::Linked;
+use crate::reach::{Linked, OfficeDesk};
 use crate::setup::AttemptLimit;
 use crate::{Settings, Trading};
 
@@ -65,6 +65,12 @@ pub(crate) struct Messenger {
     live: Mutex<Live>,
     run: tokio::sync::Mutex<Option<Running>>,
     closing: AtomicBool,
+    /// (41차 3 · 4번) 묻기 · 공지를 넘길 사무실(세션 경로를 만들 때 붙는다).
+    desk: OnceLock<Weak<OfficeDesk>>,
+    /// (41차 1번) 열린 논의 글 묶음(묶음 창이 닫히면 메시지 하나로 보낸다).
+    pub(crate) talk_lines: Mutex<Option<Vec<String>>>,
+    /// (41차 3 · 4번) 묻기 · 공지를 마지막으로 받은 시각(사무실 보내기 간격과 같은 규칙).
+    last_ask: Mutex<Option<UnixMillis>>,
 }
 
 impl std::fmt::Debug for Messenger {
@@ -102,7 +108,38 @@ impl Messenger {
             }),
             run: tokio::sync::Mutex::new(None),
             closing: AtomicBool::new(false),
+            desk: OnceLock::new(),
+            talk_lines: Mutex::new(None),
+            last_ask: Mutex::new(None),
         })
+    }
+
+    /// (41차 3 · 4번) 묻기 · 공지를 넘길 사무실을 붙인다(한 번만).
+    pub(crate) fn attach_desk(&self, desk: &Arc<OfficeDesk>) {
+        let _ = self.desk.set(Arc::downgrade(desk));
+    }
+
+    /// 붙은 사무실(없거나 이미 놓였으면 없음).
+    pub(crate) fn desk(&self) -> Option<Arc<OfficeDesk>> {
+        self.desk.get().and_then(Weak::upgrade)
+    }
+
+    /// 끄는 중인가(뒤에서 답을 기다리는 일은 그만둔다).
+    pub(crate) fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::SeqCst)
+    }
+
+    /// (41차 3 · 4번) 사무실 보내기 간격([`crate::OFFICE_SEND_INTERVAL`], 시계는 `Wiring::clock`) 안에 또 왔으면
+    /// 거짓. 받으면 시각을 남긴다.
+    pub(crate) fn pace(&self) -> bool {
+        let now = self.linked.now();
+        let gap = i64::try_from(crate::OFFICE_SEND_INTERVAL.as_millis()).unwrap_or(i64::MAX);
+        let mut last = locked(&self.last_ask);
+        if last.is_some_and(|at| now.0 - at.0 < gap) {
+            return false;
+        }
+        *last = Some(now);
+        true
     }
 
     /// 장부를 잡고 문지기에게 일을 시킨다.

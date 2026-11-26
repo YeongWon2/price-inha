@@ -146,7 +146,11 @@ async fn handle(hub: &Arc<Messenger>, telegram: &Telegram, item: &Inbound) {
         }
         Ok(Judgement::Allowed) => {
             let bot = hub.bot();
-            super::commands::answer(hub, &item.text, bot.as_deref()).await
+            // (41차) 담당 답처럼 뒤에서 보낼 것만 있으면 여기서는 답하지 않는다.
+            match super::ask::route(hub, item, bot.as_deref()).await {
+                Some(reply) => reply,
+                None => return,
+            }
         }
         Ok(Judgement::PairingPending | Judgement::Ignored { .. }) => return,
         Err(error) => {

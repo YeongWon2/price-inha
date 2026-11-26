@@ -181,6 +181,27 @@ function chatLine(entry, names) {
 function pendingLabel(line) {
 	return `${line.name ?? ""}: ${PENDING_TEXT}`;
 }
+/** (server 41차 3번) 메신저에서 온 팀 방 글에 붙는 표시(이름 옆 작은 덧말). */
+var VIA_MESSENGER_TEXT = "메신저에서";
+/**
+* (server 41차 3번) 실시간 연결로 받은 `office.message` 내용 하나를 읽는다. `via`가 `"messenger"`이고 `room` ·
+* `text` · `sourceMessageId`가 글자이면 그 글의 내 글 줄과 "메신저에서" 덧말을, 그 밖(화면에서 보낸 글 — `via` 없음 ·
+* 모양이 틀림)이면 `null`을 준다. 사무실 화면은 이 줄을 채팅 패널에 더하고 덧말을 이름 옆에 단다(`chatLineElement`의 `note`).
+*/
+function fromMessenger(payload) {
+	if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+	const { via, room, text, sourceMessageId } = payload;
+	if (via !== "messenger") return null;
+	if (typeof room !== "string" || typeof text !== "string" || typeof sourceMessageId !== "string") return null;
+	return {
+		entry: {
+			kind: "me",
+			key: sourceMessageId,
+			text
+		},
+		note: VIA_MESSENGER_TEXT
+	};
+}
 // src/office/chat-view.ts
 /** 줄 하나. `note`는 이름 옆 작은 덧말(팀 방의 내 글: "→ 받는 담당"), `extra`는 줄에 더 붙일 class. */
 function chatLineElement(line, note, extra) {
@@ -3468,7 +3489,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-mj7q1rs5.js");
+		const { webglAvailable, createScene } = await import("./scene3d-eezswvqs.js");
 		return {
 			webglAvailable,
 			createScene
@@ -3617,7 +3638,7 @@ function lineElement(line) {
 			kind: "me",
 			key: line.id,
 			text: showMentions(line.text)
-		}, state.names), line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : void 0);
+		}, state.names), line.note ?? (line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : void 0));
 		if (line.failed) {
 			div.classList.add("failed");
 			const retry = document.createElement("button");
@@ -3835,7 +3856,26 @@ function onFrame(text) {
 		else if (frame.kind === "office.notice") compose?.onNotice(frame.payload);
 		else if (frame.kind === "office.notice_ack") compose?.onAck(frame.payload);
 		else if (frame.kind === "office.summon") summons?.onEvent(frame.payload);
+		else if (frame.kind === "office.message") onMessengerLine(frame.payload);
 	}
+}
+/** (server 41차 3번) 메신저에서 온 팀 방 글: 팀 탭에 내 글 줄로 더하고 이름 옆에 "메신저에서"를 단다. */
+function onMessengerLine(payload) {
+	const via = fromMessenger(payload);
+	if (via === null || via.entry.kind !== "me") return;
+	const lines = linesOf(ROOM_TEAM);
+	if (lines.some((l) => l.kind === "me" && l.id === via.entry.key)) return;
+	chatter.stamp(via.entry.key);
+	lines.push({
+		kind: "me",
+		id: via.entry.key,
+		room: ROOM_TEAM,
+		agent: "",
+		text: via.entry.text,
+		note: via.note
+	});
+	trimLines(lines, state.responses);
+	if (state.conversation === ROOM_TEAM) renderLog(false);
 }
 /** 다시 이은 직후에 다시 받은 옛 논의 글인가(`at`이 말풍선 수명보다 오래됨). */
 function replayedOld(payload) {

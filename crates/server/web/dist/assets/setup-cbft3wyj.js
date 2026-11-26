@@ -54,8 +54,6 @@ var PAIRING_HINT = "봇에게 아무 말이나 보내면 코드가 옵니다";
 var PAIRED_TEXT = "연결됨";
 /** 다른 기기에서 볼 때(보기만). 403의 글이기도 하다. */
 var REMOTE_NOTE$1 = "이 컴퓨터에서만 바꿀 수 있습니다";
-/** 슬랙 줄. */
-var SLACK_SOON = "슬랙은 준비 중입니다";
 /** 틀린 코드(400, 서버 `MESSENGER_WRONG_CODE`와 같은 글). */
 var WRONG_CODE = "코드가 맞지 않습니다";
 /** 잠김(423)의 앞부분(서버 `MESSENGER_LOCKED`와 같은 글). 뒤에 풀리는 시각이 붙는다. */
@@ -309,11 +307,9 @@ function remoteParts(status) {
 function messengerBlock(status) {
 	const message = el("div", "");
 	message.dataset.role = "messenger-message";
-	const slack = el("p", "", SLACK_SOON);
-	slack.dataset.role = "messenger-slack";
 	const box = shell$1();
 	const middle = status.editable ? editParts(box, message, status) : remoteParts(status);
-	box.append(stateLine(status), ...middle, slack, message);
+	box.append(stateLine(status), ...middle, message);
 	return box;
 }
 /** 자리 하나에 메신저 묶음을 읽어 그린다(`GET API.messenger`). 읽기가 실패해도 던지지 않는다. */
@@ -325,6 +321,8 @@ async function mountMessenger(root) {
 // src/setup/notify-model.ts
 /** 묶음 제목. */
 var NOTIFY_TITLE = "알림";
+/** 폰 칸이 없는 줄의 폰 칸 자리 글. */
+var NO_PUSH_TEXT = "폰 없음";
 /** 잠긴 줄의 표시 글. */
 var LOCKED_TEXT = "끌 수 없음";
 /** 잠긴 종류 안내(표 아래 한 줄). */
@@ -367,7 +365,8 @@ function parseKind(row) {
 	if (!isObject(row)) return null;
 	const { kind, label, push, messenger, locked } = row;
 	if (typeof kind !== "string" || typeof label !== "string") return null;
-	if (typeof push !== "boolean" || typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
+	if (typeof push !== "boolean" && push !== null) return null;
+	if (typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
 	return {
 		kind,
 		label,
@@ -451,8 +450,24 @@ function toggle(name, checked, label, editable) {
 	input.setAttribute("aria-label", label);
 	return input;
 }
-/** 종류 한 줄(`tr[data-kind]`, 잠긴 줄은 `data-locked="true"`와 [`LOCKED_TEXT`]). */
+/**
+* (server 41차 2번) 폰 칸이 없는 종류 한 줄(`tr[data-role="notify-talk"]`, 종류 글자는 `data-talk`): 종류 글 · 폰 칸
+* 자리 글 [`NO_PUSH_TEXT`] · 메신저 칸.
+*/
+function talkRow(tbody, row, editable) {
+	const tr = tbody.insertRow();
+	tr.dataset.role = "notify-talk";
+	tr.dataset.talk = row.kind;
+	tr.insertCell().append(el("span", "", row.label));
+	tr.insertCell().append(el("span", "", NO_PUSH_TEXT));
+	tr.insertCell().append(toggle("messenger", row.messenger, `${row.label} 메신저 알림`, editable));
+}
+/** 종류 한 줄(`tr[data-kind]`, 잠긴 줄은 `data-locked="true"`와 [`LOCKED_TEXT`]). 폰 칸이 없으면 [`talkRow`]. */
 function kindRow(tbody, row, editable) {
+	if (row.push === null) {
+		talkRow(tbody, row, editable);
+		return;
+	}
 	const tr = tbody.insertRow();
 	tr.dataset.kind = row.kind;
 	if (row.locked) tr.dataset.locked = "true";
@@ -499,13 +514,14 @@ function quietPart(settings) {
 function currentValues(box, settings) {
 	const checked = (selector, fallback) => box.querySelector(selector)?.checked ?? fallback;
 	const value = (selector, fallback) => box.querySelector(selector)?.value ?? fallback;
-	const lines = [...box.querySelectorAll("tr[data-kind]")];
+	const lines = [...box.querySelectorAll("tr[data-kind], tr[data-role=\"notify-talk\"]")];
 	const kinds = settings.kinds.map((row) => {
-		const line = lines.find((tr) => tr.dataset.kind === row.kind);
+		const line = lines.find((tr) => (row.push === null ? tr.dataset.talk : tr.dataset.kind) === row.kind);
 		const flag = (name) => line?.querySelector(`input[name="${name}"]`)?.checked;
+		const push = row.push === null ? null : flag("push") ?? row.push;
 		return {
 			...row,
-			push: flag("push") ?? row.push,
+			push,
 			messenger: flag("messenger") ?? row.messenger
 		};
 	});

@@ -53,7 +53,7 @@ async fn show(
 
 async fn change(State(linked): State<Arc<Linked>>, body: Bytes) -> Response {
     let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    let next = match NotifySettings::parse(&value) {
+    let next = match NotifySettings::parse(&value, linked.notify.current().talk()) {
         Ok(next) => next,
         Err(refusal) => return reply(StatusCode::BAD_REQUEST, refusal.body()),
     };

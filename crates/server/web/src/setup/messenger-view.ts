@@ -13,7 +13,7 @@
 //   - 연결된 사람이 있으면 `messenger-paired`: [`PAIRED_TEXT`] · 빼기 `button[data-action="messenger-revoke"]`
 //     (→ `POST API.messengerRevoke`, 몸통 없음).
 // - 다른 기기(`editable` 거짓)면: 입력 · 단추 없이 `messenger-remote`([`REMOTE_NOTE`]). 연결됐으면 [`PAIRED_TEXT`]는 보인다.
-// - `messenger-slack`: [`SLACK_SOON`] 한 줄(늘).
+// - (server 41차 8번 · 결정 26) 슬랙 줄은 두지 않는다.
 // - `messenger-message`: 결과 자리. 실패면 오류 줄(`role="alert"`, [`messengerError`]의 글). 성공이면 상태를 다시
 //   읽어(`GET API.messenger`) 묶음을 새로 그린다. 기다리는 동안 그 단추는 잠긴다.
 // 읽기 실패: 이 묶음에 오류 줄(`LOAD_FAILED`)만 보이고 던지지 않는다.
@@ -25,7 +25,6 @@ import {
   PAIRED_TEXT,
   PAIRING_HINT,
   REMOTE_NOTE,
-  SLACK_SOON,
   STATE_LABELS,
   approveBody,
   messengerError,
@@ -191,11 +190,9 @@ function remoteParts(status: MessengerStatus): Node[] {
 export function messengerBlock(status: MessengerStatus): HTMLElement {
   const message = el("div", "");
   message.dataset.role = "messenger-message";
-  const slack = el("p", "", SLACK_SOON);
-  slack.dataset.role = "messenger-slack";
   const box = shell();
   const middle = status.editable ? editParts(box, message, status) : remoteParts(status);
-  box.append(stateLine(status), ...middle, slack, message);
+  box.append(stateLine(status), ...middle, message);
   return box;
 }
 

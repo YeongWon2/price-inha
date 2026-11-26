@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use pi_approval::{ApprovalNumber, ApprovalView, Decision, Notice, Subject};
 use pi_knowledge::TradeRecord;
 use pi_paper::{Broker, Order, OrderGroup, OrderStatus, Side};
-use pi_store::{ApprovalStatus, ProposalId, TradeId, TradeState};
+use pi_store::{ApprovalStatus, ProposalId, TeamCause, TradeId, TradeState};
 use rust_decimal::Decimal;
 
 use super::Trading;
@@ -36,6 +36,9 @@ pub(crate) type ProposalHook = Box<
 /// (28차 3번) 개선안에 답할 팀이 없다(팀을 열지 않았다 · 이미 닫혔다): 승인 번호를 건드리지 않고 거절한다.
 pub(crate) const PROPOSAL_UNAVAILABLE: &str = "unavailable";
 
+/// (41차 6번) 팀이 전체 정지로 바뀌었을 때 부른다(알림 본문 — 까닭과 다시 시작 안내). 오래 붙잡지 않는다.
+pub(crate) type FullStopHook = Box<dyn Fn(String) + Send + Sync>;
+
 /// 주문 길이 알리는 자리.
 pub(crate) struct Hooks {
     pub(crate) approval: ApprovalHook,
@@ -45,6 +48,8 @@ pub(crate) struct Hooks {
     pub(crate) stuck_stop: StuckStopHook,
     /// (35차 5번) 규칙 개선안의 승인 요청이 생겼을 때(승인 번호): 사무실 승인 카드만 낸다(폰 알림은 그대로).
     pub(crate) proposal: AnsweredHook,
+    /// (41차 6번) 전체 정지로 바뀐 한 번에 한 번: 멈춤 알림([`crate::STOP_NOTICE_TITLE`]).
+    pub(crate) full_stop: FullStopHook,
 }
 
 /// 승인 결과의 글자.
@@ -145,6 +150,19 @@ impl Trading {
     pub(crate) fn announce_proposal(&self, number: &ApprovalNumber) {
         if let Some(hooks) = self.hooks.get() {
             (hooks.proposal)(number.clone());
+        }
+    }
+
+    /// (41차 6번) 전체 정지로 바뀐 한 번에 멈춤 알림을 낸다: 본문은 까닭(최대 손실 · 내가 정지)과 다시 시작 안내.
+    pub(super) fn announce_full_stop(&self, cause: TeamCause) {
+        let reason = match cause {
+            TeamCause::OwnerStop => crate::STOP_NOTICE_OWNER,
+            TeamCause::MaxLoss => crate::STOP_NOTICE_MAX_LOSS,
+            // 그 밖의 까닭(되살리기 등)으로 전체 정지가 된 것은 사람이 누르거나 손실로 멈춘 것이 아니다.
+            _ => return,
+        };
+        if let Some(hooks) = self.hooks.get() {
+            (hooks.full_stop)(format!("{reason} · {}", crate::STOP_NOTICE_RESTART));
         }
     }
 

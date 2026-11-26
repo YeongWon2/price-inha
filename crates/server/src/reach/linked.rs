@@ -304,8 +304,15 @@ impl Linked {
     }
 
     /// (39차) 메신저를 잇는다(알림을 허용된 대화에도 보낸다). 한 번만.
+    /// (41차 1번) 사무실로 나가는 논의 줄도 그 메신저로 흘려보낸다.
     pub(crate) fn attach_messenger(&self, messenger: &Arc<crate::messenger::Messenger>) {
         let _ = self.messenger.set(Arc::downgrade(messenger));
+        let weak = Arc::downgrade(messenger);
+        self.talk.listen(Box::new(move |talk| {
+            if let Some(messenger) = weak.upgrade() {
+                messenger.on_talk(talk);
+            }
+        }));
     }
 
     /// (39차) 이은 메신저(없거나 이미 놓였으면 없음).
@@ -325,6 +332,15 @@ impl Linked {
         tokio::spawn(async move {
             me.notice(kind, &title, &body, link).await;
         });
+    }
+
+    /// (41차 6번) 전체 정지 알림 자리: 멈춤 알림(급함 — 조용한 시간에도 간다)을 뒤에서 낸다. 전달처는 설정대로.
+    pub(crate) fn full_stop_hook(self: &Arc<Self>) -> crate::trading::FullStopHook {
+        let linked = Arc::clone(self);
+        Box::new(move |body| {
+            let title = crate::STOP_NOTICE_TITLE.to_string();
+            linked.notice_later(NoticeKind::Stall, title, body, None);
+        })
     }
 
     /// 늦은 종목 알림을 본다: 없음 → 있음으로 바뀔 때만 이상 알림을 낸다(N5 · V11).

@@ -42,9 +42,9 @@ export function renderNotice(): HTMLElement {
 
 /**
  * 팀 상태 카드(`data-role="team"`): 상태 배지(`data-role="team-state"`) · 오늘 할 일(`data-role="team-plan"`) ·
- * 쉬는 이유(`data-role="team-reason"`, 있을 때만). 전체 정지면 까닭(`FULL_STOP_TEXT`)과
- * `button[data-action="restart"]`를 더한다(그 밖의 상태에는 단추가 없다). 단추를 누르면 `onRestart`를 부른다.
- * (40차) 내가 내린 정지(`stop_cause` `"owner_stop"`)면 까닭 뒤에 `OWNER_STOP_TEXT`를 덧붙인다(`data-role="owner-stop"`).
+ * 쉬는 이유(`data-role="team-reason"`, 있을 때만). 전체 정지면 까닭 글 하나와 `button[data-action="restart"]`를
+ * 더한다(그 밖의 상태에는 단추가 없다). 단추를 누르면 `onRestart`를 부른다. (41차 7번) 까닭 글은 내가 내린 정지
+ * (`stop_cause` `"owner_stop"`)면 `OWNER_STOP_TEXT`(`data-role="owner-stop"`)만, 그 밖이면 `FULL_STOP_TEXT`만이다.
  * (40차 2번) 전체 정지가 아니고 `onStop`을 주면 정지 자리([`renderStop`])를 단다.
  */
 export function renderTeam(team: TeamReply, onRestart: () => void, onStop?: () => void): HTMLElement {
@@ -72,13 +72,11 @@ export function renderTeam(team: TeamReply, onRestart: () => void, onStop?: () =
     const restart = button("다시 시작", "danger");
     restart.dataset.action = "restart";
     restart.addEventListener("click", () => onRestart());
-    stop.append(el("p", "acc-stop-text", FULL_STOP_TEXT));
-    if (team.stop_cause === "owner_stop") {
-      const owner = el("p", "acc-stop-text", OWNER_STOP_TEXT);
-      owner.dataset.role = "owner-stop";
-      stop.append(owner);
-    }
-    stop.append(restart);
+    // (41차 7번) 까닭에 맞는 글 하나만: 내가 정지면 그 글, 그 밖(최대 손실 · 까닭 모름)이면 지금 글.
+    const owner = team.stop_cause === "owner_stop";
+    const why = el("p", "acc-stop-text", owner ? OWNER_STOP_TEXT : FULL_STOP_TEXT);
+    if (owner) why.dataset.role = "owner-stop";
+    stop.append(why, restart);
     node.append(stop);
   } else if (onStop && canStop(team.state)) {
     node.append(renderStop(onStop));

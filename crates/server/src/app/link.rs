@@ -74,13 +74,15 @@ pub(super) fn session_parts(
         store: store.clone(),
     });
     let alert: Arc<dyn LockAlert> = Arc::new(LockNotices(Arc::clone(linked)));
-    let mut routes = office_routes(desk)
+    let mut routes = office_routes(Arc::clone(&desk))
         .merge(talk_routes(Arc::clone(&linked.talk)))
         .merge(phone_routes(phone))
         .merge(backup_routes(Arc::clone(linked)))
         .merge(crate::notify_settings::routes(Arc::clone(linked)));
     // (39차) 메신저를 이었으면 그 경로(읽기는 세션, 바꾸기는 그 컴퓨터에서만)도 단다.
     if let Some(messenger) = linked.messenger() {
+        // (41차 3 · 4번) 메신저의 묻기 · 공지는 이 사무실로 넘긴다(같은 길).
+        messenger.attach_desk(&desk);
         routes = routes.merge(crate::messenger::routes(messenger));
     }
     (Some(routes), Some(alert))
@@ -308,6 +310,7 @@ pub(super) fn attach(
         closed: close_hook(linked, Arc::downgrade(trading), crew.map(Arc::downgrade)),
         data_halt: data_halt_hook(linked),
         stuck_stop: stuck_stop_hook(linked),
+        full_stop: linked.full_stop_hook(),
     });
 }
 

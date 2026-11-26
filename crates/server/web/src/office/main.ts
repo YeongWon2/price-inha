@@ -15,7 +15,7 @@ import { mountMenu } from "../ui/menu";
 import "./office.css";
 import { API, OFFICE_LOOK_PATHS } from "../paths";
 import { KIND_OFFICE_APPROVAL, applyApproval } from "./approval";
-import { chatLine } from "./chat-lines";
+import { chatLine, fromMessenger } from "./chat-lines";
 import { chatLineElement } from "./chat-view";
 import { Chatter, KIND_OFFICE_TALK, readTalk } from "./chatter";
 import { createLookPicker } from "./look-picker";
@@ -284,7 +284,7 @@ function lineElement(line: Line): HTMLElement | null {
   if (line.kind === "me") {
     // (23차 8번) 내 글은 오른쪽 녹색 말풍선. 팀 방에서는 받는 담당을 작게 덧붙인다.
     const view = chatLine({ kind: "me", key: line.id, text: showMentions(line.text) }, state.names);
-    const div = chatLineElement(view, line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : undefined);
+    const div = chatLineElement(view, line.note ?? (line.room === ROOM_TEAM && line.agent ? `→ ${nameOf(line.agent)}` : undefined));
     if (line.failed) {
       div.classList.add("failed");
       const retry = document.createElement("button");
@@ -456,7 +456,20 @@ function onFrame(text: string): void {
     else if (frame.kind === "office.notice") { compose?.onNotice(frame.payload); }
     else if (frame.kind === "office.notice_ack") { compose?.onAck(frame.payload); }
     else if (frame.kind === "office.summon") { summons?.onEvent(frame.payload); }
+    else if (frame.kind === "office.message") { onMessengerLine(frame.payload); }
   }
+}
+
+/** (server 41차 3번) 메신저에서 온 팀 방 글: 팀 탭에 내 글 줄로 더하고 이름 옆에 "메신저에서"를 단다. */
+function onMessengerLine(payload: unknown): void {
+  const via = fromMessenger(payload);
+  if (via === null || via.entry.kind !== "me") { return; }
+  const lines = linesOf(ROOM_TEAM);
+  if (lines.some((l) => l.kind === "me" && l.id === via.entry.key)) { return; }
+  chatter.stamp(via.entry.key);
+  lines.push({ kind: "me", id: via.entry.key, room: ROOM_TEAM, agent: "", text: via.entry.text, note: via.note });
+  trimLines(lines, state.responses);
+  if (state.conversation === ROOM_TEAM) { renderLog(false); }
 }
 
 /** 다시 이은 직후에 다시 받은 옛 논의 글인가(`at`이 말풍선 수명보다 오래됨). */

@@ -108,13 +108,16 @@
 //!   `/notice`와 `@담당` 안내가 든다. 메신저로 **나가는** 글(담당 답 · 논의 글)은 명령으로 읽지 않는다.
 //! - **전체 정지 알림**(6번): `crate::TEAM_STOP_PATH`의 문서.
 
+mod ask;
 mod book;
 mod commands;
 mod http;
 mod hub;
+mod mention;
 mod outbound;
 mod runner;
 mod status;
+mod talk;
 
 use std::time::Duration;
 

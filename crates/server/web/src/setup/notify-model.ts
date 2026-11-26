@@ -81,7 +81,9 @@ function parseKind(row: unknown): NotifyKindRow | null {
   if (!isObject(row)) return null;
   const { kind, label, push, messenger, locked } = row;
   if (typeof kind !== "string" || typeof label !== "string") return null;
-  if (typeof push !== "boolean" || typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
+  // (server 41차 2번) `push`가 `null`이면 폰 칸이 없는 종류다.
+  if (typeof push !== "boolean" && push !== null) return null;
+  if (typeof messenger !== "boolean" || typeof locked !== "boolean") return null;
   return { kind, label, push, messenger, locked };
 }
 

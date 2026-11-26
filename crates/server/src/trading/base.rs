@@ -483,7 +483,13 @@ impl Trading {
             owner_approved,
         };
         match self.store.change_team_state(change) {
-            Ok(record) => Ok(record.to),
+            Ok(record) => {
+                // (41차 6번) 전체 정지로 바뀐 한 번에만 알린다(이미 전체 정지면 저장소가 받지 않는다).
+                if record.to == TeamState::FullStop && record.from != TeamState::FullStop {
+                    self.announce_full_stop(record.cause);
+                }
+                Ok(record.to)
+            }
             Err(StoreError::TransitionDenied { .. }) => Ok(self.store.team_state()?),
             Err(error) => Err(error.into()),
         }

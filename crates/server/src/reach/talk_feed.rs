@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use axum::Router;
@@ -38,6 +38,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// (41차 1번) 사무실로 나간 논의 줄 하나를 더 받는 자리(메신저). 오래 붙잡지 않는다.
+pub(crate) type TalkListener = Box<dyn Fn(&Value) + Send + Sync>;
+
 /// 팀 대화 줄을 내고 최근 줄을 쥔다.
 pub(crate) struct TalkFeed {
     store: Store,
@@ -47,6 +50,8 @@ pub(crate) struct TalkFeed {
     turn: tokio::sync::Mutex<()>,
     /// 최근 줄(이벤트 번호, 내용). 처음 읽을 때 저장소에서 채운다.
     recent: Mutex<Option<VecDeque<(u64, Value)>>>,
+    /// (41차 1번) 낸 줄을 함께 받는 자리(메신저를 이었을 때).
+    listener: OnceLock<TalkListener>,
 }
 
 /// 따라가는 방 하나.
@@ -88,7 +93,13 @@ impl TalkFeed {
             secrets,
             turn: tokio::sync::Mutex::new(()),
             recent: Mutex::new(None),
+            listener: OnceLock::new(),
         }
+    }
+
+    /// (41차 1번) 낸 줄을 함께 받는 자리를 붙인다(한 번만).
+    pub(crate) fn listen(&self, listener: TalkListener) {
+        let _ = self.listener.set(listener);
     }
 
     /// 방 로그 글 하나의 `office.talk` 내용(가린 글, [`OFFICE_TEXT_MAX`]자에서 자름). (25차 2번) 팀장 글이
@@ -119,6 +130,10 @@ impl TalkFeed {
         let talk = self.talk_of(event, topic, market);
         match EventSink::publish(self.sink.as_ref(), KIND_OFFICE_TALK, talk.clone()).await {
             Ok(seq) => {
+                // (41차 1번) `office.talk`가 나가는 한곳: 메신저로도 흘려보낸다(보내기 실패는 논의를 막지 않는다).
+                if let Some(listener) = self.listener.get() {
+                    listener(&talk);
+                }
                 if let Some(recent) = lock(&self.recent).as_mut() {
                     recent.push_back((seq, talk));
                     while recent.len() > OFFICE_TALK_RECENT {

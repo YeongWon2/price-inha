@@ -70,6 +70,9 @@ export interface ViaMessenger {
  * 모양이 틀림)이면 `null`을 준다. 사무실 화면은 이 줄을 채팅 패널에 더하고 덧말을 이름 옆에 단다(`chatLineElement`의 `note`).
  */
 export function fromMessenger(payload: unknown): ViaMessenger | null {
-  void payload;
-  throw new Error("todo");
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const { via, room, text, sourceMessageId } = payload as Record<string, unknown>;
+  if (via !== "messenger") return null;
+  if (typeof room !== "string" || typeof text !== "string" || typeof sourceMessageId !== "string") return null;
+  return { entry: { kind: "me", key: sourceMessageId, text }, note: VIA_MESSENGER_TEXT };
 }

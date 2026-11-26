@@ -12,6 +12,7 @@ use serde_json::{Map, Value, json};
 use super::{
     NOTIFY_INVALID_QUIET, NOTIFY_KIND_LABELS, NOTIFY_LOCKED_KINDS, NOTIFY_LOCKED_OFF,
     NOTIFY_QUIET_DEFAULT_END, NOTIFY_QUIET_DEFAULT_START, NOTIFY_SETTINGS_FILE,
+    NOTIFY_TEAM_TALK_KIND, NOTIFY_TEAM_TALK_LABEL,
 };
 
 /// 종류 수(`NoticeKind::ALL`).
@@ -39,6 +40,8 @@ struct Quiet {
 pub(crate) struct NotifySettings {
     routes: [Route; KIND_COUNT],
     quiet: Quiet,
+    /// (41차 2번) 팀 논의 글을 메신저로 보낸다(폰 칸은 없다).
+    talk: bool,
 }
 
 /// 바꾸기를 받지 않은 까닭(400).
@@ -92,6 +95,7 @@ impl Default for NotifySettings {
                 start: default_minute(NOTIFY_QUIET_DEFAULT_START),
                 end: default_minute(NOTIFY_QUIET_DEFAULT_END),
             },
+            talk: true,
         }
     }
 }
@@ -126,24 +130,31 @@ fn index_of(kind: NoticeKind) -> usize {
         .unwrap_or(0)
 }
 
-/// `kinds` 배열을 읽는다: 여섯 종류가 한 번씩, 값은 참/거짓.
-fn parse_kinds(value: Option<&Value>) -> Result<[Route; KIND_COUNT], Refusal> {
+/// 읽은 `kinds`: 여섯 종류의 전달처와 (있으면) 팀 논의의 메신저 값.
+type Kinds = ([Route; KIND_COUNT], Option<bool>);
+
+/// `kinds` 배열을 읽는다: 여섯 종류가 한 번씩, 값은 참/거짓. (41차 2번) 팀 논의 줄은 있어도 되고 없어도 된다 —
+/// 있으면 `messenger`만 본다(참/거짓이 아니면 거부), `push`는 보지 않는다.
+fn parse_kinds(value: Option<&Value>) -> Result<Kinds, Refusal> {
     let rows = value.and_then(Value::as_array).ok_or(Refusal::Invalid)?;
-    if rows.len() != KIND_COUNT {
-        return Err(Refusal::Invalid);
-    }
     let mut routes: [Option<Route>; KIND_COUNT] = [None; KIND_COUNT];
+    let mut talk = None;
     for row in rows {
-        let kind = row
-            .get("kind")
-            .and_then(Value::as_str)
-            .and_then(NoticeKind::from_name)
-            .ok_or(Refusal::Invalid)?;
         let flag = |name: &str| {
             row.get(name)
                 .and_then(Value::as_bool)
                 .ok_or(Refusal::Invalid)
         };
+        let name = row.get("kind").and_then(Value::as_str);
+        if name == Some(NOTIFY_TEAM_TALK_KIND) {
+            if talk.replace(flag("messenger")?).is_some() {
+                return Err(Refusal::Invalid);
+            }
+            continue;
+        }
+        let kind = name
+            .and_then(NoticeKind::from_name)
+            .ok_or(Refusal::Invalid)?;
         let route = Route {
             push: flag("push")?,
             messenger: flag("messenger")?,
@@ -160,7 +171,7 @@ fn parse_kinds(value: Option<&Value>) -> Result<[Route; KIND_COUNT], Refusal> {
     for (place, route) in out.iter_mut().zip(routes) {
         *place = route.ok_or(Refusal::Invalid)?;
     }
-    Ok(out)
+    Ok((out, talk))
 }
 
 /// 잠긴 종류를 두 전달처 모두 끄려 했는가.
@@ -206,15 +217,25 @@ fn parse_quiet(value: Option<&Value>) -> Result<Quiet, Refusal> {
 
 impl NotifySettings {
     /// 바꾸기 몸통(파일도 같은 모양)을 읽고 검사한다. `label` · `locked` · `editable`은 무시한다.
-    pub(crate) fn parse(body: &Value) -> Result<NotifySettings, Refusal> {
+    /// (41차 2번) 팀 논의 줄이 없으면 `talk`(지금 값)을 그대로 쓴다.
+    pub(crate) fn parse(body: &Value, talk: bool) -> Result<NotifySettings, Refusal> {
         let object = body.as_object().ok_or(Refusal::Invalid)?;
-        let routes = parse_kinds(object.get("kinds"))?;
+        let (routes, sent_talk) = parse_kinds(object.get("kinds"))?;
         if !object.get("quiet").is_some_and(Value::is_object) {
             return Err(Refusal::Invalid);
         }
         check_locked(&routes)?;
         let quiet = parse_quiet(object.get("quiet"))?;
-        Ok(NotifySettings { routes, quiet })
+        Ok(NotifySettings {
+            routes,
+            quiet,
+            talk: sent_talk.unwrap_or(talk),
+        })
+    }
+
+    /// (41차 2번) 팀 논의 글을 메신저로 보내는가(설정 값만 — 조용한 시간은 [`NotifyBook::talk_now`]).
+    pub(crate) fn talk(&self) -> bool {
+        self.talk
     }
 
     /// 그 종류의 전달처.
@@ -232,13 +253,14 @@ impl NotifySettings {
 
     /// 파일에 남기는 모양(바꾸기 몸통과 같다).
     fn file_json(&self) -> Value {
-        let kinds: Vec<Value> = NoticeKind::ALL
+        let mut kinds: Vec<Value> = NoticeKind::ALL
             .iter()
             .zip(&self.routes)
             .map(|(kind, route)| {
                 json!({ "kind": kind.name(), "push": route.push, "messenger": route.messenger })
             })
             .collect();
+        kinds.push(json!({ "kind": NOTIFY_TEAM_TALK_KIND, "messenger": self.talk }));
         json!({ "kinds": kinds, "quiet": self.quiet_json() })
     }
 
@@ -252,7 +274,7 @@ impl NotifySettings {
 
     /// 읽기 답(`GET`) 모양.
     pub(crate) fn view(&self, editable: bool) -> Value {
-        let kinds: Vec<Value> = NoticeKind::ALL
+        let mut kinds: Vec<Value> = NoticeKind::ALL
             .iter()
             .zip(&self.routes)
             .map(|(kind, route)| {
@@ -270,6 +292,11 @@ impl NotifySettings {
                 Value::Object(row)
             })
             .collect();
+        // (41차 2번) 팀 논의: 폰 칸 없음(`null`) · 잠기지 않음.
+        kinds.push(json!({
+            "kind": NOTIFY_TEAM_TALK_KIND, "label": NOTIFY_TEAM_TALK_LABEL,
+            "push": null, "messenger": self.talk, "locked": false,
+        }));
         json!({ "kinds": kinds, "quiet": self.quiet_json(), "editable": editable })
     }
 }
@@ -319,7 +346,7 @@ fn load(home: &Path) -> NotifySettings {
     };
     let parsed = serde_json::from_str::<Value>(&text)
         .ok()
-        .and_then(|value| NotifySettings::parse(&value).ok());
+        .and_then(|value| NotifySettings::parse(&value, true).ok());
     parsed.unwrap_or_else(|| {
         tracing::warn!("알림 설정 파일이 깨져 기본(모두 보냄)으로 둡니다");
         NotifySettings::default()
@@ -377,6 +404,13 @@ impl NotifyBook {
             messenger: route.messenger && !hushed,
             quiet,
         }
+    }
+
+    /// (41차 2번) 지금 팀 논의 글을 메신저로 보내는가: "팀 논의"가 켜져 있고 조용한 시간이 아니다.
+    pub(crate) fn talk_now(&self, now: UnixMillis) -> bool {
+        let settings = self.current();
+        let quiet = settings.quiet_hours(market_offset_minutes(self.market, now));
+        settings.talk && !quiet.is_some_and(|q| q.contains(now))
     }
 
     /// 통째로 바꾼다: 파일에 먼저 남기고(실패하면 값은 그대로) 지금 값을 바꾼다.
@@ -447,7 +481,7 @@ mod tests {
             );
         }
         assert_eq!(settings.quiet_hours(540), None);
-        let back = NotifySettings::parse(&settings.file_json());
+        let back = NotifySettings::parse(&settings.file_json(), false);
         assert_eq!(back, Ok(settings), "파일 모양을 다시 읽으면 같다");
     }
 
@@ -455,8 +489,11 @@ mod tests {
     fn 조용한_시간을_끈_채로는_시작과_끝이_같아도_받는다() {
         let mut body = NotifySettings::default().file_json();
         body["quiet"] = json!({"enabled": false, "start": "10:00", "end": "10:00"});
-        assert!(NotifySettings::parse(&body).is_ok());
+        assert!(NotifySettings::parse(&body, true).is_ok());
         body["quiet"]["enabled"] = json!(true);
-        assert_eq!(NotifySettings::parse(&body), Err(Refusal::InvalidQuiet));
+        assert_eq!(
+            NotifySettings::parse(&body, true),
+            Err(Refusal::InvalidQuiet)
+        );
     }
 }
