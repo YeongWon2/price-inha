@@ -130,6 +130,12 @@ pub enum SetupRefusal {
     /// CLI를 띄우지 않는다.
     #[error("서버가 꺼지는 중입니다")]
     ShuttingDown,
+    /// (다듬기 E 2번) 더 받지 않는 옛 항목: 한 칸짜리 자료 키(`item: "data"`)는 확인할 곳이 없다. 확인기를 부르지 않고
+    /// 거절한다. 자료 키는 출처마다의 칸(DART · ECOS · FRED · 네이버)으로 넣는다.
+    #[error(
+        "옛 자료 키 항목은 더 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다"
+    )]
+    RetiredItem,
 }
 
 impl SetupRefusal {
@@ -150,6 +156,7 @@ impl SetupRefusal {
             SetupRefusal::CliUnchecked => "cli_unchecked",
             SetupRefusal::CliWorkDirNotEmpty => "cli_work_dir_not_empty",
             SetupRefusal::ShuttingDown => "shutting_down",
+            SetupRefusal::RetiredItem => "retired_item",
         }
     }
 
@@ -170,6 +177,7 @@ impl SetupRefusal {
             SetupRefusal::CliUnchecked => 502,
             SetupRefusal::CliWorkDirNotEmpty => 409,
             SetupRefusal::ShuttingDown => 503,
+            SetupRefusal::RetiredItem => 400,
         }
     }
 }

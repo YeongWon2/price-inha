@@ -83,6 +83,23 @@ function actionButton(label: string, action: string, kind: "default" | "accent" 
   return node;
 }
 
+/** (다듬기 E 7번) 성공 답의 `notice`(토큰 지우기의 BotFather 폐기 안내 등). 글이 아니면 `null`. */
+function noticeOf(body: unknown): string | null {
+  const notice = typeof body === "object" && body !== null ? (body as Record<string, unknown>).notice : null;
+  return typeof notice === "string" && notice !== "" ? notice : null;
+}
+
+/** 새로 그린 묶음의 결과 자리에 안내 한 줄(`messenger-notice`)을 넣는다(없으면 그대로). */
+function withNotice(box: HTMLElement, notice: string | null): HTMLElement {
+  const message = box.querySelector<HTMLElement>('[data-role="messenger-message"]');
+  if (notice !== null && message) {
+    const line = el("p", "hint", notice);
+    line.dataset.role = "messenger-notice";
+    message.append(line);
+  }
+  return box;
+}
+
 /** 단추를 누르면 `ask()`가 만든 요청을 보내고, 됐으면 다시 읽어 묶음을 새로 그린다. 실패면 결과 자리에 오류 줄. */
 function wire(box: HTMLElement, message: HTMLElement, node: HTMLButtonElement, ask: () => Ask): void {
   node.addEventListener("click", () => {
@@ -91,16 +108,18 @@ function wire(box: HTMLElement, message: HTMLElement, node: HTMLButtonElement, a
     void (async () => {
       const { method, url, body } = ask();
       let text: string | null = null;
+      let notice: string | null = null;
       try {
         const reply = await call(method, url, body);
         if (!reply.ok) text = messengerError(reply.status, reply.body);
+        else notice = noticeOf(reply.body);
       } catch {
         text = LOAD_FAILED;
       }
       if (text === null) {
         const next = await readStatus();
         if (next !== null) {
-          box.replaceWith(messengerBlock(next));
+          box.replaceWith(withNotice(messengerBlock(next), notice));
           return;
         }
         text = LOAD_FAILED;

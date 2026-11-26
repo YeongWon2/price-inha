@@ -383,6 +383,15 @@ fn provider_name(provider: &str) -> &str {
     }
 }
 
+/// (다듬기 E 6번) 키 줄 끝에 덧붙이는 텔레그램 봇 토큰의 등록 여부(값 없이). 읽지 못하면 "없음"으로 본다.
+fn telegram_part(secrets: &SecretStore) -> String {
+    let registered = secrets
+        .provider_status(&[crate::TELEGRAM_KEYS])
+        .is_ok_and(|status| status.iter().any(|status| status.registered));
+    let state = if registered { "있음" } else { "없음" };
+    format!("텔레그램 봇 토큰 {state}")
+}
+
 /// 진단 3: 키 칸마다 등록 여부(이름만, 값 · 길이 · 앞뒤 글자 금지).
 fn check_keys(home: &Path, home_ok: bool) -> Check {
     let item = CheckItem::Keys;
@@ -407,6 +416,10 @@ fn check_keys(home: &Path, home_ok: bool) -> Check {
     let mut broker = false;
     let mut ai_key = false;
     for status in &kinds {
+        // (다듬기 E 2번) 옛 한 칸짜리 자료 키는 더 받지 않는다(자료 키는 아래 칸들로 보인다).
+        if matches!(status.kind, KeyKind::Data) {
+            continue;
+        }
         match status.kind {
             KeyKind::Broker => broker = status.registered,
             KeyKind::AiApiKey => ai_key = status.registered,
@@ -445,6 +458,7 @@ fn check_keys(home: &Path, home_ok: bool) -> Check {
     if cli {
         parts.push("AI는 Claude Code CLI 사용".to_string());
     }
+    parts.push(telegram_part(&secrets));
     let what = parts.join(" · ");
     if broker && (ai_key || cli) {
         good(item, what)

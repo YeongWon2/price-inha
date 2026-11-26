@@ -64,6 +64,8 @@ export interface PlayerScene {
   /** 바닥 칸을 눌렀다. 걸어가기 시작했으면 참. */
   tapFloor(cell: Point): boolean;
   setLook(look: string): void;
+  /** (다듬기 E 9번) 이름표 글을 바꾼다. */
+  setName(name: string): void;
   dispose(): void;
 }
 
@@ -221,6 +223,7 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
       return walker.walkTo(cell);
     },
     setLook: (look: string) => body.setLook(look),
+    setName: (name: string) => body.setName(name),
     dispose(): void {
       sender.flush();
       view.removeEventListener("keydown", onKeyDown);

@@ -14,6 +14,7 @@ use pi_secrets::{KeyKind, SecretStore, SecretsError, VerifyFailure};
 use tokio::sync::Notify;
 
 mod ai;
+mod demo_watch;
 mod keys;
 mod limit;
 
@@ -259,7 +260,11 @@ impl Desk {
         match name {
             ITEM_BROKER => self.presence.has(KeyKind::Broker),
             ITEM_AI => self.has_ai(),
-            ITEM_SYMBOLS => !self.watching().symbols.is_empty(),
+            // (다듬기 E 1번) 시연 기본 종목은 등록한 것이 아니다.
+            ITEM_SYMBOLS => {
+                let watching = self.watching();
+                !watching.symbols.is_empty() && watching.source != SymbolsSource::Demo
+            }
             ITEM_DATA => self.presence.has(KeyKind::Data),
             _ => false,
         }

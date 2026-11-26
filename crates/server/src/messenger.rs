@@ -24,7 +24,8 @@
 //!     시도 제한도 같은 규칙). 시연 모드(`settings.demo`)면 확인 없이 409 `{"error": "demo_mode", "message":
 //!     `[`MESSENGER_DEMO_REFUSED`]`}`.
 //!   - `DELETE` [`MESSENGER_TELEGRAM_PATH`]: 토큰과 페어링 장부([`MESSENGER_BOOK_FILE`]) · 받은 자리
-//!     ([`MESSENGER_CURSOR_FILE`])를 지우고 루프를 멈춘다. 200 `{"removed": true}`.
+//!     ([`MESSENGER_CURSOR_FILE`])를 지우고 루프를 멈춘다. 200 `{"removed": true, "notice": `[`MESSENGER_REVOKE_HINT`]`}`
+//!     (다듬기 E 7번: 텔레그램 쪽 토큰은 살아 있으니 BotFather에서 폐기하라는 안내).
 //!   - `POST` [`MESSENGER_PAIRING_APPROVE_PATH`] `{"code"}`: `Gatekeeper::approve`. 맞으면 200 `{"paired": true}`.
 //!     틀리면 400 `{"error": "wrong_code", "message": `[`MESSENGER_WRONG_CODE`]`}`(남은 횟수를 싣지 않는다).
 //!     잠겼으면(5번째 틀림부터) 423 `{"error": "locked", "message": `[`MESSENGER_LOCKED`]`, "locked_until": 유닉스 ms}`.
@@ -132,6 +133,7 @@ pub use commands::{
     MESSENGER_SHORT_ID_LEN, MESSENGER_STATUS_PENDING, MESSENGER_STOPPED, MESSENGER_UNKNOWN,
     MESSENGER_VIA,
 };
+pub use http::MESSENGER_REVOKE_HINT;
 pub(crate) use http::routes;
 pub use http::{
     MESSENGER_DEMO_REFUSED, MESSENGER_LOCKED, MESSENGER_OWNER_EXISTS,

@@ -55,6 +55,12 @@ pub fn run_assembly(settings: &Settings, secrets: Option<Arc<SecretStore>>) -> R
         } else {
             settings.symbols.clone()
         };
+        // (다듬기 E 1번) 종목이 없으면 시연 기본 종목에 시연 업종을 넣는다(파일에 쓰지 않는다).
+        let watched = if watched.is_empty() {
+            crate::demo::demo_symbols(settings.market)
+        } else {
+            watched
+        };
         trading.rules.sectors = demo_sectors(&watched);
     }
     RunAssembly {
@@ -87,9 +93,27 @@ pub(crate) struct DemoRun {
     pub(crate) ai_pause: Duration,
     /// (35차 4번) 조립이 준 업종표를 시연 업종으로 따로 쥐고, 업종이 없는 지켜보는 종목에 더한다.
     pub(crate) sectors: bool,
+    /// (다듬기 E 1번) 지켜보는 종목이 없으면 시연 기본 종목([`crate::demo_symbols`])을 조립 값으로 쓴다.
+    pub(crate) default_symbols: bool,
 }
 
 impl DemoRun {
+    /// 설정 책상을 연다([`super::open_desk`]). (다듬기 E 1번) 시연 실행이고 지켜보는 종목이 없으면 시연 기본 종목
+    /// ([`crate::demo_symbols`])을 조립 값으로 쓴다(파일에 쓰지 않는다, E56).
+    pub(crate) async fn desk(
+        &self,
+        settings: &Settings,
+        wiring: &Wiring,
+        secrets: &Arc<SecretStore>,
+        verifier: crate::KeyVerifier,
+    ) -> Result<Arc<crate::desk::Desk>, AppError> {
+        let desk = super::open_desk(settings, wiring, secrets, verifier).await?;
+        if self.default_symbols {
+            desk.use_demo_symbols(crate::demo::demo_symbols(settings.market));
+        }
+        Ok(desk)
+    }
+
     /// 시연 달력이 켜져 있으면 그 시장의 시연 달력을 주문 길의 달력으로 쓴다(조립이 이미 정한 달력이 앞선다).
     /// 그래서 하루 시작 · 마감과 깨우기 엔진이 시세 흐름이 받아 오는 달력을 기다리지 않고 처음부터 그것을 쓴다.
     fn fix_calendar(&self, market: Market, launch: &mut Launch) {
@@ -133,6 +157,7 @@ impl App {
                 offline: true,
                 ai_pause: assembly.demo_ai_pause,
                 sectors: true,
+                default_symbols: true,
             }
         } else {
             DemoRun::default()

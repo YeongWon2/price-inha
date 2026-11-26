@@ -214,9 +214,47 @@ fn default_reply(turn: DemoTurn, conversation: &str) -> String {
         DemoTurn::Draft => json!({"side": "buy", "note": "시연 주문 안"}).to_string(),
         DemoTurn::DayPlan => json!({"plan": "trade"}).to_string(),
         DemoTurn::Review => json!({"mistakes": [], "note": "시연 복기"}).to_string(),
-        DemoTurn::Chat(role) => {
-            format!("{} 담당입니다. 지금은 따로 알릴 일이 없습니다.", role.id())
-        }
+        DemoTurn::Chat(role) => chat_reply(role, conversation),
+    }
+}
+
+/// (다듬기 E 4번) 되받는 물음의 가장 긴 글자 수(넘으면 줄이고 "…").
+const ECHO_MAX_CHARS: usize = 40;
+
+/// 사무실 표시 이름(`crate::OFFICE_ROSTER`와 같다).
+fn display_name(role: Role) -> &'static str {
+    match role {
+        Role::Scout => "뉴스 공시 시세",
+        Role::Strategy => "전략",
+        Role::Risk => "리스크",
+        Role::Review => "복기",
+        Role::Trader => "매매",
+        Role::Leader => "팀장",
+    }
+}
+
+/// (다듬기 E 4번) 사무실 채팅의 시연 답: 표시 이름 · 물음 한 줄 되받기 · "(시연)". 한 줄이다.
+fn chat_reply(role: Role, conversation: &str) -> String {
+    let name = display_name(role);
+    let asked = conversation
+        .rsplit(CHAT_HEAD)
+        .next()
+        .filter(|_| conversation.contains(CHAT_HEAD))
+        .and_then(|rest| rest.lines().next())
+        .map(str::trim)
+        .unwrap_or_default();
+    let mut echo: String = asked.chars().take(ECHO_MAX_CHARS).collect();
+    if asked.chars().count() > ECHO_MAX_CHARS {
+        echo.push('…');
+    }
+    if echo.is_empty() {
+        format!(
+            "{name}입니다. 시연이라 실제 자료를 보지 않고 답합니다 — 키를 등록하면 실제로 살펴봅니다. (시연)"
+        )
+    } else {
+        format!(
+            "{name}입니다. '{echo}'에 대해서는 시연이라 실제 자료를 보지 않았습니다 — 키를 등록하면 실제로 살펴보고 답합니다. (시연)"
+        )
     }
 }
 

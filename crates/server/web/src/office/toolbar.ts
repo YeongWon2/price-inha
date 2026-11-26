@@ -22,6 +22,20 @@ export const TOOLS: readonly { id: ToolId; label: string }[] = [
 /** 조작 안내 글. */
 export const CONTROLS_HINT = "방향키 이동 · / 대화 · 끌기 화면 이동";
 
+/** (다듬기 E 10번) 따라가기 중 자동 카메라 도움말. */
+export const AUTO_CAMERA_REST_HINT = "내 캐릭터를 따라가는 중에는 자동 카메라가 쉽니다";
+
+/**
+ * (다듬기 E 10번) "따라가기"가 켜져 있으면 같은 문서의 "자동 카메라" 단추(`#auto-camera`)를 흐리게(`data-resting`) 하고
+ * 도움말(title)을 단다. 꺼지면 걷는다. 동작 · `aria-pressed` · 글은 건드리지 않는다. 단추가 없으면 아무것도 하지 않는다.
+ */
+function restAutoCamera(doc: Document, following: boolean): void {
+  const button = doc.getElementById("auto-camera");
+  if (!button) return;
+  button.dataset.resting = following ? "true" : "false";
+  button.title = following ? AUTO_CAMERA_REST_HINT : "";
+}
+
 /** 달아 놓은 도구 줄. */
 export interface Toolbar {
   /** 도구 줄 요소(`role="toolbar"`). */
@@ -52,6 +66,7 @@ export function mountToolbar(root: HTMLElement, onTool: (id: ToolId) => void, fo
   }
   const setFollowing = (on: boolean): void => {
     follow?.setAttribute("aria-pressed", on ? "true" : "false");
+    restAutoCamera(doc, on);
   };
   setFollowing(following);
   root.appendChild(bar);

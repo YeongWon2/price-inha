@@ -263,3 +263,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 @keyframes mark-effect-pop { from { opacity: 0; transform: translateY(6px) scale(.9); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .mark-effect { animation: none; } }
 #light-list li > .mark-effect { align-self: center; width: auto; height: 30px; border-radius: 8px; box-shadow: none; }
+/* (다듬기 E 3번) 탭 줄 부르기: 팀 방은 담당 탭 뒤 작은 아이콘, 1:1 탭은 줄 오른쪽 끝에 하나. */
+#chat-tabs button.summon-icon { border: 0; padding: 2px 3px; margin-left: -4px; font-size: 12px; line-height: 1; }
+#chat-tabs button.summon:not(.summon-icon) { margin-left: auto; }
+/* (다듬기 E 9번) 외형 고르기의 "나" 줄: 이름 칸 · 이름 바꾸기. */
+.looks-me { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+/* (다듬기 E 10번) 따라가기 중에는 자동 카메라가 쉰다: 흐리게(동작은 그대로). */
+#auto-camera[data-resting="true"] { opacity: .55; }

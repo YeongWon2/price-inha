@@ -283,7 +283,7 @@ impl App {
         let demo_sectors = demo.prepare(&settings, &mut launch)?;
         let (secrets, store) = open_home(&settings, launch.secrets)?;
         let verifier = key_verifier(&wiring, launch.team.as_ref(), reach.as_ref());
-        let desk = open_desk(&settings, &wiring, &secrets, verifier).await?;
+        let desk = DemoRun::desk(&demo, &settings, &wiring, &secrets, verifier).await?;
         let parts = TradingParts {
             store: store.clone(),
             clock: Arc::clone(&wiring.clock),

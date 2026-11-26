@@ -63,6 +63,7 @@ function byId(id: string): HTMLInputElement {
   // 등록 실패 까닭 → 화면에 적는 말.
   var REASONS: Record<string, string> = {
     "key_rejected": "키가 맞지 않습니다. 값을 확인하세요.",
+    "retired_item": "예전의 한 칸짜리 자료 키는 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다.",
     "unreachable": "확인할 서버에 닿지 않습니다. 잠시 뒤에 다시 하세요.",
     "invalid_input": "입력이 잘못됐습니다. 빈 칸이나 너무 짧은 값이 없는지 확인하세요.",
     "too_many_attempts": "시도가 너무 많습니다. 잠시 뒤에 다시 하세요.",
@@ -236,7 +237,8 @@ function byId(id: string): HTMLInputElement {
     var symbols = Array.isArray(status.symbols) ? status.symbols : [];
     var fixed = status.symbols_source === "argument";
     setText($symbolsNow, symbols.length === 0 ? "" :
-      "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : ""));
+      "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" :
+        status.symbols_source === "demo" ? " (시연용 기본 종목 — 종목을 등록하면 그것으로 바뀝니다)" : ""));
     showView(status.started === true, status.demo === true);
   }
 

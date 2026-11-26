@@ -162,6 +162,8 @@ impl SetupView {
             .iter()
             // 종목은 키가 아니다(설정 화면의 종목 칸이 따로 보인다).
             .filter(|item| item.name != ITEM_SYMBOLS)
+            // (다듬기 E 2번) 옛 한 칸짜리 자료 키는 더 받지 않는다(자료 키는 아래 칸들로 보인다).
+            .filter(|item| item.name != ITEM_DATA)
             .map(|item| format!("{} {}", item_label(item.name), presence(item.registered)))
             .collect();
         parts.extend(
@@ -190,6 +192,10 @@ impl SetupView {
             AiMethod::ApiKey => "API 키",
             AiMethod::Cli => "Claude Code CLI",
         };
+        // (다듬기 E 4 · 5번) 시연은 시연용 가짜 AI로 돈다("키 등록" 줄의 "AI 연결 없음"과 어긋나지 않게).
+        if self.desk.demo() {
+            return Check::info("AI 연결", format!("시연용 가짜 AI (고른 연결: {method})"));
+        }
         Check::info("AI 연결", method)
     }
 

@@ -26,6 +26,8 @@ import { loadMe, type Me } from "./player-sync";
 import { hintText } from "./mention-text";
 import { createSummonScene, type SummonScene } from "./summon-scene";
 import { summonButton } from "./summon-view";
+import { placeSummons } from "./summon-tab";
+import { createMePick } from "./me-pick";
 import { interleave, mountTeamCompose, showMentions, type TeamCompose } from "./team-compose";
 import { mountControlsHint, mountToolbar, type Toolbar } from "./toolbar";
 import type { OfficeMap, Scene } from "./scene3d";
@@ -269,9 +271,8 @@ function renderTabs(): void {
     b.textContent = (key === ROOM_TEAM ? "팀 방" : nameOf(key)) + glyph;
     b.addEventListener("click", () => selectConversation(key));
     tabs.append(b);
-    // (33차 7번) 담당 탭 옆 부르기 단추.
-    if (key !== ROOM_TEAM) { tabs.append(summonButton(key, (agent) => void summons?.summon(agent))); }
   }
+  placeSummons(tabs, [ROOM_TEAM, ...AGENT_IDS], state.conversation, nameOf, (agent) => void summons?.summon(agent));
   $("chat-to-wrap").hidden = true;
   compose?.setTeam(state.conversation === ROOM_TEAM);
   renderCaption();
@@ -707,6 +708,7 @@ async function main(): Promise<void> {
     current: () => state.looks,
     choose: chooseLook,
     applied: () => applyLooks(),
+    me: createMePick((url, init) => fetch(url, init), () => state.me, (me) => { if (state.me) { state.me = { ...state.me, ...me }; } state.view?.setPlayerLook(me.look); state.view?.setPlayerName(me.name); }),
   });
   $("look-toggle").addEventListener("click", () => {
     if (!$("looks").hidden) { picker.close(); return; }

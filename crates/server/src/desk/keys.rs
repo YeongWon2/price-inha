@@ -25,6 +25,10 @@ impl Desk {
     /// 받은 본문은 읽은 뒤 바로 0으로 덮는다([`KeyBody::parse_wiping`]).
     pub(crate) async fn register_key(&self, body: &mut [u8]) -> Result<(), SetupRefusal> {
         let request = KeyBody::parse_wiping(body)?;
+        // (다듬기 E 2번) 옛 한 칸짜리 자료 키는 확인할 곳이 없다: 확인기를 부르지 않고 까닭을 분명히 해 거절한다.
+        if matches!(&request, KeyBody::Kind(kind) if kind.kind == pi_secrets::KeyKind::Data) {
+            return Err(SetupRefusal::RetiredItem);
+        }
         if !allow(&self.limit) {
             tracing::warn!("키 등록 시도가 너무 많아 확인하지 않고 거부합니다");
             return Err(SetupRefusal::TooManyAttempts);
