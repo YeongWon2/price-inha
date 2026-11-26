@@ -51,8 +51,9 @@ async fn 상한이_없으면_상한_없음과_쓴_수만_주고_담당별로_턴
     crate::common::discuss(&bench, "잔량 첫 논의").await;
     let after = budget(&bench).await;
     assert_eq!(
-        after["used"], 1,
-        "논의 하나는 팀 상한에서 하나로 센다(지금처럼): {after}"
+        after["used"].as_u64(),
+        Some(members_total(&after)),
+        "(54차 대조) 논의 하나는 그 논의가 쓴 턴 수만큼 센다(담당별 사용의 합): {after}"
     );
     assert!(
         used_of(&after, "news") >= 2,
@@ -106,12 +107,14 @@ async fn 상한_10이면_예비분_2_몫_8을_6으로_나누고_남은_4에서_�
         "팀장 몫은 담당 몫에 예비분을 더한다: {fresh}"
     );
 
-    for round in 1..=5 {
-        crate::common::discuss(&bench, &format!("{round}번째")).await;
-    }
+    // (54차 대조) 상한은 AI 턴 단위다: 시연 논의 하나가 7번(담당 턴 3 · 점수 3 · 팀장 1)을 쓴다.
+    crate::common::discuss(&bench, "1번째").await;
     let five = budget(&bench).await;
-    assert_eq!(five["used"], 5, "{five}");
-    assert_eq!(five["mode"], "normal", "남은 5는 문턱(2 + 2) 위다: {five}");
+    assert_eq!(five["used"], 7, "{five}");
+    assert_eq!(
+        five["mode"], "wrap_up",
+        "남은 3은 예비분 + 상한의 20%(4) 이하다: {five}"
+    );
     let news = member(&five, "news");
     assert_eq!(
         news["level"], "high",
@@ -122,24 +125,33 @@ async fn 상한_10이면_예비분_2_몫_8을_6으로_나누고_남은_4에서_�
     assert!(near(&review["ratio"], 0.0), "{five}");
     assert_eq!(review["level"], "low", "{five}");
 
+    // (54차 대조) 정리 모드 논의는 새 라운드 없이 점수 · 팀장으로 가고, 예비분은 담당이 쓰지 않는다.
     crate::common::discuss(&bench, "6번째").await;
     let six = budget(&bench).await;
-    assert_eq!(six["used"], 6, "{six}");
+    assert!(
+        six["used"]
+            .as_u64()
+            .is_some_and(|used| used > 7 && used <= 10),
+        "{six}"
+    );
     assert_eq!(
-        six["mode"], "wrap_up",
-        "남은 4는 예비분 + 상한의 20% 이하다: {six}"
+        six["mode"], "leader_only",
+        "정리 모드 논의 뒤 예비분만 남았다: {six}"
     );
 
     for round in 7..=8 {
         crate::common::discuss(&bench, &format!("{round}번째")).await;
     }
     let eight = budget(&bench).await;
-    assert_eq!(eight["used"], 8, "{eight}");
+    assert_eq!(
+        eight["used"], 10,
+        "팀장 몫까지 쓰고 상한을 넘지 않는다: {eight}"
+    );
     assert_eq!(eight["mode"], "leader_only", "예비분만 남았다: {eight}");
 
     let shown = events(&bench.store(), KIND_TEAM_AI_USED);
     let last = shown.last().expect("team.ai_used 이벤트가 있어야 한다");
-    assert_eq!(last["used"], 8, "{last}");
+    assert_eq!(last["used"], 10, "{last}");
     assert_eq!(last["limit"], 10, "{last}");
     assert_eq!(last["mode"], "leader_only", "{last}");
     assert_eq!(
