@@ -9,6 +9,9 @@ use crate::{Store, StoreError};
 /// 접속 키 해시에 친 소금의 가장 짧은 길이(바이트).
 pub const ACCESS_KEY_SALT_MIN_BYTES: usize = 16;
 
+/// (22차, 결정 32) 모의계좌 상태 값의 `ledger` 안에서 시세 관찰 칸(돈이 아닌 칸) 이름.
+pub const PAPER_SNAPSHOT_MARKET_FIELDS: [&str; 3] = ["last_now", "last_quotes", "trade_marks"];
+
 /// 저장된 모의계좌(`pi-paper`) 상태 값 한 벌.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaperSnapshot {
@@ -59,6 +62,11 @@ impl Store {
                 params![at.0, text],
             )
         })
+    }
+
+    /// (22차) 거래일 마감의 끝값 한 줄. 뼈대.
+    pub fn save_paper_day_end(&self, _at: UnixMillis) -> Result<Option<u64>, StoreError> {
+        Ok(None)
     }
 
     /// 가장 나중에 저장한(번호가 가장 큰) 모의계좌 상태 값. 없으면 없음.

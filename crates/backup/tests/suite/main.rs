@@ -1,8 +1,11 @@
 //! pi-backup 시험 묶음 (T19). GitHub는 로컬 가짜 서버, age 키는 시험 안에서 만든다.
 //! (5차) 보관 파일 담기 · 되살리기는 `archive.rs`(결정 31).
+//! (6차) gzip 보관 파일은 `archive_gz.rs`(결정 33), 설정 파일 담기는 `config_files.rs`.
 
 mod archive;
+mod archive_gz;
 mod common;
+mod config_files;
 mod failure;
 mod late_retention;
 mod partial_retention;

@@ -7,6 +7,7 @@ mod access_http;
 mod ai_link;
 mod app;
 mod archive;
+mod backup_files;
 mod cli;
 mod demo;
 mod desk;
@@ -46,10 +47,12 @@ pub use app::{
     KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, RunAssembly, Wiring,
     announce_addr, run_assembly,
 };
+pub use archive::read_archive_file;
 pub use archive::{
     ARCHIVE_DIR, ARCHIVE_KEEP_DAYS_DEFAULT, ArchiveJob, ArchiveRun, ArchivedPeriod, GroupReport,
     SETUP_STORAGE_PATH, StorageReport, run_archive, storage_line, storage_report,
 };
+pub use backup_files::BACKUP_CONFIG_FILES;
 pub use cli::{
     ANSWER_CLI, ANSWER_KEY, ANSWER_SKIP, AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem,
     Command, CommandLine, CommandOutput, CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE,

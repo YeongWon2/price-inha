@@ -21,6 +21,8 @@ mod job;
 mod measure;
 mod summary;
 
+pub use file::read_archive_file;
+
 /// 보관 폴더 이름(보관 폴더 `--home` 아래).
 pub const ARCHIVE_DIR: &str = "archive";
 /// 보관 기간 기본값(일).

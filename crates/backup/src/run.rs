@@ -117,6 +117,11 @@ impl Backup {
         self
     }
 
+    /// (6차) 보관 폴더 `home`의 비밀이 아닌 설정 파일 `names`도 묶음에 담는다. 뼈대.
+    pub fn with_config_files(self, _home: PathBuf, _names: &[&str]) -> Self {
+        self
+    }
+
     /// 한 번 올린다. `now`가 이번 백업 시각이다(파일 이름 · manifest · 상태 기록).
     ///
     /// 순서: 토큰([`pi_secrets::KeySlot::BackupGithubToken`]) 읽기 → 임시 폴더에 스냅샷 → 비밀 검사

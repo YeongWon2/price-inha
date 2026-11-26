@@ -89,3 +89,8 @@ pub(super) fn write_verified(
     }
     Ok((target, found))
 }
+
+/// (62차) 보관 파일을 읽어 원문을 준다. 뼈대.
+pub fn read_archive_file(path: &Path) -> Result<String, ArchiveError> {
+    Err(fail(path, "아직 없다"))
+}

@@ -12,6 +12,7 @@ workspace = true
 async-trait.workspace = true
 axum.workspace = true
 chrono = { workspace = true, default-features = true }
+flate2.workspace = true
 pi-agent.workspace = true
 pi-ai.workspace = true
 pi-approval.workspace = true
