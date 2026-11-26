@@ -8,6 +8,7 @@ mod chunk;
 mod condition;
 mod embed;
 pub mod error;
+mod hybrid;
 mod meta;
 mod output;
 mod quant;
@@ -20,6 +21,7 @@ pub use chunk::{CHUNK_OVERLAP, CHUNK_TOKENS, INDEX_PREFIX_CHARS, TextChunk, spli
 pub use condition::{Condition, TradeCatalog, TradeRecord};
 pub use embed::{EmbedReport, Embedder, SemanticStatus, SharedEmbedder};
 pub use error::{EmbedError, Error};
+pub use hybrid::{TEXT_WEIGHT_MICROS, VECTOR_WEIGHT_MICROS};
 pub use output::{SNIPPET_CHARS, SearchMode, SearchOutput, ToolHit};
 pub use quant::{cosine, dequantize, quantize};
 pub use reindex::{IndexSettings, ReembedProgress, ReindexPlan, ReindexReason};
@@ -319,28 +321,15 @@ impl Knowledge {
     }
 
     /// 뜻 검색. 임베딩 포트가 없으면 오류가 아니라 빈 결과와 [`SemanticStatus::Unavailable`]
-    /// (`code = "no_embedder"`)를 돌려주고 바깥 요청을 하지 않는다(V23).
+    /// (`code = "no_embedder"`)를 돌려주고 바깥 요청을 하지 않는다(V23). (6차) 포트가 있으면
+    /// [`Knowledge::hybrid_search`]`(&SearchRequest::keywords(text), now)`와 같다.
     pub async fn semantic_search(
         &self,
         text: &str,
         now: UnixMillis,
     ) -> Result<SearchOutput, Error> {
-        let _ = (text, now);
-        let semantic = match &self.embedder {
-            None => self.semantic_status(),
-            // 1차 범위 밖: 조각의 벡터를 훑어 견주는 길은 공급자를 고른 뒤에 붙인다(결정 2026-11-16 11번).
-            Some(_) => SemanticStatus::Unavailable {
-                warning: "뜻 검색은 아직 붙이지 않았다.".to_string(),
-                action: "키워드나 조건으로 찾는다.".to_string(),
-                code: "semantic_not_wired".to_string(),
-            },
-        };
-        Ok(SearchOutput {
-            results: Vec::new(),
-            mode: SearchMode::Semantic,
-            relaxed: false,
-            semantic,
-        })
+        self.hybrid_search(&SearchRequest::keywords(text), now)
+            .await
     }
 
     /// 임베딩이 없는 조각(그 모델 기준)에 임베딩을 `max`개까지 만들어 둔다. 한 번 부를 때 포트는 많아야 한 번 부른다.
