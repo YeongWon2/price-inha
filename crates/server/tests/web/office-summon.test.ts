@@ -109,7 +109,8 @@ describe("단계별 그리기 정보", () => {
 
   it("곁에 빈 칸이 없으면 그 자리에 선다", () => {
     // 검증: V60
-    expect(summonDraw("called", BOXED, { x: 1, y: 1 }, { x: 5, y: 5 }, home)).toEqual({ kind: "stay" });
+    // 대조(결정 29): 네 이웃이 막히면 그 바깥 고리(맨해튼 2)의 빈 칸으로 온다.
+    expect(summonDraw("called", BOXED, { x: 1, y: 1 }, { x: 5, y: 5 }, home)).toEqual({ kind: "walk", to: { x: 4, y: 4 }, speed: SUMMON_SPEED });
   });
 
   it("곁에서 기다리면 나를 보고 선다", () => {
