@@ -42,6 +42,8 @@ pub(super) fn team_with_limit(
     team.map(|mut team| {
         team.ai_daily_limit = team.ai_daily_limit.or(settings.ai_daily_limit);
         desk.set_launch_ai_limit(team.ai_daily_limit);
+        // (57차) 조립의 담당 모델이 설정 화면의 기본값이다.
+        desk.team_models.set_default(&team.model);
         team
     })
 }

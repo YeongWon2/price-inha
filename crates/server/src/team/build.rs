@@ -56,7 +56,7 @@ impl pi_approval::Clock for Shared {
 }
 
 /// 담당 이름(사람이 읽는 말).
-pub(super) fn role_name(role: Role) -> &'static str {
+pub(crate) fn role_name(role: Role) -> &'static str {
     match role {
         Role::Scout => "뉴스 공시 시세 담당",
         Role::Strategy => "전략 담당",
@@ -181,7 +181,7 @@ impl Crew {
             clock: Arc::clone(&shared) as Arc<dyn pi_agent::Clock>,
         };
         let roles = roles(&wiring.model);
-        let team = Team::new(ports, roles.clone(), TimeLimits::MARKET)
+        let team = Team::new(ports.clone(), roles.clone(), TimeLimits::MARKET)
             .map_err(|error| TeamError::Agent(error.to_string()))?;
         let (news, data) = sources(&wiring, (secrets, offline), &shared, &store, &clock)?;
         let approvals = Approvals::new(store.clone(), shared, WaitTimes::default());
@@ -212,16 +212,32 @@ impl Crew {
             ai_cap,
             ai_cap_told: Mutex::new(None),
             meter,
+            ports,
         });
         let _ = crew.tools.crew.set(Arc::downgrade(&crew));
         Ok(crew)
     }
 
-    /// 그 담당의 설정.
-    pub(super) fn role(&self, role: Role) -> &RoleConfig {
-        self.roles
+    /// 그 담당의 설정. (57차) 모델은 **지금** 고른 값이다(설정 화면에서 저장한 값, 없으면 조립의
+    /// [`TeamWiring::model`]). 그래서 바꾼 모델은 다시 켜지 않아도 다음 턴부터 쓰인다.
+    pub(super) fn role(&self, role: Role) -> RoleConfig {
+        let mut config = self
+            .roles
             .iter()
             .find(|config| config.role == role)
             .unwrap_or(&self.roles[0])
+            .clone();
+        if let Some(model) = self.desk.team_models.saved_for(role.id()) {
+            config.model = model;
+        }
+        config
+    }
+
+    /// (57차) 논의 하나에 쓰는 팀: 지금 고른 담당 모델로 짠다. 논의는 시작할 때 이것을 한 번 받아 끝까지 쓰므로,
+    /// 도는 중에 모델을 바꿔도 그 논의는 시작할 때의 모델로 끝난다. 짤 수 없으면(일어나지 않는다) 켤 때의 팀.
+    pub(super) fn team_now(&self) -> Team {
+        let roles = Role::ALL.into_iter().map(|role| self.role(role)).collect();
+        Team::new(self.ports.clone(), roles, TimeLimits::MARKET)
+            .unwrap_or_else(|_| self.team.clone())
     }
 }

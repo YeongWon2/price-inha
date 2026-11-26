@@ -158,6 +158,9 @@ pub(super) async fn open_gate(
         .protected_routes(crate::setup_sound::routes(settings.home.clone()))
         // (기능 H 2번) 키 화면은 설정 화면과 같은 관문: 그 컴퓨터는 세션 없이, 밖에서는 원격 세션이 있어야 열린다.
         .public_routes(page::keys_routes())
+        // (57차) 담당 모델 고르기: 세션이면 읽고, 바꾸기는 그 컴퓨터에서만(경로 안에서 local_only).
+        .protected_routes(crate::setup_models::routes(Arc::clone(view.desk())))
+        .protected_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
         .local_routes(setup_http::register_routes(Arc::clone(view.desk())))

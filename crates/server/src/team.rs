@@ -62,6 +62,7 @@ use crate::desk::Desk;
 use crate::{DayPlan, Placed, SecretsRedactor, TeamError, Trading};
 
 pub(crate) use build::CrewParts;
+pub(crate) use build::role_name;
 pub(crate) use http::routes;
 pub(crate) use link::{CrewLinks, role_of};
 pub(crate) use wake::spawn_trigger;
@@ -321,6 +322,8 @@ pub struct Crew {
     ai_cap_told: std::sync::Mutex<Option<chrono::NaiveDate>>,
     /// (51차) 담당별 하루 AI 사용과 사무실 표시판(진행 단계 · 잔량).
     meter: budget::Meter,
+    /// (57차) 실행기 포트. 논의마다 그때 고른 담당 모델로 팀을 새로 짠다([`Crew::team_now`]).
+    ports: pi_agent::Ports,
 }
 
 impl Crew {

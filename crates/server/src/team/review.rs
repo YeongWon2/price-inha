@@ -154,7 +154,7 @@ impl Crew {
         match self
             .team
             .runner()
-            .run_turn(config, limits, &title, &input)
+            .run_turn(&config, limits, &title, &input)
             .await
         {
             Ok(outcome) => parse_review(&outcome.text),

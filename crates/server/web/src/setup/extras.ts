@@ -36,6 +36,8 @@ import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
 import { mountMessenger } from "./messenger-view";
 import { mountNotify } from "./notify-view";
+// (57차) 담당 모델 고르기 표: 설정 상태로 그린 보기 줄을, 고르기 표(`API.setupModels`)를 읽으면 표로 바꾼다.
+import { upgradeModels } from "./models-view";
 import type { BadgeTone } from "../ui/parts";
 import { SOUND_DEFAULT, saveSound, soundEnabled } from "../ui/sound-pref";
 
@@ -85,8 +87,8 @@ export const AGENT_LABELS: Readonly<Record<string, string>> = {
   leader: "팀장",
 };
 
-/** 모델 줄의 안내(보기만). */
-export const MODELS_NOTE = "담당 모델은 지금 보기만 합니다. 바꾸는 길은 아직 없습니다.";
+/** 모델 줄의 안내(고르기 표를 읽기 전 · 읽지 못했을 때의 보기 줄). */
+export const MODELS_NOTE = "지금 쓰는 담당 모델입니다. 고르기 표를 읽으면 이 자리에서 바꿀 수 있습니다.";
 
 /** 모델 목록이 비었을 때(팀을 잇지 않은 서버). */
 export const MODELS_NONE = "팀이 이어져 있지 않아 쓰는 모델이 없습니다.";
@@ -375,6 +377,8 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
     swap(slots.market, body === null ? failedBlock("market", titles.market) : marketLine(body));
     swap(slots.models, body === null ? failedBlock("models", titles.models) : modelsLine(body));
   });
+  // (57차) 보기 줄을 그린 뒤 고르기 표로 바꾼다(못 읽으면 보기 줄 그대로).
+  const models = status.then(() => upgradeModels(root));
   const semantic = read(API.setupSemantic).then((body) => {
     const settings = semanticOf(body);
     swap(slots.semantic, settings === null ? failedBlock("semantic", titles.semantic) : semanticCard(settings));
@@ -389,4 +393,5 @@ export async function mountSetupExtras(root: HTMLElement): Promise<void> {
     if (body === null && state) state.textContent = "백업 상태를 읽지 못함";
   });
   await Promise.allSettled([status, semantic, doctor, backup, sound.ready, messenger, notify]);
+  await models;
 }

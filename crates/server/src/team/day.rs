@@ -64,7 +64,7 @@ impl Crew {
         let (plan, text) = match self
             .team
             .runner()
-            .run_turn(config, limits, &title, &input)
+            .run_turn(&config, limits, &title, &input)
             .await
         {
             Ok(outcome) => (

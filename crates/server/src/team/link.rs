@@ -326,7 +326,7 @@ impl Crew {
         let outcome = self
             .team
             .runner()
-            .run_turn(self.role(role), TimeLimits::CHAT, &title, &input)
+            .run_turn(&self.role(role), TimeLimits::CHAT, &title, &input)
             .await
             .map_err(|error| TeamError::Agent(self.redactor.redact(&error.to_string())))?;
         Ok(outcome.text)
