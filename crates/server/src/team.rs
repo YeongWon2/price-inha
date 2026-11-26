@@ -183,6 +183,8 @@ pub const DEFAULT_REEMBED_INTERVAL: std::time::Duration = std::time::Duration::f
 
 /// (10차 10c 13번) 임베딩을 다시 만드는 한 걸음에서 많아야 몇 조각(`pi_knowledge::Knowledge::reembed_step`의 `batch`).
 pub const DEFAULT_REEMBED_BATCH: usize = 32;
+/// (round64) 검색 도구의 뜻 검색을 기다리는 기본 시간(10초).
+pub const DEFAULT_SEMANTIC_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// 투자 팀 조립의 바깥 값. [`crate::Launch::team`]에 준다.
 #[derive(Debug, Clone)]
@@ -220,6 +222,9 @@ pub struct TeamWiring {
     pub reembed_interval: std::time::Duration,
     /// (10차 10c 13번) 한 걸음에서 다시 만드는 조각 수 상한. 기본 [`DEFAULT_REEMBED_BATCH`].
     pub reembed_batch: usize,
+    /// (round64, 10c N3 참고) 검색 도구의 뜻 검색(질의 임베딩 포함)을 기다리는 가장 긴 시간. 넘으면 키워드 결과와
+    /// `embedder_timeout`을 준다. 기본 [`DEFAULT_SEMANTIC_SEARCH_TIMEOUT`].
+    pub semantic_search_timeout: std::time::Duration,
     /// (16차 3번) 하루 AI 호출 상한: 한국 시각 하루 안에 팀 논의 · 깨우기로 AI를 부른 횟수의 상한.
     /// 비우면(`None`, 기본) 상한이 없다(스펙 그대로). 켜져 있고 상한에 닿으면 그날 남은 논의 · 깨우기를 쉬고
     /// 사용자에게 한 번 알린다. 손절 · 청산 · 이상 감지 · 한도 판단은 AI를 부르지 않아 그대로 돈다.
@@ -260,6 +265,7 @@ impl TeamWiring {
             dart_daily_limit: DEFAULT_DART_DAILY_LIMIT,
             reembed_interval: DEFAULT_REEMBED_INTERVAL,
             reembed_batch: DEFAULT_REEMBED_BATCH,
+            semantic_search_timeout: DEFAULT_SEMANTIC_SEARCH_TIMEOUT,
             ai_daily_limit: None,
         }
     }
