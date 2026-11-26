@@ -65,7 +65,6 @@
 //! - 숫자 칸은 없다.
 
 use std::io::{ErrorKind, Write};
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -333,16 +332,17 @@ fn absolute(text: &str) -> Result<PathBuf, SetupRefusal> {
 }
 
 /// 환경에서 [`CLI_ENV_ALLOWLIST`]의 이름만 골라 그 순서로 준다. 없는 이름은 뺀다.
+/// (58차) 윈도에서는 사용자 폴더 · 시스템 폴더 이름을 더한다([`crate::cli_env_names`]).
 pub fn cli_base_env(env: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-    CLI_ENV_ALLOWLIST
-        .iter()
-        .filter_map(|name| env(name).map(|value| ((*name).to_string(), value)))
+    crate::platform::cli_env_names(crate::platform::this_os())
+        .into_iter()
+        .filter_map(|name| env(name).map(|value| (name.to_string(), value)))
         .collect()
 }
 
-/// CLI 실행 파일을 찾는다: `path_var`(`:`로 나눈 폴더들)의 `claude` →
-/// `user_home`/[`CLI_USER_LOCATION`] → `fixed`(보통 [`CLI_COMMON_LOCATIONS`]) 순서.
-/// 실행할 수 있는 파일만 본다. 없으면 `None`. 아무것도 띄우지 않는다.
+/// CLI 실행 파일을 찾는다: `path_var`(유닉스는 `:`, 윈도는 `;`로 나눈 폴더들)의 `claude`(윈도는 `claude.exe` ·
+/// `claude.cmd`) → `user_home`/[`CLI_USER_LOCATION`](윈도는 `.local\bin\claude.exe`) → `fixed`(보통
+/// [`CLI_COMMON_LOCATIONS`]) 순서. 실행할 수 있는 파일만 본다. 없으면 `None`. 아무것도 띄우지 않는다.
 /// (7차 13번) `path_var`의 상대 경로 항목(`.` · `bin` · `../x` 등)은 후보가 아니다
 /// (서버의 작업 폴더에 따라 다른 파일을 가리키게 된다).
 pub fn find_claude(
@@ -350,23 +350,16 @@ pub fn find_claude(
     user_home: Option<&Path>,
     fixed: &[PathBuf],
 ) -> Option<PathBuf> {
+    let os = crate::platform::this_os();
     let on_path = path_var
         .into_iter()
-        .flat_map(|var| var.split(':'))
-        .map(Path::new)
-        .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join("claude"));
-    let in_home = user_home.map(|home| home.join(CLI_USER_LOCATION));
+        .flat_map(|var| crate::platform::claude_path_candidates(os, var))
+        .map(PathBuf::from);
+    let in_home = user_home.map(|home| home.join(crate::platform::claude_user_location(os)));
     on_path
         .chain(in_home)
         .chain(fixed.iter().cloned())
-        .find(|candidate| executable(candidate))
-}
-
-/// 실행할 수 있는 파일인가(폴더 · 실행 권한이 없는 파일은 아니다). 열지 않는다.
-fn executable(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .find(|candidate| crate::platform::is_runnable_file(candidate))
 }
 
 /// CLI 자식의 작업 폴더(보관 폴더/[`CLI_WORK_DIR`])를 준비한다: 없으면 만들고, 권한은 0700이다.
@@ -393,7 +386,7 @@ pub(crate) enum Leftovers {
 pub(crate) fn prepare_work_dir(home: &Path, leftovers: Leftovers) -> Result<PathBuf, AppError> {
     let work = home.join(CLI_WORK_DIR);
     let fail = |error: std::io::Error| AppError::Home { kind: error.kind() };
-    let existed = match std::fs::DirBuilder::new().mode(0o700).create(&work) {
+    let existed = match crate::platform::create_private_dir(&work) {
         Ok(()) => false,
         Err(error) if error.kind() == ErrorKind::AlreadyExists => true,
         Err(error) => return Err(fail(error)),
@@ -420,9 +413,7 @@ pub(crate) fn prepare_work_dir(home: &Path, leftovers: Leftovers) -> Result<Path
             }
         }
     }
-    if meta.permissions().mode() & 0o777 != 0o700 {
-        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o700)).map_err(fail)?;
-    }
+    crate::platform::narrow_private_dir(&work, &meta).map_err(fail)?;
     Ok(work)
 }
 
@@ -519,6 +510,7 @@ mod tests {
         assert!(!work.join(OWN).exists(), "지우기면 지운다");
     }
 
+    #[cfg(unix)]
     #[test]
     fn 이름이_맞아도_폴더나_링크면_다른_항목이다() {
         let (dir, work) = work_with(&[]);

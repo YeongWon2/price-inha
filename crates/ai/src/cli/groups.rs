@@ -16,8 +16,8 @@ use tokio::sync::{Notify, oneshot};
 
 use super::CLI_STDIN_CLOSE_WAIT;
 
-/// 그룹에 신호를 보내는 시스템 명령.
-pub(super) const KILL_COMMAND: &str = "/bin/kill";
+/// 그룹에 신호를 보내는 시스템 명령(유닉스 `/bin/kill`, 윈도 `taskkill` — [`super::os`]).
+pub(super) const KILL_COMMAND: &str = super::os::KILL_COMMAND;
 
 /// 살아 있는 자식 그룹의 명부.
 #[derive(Default)]
@@ -172,8 +172,11 @@ impl Groups {
 /// `program`을 신호 명령으로 써서 그룹 전체에 신호를 보낸다(`kill -<신호> -- -<그룹>`).
 /// 막히는 함수 안에서 쓴다. 신호 명령이 떠서 성공으로 끝났으면 참.
 pub(super) fn signal_group(program: &Path, signal: &str, pgid: u32) -> bool {
+    let Some(args) = kill_args(signal, pgid) else {
+        return false;
+    };
     StdCommand::new(program)
-        .args(kill_args(signal, pgid))
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -188,8 +191,11 @@ pub(super) async fn signal_group_async(signal: &str, pgid: u32) -> bool {
 
 /// `program`을 신호 명령으로 써서 그룹 전체에 신호를 보낸다. 떠서 성공으로 끝났으면 참.
 pub(super) async fn signal_group_with(program: &Path, signal: &str, pgid: u32) -> bool {
+    let Some(args) = kill_args(signal, pgid) else {
+        return false;
+    };
     tokio::process::Command::new(program)
-        .args(kill_args(signal, pgid))
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -241,8 +247,9 @@ pub(super) fn kill_lingering(program: &Path, pgid: u32, grace: Duration) {
 /// 남은 그룹이 비었는지 다시 보는 간격.
 const LINGER_POLL: Duration = Duration::from_millis(20);
 
-fn kill_args(signal: &str, pgid: u32) -> [String; 3] {
-    [format!("-{signal}"), "--".to_string(), format!("-{pgid}")]
+/// 신호 명령 인자(유닉스 `kill -<신호> -- -<그룹>`, 윈도 `taskkill /PID <번호> /T [/F]`). 보낼 수 없으면 `None`.
+fn kill_args(signal: &str, pgid: u32) -> Option<Vec<String>> {
+    super::os::kill_args(signal, pgid)
 }
 
 #[cfg(test)]

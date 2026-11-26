@@ -3,7 +3,6 @@
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -160,12 +159,10 @@ impl SystemFile {
                 "{SYSTEM_FILE_PREFIX}{}-{n}{SYSTEM_FILE_SUFFIX}",
                 std::process::id()
             ));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)
-            {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            super::os::private_file(&mut options);
+            match options.open(&path) {
                 Ok(mut file) => {
                     let made = Self { path };
                     file.write_all(text.as_bytes())?;

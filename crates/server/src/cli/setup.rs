@@ -24,7 +24,7 @@
 //!   - `cli`인데 로그인 안 됨: 저장하기 전에 [`SETUP_CLI_LOGIN_HINT`] 한 줄을 그대로 보이고 한 줄(Enter)을 읽은 뒤
 //!     다시 확인한다. 그래도 안 됐으면 같은 안내를 되풀이한다. 로그인됐으면 서버의 `/api/setup/ai`로 CLI 방식을
 //!     고른다(서버가 다시 확인한다).
-//!   - `cli`인데 찾지 못함: 고를 수 없는 답이다(다시 묻는다).
+//!   - `cli`인데 찾지 못함: [`crate::SETUP_CLI_INSTALL_HINT`]를 보이고 Enter 뒤 다시 찾고 다시 묻는다(58차).
 //!   - 환경에 `ANTHROPIC_API_KEY`가 있는데 `cli`를 고르면 [`SETUP_CLI_BILLING_WARNING`] 한 줄(그 값은 찍지 않는다).
 //!   - `key`: API 키 한 줄(터미널이면 보이지 않는 입력, `--stdin-answers`면 그 줄). 빈 줄 = 건너뛰기.
 //!     거절되면 거절 글을 보이고 키를 다시 묻는다. [`crate::SetupRefusal::TooManyAttempts`]면 그 구역은
@@ -296,7 +296,7 @@ fn show_home(prompter: &mut Prompter<'_>, home: &Path) {
     #[cfg(not(unix))]
     {
         let _ = meta;
-        prompter.say(&format!("보관 폴더: {}", home.display()));
+        prompter.say(&crate::platform::windows_home_line(home));
     }
 }
 

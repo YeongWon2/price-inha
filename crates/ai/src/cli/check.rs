@@ -173,8 +173,8 @@ async fn probe(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
         .kill_on_drop(false);
+    super::os::own_group(&mut cmd);
     let mut child = match super::spawn::spawn_retrying(|| cmd.spawn()).await {
         Ok(child) => child,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Probe::Missing,
@@ -394,7 +394,7 @@ fn auth_status(out: &Output, version: CliVersion) -> CliStatus {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

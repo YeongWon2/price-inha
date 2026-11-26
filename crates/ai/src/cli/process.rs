@@ -8,7 +8,6 @@
 //! `unsafe` 없이 시스템 `kill` 명령을 부른다.
 
 use std::io;
-use std::os::fd::{AsFd, OwnedFd};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -23,6 +22,7 @@ use super::groups::{
     Groups, KILL_COMMAND, Registration, kill_lingering, kill_lingering_with, signal_group,
     signal_group_with,
 };
+use super::os::{HeldPipe, SIGNAL_AFTER_REAP, held_outputs};
 use super::output::{self, StreamState};
 use super::{CLI_STDIN_CLOSE_WAIT, ClaudeCliConfig};
 use crate::error::AiError;
@@ -63,8 +63,8 @@ pub(super) async fn run_once(
         .current_dir(&config.work_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+        .stderr(Stdio::piped());
+    super::os::own_group(&mut cmd);
     let mut child = super::spawn::spawn_retrying(|| cmd.spawn())
         .await
         .map_err(|e| spawn_error(&e))?;
@@ -97,24 +97,6 @@ pub(super) async fn run_once(
     }
     let status = guard.wait().await.map_err(|_| AiError::Connection)?;
     output::finish(&collected.state, status, &collected.stderr)
-}
-
-/// 표준 출력 · 표준 오류 읽는 끝의 사본. 그룹을 끝낼 때까지 쥐고 있어서,
-/// 읽기를 그만둔 뒤에도 자식이 `SIGPIPE`로 먼저 죽지 않고 `SIGTERM`을 처리할 수 있게 한다.
-fn held_outputs(child: &Child) -> Vec<OwnedFd> {
-    let out = child
-        .stdout
-        .as_ref()
-        .map(|p| p.as_fd().try_clone_to_owned());
-    let err = child
-        .stderr
-        .as_ref()
-        .map(|p| p.as_fd().try_clone_to_owned());
-    [out, err]
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .collect()
 }
 
 fn spawn_error(e: &io::Error) -> AiError {
@@ -259,7 +241,7 @@ struct GroupGuard {
     grace: Duration,
     permit: Option<OwnedSemaphorePermit>,
     /// 출력 읽는 끝의 사본(그룹을 끝낸 뒤에 닫는다).
-    held: Vec<OwnedFd>,
+    held: Vec<HeldPipe>,
     /// 공급자 명부의 자리(그룹을 끝낸 뒤에 놓는다).
     registration: Option<Registration>,
     /// 자식을 거뒀다(그룹을 끝낼 필요가 없다).
@@ -281,7 +263,7 @@ impl GroupGuard {
         child: Child,
         grace: Duration,
         permit: OwnedSemaphorePermit,
-        held: Vec<OwnedFd>,
+        held: Vec<HeldPipe>,
         registration: Option<Registration>,
     ) -> Self {
         Self {
@@ -393,7 +375,8 @@ impl Drop for GroupGuard {
         let (reaped, signalled, grace, kill) = (self.reaped, self.signalled, self.grace, self.kill);
         // 손주를 지켜보다 취소됐으면 TERM · 유예는 이미 지났다: 그룹이 남아 있으면 바로 KILL(8차 1).
         let kill_pending = self.kill_pending || self.lingering;
-        if reaped && signalled && !kill_pending {
+        // 윈도는 거둔 뒤 그 번호에 보내지 않는다(번호가 곧 다시 쓰인다 — os.rs).
+        if reaped && (!SIGNAL_AFTER_REAP || (signalled && !kill_pending)) {
             return;
         }
         let spawned = std::thread::Builder::new()
@@ -454,7 +437,7 @@ fn reap(mut child: Child) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
