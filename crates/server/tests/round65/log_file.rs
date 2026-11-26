@@ -31,9 +31,15 @@ fn 상한을_넘으면_옛_파일로_돌리고_정한_수만_남긴다() {
     assert!(!rotated(&path, 3).exists(), "옛 파일은 둘만 남긴다");
     for text in [&now, &first, &second] {
         assert!(text.len() as u64 <= 100, "파일마다 상한 안: {}", text.len());
-        assert!(text.lines().all(|l| l.starts_with("기록 줄 ")), "줄을 자르지 않는다: {text}");
+        assert!(
+            text.lines().all(|l| l.starts_with("기록 줄 ")),
+            "줄을 자르지 않는다: {text}"
+        );
     }
-    assert!(now.contains("기록 줄 019"), "마지막 줄은 지금 파일에: {now}");
+    assert!(
+        now.contains("기록 줄 019"),
+        "마지막 줄은 지금 파일에: {now}"
+    );
     assert!(!now.contains("기록 줄 000"));
     #[cfg(unix)]
     {
@@ -63,5 +69,8 @@ fn 다시_열면_있던_파일에_이어_쓰고_넘쳐_있으면_먼저_돌린�
     let mut file = RotatingLogFile::open(&path, 1000, 1).unwrap();
     file.write_all("새 줄\n".as_bytes()).unwrap();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "새 줄\n");
-    assert_eq!(std::fs::read_to_string(rotated(&path, 1)).unwrap().len(), 2000);
+    assert_eq!(
+        std::fs::read_to_string(rotated(&path, 1)).unwrap().len(),
+        2000
+    );
 }

@@ -159,7 +159,9 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     // server 40차 6번: 알림 전달처 · 조용한 시간.
     API.notifySettings,
   ],
-  keys: [API.remoteKeys, API.setupSlots, API.setupProviders],
+  keys: [API.remoteKeys, API.setupSlots, API.setupProviders,
+    // (65차) 키 화면은 세션을 청한다(`keys/session.ts`의 `POST /api/session`).
+    API.session],
   office: [
     API.session,
     API.office,

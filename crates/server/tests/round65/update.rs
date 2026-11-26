@@ -7,8 +7,8 @@
 //! - 시연 모드 · 확인 주소가 없는 조립(개발 · 시험 빌드)에서는 확인을 띄우지 않는다.
 
 use price_inha::{
-    CheckItem, Os, Service, UPDATE_CHECK_FILE, UpdateCheckError, VERSION, check_for_update,
-    doctor, is_newer_version, read_update_notice, spawn_update_check, update_check_url,
+    CheckItem, Os, Service, UPDATE_CHECK_FILE, UpdateCheckError, VERSION, check_for_update, doctor,
+    is_newer_version, read_update_notice, spawn_update_check, update_check_url,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -38,7 +38,10 @@ fn 판_견주기는_숫자_차례로_한다() {
     assert!(is_newer_version("1.0.0", "0.99.99"));
     assert!(!is_newer_version("v0.1.0", "0.1.0"));
     assert!(!is_newer_version("v0.0.9", "0.1.0"));
-    assert!(!is_newer_version("최신", "0.1.0"), "판 글자가 아니면 새 판이 아니다");
+    assert!(
+        !is_newer_version("최신", "0.1.0"),
+        "판 글자가 아니면 새 판이 아니다"
+    );
 }
 
 // 검증: D1
@@ -52,7 +55,11 @@ async fn 새_판이_있으면_기록하고_진단이_알리기만_한다() {
     assert_eq!(notice.latest, "v99.0.0");
     assert_eq!(notice.current, VERSION);
     assert!(notice.newer);
-    assert_eq!(server.received_requests().await.unwrap().len(), 1, "한 번만 묻는다");
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "한 번만 묻는다"
+    );
     assert!(home.path().join(UPDATE_CHECK_FILE).is_file());
     let entries: Vec<_> = std::fs::read_dir(home.path()).unwrap().collect();
     assert_eq!(entries.len(), 1, "확인 기록 말고는 아무것도 받지 않는다");
@@ -64,8 +71,14 @@ async fn 새_판이_있으면_기록하고_진단이_알리기만_한다() {
     let report = doctor(&plain_settings(home.path()), &service);
     let line = report.check(CheckItem::Update).expect("새 판 줄");
     assert!(line.ok, "알리기만 한다(문제로 세지 않는다): {line:?}");
-    assert!(line.what.contains("v99.0.0") && line.what.contains(VERSION), "{line:?}");
-    assert!(line.what.contains("install"), "다시 설치하는 길을 알린다: {line:?}");
+    assert!(
+        line.what.contains("v99.0.0") && line.what.contains(VERSION),
+        "{line:?}"
+    );
+    assert!(
+        line.what.contains("install"),
+        "다시 설치하는 길을 알린다: {line:?}"
+    );
     assert_eq!(
         server.received_requests().await.unwrap().len(),
         1,

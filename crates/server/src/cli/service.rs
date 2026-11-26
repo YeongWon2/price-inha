@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::runner::{CommandLine, CommandRunner};
 use crate::error::ServiceError;
 
+mod dying;
 mod env_note;
 mod listen;
 mod render;
@@ -192,7 +193,7 @@ pub struct ServiceStatus {
 impl ServiceStatus {
     /// (65차) 계속 죽는가: 도는 중이 아니고 마지막 종료 코드가 0이 아니다(서비스 관리자가 다시 띄우려는 중).
     pub fn keeps_dying(&self) -> bool {
-        false // red 뼈대
+        self.installed && !self.running && self.last_exit_code.is_some_and(|code| code != 0)
     }
 }
 
@@ -240,7 +241,7 @@ impl<'a> Service<'a> {
             Os::Linux => contents
                 .lines()
                 .find_map(|line| line.trim().strip_prefix("WorkingDirectory="))
-                .map(|dir| dir.trim().trim_matches('"').to_string()),
+                .map(|dir| render::systemd_unspecifiers(dir.trim().trim_matches('"'))),
             Os::Windows => {
                 between(&contents, "<WorkingDirectory>", "</WorkingDirectory>").map(xml_unescape)
             }
@@ -403,21 +404,22 @@ impl<'a> Service<'a> {
                 Some(&["Running", "실행 중"]),
             ),
         };
-        let running = match self.runner.run(&command) {
-            Ok(output) => {
-                output.success
-                    && running_word.is_none_or(|words| {
-                        output.stdout.is_empty()
-                            || words.iter().any(|word| output.stdout.contains(word))
-                    })
-            }
-            Err(_) => false,
-        };
+        let output = self.runner.run(&command).ok();
+        let running = output.as_ref().is_some_and(|output| {
+            output.success
+                && running_word.is_none_or(|words| {
+                    output.stdout.is_empty()
+                        || words.iter().any(|word| output.stdout.contains(word))
+                })
+        });
+        let last_exit_code = output
+            .filter(|output| output.success && self.setup.os == Os::MacOs)
+            .and_then(|output| dying::launchd_last_exit(&output.stdout));
         Ok(ServiceStatus {
             installed: true,
             running,
             home,
-            last_exit_code: None,
+            last_exit_code,
         })
     }
 

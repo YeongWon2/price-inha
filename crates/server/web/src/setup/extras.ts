@@ -36,6 +36,7 @@ import { LOAD_FAILED, call, el } from "../ui/call";
 import { badge, card, emptyState, errorLine, field, loading, table, button } from "../ui/parts";
 import { mountMessenger } from "./messenger-view";
 import { mountNotify } from "./notify-view";
+import { semanticLan } from "./semantic-lan";
 // (57차) 담당 모델 고르기 표: 설정 상태로 그린 보기 줄을, 고르기 표(`API.setupModels`)를 읽으면 표로 바꾼다.
 import { upgradeModels } from "./models-view";
 import type { BadgeTone } from "../ui/parts";
@@ -111,6 +112,8 @@ export const SEMANTIC_ERRORS: Readonly<Record<string, string>> = {
   loopback_only: "Ollama 주소는 같은 컴퓨터(127.0.0.1 · localhost)만 됩니다. 주소를 확인하세요.",
   invalid_input: "주소와 모델 이름을 모두 적어 주세요.",
   local_only: "뜻 검색 설정은 이 컴퓨터에서만 바꿀 수 있습니다.",
+  // (65차, 결정 34) 같은 집 다른 기기를 켜도 공인 주소 · 도메인은 받지 않는다.
+  private_only: "같은 집 다른 기기는 사설망 주소(192.168.x.x · 10.x.x.x · 172.16~31.x.x · 이름.local)만 됩니다. 주소를 확인하세요.",
 };
 
 /** 진단 상태 → 배지 글. */
@@ -250,7 +253,9 @@ export function restoreGuide(backup: unknown): HTMLElement {
 function semanticOf(value: unknown): SemanticSettings | null {
   const body = record(value);
   if (typeof body.enabled !== "boolean" || typeof body.base_url !== "string" || typeof body.model !== "string") return null;
-  return { enabled: body.enabled, base_url: body.base_url, model: body.model };
+  // (65차) 같은 집 다른 기기 켜기 · 밖으로 보낸다는 줄(없으면 꺼짐 · 없음).
+  const lan = { private_network: body.private_network === true, outside: typeof body.outside === "string" ? body.outside : null };
+  return { enabled: body.enabled, base_url: body.base_url, model: body.model, ...lan };
 }
 
 /** 뜻 검색 바꾸기 실패 까닭 → 화면 글. */
@@ -279,9 +284,11 @@ export function semanticCard(initial: SemanticSettings): HTMLElement {
   toggle.dataset.action = "semantic-toggle";
   const message = el("div", "setup-extra-message");
   message.setAttribute("aria-live", "polite");
+  const lan = semanticLan(current.private_network, current.outside);
   const paint = (): void => {
     state.textContent = current.enabled ? "켜짐" : "꺼짐";
     toggle.textContent = current.enabled ? "끄기" : "켜기";
+    lan.paint(current.private_network, current.outside);
   };
   toggle.addEventListener("click", () => {
     if (busy) return;
@@ -289,6 +296,7 @@ export function semanticCard(initial: SemanticSettings): HTMLElement {
     toggle.disabled = true;
     message.replaceChildren(loading(SEMANTIC_SAVING));
     const body = { enabled: !current.enabled, base_url: inputOf(urlField).value, model: inputOf(modelField).value };
+    if (lan.checked()) Object.assign(body, { private_network: true });
     void call("POST", API.setupSemantic, body)
       .then((reply) => {
         const next = reply.ok ? semanticOf(reply.body) : null;
@@ -306,7 +314,7 @@ export function semanticCard(initial: SemanticSettings): HTMLElement {
       });
   });
   paint();
-  return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), toggle, message);
+  return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), ...lan.nodes, toggle, message);
 }
 
 /**

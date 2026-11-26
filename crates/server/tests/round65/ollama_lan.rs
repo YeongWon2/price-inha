@@ -23,7 +23,10 @@ async fn 켜야만_사설망_주소를_받고_공인_주소는_켜도_받지_않
     let plain = json!({"enabled": false, "base_url": LAN, "model": "bge-m3"});
     let reply = bench.post(SETUP_SEMANTIC_PATH, &plain).await;
     assert_eq!(reply.status, 400, "{}", reply.text);
-    assert_eq!(reply.body["error"], SEMANTIC_LOOPBACK_ONLY, "켜지 않으면 지금처럼");
+    assert_eq!(
+        reply.body["error"], SEMANTIC_LOOPBACK_ONLY,
+        "켜지 않으면 지금처럼"
+    );
 
     for outside in ["http://8.8.8.8:11434", "https://ollama.example:11434"] {
         let body = json!({"enabled": false, "base_url": outside, "model": "bge-m3", "private_network": true});
@@ -32,7 +35,8 @@ async fn 켜야만_사설망_주소를_받고_공인_주소는_켜도_받지_않
         assert_eq!(reply.body["error"], SEMANTIC_PRIVATE_ONLY, "{outside}");
     }
 
-    let lan = json!({"enabled": false, "base_url": LAN, "model": "bge-m3", "private_network": true});
+    let lan =
+        json!({"enabled": false, "base_url": LAN, "model": "bge-m3", "private_network": true});
     let reply = bench.post(SETUP_SEMANTIC_PATH, &lan).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     assert_eq!(reply.body["private_network"], true);

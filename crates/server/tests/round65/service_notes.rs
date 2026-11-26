@@ -26,9 +26,18 @@ fn 환경_변수로_준_주소와_포트는_정의에_안_실린다고_알린다
     let lookup = env_of(&[(ENV_BIND, "0.0.0.0"), (ENV_PORT, "9100")]);
     let notes = service_env_notes(&lookup, &[]);
     assert_eq!(notes.len(), 2, "{notes:?}");
-    assert!(notes[0].contains(ENV_BIND) && notes[0].contains("--bind 0.0.0.0"), "{notes:?}");
-    assert!(notes[1].contains(ENV_PORT) && notes[1].contains("--port 9100"), "{notes:?}");
-    assert!(notes.iter().all(|note| note.contains("실리지 않")), "{notes:?}");
+    assert!(
+        notes[0].contains(ENV_BIND) && notes[0].contains("--bind 0.0.0.0"),
+        "{notes:?}"
+    );
+    assert!(
+        notes[1].contains(ENV_PORT) && notes[1].contains("--port 9100"),
+        "{notes:?}"
+    );
+    assert!(
+        notes.iter().all(|note| note.contains("실리지 않")),
+        "{notes:?}"
+    );
 
     let given = vec!["--port".to_string(), "9100".to_string()];
     let notes = service_env_notes(&lookup, &given);
@@ -96,7 +105,9 @@ fn macos에서_계속_죽는_서비스를_상태와_진단이_알린다() {
     assert!(!line.ok, "계속 죽으면 ✗: {line:?}");
     assert!(line.what.contains("78"), "{line:?}");
     assert!(
-        line.fix.as_deref().is_some_and(|fix| fix.contains(SERVER_ERROR_LOG)),
+        line.fix
+            .as_deref()
+            .is_some_and(|fix| fix.contains(SERVER_ERROR_LOG)),
         "기록 파일 자리를 알린다: {line:?}"
     );
 }
@@ -106,13 +117,20 @@ fn macos에서_계속_죽는_서비스를_상태와_진단이_알린다() {
 fn 잘_도는_서비스와_한_번도_끝나지_않은_서비스는_죽는다고_하지_않는다() {
     let home = tempfile::tempdir().unwrap();
     let defs = tempfile::tempdir().unwrap();
-    for (state, last) in [("running", "1"), ("not running", "(never exited)"), ("not running", "0")] {
+    for (state, last) in [
+        ("running", "1"),
+        ("not running", "(never exited)"),
+        ("not running", "0"),
+    ] {
         let runner = mac_service_with(home.path(), defs.path(), launchctl_print(state, last));
         let service = Service::new(setup(Os::MacOs, home.path(), defs.path(), &[]), &runner);
         let status = service.status().unwrap();
         assert!(!status.keeps_dying(), "{state} · {last}");
         let report = doctor(&plain_settings(home.path()), &service);
-        assert!(report.check(CheckItem::Service).unwrap().ok, "{state} · {last}");
+        assert!(
+            report.check(CheckItem::Service).unwrap().ok,
+            "{state} · {last}"
+        );
     }
     let linux = ScriptedRunner::ok();
     let service = Service::new(setup(Os::Linux, home.path(), defs.path(), &[]), &linux);

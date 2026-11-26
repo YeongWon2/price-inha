@@ -21,12 +21,12 @@ pub use doctor::{Check, CheckItem, DoctorReport, doctor};
 pub use open::{OPEN_NO_SERVER, OPEN_NO_SERVER_EXIT, OPEN_SCREENS, OpenRequest, OpenScreen, open};
 pub use restore::{RestoreRequest, RestoreSummary, restore};
 pub use runner::{CommandLine, CommandOutput, CommandRunner, SystemRunner};
+pub use service::service_env_notes;
 pub use service::{
     CONFIG_FATAL_EXIT, InstallOptions, LAUNCHD_FILE, LAUNCHD_LABEL, Os, SERVER_ERROR_LOG,
     SERVER_LOG, SERVER_LOGS_DIR, SYSTEMD_UNIT, Service, ServiceDefinition, ServiceReport,
     ServiceSetup, ServiceStatus, WINDOWS_TASK, WINDOWS_TASK_FILE,
 };
-pub use service::service_env_notes;
 pub use setup::{
     ANSWER_CLI, ANSWER_KEY, ANSWER_SKIP, SETUP_ALREADY, SETUP_CLI_BILLING_WARNING,
     SETUP_CLI_LOGIN_HINT, SETUP_DOCTOR_HINT, SETUP_DONE, SETUP_FAILED, SETUP_FAILED_EXIT,

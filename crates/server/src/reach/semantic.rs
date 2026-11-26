@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_ai::{
-    AiError, EmbedPurpose, EmbeddingProvider, EmbeddingRegistry, EmbeddingRequest,
+    AiError, AnthropicLimits, EmbedPurpose, EmbeddingProvider, EmbeddingRegistry, EmbeddingRequest,
     OLLAMA_DEFAULT_BASE_URL, OLLAMA_PROVIDER_ID, OllamaConfig, OllamaEmbeddingProvider, Redactor,
 };
 use pi_knowledge::{
@@ -44,6 +44,8 @@ pub(crate) struct SemanticSettings {
     pub(crate) enabled: bool,
     pub(crate) base_url: String,
     pub(crate) model: String,
+    /// (65차, 결정 34) 같은 집 다른 기기(사설망)의 Ollama를 켰나. 켜야만 사설망 주소를 받는다(기본 꺼짐).
+    pub(crate) private_network: bool,
 }
 
 impl Default for SemanticSettings {
@@ -52,6 +54,7 @@ impl Default for SemanticSettings {
             enabled: false,
             base_url: OLLAMA_DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_EMBED_MODEL.to_string(),
+            private_network: false,
         }
     }
 }
@@ -68,11 +71,20 @@ impl SemanticSettings {
             enabled: body["enabled"].as_bool()?,
             base_url: base_url.to_string(),
             model: model.to_string(),
+            private_network: body["private_network"].as_bool().unwrap_or(false),
         })
     }
 
+    /// (65차) `outside`: 임베딩을 이 컴퓨터 밖(사설망)으로 보내면 그 한 줄([`super::semantic_lan::outside_line`]),
+    /// 루프백이면 `null`.
     pub(crate) fn to_json(&self) -> Value {
-        json!({"enabled": self.enabled, "base_url": self.base_url, "model": self.model})
+        json!({
+            "enabled": self.enabled,
+            "base_url": self.base_url,
+            "model": self.model,
+            "private_network": self.private_network,
+            "outside": super::semantic_lan::outside_line(self),
+        })
     }
 
     /// 보관 폴더의 설정 파일을 읽기만 한다. 없거나 틀리면(루프백이 아닌 주소 포함) 기본(꺼짐)이다.
@@ -93,11 +105,17 @@ impl SemanticSettings {
     }
 
     /// 이 주소의 Ollama 공급자(만들 때 아무것도 보내지 않는다). 루프백이 아니면 [`AiError::InsecureBaseUrl`].
+    /// (65차, 결정 34) 같은 집 다른 기기를 켰으면 사설망 주소도 받는 공급자다(공인 주소는 그래도 거부).
     pub(crate) fn provider(&self) -> Result<OllamaEmbeddingProvider, AiError> {
-        OllamaEmbeddingProvider::new(OllamaConfig {
+        let config = OllamaConfig {
             base_url: self.base_url.clone(),
             ..OllamaConfig::default()
-        })
+        };
+        if self.private_network {
+            OllamaEmbeddingProvider::on_private_network(config, AnthropicLimits::default())
+        } else {
+            OllamaEmbeddingProvider::new(config)
+        }
     }
 }
 
@@ -106,8 +124,19 @@ impl SemanticSettings {
 pub(crate) enum ChangeError {
     /// 주소가 루프백이 아니다.
     NotLoopback,
+    /// (65차) 같은 집 다른 기기를 켰는데 주소가 루프백도 사설망도 아니다.
+    NotPrivate,
     /// 파일에 남기지 못했다.
     Save(std::io::Error),
+}
+
+/// (65차) 공급자를 만들 수 없는 주소의 거부 까닭: 같은 집 다른 기기를 켰으면 [`ChangeError::NotPrivate`].
+fn refused(settings: &SemanticSettings) -> ChangeError {
+    if settings.private_network {
+        ChangeError::NotPrivate
+    } else {
+        ChangeError::NotLoopback
+    }
 }
 
 /// 공급자를 `pi_knowledge::Embedder`로 감싼다(모델 · 차원은 정해 둔다).
@@ -223,7 +252,7 @@ impl Semantic {
 
     /// 설정을 바꿔 파일에 남긴다. 루프백이 아니면 그대로 둔다.
     pub(crate) fn change(&self, settings: SemanticSettings) -> Result<(), ChangeError> {
-        settings.provider().map_err(|_| ChangeError::NotLoopback)?;
+        settings.provider().map_err(|_| refused(&settings))?;
         settings.save(&self.home).map_err(ChangeError::Save)?;
         self.apply(settings)
     }
@@ -231,7 +260,7 @@ impl Semantic {
     fn apply(&self, settings: SemanticSettings) -> Result<(), ChangeError> {
         let provider = settings
             .provider()
-            .map_err(|_| ChangeError::NotLoopback)?
+            .map_err(|_| refused(&settings))?
             .with_redactor(Arc::clone(&self.redactor));
         let engine = settings
             .enabled

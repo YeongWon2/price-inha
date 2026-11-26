@@ -31,7 +31,10 @@ fn systemd_정의는_달러와_퍼센트를_풀이되지_않게_적는다() {
     assert!(exec.contains("$$HOME"), "{exec}");
     assert!(exec.contains("100%%"), "{exec}");
     assert!(exec.contains("A$$B"), "{exec}");
-    assert!(!exec.replace("$$", "").contains('$'), "홀로 선 $가 없다: {exec}");
+    assert!(
+        !exec.replace("$$", "").contains('$'),
+        "홀로 선 $가 없다: {exec}"
+    );
     let working = unit
         .lines()
         .find(|line| line.starts_with("WorkingDirectory="))
@@ -85,10 +88,7 @@ fn windows_인자_끝의_역빗금은_따옴표를_닫게_겹친다() {
         arguments.contains(r#""C:\Users\me\price inha\\""#),
         "끝의 \\는 겹친다: {arguments}"
     );
-    assert!(
-        arguments.contains(r#""D:\logs dir\\""#),
-        "{arguments}"
-    );
+    assert!(arguments.contains(r#""D:\logs dir\\""#), "{arguments}");
     assert!(
         arguments.contains(r#""a\"b\\""#),
         "따옴표는 \\\" · 끝 \\는 겹친다: {arguments}"
