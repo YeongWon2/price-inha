@@ -6,6 +6,7 @@
 mod access_http;
 mod ai_link;
 mod app;
+mod archive;
 mod cli;
 mod demo;
 mod desk;
@@ -45,6 +46,10 @@ pub use app::{
     KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, RunAssembly, Wiring,
     announce_addr, run_assembly,
 };
+pub use archive::{
+    ARCHIVE_DIR, ARCHIVE_KEEP_DAYS_DEFAULT, ArchiveJob, ArchiveRun, ArchivedPeriod, GroupReport,
+    SETUP_STORAGE_PATH, StorageReport, run_archive, storage_line, storage_report,
+};
 pub use cli::{
     ANSWER_CLI, ANSWER_KEY, ANSWER_SKIP, AccessKeyRequest, CONFIG_FATAL_EXIT, Check, CheckItem,
     Command, CommandLine, CommandOutput, CommandRunner, DoctorReport, InstallOptions, LAUNCHD_FILE,
@@ -64,6 +69,7 @@ pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,
 };
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
+pub use error::ArchiveError;
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
 };

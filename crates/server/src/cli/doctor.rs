@@ -41,6 +41,8 @@ pub enum CheckItem {
     Ollama,
     /// (19차 3번) 하루 AI 호출 상한: 늘 문제 아님. 없으면 "없음", 있으면 "N번".
     AiDailyLimit,
+    /// (61차, 결정 31) 기록 용량: 늘 문제 아님. "기록: N MB, 하루 약 X KB, 10년 약 Y GB"(저장소 바로 뒤).
+    Storage,
 }
 
 /// 항목 하나의 결과. 키 값 · 길이 · 앞뒤 글자를 싣지 않는다(N8).
@@ -142,6 +144,7 @@ fn item_name(item: CheckItem) -> &'static str {
         CheckItem::Backup => "backup",
         CheckItem::Ollama => "ollama",
         CheckItem::AiDailyLimit => "ai_daily_limit",
+        CheckItem::Storage => "storage",
     }
 }
 
