@@ -1,4 +1,5 @@
 //! pi-agent 테스트 한 바이너리. 지시서 docs/dev/modules/agent.md 1차.
+//! (12차) 판단 글의 팀 지침 블록은 `guideline.rs`(결정 30).
 
 mod action;
 mod common;
