@@ -12,8 +12,11 @@
 //! - 거부된 호출은 아무것도 바꾸지 않는다.
 
 mod approval;
+mod archive;
+mod archive_sql;
 mod chunkmeta;
 mod codec;
+mod embed_q8;
 mod error;
 mod fact;
 mod history;
@@ -37,6 +40,7 @@ mod session;
 mod team;
 mod template;
 mod trade;
+mod usage;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -44,6 +48,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use rusqlite::{Connection, TransactionBehavior};
 
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, ApprovalUse, NewApprovalRequest};
+pub use archive::{
+    ArchiveBatch, ArchiveCategory, ArchiveExport, NewArchiveBatch,
+    fingerprint as archive_fingerprint,
+};
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use history::{ApprovalLine, HISTORY_PAGE_MAX, TemplateHistoryLine, TradeFlow, TradeListItem};
@@ -80,6 +88,7 @@ pub use session::{
 pub use template::{
     CriteriaPass, NewTemplate, Template, TemplateId, TemplateRevision, TemplateState,
 };
+pub use usage::{ReclaimReport, StorageUsage, UsageGroup, measure_file};
 
 /// 이 프로그램이 아는 가장 새 스키마 버전. 1부터 시작하고 스키마를 바꿀 때마다 1씩 올린다.
 /// (10차) 10차의 표(세션 · 메시지 · 방 로그 · 트리거 영수증 · 자료)를 더하며 6으로 올린다.
@@ -88,7 +97,8 @@ pub use template::{
 /// (13차) 지식 조각 갱신으로 줄을 겹치게 바꾸는 길과 열린 상태가 아닌 매매에 방향을 처음 정하는 길을 막으며 9로 올린다.
 /// (15차) 개선안 출처 · 사용자 변경 반영 길 · 사무실 외형 표를 더하며 10으로 올린다.
 /// (19차) 내 캐릭터 · 담당 의견과 팀장 요약 · 공지 · 결정 메모 표를 더하며 11로 올린다.
-pub const SCHEMA_VERSION: u32 = 11;
+/// (21차, 결정 31) 보관 묶음 표 · 보관으로 옮긴 범위만 지우는 좁은 길 · 정수 양자화 임베딩 표를 더하며 12로 올린다.
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///

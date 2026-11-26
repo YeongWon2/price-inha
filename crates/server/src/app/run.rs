@@ -163,13 +163,24 @@ impl App {
             DemoRun::default()
         };
         let reach = Some((assembly.reach, assembly.messenger));
-        Box::pin(App::assemble(
+        // (61차, 결정 31) 하루 한 번 오래된 기록을 보관 파일로 옮긴다(꺼질 때 멈춤 알림으로 그만둔다).
+        let (home, keep_days) = (settings.home.clone(), settings.archive_keep_days);
+        let clock = Arc::clone(&assembly.wiring.clock);
+        let app = Box::pin(App::assemble(
             settings,
             assembly.wiring,
             assembly.launch,
             reach,
             demo,
         ))
-        .await
+        .await?;
+        let job = crate::ArchiveJob {
+            store: app.store(),
+            knowledge: Some(Arc::clone(&app.knowledge)),
+            home,
+            keep_days,
+        };
+        let _archive = crate::archive::spawn_daily(job, clock, app.stop.subscribe());
+        Ok(app)
     }
 }

@@ -345,6 +345,10 @@ pub enum StoreError {
     /// 결정 메모 값이 규칙에 맞지 않는다(빈 교훈 등). (19차)
     #[error("결정 메모 값이 맞지 않다: {0}")]
     InvalidDecisionMemo(String),
+    /// (21차, 결정 31) 보관으로 옮기려던 줄이 내보낸 것과 다르다(줄 수 · 지문), 또는 보관 묶음 값이 규칙에
+    /// 어긋난다. 아무것도 지우지 않았다.
+    #[error("보관 묶음이 맞지 않다: {0}")]
+    ArchiveMismatch(String),
     /// 그 번호의 매매가 없다.
     #[error("매매를 찾을 수 없다: {0:?}")]
     TradeNotFound(TradeId),

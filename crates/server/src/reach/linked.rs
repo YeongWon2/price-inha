@@ -120,6 +120,8 @@ fn backup_of(
         temp_root: home.join("backup-work"),
     };
     Backup::new(settings, store.clone(), Arc::clone(secrets))
+        // (61차, 결정 31) 보관 파일도 백업에 담는다.
+        .map(|backup| backup.with_archive_dir(home.join(crate::ARCHIVE_DIR)))
         .map_err(|e| AppError::Backup(e.to_string()))
 }
 

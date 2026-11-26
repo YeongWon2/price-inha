@@ -95,16 +95,16 @@ fn rejected(path: &Path, sql: &str) -> bool {
 // 검증: D6 M2
 #[test]
 fn 버전_7_파일을_8로_올려도_있던_줄이_글자까지_그대로이고_새_표는_비어_있다() {
-    assert_eq!(SCHEMA_VERSION, 11);
+    assert_eq!(SCHEMA_VERSION, 12);
     let (_dir, path) = copy_of_v7();
     assert_eq!(user_version(&path), 7);
     let names = tables(&path);
     let before = dump(&path, &names);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 11);
+    assert_eq!(store.info().unwrap().schema_version, 12);
     drop(store);
-    assert_eq!(user_version(&path), 11);
+    assert_eq!(user_version(&path), 12);
     assert_eq!(dump(&path, &names), before);
     for table in ["trade_plans", "trade_state_changes"] {
         assert!(rows(&path, table).is_empty(), "{table}");

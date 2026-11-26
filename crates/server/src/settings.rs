@@ -127,6 +127,8 @@ pub struct Settings {
     /// (17차 4번) 하루 AI 호출 상한. 없으면 상한 없음(기본). 0은 받지 않는다([`SettingsError::InvalidValue`]).
     /// [`crate::TeamWiring::ai_daily_limit`]으로 이어진다.
     pub ai_daily_limit: Option<u32>,
+    /// (61차, 결정 31) 오래된 기록의 보관 기간(일, `--archive-keep-days <수>`). 기본 90. 0은 받지 않는다.
+    pub archive_keep_days: u32,
 }
 
 impl Settings {
@@ -214,6 +216,7 @@ impl Settings {
             cli_env: crate::cli_base_env(env),
             log_file: log_file(given.log_file.as_deref())?,
             ai_daily_limit,
+            archive_keep_days: keep_days(&given)?,
         })
     }
 
@@ -293,6 +296,15 @@ fn attempts(picked: Picked, default: u32) -> Result<u32, SettingsError> {
     }
 }
 
+/// (61차) 오래된 기록의 보관 기간(일). 주지 않으면 [`crate::ARCHIVE_KEEP_DAYS_DEFAULT`], 0은 받지 않는다.
+fn keep_days(given: &Given) -> Result<u32, SettingsError> {
+    let picked = given
+        .archive_keep_days
+        .clone()
+        .map(|value| (value, ARG_ARCHIVE_KEEP_DAYS));
+    attempts(picked, crate::ARCHIVE_KEEP_DAYS_DEFAULT)
+}
+
 /// 등록 시도 제한들(키 등록과 종목 등록은 따로 센다).
 struct Limits {
     register_attempts: u32,
@@ -357,6 +369,7 @@ const ARG_SYMBOLS_WINDOW_MS: &str = "--symbols-window-ms";
 const ARG_DEMO: &str = "--demo";
 const ARG_LOG_FILE: &str = "--log-file";
 const ARG_AI_DAILY_LIMIT: &str = "--ai-daily-limit";
+const ARG_ARCHIVE_KEEP_DAYS: &str = "--archive-keep-days";
 
 /// 읽는 환경 변수 전부.
 const ENV_NAMES: [&str; 14] = [
@@ -395,6 +408,7 @@ struct Given {
     demo: bool,
     log_file: Option<String>,
     ai_daily_limit: Option<String>,
+    archive_keep_days: Option<String>,
 }
 
 impl Given {
@@ -422,6 +436,7 @@ impl Given {
                 ARG_SYMBOLS_WINDOW_MS => (&mut given.symbols_window_ms, ARG_SYMBOLS_WINDOW_MS),
                 ARG_LOG_FILE => (&mut given.log_file, ARG_LOG_FILE),
                 ARG_AI_DAILY_LIMIT => (&mut given.ai_daily_limit, ARG_AI_DAILY_LIMIT),
+                ARG_ARCHIVE_KEEP_DAYS => (&mut given.archive_keep_days, ARG_ARCHIVE_KEEP_DAYS),
                 // 모르는 인자의 이름도 값도 오류에 싣지 않는다.
                 _ => return Err(SettingsError::UnknownArgument),
             };

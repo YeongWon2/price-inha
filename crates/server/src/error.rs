@@ -341,3 +341,23 @@ pub enum ServiceError {
         program: String,
     },
 }
+
+/// (61차, 결정 31) 오래된 기록 덜어 내기가 실패했다. 실패하면 그 기간의 원문은 DB에 그대로 남는다.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ArchiveError {
+    /// 저장소가 거부했다(줄 수 · 지문이 다르면 아무것도 지우지 않았다).
+    #[error("저장소: {0}")]
+    Store(#[from] pi_store::StoreError),
+    /// 보관 파일을 쓰거나 확인하지 못했다.
+    #[error("보관 파일 {path}: {reason}")]
+    File {
+        /// 파일 경로.
+        path: String,
+        /// 까닭.
+        reason: String,
+    },
+    /// 지식 조각을 바꾸지 못했다.
+    #[error("지식: {0}")]
+    Knowledge(#[from] pi_knowledge::Error),
+}

@@ -7,6 +7,7 @@ mod index;
 mod keyword;
 mod kinds;
 mod mistake;
+mod quant;
 mod recall;
 mod reembed;
 mod reindex;

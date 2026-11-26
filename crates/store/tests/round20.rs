@@ -379,10 +379,10 @@ fn 다시_열어도_내_정지_기록이_그대로_읽히고_판은_그대로다
     assert_eq!(reopened.team_history().unwrap(), history);
     assert_eq!(reopened.team_history().unwrap().last().unwrap(), &rec);
     // 사유 글자에 표의 제약이 없어 판을 올리지 않았다(19차의 판 11 그대로).
-    assert_eq!(SCHEMA_VERSION, 11);
+    assert_eq!(SCHEMA_VERSION, 12);
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: u32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
 }

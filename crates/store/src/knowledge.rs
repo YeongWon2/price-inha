@@ -135,7 +135,10 @@ pub struct ChunkEmbedding {
     /// 차원 수.
     pub dims: u32,
     /// 벡터의 바이트. 받은 그대로 BLOB에 둔다(리틀 엔디언 부동소수 묶음은 knowledge 모듈이 만든다). 길이 = 차원 × 4.
+    /// (21차) `quantized`가 참이면 정수 양자화 바이트(크기 값 4바이트 + 차원마다 1바이트, 길이 = 차원 + 4).
     pub bytes: Vec<u8>,
+    /// (21차, 결정 31) 정수 양자화 바이트인가([`Store::set_chunk_embedding_q8`]로 둔 것).
+    pub quantized: bool,
 }
 
 impl Store {
@@ -209,6 +212,11 @@ impl Store {
             if known.is_none() {
                 return Err(StoreError::ChunkNotFound(id));
             }
+            // (21차) 한 조각에는 한 가지 모양만 남는다.
+            conn.execute(
+                "DELETE FROM knowledge_embeddings_q8 WHERE chunk_id = ?1",
+                [id.0],
+            )?;
             conn.execute(
                 "INSERT INTO knowledge_embeddings (chunk_id, model, dims, embedding)
                  VALUES (?1, ?2, ?3, ?4)
@@ -230,9 +238,11 @@ impl Store {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
-            found
-                .map(|(model, dims, bytes)| decode(model, dims, bytes))
-                .transpose()
+            if let Some((model, dims, bytes)) = found {
+                return decode(model, dims, bytes).map(Some);
+            }
+            // (21차) f32 줄이 없으면 정수 양자화 줄.
+            crate::embed_q8::read_q8(conn, id)
         })
     }
 
@@ -247,6 +257,8 @@ impl Store {
                 "SELECT c.id FROM knowledge_chunks c
                  WHERE NOT EXISTS (SELECT 1 FROM knowledge_embeddings e
                                    WHERE e.chunk_id = c.id AND e.model = ?1)
+                   AND NOT EXISTS (SELECT 1 FROM knowledge_embeddings_q8 q
+                                   WHERE q.chunk_id = c.id AND q.model = ?1)
                  ORDER BY c.id LIMIT ?2",
             )?;
             let ids = stmt
@@ -299,7 +311,7 @@ pub(crate) fn kind_code(kind: KnowledgeKind) -> &'static str {
     }
 }
 
-fn source_code(source: KnowledgeSource) -> &'static str {
+pub(crate) fn source_code(source: KnowledgeSource) -> &'static str {
     match source {
         KnowledgeSource::Mine => "mine",
         KnowledgeSource::Team => "team",
@@ -469,8 +481,17 @@ fn score_of(relevance_micros: i64) -> i64 {
     i64::try_from(score.max(1)).unwrap_or(1_000_000)
 }
 
-fn decode(model: String, dims: i64, bytes: Vec<u8>) -> Result<ChunkEmbedding, StoreError> {
+pub(crate) fn decode(
+    model: String,
+    dims: i64,
+    bytes: Vec<u8>,
+) -> Result<ChunkEmbedding, StoreError> {
     let dims = u32::try_from(dims)
         .map_err(|_| StoreError::Incompatible(format!("임베딩 차원 값이 이상하다: {dims}")))?;
-    Ok(ChunkEmbedding { model, dims, bytes })
+    Ok(ChunkEmbedding {
+        model,
+        dims,
+        bytes,
+        quantized: false,
+    })
 }

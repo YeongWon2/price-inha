@@ -66,8 +66,8 @@ fn restore_with(
 
     std::fs::create_dir_all(target).map_err(|e| BackupError::io(target, e))?;
     for file in &bundle.files {
-        // 검증에서 경로가 한 조각임을 확인했다.
-        let path = target.join(&file.path);
+        // 검증에서 경로가 한 조각임을 확인했다. (결정 31) 보관 파일은 `archive/` 아래로 돌린다.
+        let path = crate::archive::restored_path(target, &file.path)?;
         write_new(&path, &file.bytes)?;
     }
     let store = Store::open(target.join(SNAPSHOT_FILE))?;

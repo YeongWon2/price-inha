@@ -39,8 +39,9 @@
 pub const SETUP_DOCTOR_PATH: &str = "/api/setup/doctor";
 
 /// 진단 항목의 `key`. 이 순서대로 낸다.
-pub const DIAGNOSIS_ITEMS: [&str; 7] = [
+pub const DIAGNOSIS_ITEMS: [&str; 8] = [
     "store",
+    "storage",
     "keys",
     "ai",
     "ai_daily_limit",
@@ -106,6 +107,11 @@ impl SetupView {
         }
     }
 
+    /// (61차) 열린 저장소.
+    pub(crate) fn store(&self) -> &Store {
+        &self.store
+    }
+
     /// 설정 책상.
     pub(crate) fn desk(&self) -> &Arc<Desk> {
         &self.desk
@@ -138,6 +144,8 @@ impl SetupView {
     fn check(&self, key: &str) -> Check {
         match key {
             "store" => self.check_store(),
+            // (61차, 결정 31) 기록 용량 한 줄(늘 알림).
+            "storage" => Check::info("기록 용량", crate::archive::storage_detail(&self.store)),
             "keys" => self.check_keys(),
             "ai" => self.check_ai(),
             "ai_daily_limit" => self.check_ai_limit(),
