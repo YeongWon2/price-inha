@@ -16,6 +16,7 @@ mod log;
 mod messenger;
 mod notify_settings;
 mod page;
+mod platform;
 mod reach;
 mod retry;
 mod run_proof;
@@ -89,6 +90,12 @@ pub use notify_settings::{
 };
 pub use page::{
     ACCOUNT_PAGE_PATH, ADMIN_PAGE_PATHS, HISTORY_PAGE_PATH, RULES_PAGE_PATH, TEMPLATES_PAGE_PATH,
+};
+pub use platform::{
+    CLAUDE_CODE_DOCS_URL, SETUP_CLI_INSTALL_HINT, WINDOWS_PERMISSION_NOTE, browser_command,
+    claude_file_names, claude_path_candidates, claude_user_location, cli_env_names,
+    default_home_text, executable_name, home_permission_note, shared_home_warning,
+    terminate_command, this_os,
 };
 pub use reach::{
     APPROVAL_DECIDE_PATH, APPROVAL_LOG_PATH, APPROVAL_PATH, BACKUP_SETTINGS_FILE, BackupWiring,

@@ -7,6 +7,7 @@
 mod check;
 mod command;
 mod groups;
+mod os;
 mod output;
 mod process;
 mod spawn;
