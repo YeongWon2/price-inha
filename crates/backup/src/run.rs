@@ -108,6 +108,12 @@ impl Backup {
         })
     }
 
+    /// (결정 31) 보관 폴더(`archive/`)의 보관 파일(`*.jsonl`)도 묶음에 담는다. 폴더가 없으면 스냅샷만 담는다.
+    pub fn with_archive_dir(self, dir: PathBuf) -> Self {
+        let _ = dir;
+        todo!()
+    }
+
     /// 한 번 올린다. `now`가 이번 백업 시각이다(파일 이름 · manifest · 상태 기록).
     ///
     /// 순서: 토큰([`pi_secrets::KeySlot::BackupGithubToken`]) 읽기 → 임시 폴더에 스냅샷 → 비밀 검사

@@ -41,6 +41,9 @@ pub const MANIFEST_VERSION: u32 = 1;
 /// 묶음 안 스냅샷 파일 이름. 되살린 폴더에도 이 이름으로 쓴다(서버의 DB 파일 이름과 같다).
 pub const SNAPSHOT_FILE: &str = "price-inha.sqlite";
 
+/// (결정 31) 보관 파일(보관 폴더 `archive/`의 `*.jsonl`)의 묶음 안 이름 앞붙이. 되살리면 `archive/` 아래로 돌아간다.
+pub const ARCHIVE_BUNDLE_PREFIX: &str = "archive--";
+
 /// 원격 저장소 안에서 백업 파일을 두는 폴더.
 pub const REMOTE_DIR: &str = "backups";
 
