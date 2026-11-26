@@ -160,7 +160,6 @@ pub(super) async fn open_gate(
         .public_routes(page::keys_routes())
         // (57차) 담당 모델 고르기: 세션이면 읽고, 바꾸기는 그 컴퓨터에서만(경로 안에서 local_only).
         .protected_routes(crate::setup_models::routes(Arc::clone(view.desk())))
-        .protected_routes(page::keys_routes())
         .protected_routes(protected)
         // 키 · 종목 등록은 접속 관문의 확인과 별개로 그 경로 자체가 그 컴퓨터인지 본다.
         .local_routes(setup_http::register_routes(Arc::clone(view.desk())))
