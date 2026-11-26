@@ -4,6 +4,7 @@ mod basis;
 mod common;
 mod day;
 mod fourth;
+mod guideline;
 mod improve;
 mod memo;
 mod review;

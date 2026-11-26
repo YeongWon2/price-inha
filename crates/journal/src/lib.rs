@@ -5,6 +5,11 @@
 mod basis;
 mod day;
 pub mod error;
+// (기능 L · 결정 30) 2층 팀 지침.
+mod guideline;
+mod guideline_learn;
+mod guideline_review;
+mod guideline_text;
 mod improve;
 mod memo;
 mod review;
@@ -12,6 +17,16 @@ mod review;
 pub use basis::{missing_fields, plain_summary};
 pub use day::{Day, DayFacts, DaySummary, TradeLine};
 pub use error::Error;
+pub use guideline::{
+    DayTally, GUIDELINE_BLOCK_MAX_CHARS, GUIDELINE_BLOCK_MAX_ITEMS, GUIDELINE_MERGE_PCT,
+    GUIDELINE_PROMOTE_REPEATS, GUIDELINE_RETIRE_MIN_USES, GUIDELINE_RETIRE_WIN_PCT,
+    GUIDELINE_SIMILAR_PCT, GUIDELINE_STALE_DAYS, GUIDELINE_TALLY_KEEP, GUIDELINE_TEXT_MAX_CHARS,
+    GUIDELINE_UNBLOCK_DAYS, GUIDELINE_UNBLOCK_KEEP_PCT, GUIDELINE_UNBLOCK_MIN_EARLIER, Guideline,
+    GuidelineAction, GuidelineBook, GuidelineChange, GuidelineKind, GuidelineRules, GuidelineState,
+    PendingUse, PersonRetire,
+};
+pub use guideline_learn::{Candidate, ClosedTrade, Promotion, guideline_candidates};
+pub use guideline_text::{similarity_pct, touches_layer_one};
 pub use improve::{Improvement, RuleOutcome, increases_risk};
 pub use memo::{
     ClosePrices, LessonInput, LessonWriter, MemoBrief, OTHER_SYMBOL_LESSONS, Redactor,

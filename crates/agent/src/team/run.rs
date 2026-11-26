@@ -14,6 +14,8 @@ pub(super) struct Run {
     retries: u32,
     /// 사용자 공지(보낸 시각 순서, 11차).
     notices: Vec<NoticeNote>,
+    /// (기능 L) 팀 지침 줄.
+    guidelines: Vec<String>,
     /// 이 논의에서 쓴 호출 수(담당 턴 · 다시 시도 · 점수 턴 · 팀장 턴).
     used: AtomicU32,
     /// 정리 모드에 들어갔는가.
@@ -31,6 +33,7 @@ impl Run {
             budget: options.budget,
             retries: options.turn_retries,
             notices: options.notices,
+            guidelines: options.guidelines,
             used: AtomicU32::new(0),
             wrapping: AtomicBool::new(false),
             abstained: AtomicBool::new(false),
@@ -108,6 +111,11 @@ impl Run {
     /// 사용자 공지(보낸 시각 순서). 넘기지 않았으면 비어 있다.
     pub(super) fn notices(&self) -> &[NoticeNote] {
         &self.notices
+    }
+
+    /// (기능 L) 팀 지침 줄.
+    pub(super) fn guidelines(&self) -> &[String] {
+        &self.guidelines
     }
 }
 

@@ -23,6 +23,8 @@ use crate::TeamError;
 
 /// `GateBuilder::protected_routes`에 끼운다.
 pub(crate) fn routes(crew: Arc<Crew>) -> Router {
+    // (기능 L) 팀 지침 읽기 · 끄기.
+    let guides = super::guide_http::routes(Arc::clone(&crew));
     Router::new()
         .route(TEAM_MEMBERS_PATH, get(members))
         .route(TRADE_BASIS_PATH, get(basis))
@@ -32,6 +34,7 @@ pub(crate) fn routes(crew: Arc<Crew>) -> Router {
         // (51차, C22) 하루 AI 잔량.
         .route(super::TEAM_BUDGET_PATH, get(super::budget::budget_route))
         .with_state(crew)
+        .merge(guides)
 }
 
 /// JSON 응답. 브라우저나 중간 자리가 간직하지 않게 한다.

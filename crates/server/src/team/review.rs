@@ -135,6 +135,8 @@ impl Crew {
             }
             reviewed.reviews.push(record);
         }
+        // (기능 L) 하루 정리의 지침 승격 · 성적 · 회고.
+        self.learn_guidelines().await;
         Ok(reviewed)
     }
 
