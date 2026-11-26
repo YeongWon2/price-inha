@@ -79,6 +79,9 @@ async fn 실전중_템플릿의_사는_주문이_막히면_매매가_막힘이_�
     let stored = bench.store().get_trade(trade).unwrap();
     assert_eq!(stored.state, TradeState::Blocked, "판단됨에 남지 않는다");
     let reason = stored.blocked.expect("막힌 까닭").detail;
-    assert!(reason.contains("실전중"), "까닭에 실전중 템플릿이 보인다: {reason}");
+    assert!(
+        reason.contains("실전중"),
+        "까닭에 실전중 템플릿이 보인다: {reason}"
+    );
     bench.close().await;
 }

@@ -38,7 +38,11 @@ async fn 미룬_푸시를_동시에_두_번_풀어도_번호마다_한_번만_�
     assert_eq!(sent, held, "두 부름을 합치면 미룬 것이 한 번씩이다");
 
     let received = env.push.received_at(&path_of(&sub));
-    assert_eq!(received.len(), held.len(), "가짜 푸시 서버가 받은 수도 같다");
+    assert_eq!(
+        received.len(),
+        held.len(),
+        "가짜 푸시 서버가 받은 수도 같다"
+    );
     let mut seqs: Vec<u64> = received
         .iter()
         .map(|got| open_json(&sub, got)["seq"].as_u64().unwrap())

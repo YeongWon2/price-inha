@@ -3,9 +3,8 @@
 //! 막힌 까닭 글(`DueHandling::Blocked`)은 상한까지만 남는다.
 //! 공용 도우미는 `tests/round4/common.rs`를 그대로 쓴다(그 폴더는 고치지 않는다).
 
-#[allow(dead_code)]
 #[path = "../round4/common.rs"]
-mod common;
+pub mod common;
 
 mod blocked_cap;
 mod due_floor;

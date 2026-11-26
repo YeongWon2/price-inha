@@ -9,17 +9,14 @@
 //! 공용 도우미는 round22(깨우기) · round30(승인 카드) · round17(실전중 템플릿)의 것을 그대로 쓴다(그 폴더들은
 //! 고치지 않는다). 바깥 서비스는 모두 로컬 가짜 서버이고 계좌는 모의계좌뿐이다.
 
-#[allow(dead_code)]
 #[path = "../round30/common.rs"]
-mod common;
+pub mod common;
 
-#[allow(dead_code)]
 #[path = "../round22/common.rs"]
-mod waking;
+pub mod waking;
 
-#[allow(dead_code)]
 #[path = "../round17/common.rs"]
-mod promoting;
+pub mod promoting;
 
 mod card;
 mod live;

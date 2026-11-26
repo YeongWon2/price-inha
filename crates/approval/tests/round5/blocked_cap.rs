@@ -20,7 +20,12 @@ fn 긴_막힘_까닭은_상한_글자까지만_남고_다시_켜도_같다() {
     close_due_at(&e, T0 + 5 * MIN);
     let long = "가".repeat(BLOCKED_REASON_MAX_CHARS * 3);
     e.approvals
-        .record_due_handling(&r.number, DueHandling::Blocked { reason: long.clone() })
+        .record_due_handling(
+            &r.number,
+            DueHandling::Blocked {
+                reason: long.clone(),
+            },
+        )
         .unwrap();
 
     let kept = reason_of(e.approvals.due_handling(&r.number).unwrap());
@@ -40,9 +45,17 @@ fn 상한_안의_막힘_까닭은_그대로_남는다() {
     close_due_at(&e, T0 + 5 * MIN);
     let exact = "나".repeat(BLOCKED_REASON_MAX_CHARS);
     e.approvals
-        .record_due_handling(&r.number, DueHandling::Blocked { reason: exact.clone() })
+        .record_due_handling(
+            &r.number,
+            DueHandling::Blocked {
+                reason: exact.clone(),
+            },
+        )
         .unwrap();
-    assert_eq!(reason_of(e.approvals.due_handling(&r.number).unwrap()), exact);
+    assert_eq!(
+        reason_of(e.approvals.due_handling(&r.number).unwrap()),
+        exact
+    );
 }
 
 // 검증: E22

@@ -57,8 +57,15 @@ async fn card_in(store: &Store, number: &str, state: &str) -> Value {
 /// 사무실 카드가 하는 그대로 승인한다: 카드의 지문 앞 6자와 읽은 승인 내용의 지문을 대조하고 전체 지문을 보낸다.
 async fn approve_like_office(bench: &Bench, number: &str) -> Value {
     let waiting = card_in(&bench.store(), number, "waiting").await;
-    assert_eq!(waiting["agent"], json!("review"), "개선안은 복기 담당: {waiting}");
-    let code = waiting["short_code"].as_str().expect("지문 앞 6자").to_string();
+    assert_eq!(
+        waiting["agent"],
+        json!("review"),
+        "개선안은 복기 담당: {waiting}"
+    );
+    let code = waiting["short_code"]
+        .as_str()
+        .expect("지문 앞 6자")
+        .to_string();
     assert_eq!(code.chars().count(), 6, "{waiting}");
 
     let view = get(bench.addr(), &format!("/api/approvals/{number}")).await;
@@ -113,7 +120,11 @@ async fn 사무실_카드로_위험을_키우는_개선안을_승인하면_냉�
 
     next_trading_day(&bench).await;
     assert_eq!(proposal_state(&bench, id), ProposalState::Applied);
-    assert_eq!(risk_pct(&bench.store(), template), d("1.5"), "다음 거래일에 반영");
+    assert_eq!(
+        risk_pct(&bench.store(), template),
+        d("1.5"),
+        "다음 거래일에 반영"
+    );
     bench.close().await;
 }
 
@@ -132,7 +143,10 @@ async fn 개선안_목록은_목록을_읽은_뒤에_생긴_개선안의_승인_
     // 다시 읽어도 같다(두 번 싣지 않는다).
     assert_eq!(approval_of(&bench, id).await, (number.clone(), fingerprint));
     let shown = get(bench.addr(), PROPOSALS_PATH).await;
-    let list = shown.body["proposals"].as_array().cloned().unwrap_or_default();
+    let list = shown.body["proposals"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(list.len(), 1, "{}", shown.body);
     assert_eq!(list[0]["number"], json!(number), "{}", shown.body);
     bench.close().await;
