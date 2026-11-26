@@ -524,7 +524,6 @@ pub async fn post(addr: SocketAddr, path: &str, cookie: &str, body: &Value) -> R
     post_raw(addr, path, Some(cookie), Some(&origin), &body.to_string()).await
 }
 
-
 // ───────────── 논의 · 호출 수 ─────────────
 
 /// 지켜보는 종목으로 논의 하나를 끝까지 돈다(결과는 보지 않는다).

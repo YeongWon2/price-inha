@@ -65,7 +65,11 @@ async fn 예비분만_남으면_팀장만_부르고_예비분도_없으면_논�
         .expect("예비분이 남으면 논의는 열린다");
     let prompts = bench.prompts();
     let asked: Vec<&String> = prompts[before..].iter().collect();
-    assert_eq!(asked.len(), 1, "담당 턴 없이 팀장 판단 하나만 부른다: {asked:?}");
+    assert_eq!(
+        asked.len(),
+        1,
+        "담당 턴 없이 팀장 판단 하나만 부른다: {asked:?}"
+    );
     assert!(
         asked[0].contains("판단을 JSON 객체 하나로"),
         "그 하나는 팀장 판단 턴이다: {asked:?}"

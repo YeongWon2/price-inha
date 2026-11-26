@@ -40,14 +40,15 @@ async fn 상한을_다_써도_전체_정지는_ai_없이_된다() {
     settled_prompts(&bench).await;
     let _first = discuss_result(&bench, "첫째").await;
     let second = discuss_result(&bench, "둘째").await;
-    assert!(
-        matches!(second, Err(TeamError::AiLimit)),
-        "상한에 닿았다"
-    );
+    assert!(matches!(second, Err(TeamError::AiLimit)), "상한에 닿았다");
     let asked = bench.prompts().len();
     let reply = bench.post(TEAM_STOP_PATH, &json!({})).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     assert_eq!(bench.store().team_state().unwrap(), TeamState::FullStop);
-    assert_eq!(bench.prompts().len(), asked, "전체 정지는 AI를 부르지 않는다");
+    assert_eq!(
+        bench.prompts().len(),
+        asked,
+        "전체 정지는 AI를 부르지 않는다"
+    );
     bench.close().await;
 }
