@@ -130,6 +130,17 @@ impl Office {
         self.call_in(agent, SummonReason::Mention).await
     }
 
+    /// (결정 29) 팀 방 글 · 답 속 멘션으로 멘션이 정해진 그때 멘션된 담당 모두를 곧바로 `Called`(까닭 `Mention`)로
+    /// 만든다(답 턴을 기다리지 않는다). 같은 담당은 한 번만 보고, 담당마다 결과를 돌려준다(규칙은
+    /// [`Office::mention_turn_started`]와 같다 — 이미 불려 온 담당은 그대로, 논의 중이면 [`Error::MeetingReserved`]).
+    pub async fn mention_posted(
+        &self,
+        agents: &[Agent],
+    ) -> Vec<(Agent, Result<SummonPhase, Error>)> {
+        let _ = agents;
+        Vec::new()
+    }
+
     /// 사용자가 방을 떠났다(화면이 알린다). 팀 방을 떠나면 멘션으로 온 담당(`Called` · `Waiting`)이
     /// `Returning`으로 간다. 부름으로 온 담당은 그대로다. 바뀐 담당마다 이벤트를 내고 번호들을 돌려준다.
     pub async fn user_left_room(&self, room: Room) -> Result<Vec<u64>, Error> {

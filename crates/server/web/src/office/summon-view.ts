@@ -80,7 +80,10 @@ export type SummonDraw =
  * - `returning`: `home`으로 `walk`(빠르기 [`RETURN_SPEED`]).
  * - `idle`: `home`.
  */
-export function summonDraw(phase: SummonPhase, grid: Grid, agent: Point, player: Point, home: Point): SummonDraw {
+export function summonDraw(
+  phase: SummonPhase, grid: Grid, agent: Point, player: Point, home: Point, taken: readonly Point[] = [],
+): SummonDraw {
+  void taken;
   switch (phase) {
     case "called": {
       if (arrivedNear(agent, player)) return { kind: "arrived" };
@@ -110,7 +113,8 @@ export function arrivedNear(pos: Point, target: Point): boolean {
 }
 
 /** 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). */
-export function opensConversation(reason: SummonReason | null): boolean {
+export function opensConversation(reason: SummonReason | null, talked = false): boolean {
+  void talked;
   return reason === "call";
 }
 

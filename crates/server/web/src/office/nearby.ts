@@ -33,6 +33,13 @@ export function nearbyAgents(player: Point, agents: readonly AgentSpot[]): strin
     .map((a) => a.agent);
 }
 
+/** 모든 담당 id, 가까운 순. 뼈대(red). */
+export function agentsByDistance(player: Point, agents: readonly AgentSpot[]): string[] {
+  void player;
+  void agents;
+  return [];
+}
+
 /** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
 export function objectParticle(name: string): string {
   const last = name.trim().slice(-1);
