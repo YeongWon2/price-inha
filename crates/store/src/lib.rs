@@ -17,6 +17,7 @@ mod archive_sql;
 mod chunkmeta;
 mod codec;
 mod embed_q8;
+mod embed_scan;
 mod error;
 mod fact;
 mod history;
@@ -52,6 +53,7 @@ pub use archive::{
     ArchiveBatch, ArchiveCategory, ArchiveExport, NewArchiveBatch,
     fingerprint as archive_fingerprint,
 };
+pub use embed_scan::ChunkVector;
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use history::{ApprovalLine, HISTORY_PAGE_MAX, TemplateHistoryLine, TradeFlow, TradeListItem};
