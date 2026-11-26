@@ -8,6 +8,8 @@ mod action;
 mod discussion;
 pub mod error;
 mod floor;
+// (기능 L · 결정 30) 판단 글의 팀 지침 블록.
+mod guideline;
 mod opinion;
 mod ports;
 mod progress;
@@ -24,6 +26,9 @@ pub use discussion::{
     DataItem, Decision, DiscussionLimits, DiscussionOutcome, DiscussionRequest, WatchReason,
 };
 pub use error::{Error, SignalError, ToolError, TurnFailure};
+pub use guideline::{
+    GUIDELINE_BLOCK_NOTE, GUIDELINE_BLOCK_TITLE, GUIDELINE_CHARS_MAX, GUIDELINE_LINES_MAX,
+};
 pub use ports::{Clock, OrderDraft, SellDraft, Side, Tools};
 pub use progress::{
     CallBudget, DiscussionOptions, NOTICE_SOURCE_NAME, NoticeNote, ProgressSignal, ProgressSink,

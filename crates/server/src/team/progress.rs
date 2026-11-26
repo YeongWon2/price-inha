@@ -209,6 +209,8 @@ impl Crew {
             .discussion_options()
             .with_signals(signals)
             .with_turn_retries(TURN_RETRY_MAX);
+        // (기능 L) 팀 지침 블록(상한 안의 활성 지침, 넣은 것은 장부에 쓰임으로 남는다).
+        options = options.with_guidelines(self.guideline_lines(request.trade));
         // (54차) 남은 호출 · 팀장 예비분 · 정리 문턱을 넘긴다(정리 모드 · 팀장 몫만은 agent가 한다).
         if let Some(budget) = self.discussion_budget() {
             options = options.with_budget(budget);

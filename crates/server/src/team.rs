@@ -47,6 +47,10 @@ mod progress;
 // (기능 G) 결정 메모 정산의 거래일 달력(기록된 하루 시작 · 마감).
 mod memo_days;
 mod turns;
+// (기능 L · 결정 30) 2층 팀 지침: 장부 파일 · 잇기 · 경로.
+mod guide;
+mod guide_book;
+mod guide_http;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -70,6 +74,8 @@ pub(crate) use wake::spawn_trigger;
 
 pub use budget::{KIND_TEAM_AI_USED, TEAM_BUDGET_PATH};
 pub use demo_ai::{DemoAi, DemoTurn};
+pub use guide_book::TEAM_GUIDELINES_FILE;
+pub use guide_http::{GUIDELINE_RETIRE_PATH, GUIDELINES_PATH, KIND_GUIDELINE};
 pub use progress::KIND_OFFICE_PROGRESS;
 
 /// 투자 팀 담당 명단(V1). `GET` → `{"members": [{"id": 담당 id, "name": 담당 이름}, …]}`.
@@ -325,6 +331,8 @@ pub struct Crew {
     meter: budget::Meter,
     /// (57차) 실행기 포트. 논의마다 그때 고른 담당 모델로 팀을 새로 짠다([`Crew::team_now`]).
     ports: pi_agent::Ports,
+    /// (기능 L) 팀 지침 장부(보관 폴더의 파일 하나).
+    guide: guide_book::GuideBook,
 }
 
 impl Crew {

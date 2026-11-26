@@ -99,11 +99,18 @@ export const API = {
   teamBudget: "/api/team/budget",
   // 결정 메모(additions.md 23번 · C25): `GET ?days=`(어제 메모 카드, 배열) · `GET ?before=&max=`(히스토리 탭, 쪽).
   memos: "/api/memos",
+  // 팀 지침(기능 L · 결정 30): 읽기 `GET`. 끄기는 [`guidelineRetirePath`](`POST`, 그 컴퓨터만).
+  guidelines: "/api/guidelines",
 } as const;
 
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
 export function tradePath(id: number | string): string {
   return API.trades + "/" + encodeURIComponent(String(id));
+}
+
+/** (기능 L) 팀 지침 하나 끄기 경로 `/api/guidelines/{id}/retire`(번호는 주소 글자로 감싼다). */
+export function guidelineRetirePath(id: string): string {
+  return API.guidelines + "/" + encodeURIComponent(id) + "/retire";
 }
 
 /** 실전 템플릿 멈추기 경로 `/api/templates/{id}/stop`(server 27차 2번, 번호는 주소 글자로 감싼다). */
@@ -193,7 +200,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
   ],
   // 규칙 화면(server 28차 2번): 규칙 읽기 · 개선안 목록 · 개선안 답하기(번호 · 지문을 그대로 보낸다).
   // server 35차 3번: 금지 종목 · 업종표 읽기 · 고치기.
-  rules: [API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig],
+  // 기능 L: 팀 지침 읽기 · 끄기.
+  rules: [API.session, API.rules, API.proposals, API.proposalAnswer, API.rulesConfig, API.guidelines, "/api/guidelines/{id}/retire"],
   // 히스토리 화면(server 29차 2번): 매매 목록 · 매매 하나(근거가 함께 온다) · 하루 정리 · 승인 요청 기록.
   history: [API.session, API.trades, "/api/trades/{id}", API.dailySummary, API.approvalLog, API.memos],
 };

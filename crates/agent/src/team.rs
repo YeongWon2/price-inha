@@ -182,7 +182,9 @@ impl Team {
                 request.trade,
             )?,
             briefing: prompt::briefing(request, &trade.symbol)
-                + &prompt::notices(run.notices(), self.ports.redactor.as_ref()),
+                + &prompt::notices(run.notices(), self.ports.redactor.as_ref())
+                // (기능 L) 팀 지침 블록: 자료 · 공지 뒤 정해진 자리.
+                + &crate::guideline::block(run.guidelines(), self.ports.redactor.as_ref()),
         };
         let missing: Vec<String> = request
             .data

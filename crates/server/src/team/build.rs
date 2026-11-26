@@ -189,7 +189,9 @@ impl Crew {
         let ai_cap =
             super::quota::DailyQuota::new(store.clone(), super::quota::AI_USED_KEY, u32::MAX);
         let meter = super::budget::Meter::new(store.clone());
+        let guide = super::guide_book::GuideBook::open(desk.home());
         let crew = Arc::new(Crew {
+            guide,
             journal: Journal::new(store.clone()),
             store,
             clock,

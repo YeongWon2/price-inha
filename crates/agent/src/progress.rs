@@ -107,6 +107,8 @@ pub struct DiscussionOptions {
     pub(crate) turn_retries: u32,
     /// 사용자 공지(보낸 시각 순서). 비어 있으면 공지 없음이다.
     pub(crate) notices: Vec<NoticeNote>,
+    /// (기능 L) 팀 지침 줄(고른 순서). 비어 있으면 블록이 없다.
+    pub(crate) guidelines: Vec<String>,
 }
 
 impl DiscussionOptions {
@@ -137,6 +139,14 @@ impl DiscussionOptions {
         // 보낸 시각이 같으면 받은 순서를 지킨다(안정 정렬).
         notices.sort_by_key(|note| note.sent_at.0);
         self.notices = notices;
+        self
+    }
+
+    /// (기능 L · 결정 30) 팀 지침 줄을 넘긴다. 담당 브리핑의 자료 · 공지 뒤 정해진 자리에 "팀 지침" 블록으로 든다
+    /// (가린 글, 받은 순서, 개수 [`crate::GUIDELINE_LINES_MAX`] · 글자 [`crate::GUIDELINE_CHARS_MAX`] 상한 안).
+    /// 빈 목록이면 블록이 없다. 자료 완전성(E32)이나 판단의 자료 목록에는 들지 않는다.
+    pub fn with_guidelines(mut self, lines: Vec<String>) -> DiscussionOptions {
+        self.guidelines = lines;
         self
     }
 }

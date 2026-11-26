@@ -3,6 +3,7 @@
 mod action;
 mod common;
 mod discussion;
+mod guideline;
 mod judgment;
 mod longroom;
 mod opinions;
