@@ -211,3 +211,5 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #chat-tabs button.summon:not(.summon-icon) { margin-left: auto; }
 /* (다듬기 E 9번) 외형 고르기의 "나" 줄: 이름 칸 · 이름 바꾸기. */
 .looks-me { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+/* (다듬기 E 10번) 따라가기 중에는 자동 카메라가 쉰다: 흐리게(동작은 그대로). */
+#auto-camera[data-resting="true"] { opacity: .55; }
