@@ -172,11 +172,19 @@ async fn 상한이_없으면_새_공시가_scout_깨우기로_ai를_부른다() 
 // 검증: E30 E34 N5
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 상한_2를_채운_뒤에는_scout_깨우기도_ai를_부르지_않고_알림이_한_번_간다() {
-    let bench = waking_plan().ai_limit(2).start(kst(monday(), 10, 0)).await;
+    // (54차 대조) 상한은 AI 턴 단위이고 깨우기는 팀장 예비분을 쓰지 않는다. 다음 날 보관된 공시 논의가 몇 턴을
+    // 먼저 써도 깨우기 몫이 남게 상한을 20으로 두고, 그날은 논의가 더 열리지 않을 때까지(상한을 다 쓸 때까지) 연다.
+    let bench = waking_plan().ai_limit(20).start(kst(monday(), 10, 0)).await;
     bench.ready().await;
     bench.advance(40).await;
-    discuss(&bench, "첫째").await;
-    discuss(&bench, "둘째").await;
+    let mut seen = calls(&bench);
+    for round in 0..30 {
+        discuss(&bench, &format!("{round}번째")).await;
+        if calls(&bench) == seen {
+            break;
+        }
+        seen = calls(&bench);
+    }
     settle().await;
     let used = calls(&bench);
     assert!(used > 0, "두 논의가 AI를 불렀다");
