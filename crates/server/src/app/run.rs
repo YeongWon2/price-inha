@@ -100,7 +100,7 @@ pub(crate) struct DemoRun {
 impl DemoRun {
     /// 설정 책상을 연다([`super::open_desk`]). (다듬기 E 1번) 시연 실행이고 지켜보는 종목이 없으면 시연 기본 종목
     /// ([`crate::demo_symbols`])을 조립 값으로 쓴다(파일에 쓰지 않는다, E56).
-    pub(crate) async fn open_desk(
+    pub(crate) async fn desk(
         &self,
         settings: &Settings,
         wiring: &Wiring,
