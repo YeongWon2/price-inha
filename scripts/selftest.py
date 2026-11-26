@@ -58,7 +58,7 @@ def required_ids(module):
 
 
 def build_fixture(fx):
-    for f in ["Cargo.toml", "clippy.toml", ".gitignore", "deny.toml", "install.sh"]:
+    for f in ["Cargo.toml", "clippy.toml", ".gitignore", "deny.toml", "install.sh", "install.ps1"]:
         shutil.copy(ROOT / f, fx / f)
     shutil.copytree(ROOT / "scripts", fx / "scripts")
     (fx / "docs").mkdir()
