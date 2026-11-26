@@ -5,9 +5,12 @@
 //!   설정 상태의 `symbols_source`는 `"demo"`.
 //! - `data_key`: 2번 — 옛 자료 키 등록은 `retired_item`으로 거절(확인기를 부르지 않는다), 진단 · doctor 키 줄에서 뺀다.
 //! - `demo_chat`: 4번 — 시연용 가짜 AI의 채팅 답은 표시 이름 · 물음 되받기 · "(시연)".
+//! - `diagnosis`: 5번 — 시연 진단의 "AI 연결" 줄은 시연용 가짜 AI(고른 방식은 뒤에 그대로). 표의 줄바꿈은 vitest
+//!   `setup-diag-wrap.test.ts`가 본다.
 
 mod common;
 mod data_key;
 mod demo_chat;
 mod demo_symbols;
+mod diagnosis;
 mod doctor_cli;
