@@ -206,3 +206,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .legend ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .legend li { display: flex; gap: 8px; align-items: center; }
 .legend-glyph { flex: none; width: 22px; text-align: center; font-size: 14px; font-weight: 700; }
+/* (다듬기 E 3번) 탭 줄 부르기: 팀 방은 담당 탭 뒤 작은 아이콘, 1:1 탭은 줄 오른쪽 끝에 하나. */
+#chat-tabs button.summon-icon { border: 0; padding: 2px 3px; margin-left: -4px; font-size: 12px; line-height: 1; }
+#chat-tabs button.summon:not(.summon-icon) { margin-left: auto; }
