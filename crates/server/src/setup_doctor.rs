@@ -162,6 +162,8 @@ impl SetupView {
             .iter()
             // 종목은 키가 아니다(설정 화면의 종목 칸이 따로 보인다).
             .filter(|item| item.name != ITEM_SYMBOLS)
+            // (다듬기 E 2번) 옛 한 칸짜리 자료 키는 더 받지 않는다(자료 키는 아래 칸들로 보인다).
+            .filter(|item| item.name != ITEM_DATA)
             .map(|item| format!("{} {}", item_label(item.name), presence(item.registered)))
             .collect();
         parts.extend(

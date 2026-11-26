@@ -23,6 +23,7 @@ const REASONS: Record<string, string> = {
   invalid_input: "칸을 다시 확인하세요",
   body_too_large: "값이 너무 깁니다",
   save_failed: "저장하지 못했습니다",
+  retired_item: "예전의 한 칸짜리 자료 키는 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다",
 };
 
 /** 칸 이름 → 입력 칸 id. */

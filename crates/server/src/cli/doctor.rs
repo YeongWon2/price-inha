@@ -407,6 +407,10 @@ fn check_keys(home: &Path, home_ok: bool) -> Check {
     let mut broker = false;
     let mut ai_key = false;
     for status in &kinds {
+        // (다듬기 E 2번) 옛 한 칸짜리 자료 키는 더 받지 않는다(자료 키는 아래 칸들로 보인다).
+        if matches!(status.kind, KeyKind::Data) {
+            continue;
+        }
         match status.kind {
             KeyKind::Broker => broker = status.registered,
             KeyKind::AiApiKey => ai_key = status.registered,

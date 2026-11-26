@@ -63,6 +63,7 @@ function byId(id: string): HTMLInputElement {
   // 등록 실패 까닭 → 화면에 적는 말.
   var REASONS: Record<string, string> = {
     "key_rejected": "키가 맞지 않습니다. 값을 확인하세요.",
+    "retired_item": "예전의 한 칸짜리 자료 키는 받지 않습니다. 자료 키는 DART · ECOS · FRED · 네이버 칸으로 넣습니다.",
     "unreachable": "확인할 서버에 닿지 않습니다. 잠시 뒤에 다시 하세요.",
     "invalid_input": "입력이 잘못됐습니다. 빈 칸이나 너무 짧은 값이 없는지 확인하세요.",
     "too_many_attempts": "시도가 너무 많습니다. 잠시 뒤에 다시 하세요.",

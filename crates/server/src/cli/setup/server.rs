@@ -29,7 +29,8 @@ const STOP_WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(100);
 
 /// 응답의 `error` 글자로 되돌릴 거절들.
-const REFUSALS: [SetupRefusal; 14] = [
+const REFUSALS: [SetupRefusal; 15] = [
+    SetupRefusal::RetiredItem,
     SetupRefusal::KeyRejected,
     SetupRefusal::Unreachable,
     SetupRefusal::InvalidInput,
