@@ -44,6 +44,7 @@ pub(crate) mod card;
 // (51차) 하루 AI 잔량 · 논의 진행 단계.
 mod budget;
 mod progress;
+mod turns;
 
 use std::collections::HashMap;
 use std::sync::Arc;

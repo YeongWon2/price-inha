@@ -77,6 +77,10 @@ pub(super) async fn post(desk: &Arc<OfficeDesk>, body: &Value, device: IpAddr) -
         lock(&desk.texts).insert(response.request_id.clone(), text.clone());
         lock(&desk.mentions).insert(response.request_id.clone());
         turns.push(response.agent);
+        // (54차) 사람이 직접 물은 채팅 답은 막지 않고 그 담당 · 팀의 AI 호출 하나로 센다.
+        if let Some(crew) = &desk.crew {
+            crew.count_turn(response.agent);
+        }
     }
     tokio::spawn(Arc::clone(desk).work_in_turn(turns));
     let responders: Vec<&str> = posted.responders.iter().map(|a| a.id()).collect();

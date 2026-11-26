@@ -7,7 +7,8 @@
 //! - 담당 턴이 실패하면 3번까지 다시 시도한다(E51): 그 담당은 "오류" 다음 `retry: n`으로 다시 진행이 된다.
 //! - 점수 턴 · 팀장 판단은 끝 신호가 없다. 다음 턴이 시작되거나 논의가 끝나면 진행 중이던 담당을 완료로 본다.
 //! - 신호를 받는 쪽은 상태만 바꿔 줄에 넣는다. 내기는 논의와 나란히 도는 쪽이 차례대로 한다. 내다 실패해도
-//!   논의는 그대로 간다. 신호마다 그 담당의 하루 AI 사용도 센다([`super::budget`]).
+//!   논의는 그대로 간다. 신호마다 그 담당의 하루 AI 사용도 센다([`super::budget`]). (54차) 팀의 쓴 수도 같은 턴으로
+//!   센다. 논의를 열 때 남은 호출 · 예비분 · 정리 문턱을 넘긴다([`super::turns`]).
 
 use std::sync::{Mutex, PoisonError};
 
@@ -204,10 +205,14 @@ impl Crew {
             clock: std::sync::Arc::clone(&self.clock),
             line,
         });
-        let options: DiscussionOptions = self
+        let mut options: DiscussionOptions = self
             .discussion_options()
             .with_signals(signals)
             .with_turn_retries(TURN_RETRY_MAX);
+        // (54차) 남은 호출 · 팀장 예비분 · 정리 문턱을 넘긴다(정리 모드 · 팀장 몫만은 agent가 한다).
+        if let Some(budget) = self.discussion_budget() {
+            options = options.with_budget(budget);
+        }
         let _clear = ClearOnDrop(self);
         let discussing = self.team.discuss_with(request, options);
         let showing = async {

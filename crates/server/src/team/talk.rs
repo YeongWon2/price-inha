@@ -66,43 +66,6 @@ impl Crew {
         UnixMillis(self.clock.now().timestamp_millis())
     }
 
-    /// (16차 3번) 하루 AI 호출 상한이 켜져 있으면 논의 한 번을 한 번으로 센다(한국 시각 날짜별, 저장).
-    /// 상한에 닿았으면 그날 남은 논의를 쉬고(오류) 사용자에게 그날 한 번 알린다. 손절 등은 AI를 부르지 않아 상관없다.
-    pub(super) fn take_ai_call(&self) -> Result<(), TeamError> {
-        let limit = self
-            .wiring
-            .ai_daily_limit
-            .or_else(|| self.desk.saved_ai_limit());
-        let Some(limit) = limit else {
-            // (51차) 상한이 없어도 그날 쓴 수는 센다(잔량 바의 쓴 수). 막지는 않는다.
-            self.ai_cap.take_within(self.clock.now(), u32::MAX);
-            self.publish_budget();
-            return Ok(());
-        };
-        let now = self.clock.now();
-        if self.ai_cap.take_within(now, limit) {
-            self.publish_budget();
-            return Ok(());
-        }
-        let today = super::quota::kst_date(now);
-        let first_today = {
-            let mut told = self
-                .ai_cap_told
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let first = *told != Some(today);
-            *told = Some(today);
-            first
-        };
-        if first_today {
-            tracing::warn!("오늘 AI 호출 상한에 닿아 논의를 쉽니다");
-            if let Some(notify) = self.links.get().and_then(|links| links.ai_capped.as_ref()) {
-                notify();
-            }
-        }
-        Err(TeamError::AiLimit)
-    }
-
     /// (22차 1번) 논의가 도는 동안 그 방의 담당 글을 사무실 팀 대화로 낸다(사무실이 없으면 없음).
     fn follow_talk(&self, trade: TradeId, symbol: &str) -> Option<crate::reach::Following> {
         let talk = self.links.get().and_then(|links| links.talk.as_ref())?;
@@ -165,7 +128,8 @@ impl Crew {
         if Symbol::parse(symbol).is_err() {
             return Err(TeamError::UnknownSymbol(symbol.to_string()));
         }
-        self.take_ai_call()?;
+        // (54차) 남은 호출이 없으면 열지 않는다. 논의 안의 턴은 진행 신호마다 센다(셈은 턴 단위).
+        self.open_discussion()?;
         let now = self.clock.now();
         let trade = self.store.create_trade(NewTrade {
             symbol: symbol.to_string(),
