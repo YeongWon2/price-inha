@@ -38,6 +38,7 @@ import { KIND_TEAM_AI_USED } from "./budget";
 import { mountBudget, type BudgetView } from "./budget-view";
 import { KIND_OFFICE_PROGRESS } from "./progress";
 import { mountProgress, type ProgressView } from "./progress-view";
+import { KIND_OFFICE_MEMO, mountMemoCard, type MemoCard } from "./memo-card";
 
 const SESSION_PATH = API.session;
 const SNAPSHOT_PATH = API.office;
@@ -109,6 +110,8 @@ let marks: OfficeMarks | null = null;
 /** (51차) 위 줄 하루 AI 잔량 바 · 옆 패널 논의 진행 단계. */
 let budgetView: BudgetView | null = null;
 let progressView: ProgressView | null = null;
+/** (23번) 옆 패널의 어제 메모 카드. */
+let memoCard: MemoCard | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -467,6 +470,7 @@ function onFrame(text: string): void {
     else if (frame.kind === "office.message") { onMessengerLine(frame.payload); }
     else if (frame.kind === KIND_TEAM_AI_USED) { budgetView?.apply(frame.payload); }
     else if (frame.kind === KIND_OFFICE_PROGRESS) { progressView?.apply(frame.payload, Date.now()); }
+    else if (frame.kind === KIND_OFFICE_MEMO) { void memoCard?.onEvent(frame.kind); }
   }
 }
 
@@ -702,6 +706,9 @@ async function main(): Promise<void> {
   });
   // 처음 이음(세션 · 외형 · 스냅샷)을 먼저 해 3D가 고른 외형으로 바로 그려지게 한다. 실패하면 뒤에서 다시 잇는다.
   await start();
+  // (23번) 어제 메모 카드: 세션을 얻은 뒤에 읽는다.
+  memoCard = mountMemoCard($("memos"), (url, init) => fetch(url, init));
+  void memoCard.refresh();
 
   // 폰처럼 좁은 화면은 처음부터 가벼운 화면이다. 3D가 안 되면 가벼운 화면으로 떨어진다.
   const narrow = window.matchMedia("(max-width: 760px)").matches;

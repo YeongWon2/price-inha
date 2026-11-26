@@ -48,6 +48,7 @@ import {
   selectTab,
   type HistoryTab,
 } from "./view";
+import { mountMemoTab, type MemoTab } from "./memos";
 
 /** JSON 몸통을 읽는다. 실패(상태 · 모양)면 던진다. */
 async function read<T>(url: string): Promise<T> {
@@ -171,6 +172,8 @@ class HistoryScreen {
   private readonly summaryBody = el("div", "his-summary-body");
   private readonly dateInput = el("input", "ui-input his-date");
   private summaryLoaded = false;
+  /** (23번) 결정 메모 탭. */
+  private readonly memos: MemoTab;
   /** 펼친 줄의 근거(다시 펼칠 때 다시 읽지 않는다). */
   private readonly details = new Map<number, HTMLElement>();
 
@@ -220,6 +223,7 @@ class HistoryScreen {
     );
 
     panels.summary.append(card("하루 정리", this.datePicker(), this.summaryBody));
+    this.memos = mountMemoTab(panels.memos, (url, init) => fetch(url, { ...init, credentials: "same-origin" }));
     main.append(tabs, ...TABS.map(([name]) => panels[name]));
   }
 
@@ -245,6 +249,7 @@ class HistoryScreen {
     selectTab(this.tabs, this.panels, name);
     if (name === "summary" && !this.summaryLoaded) void this.loadSummary(null);
     if (name === "approvals" && !this.approvals.loaded) void this.approvals.load(null);
+    if (name === "memos") void this.memos.open();
   }
 
   /** 좌우 방향키 · Home · End로 탭을 옮긴다. */

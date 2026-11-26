@@ -198,6 +198,8 @@ impl Crew {
             .unwrap_or_default();
         let mut data = gathered.items.clone();
         data.extend(self.recall(symbol, topic, trade.id).await);
+        // (23번) 지난 결정 메모의 교훈(N20).
+        data.extend(self.memo_items(symbol));
         let request = DiscussionRequest {
             room: request_room(trade.id),
             trade: trade.id,
@@ -218,6 +220,8 @@ impl Crew {
         }
         self.attach(trade.id, &gathered)?;
         let outcome = result.map_err(|error| TeamError::Agent(error.to_string()))?;
+        // (23번) 판단됨이 된 매매의 결정 메모(M11).
+        self.note_decision(trade.id, &outcome);
         Ok(Discussed {
             trade: trade.id,
             outcome,

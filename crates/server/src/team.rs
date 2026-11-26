@@ -26,6 +26,7 @@ mod facts;
 mod guard;
 mod http;
 mod link;
+mod memo;
 mod news;
 mod notes;
 mod notices;
@@ -377,6 +378,8 @@ impl Crew {
     /// 답하지 못한 매매는 그대로 두고 다음 마감에 다시 본다(E17).
     pub async fn review_day(&self) -> Result<Reviewed, TeamError> {
         let _turn = self.review_turn.lock().await;
+        // (23번) 정산할 결정 메모가 있으면 복기 앞에 정산한다(R7-4 · N20 · E54).
+        self.settle_day_memos().await;
         self.review_pending().await
     }
 
