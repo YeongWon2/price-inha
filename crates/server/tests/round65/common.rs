@@ -1,13 +1,11 @@
 //! 65차 시험의 공용 도우미: 실행 파일의 `--demo` 조립으로 띄우기 · 시계 · 바깥 주소 자리의 로컬 가짜 서버 · 세션 ·
 //! 요청 · 가짜 바깥 명령 실행기 · 서비스 재료. round61의 도우미를 본떴다(그 폴더는 고치지 않는다).
 
-#![allow(dead_code)]
-
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -62,9 +60,8 @@ pub fn after_close() -> DateTime<Utc> {
 /// 정의에 실릴 실행 파일 경로(가짜. 실제로 띄우지 않는다).
 pub const EXE: &str = "/opt/price-inha/bin/price-inha";
 
-/// 부른 명령을 적고, 정한 표준 출력으로 답하는 가짜 실행기.
+/// 정한 표준 출력으로 답하는 가짜 실행기(실제 서비스 관리자를 부르지 않는다).
 pub struct ScriptedRunner {
-    calls: Mutex<Vec<CommandLine>>,
     answer: Box<dyn Fn(&CommandLine) -> CommandOutput + Send + Sync>,
 }
 
@@ -82,19 +79,13 @@ impl ScriptedRunner {
         answer: impl Fn(&CommandLine) -> CommandOutput + Send + Sync + 'static,
     ) -> ScriptedRunner {
         ScriptedRunner {
-            calls: Mutex::new(Vec::new()),
             answer: Box::new(answer),
         }
-    }
-
-    pub fn calls(&self) -> Vec<CommandLine> {
-        self.calls.lock().unwrap().clone()
     }
 }
 
 impl CommandRunner for ScriptedRunner {
     fn run(&self, command: &CommandLine) -> io::Result<CommandOutput> {
-        self.calls.lock().unwrap().push(command.clone());
         Ok((self.answer)(command))
     }
 }
@@ -247,7 +238,7 @@ fn bend(mut assembly: RunAssembly, clock: &Arc<TestClock>, outside: &Outside) ->
 
 /// 떠 있는 서버 하나와 그 보관 폴더 · 가짜 서버들.
 pub struct Bench {
-    dir: TempDir,
+    _dir: TempDir,
     _outside: Outside,
     app: App,
 }
@@ -266,7 +257,7 @@ impl Bench {
             .expect("서버가 시간 안에 떠야 한다")
             .expect("서버가 떠야 한다");
         Bench {
-            dir,
+            _dir: dir,
             _outside: outside,
             app,
         }
@@ -278,10 +269,6 @@ impl Bench {
             .await
             .expect("시간 안에 꺼져야 한다")
             .expect("끄기가 성공해야 한다");
-    }
-
-    pub fn home(&self) -> &Path {
-        self.dir.path()
     }
 
     /// 새 세션으로 읽는다.
