@@ -15,8 +15,8 @@ fn rotated(path: &std::path::Path, n: usize) -> std::path::PathBuf {
 // 검증: D1 N8
 #[test]
 fn 상한을_넘으면_옛_파일로_돌리고_정한_수만_남긴다() {
-    assert!(LOG_FILE_MAX_BYTES >= 1024 * 1024, "기본 상한은 넉넉하다");
-    assert!(LOG_FILE_KEEP >= 1);
+    const { assert!(LOG_FILE_MAX_BYTES >= 1024 * 1024, "기본 상한은 넉넉하다") };
+    const { assert!(LOG_FILE_KEEP >= 1) };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("logs").join("server.log");
     let mut file = RotatingLogFile::open(&path, 100, 2).expect("폴더가 없어도 만든다");
