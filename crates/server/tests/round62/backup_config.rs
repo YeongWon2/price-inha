@@ -22,10 +22,10 @@ const CONFIG: [&str; 11] = [
     "backup-settings.json",
 ];
 
-/// 백업에 들면 안 되는 파일 이름들(키 · 토큰 · 실행 증표 · 짝 맺기 장부 · 메신저 위치).
+/// 백업에 들면 안 되는 파일 이름들(키 · 토큰 · 실행 증표 · 짝 맺기 장부 · 메신저 위치). 키 파일 이름은 pi-secrets가 정한다.
 const SECRET: [&str; 6] = [
-    ".env",
-    "auth.json",
+    pi_secrets::ENV_FILE,
+    pi_secrets::LEGACY_AUTH_FILE,
     "vapid.key",
     "run.proof",
     "messenger-pairing.json",
