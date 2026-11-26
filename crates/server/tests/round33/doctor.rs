@@ -38,6 +38,7 @@ async fn 진단은_정한_항목을_정한_순서로_내고_항목마다_정한_
         DIAGNOSIS_ITEMS,
         [
             "store",
+            "storage",
             "keys",
             "ai",
             "ai_daily_limit",
