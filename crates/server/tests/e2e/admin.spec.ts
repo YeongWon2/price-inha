@@ -10,7 +10,7 @@ test("설정 화면에 시장 · 담당 모델 · 진단 표 7줄 · 알림음�
   await openSettings(page);
   await expect(page.locator('[data-role="market"]')).toContainText("국내");
   await expect(page.locator('[data-role="models"] [data-agent]')).toHaveCount(6);
-  await expect(page.locator('[data-role="diagnosis"] tr[data-key]')).toHaveCount(7);
+  await expect(page.locator('[data-role="diagnosis"] tr[data-key]')).toHaveCount(8);
   await expect(page.locator('[data-role="sound"]')).toBeVisible();
   await expect(page.locator("#sound-on")).toBeChecked();
 });
