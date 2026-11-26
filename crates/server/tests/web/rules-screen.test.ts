@@ -343,8 +343,17 @@ describe("규칙 화면 · 못 읽음 · 경로 · 가벼움", () => {
     const table = SCREEN_PATHS.rules;
     for (const url of seen) expect(table, url).toContain(url);
     // 35차 2번 · 3번: 금지 종목 · 업종표 경로가 더해진다(그 경로만 더한다).
+    // 기능 L(결정 30): 팀 지침 읽기 · 끄기 경로가 더해진다.
     expect([...table].sort()).toEqual(
-      ["/api/session", "/api/rules", "/api/proposals", "/api/proposals/answer", "/api/rules/config"].sort(),
+      [
+        "/api/session",
+        "/api/rules",
+        "/api/proposals",
+        "/api/proposals/answer",
+        "/api/rules/config",
+        "/api/guidelines",
+        "/api/guidelines/{id}/retire",
+      ].sort(),
     );
   });
 
