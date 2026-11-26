@@ -1,0 +1,27 @@
+/* 규칙 화면의 팀 지침 묶음(기능 L). 묶음과 함께 따로 불러온다(guide-panel.ts). */
+.rul-guide-note {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.rul-guide-list { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.rul-guide-item {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.rul-guide-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.rul-guide-text { color: var(--text); font-weight: 600; }
+.rul-guide-when, .rul-guide-why { margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.rul-guide-stats { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; color: var(--text); font-size: var(--font-size-sm); }
+.rul-guide-retired { margin-top: var(--space-4); }
+.rul-guide-summary { margin-bottom: var(--space-2); color: var(--text-muted); font-size: var(--font-size-sm); cursor: pointer; }
+.rul-guide-readonly, .rul-guide-failed { margin: var(--space-3) 0 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.rul-guide-result { margin: var(--space-3) 0 0; font-size: var(--font-size-sm); font-weight: 600; }
+.rul-guide-ok { color: var(--success); }
+.rul-guide-failed.rul-guide-result { color: var(--danger); }

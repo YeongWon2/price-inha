@@ -1,4 +1,4 @@
-import { A as bubbleWidth, C as followStep, D as bubbleCandidates, M as overlap, O as bubbleText, S as FOLLOW_LERP, T as LOOKS, _ as buildGrid, a as agentClick, b as SpotSender, c as slashAction, d as cellOf, f as entranceCell, g as ACTOR_RADIUS, h as withBlockers, i as showChooser, j as insideScreen, k as bubbleWhere, l as talkHint, m as startCell, n as speakerOrbit, o as distance, p as pathTo, r as setHint, s as nearbyAgents, t as easeInOut, u as tooFar, v as clearLine, w as DEFAULT_LOOKS, x as postSpot, y as findPath } from "./office-kdzqbw7y.js";
+import { A as insideScreen, C as DEFAULT_LOOKS, D as bubbleText, E as bubbleCandidates, O as bubbleWhere, S as followStep, _ as clearLine, a as agentsByDistance, b as postSpot, c as talkHint, d as entranceCell, f as pathTo, g as buildGrid, h as ACTOR_RADIUS, i as showChooser, j as overlap, k as bubbleWidth, l as tooFar, m as withBlockers, n as speakerOrbit, o as nearbyAgents, p as startCell, r as setHint, s as slashAction, t as easeInOut, u as cellOf, v as findPath, w as LOOKS, x as FOLLOW_LERP, y as SpotSender } from "./office-jqj7hq6d.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -41461,11 +41461,13 @@ function createPlayerScene(options) {
 	stage.appendChild(hint);
 	let chooser = null;
 	let chooserFor = "";
-	/** 걸어가서 닿으면 대화를 열 담당. */
-	let openOnArrival = null;
 	/** 다가가 연 대화(멀어지면 닫는다). */
 	let talkingTo = null;
+	/** 그 담당이 한 번 곁(2칸 안)에 왔는가(온 뒤에만 멀어지면 닫는다). */
+	let met = false;
 	let near = [];
+	/** `/`의 후보: 모든 담당, 가까운 순. */
+	let everyone = [];
 	let lastSpot = "";
 	const nameOf = (id) => names[id] ?? id;
 	function agentCells() {
@@ -41480,8 +41482,8 @@ function createPlayerScene(options) {
 	}
 	function open(id) {
 		closeChooser();
-		openOnArrival = null;
 		talkingTo = id;
+		met = false;
 		hooks.openChat(id);
 	}
 	function closeChooser() {
@@ -41490,7 +41492,7 @@ function createPlayerScene(options) {
 		chooserFor = "";
 	}
 	function slash() {
-		const action = slashAction(near);
+		const action = slashAction(everyone);
 		if (action.kind === "open") {
 			open(action.agent);
 			return;
@@ -41500,7 +41502,7 @@ function createPlayerScene(options) {
 				id,
 				name: nameOf(id)
 			})), (id) => open(id));
-			chooserFor = action.agents.join();
+			chooserFor = [...action.agents].sort().join();
 			chooser.querySelector("button[data-agent]")?.focus();
 		}
 	}
@@ -41543,41 +41545,33 @@ function createPlayerScene(options) {
 	function step(dt, t, wall) {
 		const blocked = withBlockers(base, agentCells());
 		walker.setGrid(blocked);
-		if (arrows.any()) openOnArrival = null;
 		const before = walker.pos();
-		const wasFollowing = walker.following();
 		walker.step(arrows.held(), Math.min(dt, MAX_STEP_SECONDS));
 		const pos = walker.pos();
 		const walking = Math.hypot(pos.x - before.x, pos.y - before.y) > MOVED_EPSILON;
 		body.update(pos, walker.facing(), walking, dt, t);
-		const agents = options.agents();
-		near = nearbyAgents(pos, agents.map((a) => ({
+		const spots = options.agents().map((a) => ({
 			agent: a.id,
 			x: a.x,
 			y: a.z
-		})));
-		if (openOnArrival && wasFollowing && !walker.following()) {
-			const target = agentAt(openOnArrival);
-			const id = openOnArrival;
-			openOnArrival = null;
-			if (target && distance(pos, {
-				x: target.x,
-				y: target.z
-			}) < 2) open(id);
-		}
+		}));
+		near = nearbyAgents(pos, spots);
+		everyone = agentsByDistance(pos, spots);
 		if (talkingTo && hooks.conversation() !== talkingTo) talkingTo = null;
 		if (talkingTo) {
 			const target = agentAt(talkingTo);
-			if (!target || tooFar(pos, {
+			const far = !target || tooFar(pos, {
 				x: target.x,
 				y: target.z
-			})) {
+			});
+			if (!far) met = true;
+			if (far && met && walking) {
 				hooks.closeChat(talkingTo);
 				talkingTo = null;
 			}
 		}
 		setHint(hint, near.length > 0 ? talkHint(nameOf(near[0])) : null);
-		if (chooser && near.join() !== chooserFor) closeChooser();
+		if (chooser && [...everyone].sort().join() !== chooserFor) closeChooser();
 		const cell = walker.cell();
 		const spot = {
 			x: cell.x,
@@ -41596,27 +41590,10 @@ function createPlayerScene(options) {
 		step,
 		placeTag: (camera, width, height) => body.placeTag(camera, width, height),
 		tapAgent(id) {
-			const target = agentAt(id);
-			if (!target) return;
-			const cell = cellOf({
-				x: target.x,
-				y: target.z
-			});
-			const others = agentCells();
-			const blocked = withBlockers(base, others.some((c) => c.x === cell.x && c.y === cell.y) ? others : [...others, cell]);
-			const click = agentClick(blocked, walker.pos(), cell);
-			if (click.kind === "open") {
-				open(id);
-				return;
-			}
-			if (click.kind === "walk") {
-				walker.setGrid(blocked);
-				if (walker.walkTo(click.to)) openOnArrival = id;
-			}
+			if (agentAt(id)) open(id);
 		},
 		tapFloor(cell) {
 			walker.setGrid(withBlockers(base, agentCells()));
-			openOnArrival = null;
 			return walker.walkTo(cell);
 		},
 		setLook: (look) => body.setLook(look),

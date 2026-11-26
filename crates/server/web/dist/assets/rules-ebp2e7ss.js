@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/config-panel-la7rztgw.js","assets/menu-g4dweas1.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
-import { n as API, t as mountMenu } from "./menu-g4dweas1.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/guide-panel-jc7fyqqs.js","assets/menu-ixz3ji1b.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/guide-panel-cccldnyz.css","assets/config-panel-nqki1l03.js","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
+import { n as API, t as mountMenu } from "./menu-ixz3ji1b.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
@@ -256,6 +256,10 @@ var RulesScreen = class {
 	config = null;
 	/** 그 묶음을 불러오기 전 · 못 불러왔을 때의 자리. */
 	configSlot = el("div", "rul-cfg-holder");
+	/** (기능 L) 팀 지침 묶음. 첫 화면을 가볍게 따로 불러온다. */
+	guide = null;
+	/** 그 묶음을 불러오기 전 · 못 불러왔을 때의 자리. */
+	guideSlot = el("div", "rul-guide-holder");
 	constructor(main) {
 		main.append(this.body);
 	}
@@ -268,6 +272,7 @@ var RulesScreen = class {
 	*/
 	async load(withConfig = true) {
 		const configRead = withConfig ? this.loadConfig() : Promise.resolve();
+		const guideRead = withConfig ? this.loadGuides() : Promise.resolve();
 		try {
 			const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals)]);
 			if (!rules.ok || typeof rules.body !== "object" || rules.body === null) throw new Error(`rules ${rules.status}`);
@@ -277,7 +282,26 @@ var RulesScreen = class {
 			this.rows = [];
 			this.renderFailed();
 		}
-		await configRead;
+		await Promise.all([configRead, guideRead]);
+	}
+	/** (기능 L) 팀 지침 묶음을 (처음이면 불러와) 읽고, 그려 둔 자리를 그 묶음으로 바꾼다. */
+	async loadGuides() {
+		if (!this.guide) {
+			this.guideSlot.replaceChildren(loading());
+			try {
+				const { GuidePanel } = await __vitePreload(async () => {
+					const { GuidePanel } = await import("./guide-panel-jc7fyqqs.js");
+					return { GuidePanel };
+				}, __vite__mapDeps([0,1,2,3,4,5,6]));
+				this.guide ??= new GuidePanel();
+			} catch {
+				this.guideSlot.replaceChildren(el("p", "rul-hint", "팀 지침을 불러오지 못했습니다. 화면을 다시 열어 주세요."));
+				return;
+			}
+		}
+		const panel = this.guide;
+		await panel.load();
+		if (this.guideSlot.isConnected) this.guideSlot.replaceWith(panel.element());
 	}
 	/** 금지 종목 · 업종표 묶음을 (처음이면 불러와) 읽고, 그려 둔 자리를 그 묶음으로 바꾼다. */
 	async loadConfig() {
@@ -285,9 +309,9 @@ var RulesScreen = class {
 			this.configSlot.replaceChildren(loading());
 			try {
 				const { ConfigPanel } = await __vitePreload(async () => {
-					const { ConfigPanel } = await import("./config-panel-la7rztgw.js");
+					const { ConfigPanel } = await import("./config-panel-nqki1l03.js");
 					return { ConfigPanel };
-				}, __vite__mapDeps([0,1,2,3,4,5,6]));
+				}, __vite__mapDeps([7,1,2,3,4,5,8]));
 				this.config ??= new ConfigPanel();
 			} catch {
 				const retry = button("다시 시도", "accent");
@@ -311,7 +335,8 @@ var RulesScreen = class {
 		const list = this.rows.length === 0 ? empty("no-proposals", "아직 개선안이 없습니다. 복기에서 같은 실수가 반복되면 개선안이 올라옵니다.") : renderProposals(this.rows, this.notes);
 		list.addEventListener("click", (event) => this.onClick(event));
 		const proposalsCard = card("개선안", hint("위험을 키우는 개선안은 승인 뒤 냉각중이 되고 다음 거래일부터 반영됩니다."), list);
-		this.body.replaceChildren(rulesCard, capsCard, this.config?.element() ?? this.configSlot, proposalsCard);
+		const guides = this.guide?.element() ?? this.guideSlot;
+		this.body.replaceChildren(rulesCard, capsCard, this.config?.element() ?? this.configSlot, proposalsCard, guides);
 	}
 	rulesHint(rules) {
 		if (rules.template === null) return "지금 쓰는 템플릿의 위험 규칙을 보여 줍니다.";

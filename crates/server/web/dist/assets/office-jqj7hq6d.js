@@ -1,6 +1,6 @@
-import { a as approvalPath, c as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-g4dweas1.js";
+import { a as approvalPath, l as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ixz3ji1b.js";
 import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
-import { n as soundEnabled } from "./sound-pref-l2lvmzqx.js";
+import { n as soundEnabled } from "./sound-pref-om8v2p4r.js";
 import { i as readBasisCard } from "./basis-card-f0d1wup9.js";
 import { n as renderBasisCard } from "./basis-card-view-dxesydpj.js";
 import { i as readMemoList, r as pendingCount, t as cardMemos } from "./memo-model-pzip3mr0.js";
@@ -2186,47 +2186,6 @@ function lengthOf(from, path) {
 	}
 	return total;
 }
-/** 네 이웃(위 · 아래 · 왼쪽 · 오른쪽). */
-var NEIGHBORS = [
-	{
-		x: 0,
-		y: -1
-	},
-	{
-		x: 0,
-		y: 1
-	},
-	{
-		x: -1,
-		y: 0
-	},
-	{
-		x: 1,
-		y: 0
-	}
-];
-/**
-* 담당(칸 `agent`) 옆 빈 칸: 네 이웃(위 · 아래 · 왼쪽 · 오른쪽) 가운데 걸을 수 있고 `from`에서 길이 있는 칸 중
-* 길이 가장 짧은 칸. 없으면 `null`.
-*/
-function besideCell(grid, from, agent) {
-	let best = null;
-	for (const d of NEIGHBORS) {
-		const cell = {
-			x: agent.x + d.x,
-			y: agent.y + d.y
-		};
-		if (!grid.walkable(cell.x, cell.y)) continue;
-		const path = pathTo(grid, from, cell);
-		if (path === null) continue;
-		const length = lengthOf(from, path);
-		if (best === null || length < best.length) best = {
-			cell,
-			length
-		};
-	}
-	return best === null ? null : best.cell;
-}
 /** 입구 칸: 입구 가운데 열, 입구 줄 바로 안쪽(한 줄 위). 지도에 입구가 없으면 지도 아래 가운데의 한 줄 위. */
 function entranceCell(map) {
 	const e = map.entrance;
@@ -2277,6 +2236,140 @@ function startCell(grid, saved, entrance) {
 	return {
 		x: entrance.x,
 		y: entrance.y
+	};
+}
+/** 네 이웃(위 · 아래 · 왼쪽 · 오른쪽 — `besideCell`과 같은 차례). */
+var NEIGHBORS = [
+	{
+		x: 0,
+		y: -1
+	},
+	{
+		x: 0,
+		y: 1
+	},
+	{
+		x: -1,
+		y: 0
+	},
+	{
+		x: 1,
+		y: 0
+	}
+];
+/** 칸 `center`에서 맨해튼 거리 `k`(1 이상)인 칸들. 1이면 네 이웃 차례, 그 밖은 위 줄부터 왼쪽에서 오른쪽으로. */
+function ringCells(center, k) {
+	if (k === 1) return NEIGHBORS.map((d) => ({
+		x: center.x + d.x,
+		y: center.y + d.y
+	}));
+	const cells = [];
+	for (let dy = -k; dy <= k; dy += 1) {
+		const dx = k - Math.abs(dy);
+		cells.push({
+			x: center.x - dx,
+			y: center.y + dy
+		});
+		if (dx !== 0) cells.push({
+			x: center.x + dx,
+			y: center.y + dy
+		});
+	}
+	return cells;
+}
+/**
+* 담당(칸 `from`)이 내 칸 `player` 둘레에서 설 칸: 가까운 고리부터, 같은 고리에서는 `from`에서 길이 가장 짧은 칸.
+* 걸을 수 없거나 `taken`에 든 칸 · 길이 없는 칸은 건너뛴다. [`GATHER_RINGS`] 고리 안에 없으면 `null`.
+*/
+function gatherCell(grid, from, player, taken = []) {
+	const held = new Set(taken.map((c) => `${c.x},${c.y}`));
+	for (let k = 1; k <= 3; k += 1) {
+		let best = null;
+		for (const cell of ringCells(player, k)) {
+			if (held.has(`${cell.x},${cell.y}`) || !grid.walkable(cell.x, cell.y)) continue;
+			const path = pathTo(grid, from, cell);
+			if (path === null) continue;
+			const length = lengthOf(from, path);
+			if (best === null || length < best.length) best = {
+				cell,
+				length
+			};
+		}
+		if (best !== null) return best.cell;
+	}
+	return null;
+}
+/**
+* 말을 걸 때(누르기 · 목록 · 탭 · `/`로 그 담당의 1:1을 열 때) 그 담당을 부르는가. `near`는 이미 곁(말 걸 거리 안)인가.
+* - 부름(`call`)으로 오는 중 · 곁에서 기다림이면 부르지 않는다.
+* - 멘션으로 왔던 담당 · 돌아가는 중이면 부른다.
+* - 자리에 있으면(단계 없음 포함) 곁이 아닐 때만 부른다.
+*/
+function talkCalls(phase, reason, near) {
+	if (phase === "called" || phase === "waiting") return reason !== "call";
+	if (phase === "returning") return true;
+	return !near;
+}
+/** "누구와 대화?" 목록의 제목. */
+var WHO_TO_TALK = "누구와 대화?";
+/** 두 자리의 곧은 거리(칸). */
+function distance(a, b) {
+	return Math.hypot(a.x - b.x, a.y - b.y);
+}
+/** `player`에서 [`TALK_RADIUS`] 안의 담당 id, 가까운 순(같으면 id 글자 순). */
+function nearbyAgents(player, agents) {
+	return byDistance(player, agents, 2);
+}
+/** 담당 id를 가까운 순으로 늘어놓는다(같으면 id 글자 순). */
+function byDistance(player, agents, within) {
+	return agents.map((a) => ({
+		agent: a.agent,
+		d: distance(player, a)
+	})).filter((a) => a.d < within).sort((a, b) => a.d - b.d || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0)).map((a) => a.agent);
+}
+/** (결정 29) `/`의 후보: 거리 제한 없이 모든 담당 id, 가까운 순(같으면 id 글자 순). */
+function agentsByDistance(player, agents) {
+	return byDistance(player, agents, Infinity);
+}
+/** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
+function objectParticle(name) {
+	const code = name.trim().slice(-1).charCodeAt(0);
+	if (!(code >= 44032 && code <= 55203)) return "을(를)";
+	return (code - 44032) % 28 === 0 ? "를" : "을";
+}
+/** 안내 글: `{이름}{을/를} 클릭하거나 /를 눌러 대화`. */
+function talkHint(name) {
+	return `${name}${objectParticle(name)} 클릭하거나 /를 눌러 대화`;
+}
+/** 가까운 담당(가까운 순) → `/`의 할 일: 없으면 none, 하나면 open, 둘 이상이면 choose(가까운 순 그대로). */
+function slashAction(near) {
+	if (near.length === 0) return { kind: "none" };
+	if (near.length === 1) return {
+		kind: "open",
+		agent: near[0]
+	};
+	return {
+		kind: "choose",
+		agents: [...near]
+	};
+}
+/** 대화 중인 담당에게서 멀어졌는가(거리가 [`TALK_RADIUS`] 이상이면 닫는다 — 기본 흐름 7). */
+function tooFar(player, agent) {
+	return distance(player, agent) >= 2;
+}
+/**
+* 담당 누르기. `grid`는 걷기 표, `player`는 실수 자리, `agent`는 그 담당이 선 칸(정수). 거리는 `player`에서 그 칸
+* 가운데(+0.5)까지다. 올 칸은 `gatherCell`(내 칸 둘레에서 그 담당에게서 길이 가장 짧은 빈 칸 — `taken`은 잡힌 칸).
+*/
+function agentClick(grid, player, agent, taken = []) {
+	if (distance(player, {
+		x: agent.x + .5,
+		y: agent.y + .5
+	}) < 2) return { kind: "open" };
+	const to = gatherCell(grid, agent, cellOf(player), taken);
+	return to === null ? { kind: "open" } : {
+		kind: "come",
+		to
 	};
 }
 // src/office/summon-client.ts
@@ -2344,17 +2437,17 @@ function parseSummon(payload) {
 }
 /**
 * 단계 `phase`에서 칸 `agent`의 담당을 어떻게 그릴지. `player`는 내 칸, `home`은 그 담당의 자리 칸.
-* - `called`: `agent`가 `player`에서 [`ARRIVE_RADIUS`] 안이면 `arrived`, 아니면 `besideCell(grid, agent, player)`로
-*   `walk`(빠르기 [`SUMMON_SPEED`]), 곁 칸이 없으면 `stay`.
+* - `called`: `agent`가 `player`에서 [`ARRIVE_RADIUS`] 안이면 `arrived`, 아니면 `gatherCell(grid, agent, player, taken)`로
+*   `walk`(빠르기 [`SUMMON_SPEED`]), 곁 칸이 없으면 `stay`. `taken`은 다른 담당이 서 있거나 잡은 칸.
 * - `waiting`: `face`(나를 보는 쪽, [`facingToward`]).
 * - `returning`: `home`으로 `walk`(빠르기 [`RETURN_SPEED`]).
 * - `idle`: `home`.
 */
-function summonDraw(phase, grid, agent, player, home) {
+function summonDraw(phase, grid, agent, player, home, taken = []) {
 	switch (phase) {
 		case "called": {
 			if (arrivedNear(agent, player)) return { kind: "arrived" };
-			const to = besideCell(grid, agent, player);
+			const to = gatherCell(grid, agent, player, taken);
 			return to ? {
 				kind: "walk",
 				to,
@@ -2384,9 +2477,12 @@ function facingToward(from, to) {
 function arrivedNear(pos, target) {
 	return Math.hypot(target.x - pos.x, target.y - pos.y) <= ARRIVE_RADIUS;
 }
-/** 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). */
-function opensConversation(reason) {
-	return reason === "call";
+/**
+* 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). (결정 29) 말을 걸어(`talked`)
+* 부른 담당은 대화가 이미 열려 있으므로 거짓.
+*/
+function opensConversation(reason, talked = false) {
+	return reason === "call" && !talked;
 }
 /** 회의 중 안내(E47): `{이름}{은/는} 지금 회의 중이에요`(받침 있으면 "은", 없으면 "는", 한글이 아니면 "은(는)"). */
 function meetingNotice(name) {
@@ -2428,13 +2524,31 @@ var YAW = {
 };
 /** 다시 들어왔을 때 곁에 있다고 보는 거리(칸). */
 var NEAR = 2;
+/** 팀 방 대화 키. */
+var TEAM = "team";
 function createSummonScene(options) {
 	const grid = buildGrid(options.map);
 	const phases = /* @__PURE__ */ new Map();
+	/** 오는 중 · 곁에 선 담당이 잡은 칸. */
+	const spots = /* @__PURE__ */ new Map();
+	/** 말을 걸어 부른 담당(도착해도 1:1을 다시 열지 않는다). */
+	const talked = /* @__PURE__ */ new Set();
 	const arrived = (agent, reason, opens) => {
 		reportArrived(options.fetcher, agent);
-		if (opens && opensConversation(reason)) options.openChat(agent);
+		if (opens && opensConversation(reason, talked.has(agent))) options.openChat(agent);
+		if (opens) talked.delete(agent);
 	};
+	/** 그 담당 말고 다른 담당이 서 있거나 잡은 칸. */
+	function taken(agent, view) {
+		const cells = [];
+		for (const [id, cell] of spots) if (id !== agent) cells.push(cell);
+		for (const id of options.ids ?? []) {
+			if (id === agent || spots.has(id)) continue;
+			const at = view.agentAt(id);
+			if (at) cells.push(cellOf(at));
+		}
+		return cells;
+	}
 	function steerTo(view, agent, to, yaw, onArrive) {
 		const steer = {
 			to,
@@ -2447,6 +2561,10 @@ function createSummonScene(options) {
 	function draw(agent) {
 		const event = phases.get(agent);
 		if (!event) return;
+		if (event.phase === "returning" || event.phase === "idle") {
+			spots.delete(agent);
+			talked.delete(agent);
+		}
 		const view = options.view();
 		const here = view?.agentAt(agent) ?? null;
 		const me = view?.playerAt() ?? null;
@@ -2454,7 +2572,7 @@ function createSummonScene(options) {
 			if (event.phase === "called" || event.phase === "returning") arrived(agent, event.reason, event.phase === "called");
 			return;
 		}
-		const draw = summonDraw(event.phase, grid, cellOf(here), cellOf(me), cellOf(here));
+		const draw = summonDraw(event.phase, grid, cellOf(here), cellOf(me), cellOf(here), taken(agent, view));
 		const toward = YAW[facingToward(here, me)];
 		switch (draw.kind) {
 			case "walk":
@@ -2463,10 +2581,14 @@ function createSummonScene(options) {
 					speed: draw.speed,
 					onArrive: () => arrived(agent, event.reason, false)
 				});
-				else steerTo(view, agent, draw.to, YAW[facingToward(draw.to, cellOf(me))], () => arrived(agent, event.reason, true));
+				else {
+					spots.set(agent, draw.to);
+					steerTo(view, agent, draw.to, YAW[facingToward(draw.to, cellOf(me))], () => arrived(agent, event.reason, true));
+				}
 				return;
 			case "arrived":
 			case "stay":
+				spots.set(agent, cellOf(here));
 				steerTo(view, agent, cellOf(here), toward);
 				arrived(agent, event.reason, true);
 				return;
@@ -2479,11 +2601,29 @@ function createSummonScene(options) {
 	/** 곁에서 기다림: 곁이면 나를 보고, 멀면(다시 들어옴) 곁으로 걸어온다. */
 	function faceOrCome(view, agent, here, me) {
 		if (Math.hypot(here.x - me.x, here.y - me.y) <= NEAR || arrivedNear(here, me)) {
+			spots.set(agent, cellOf(here));
 			steerTo(view, agent, cellOf(here), YAW[facingToward(here, me)]);
 			return;
 		}
-		const come = summonDraw("called", grid, cellOf(here), cellOf(me), cellOf(here));
-		if (come.kind === "walk") steerTo(view, agent, come.to, YAW[facingToward(come.to, cellOf(me))]);
+		const come = summonDraw("called", grid, cellOf(here), cellOf(me), cellOf(here), taken(agent, view));
+		if (come.kind === "walk") {
+			spots.set(agent, come.to);
+			steerTo(view, agent, come.to, YAW[facingToward(come.to, cellOf(me))]);
+		}
+	}
+	/** 말 걸기: 그 담당의 1:1을 열었다. 부를 때면 부른다(회의 중이면 안내). */
+	async function talk(agent) {
+		const event = phases.get(agent);
+		const view = options.view();
+		const here = view?.agentAt(agent) ?? null;
+		const me = view?.playerAt() ?? null;
+		const near = here !== null && me !== null && agentClick(grid, me, cellOf(here), view ? taken(agent, view) : []).kind === "open";
+		if (!talkCalls(event?.phase ?? null, event?.reason ?? null, near)) return;
+		talked.add(agent);
+		const result = await requestSummon(options.fetcher, agent);
+		if (result.kind === "called") return;
+		talked.delete(agent);
+		if (result.kind === "meeting") options.say(meetingNotice(options.nameOf(agent)));
 	}
 	return {
 		onEvent(payload) {
@@ -2503,6 +2643,7 @@ function createSummonScene(options) {
 			phases.set(agent, event);
 		},
 		redraw() {
+			spots.clear();
 			for (const agent of phases.keys()) draw(agent);
 		},
 		async summon(agent) {
@@ -2512,7 +2653,8 @@ function createSummonScene(options) {
 		},
 		conversation(prev, next) {
 			const room = viewChange(prev, next);
-			if (room) reportView(options.fetcher, room);
+			const told = room ? reportView(options.fetcher, room) : Promise.resolve(true);
+			if (next !== TEAM) told.then(() => talk(next));
 		}
 	};
 }
@@ -3064,60 +3206,6 @@ function mountTeamCompose(options) {
 			at: item.at,
 			el: noticeElement(item, options.names())
 		}))
-	};
-}
-/** "누구와 대화?" 목록의 제목. */
-var WHO_TO_TALK = "누구와 대화?";
-/** 두 자리의 곧은 거리(칸). */
-function distance(a, b) {
-	return Math.hypot(a.x - b.x, a.y - b.y);
-}
-/** `player`에서 [`TALK_RADIUS`] 안의 담당 id, 가까운 순(같으면 id 글자 순). */
-function nearbyAgents(player, agents) {
-	return agents.map((a) => ({
-		agent: a.agent,
-		d: distance(player, a)
-	})).filter((a) => a.d < 2).sort((a, b) => a.d - b.d || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0)).map((a) => a.agent);
-}
-/** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
-function objectParticle(name) {
-	const code = name.trim().slice(-1).charCodeAt(0);
-	if (!(code >= 44032 && code <= 55203)) return "을(를)";
-	return (code - 44032) % 28 === 0 ? "를" : "을";
-}
-/** 안내 글: `{이름}{을/를} 클릭하거나 /를 눌러 대화`. */
-function talkHint(name) {
-	return `${name}${objectParticle(name)} 클릭하거나 /를 눌러 대화`;
-}
-/** 가까운 담당(가까운 순) → `/`의 할 일: 없으면 none, 하나면 open, 둘 이상이면 choose(가까운 순 그대로). */
-function slashAction(near) {
-	if (near.length === 0) return { kind: "none" };
-	if (near.length === 1) return {
-		kind: "open",
-		agent: near[0]
-	};
-	return {
-		kind: "choose",
-		agents: [...near]
-	};
-}
-/** 대화 중인 담당에게서 멀어졌는가(거리가 [`TALK_RADIUS`] 이상이면 닫는다 — 기본 흐름 7). */
-function tooFar(player, agent) {
-	return distance(player, agent) >= 2;
-}
-/**
-* 담당 누르기. `grid`는 담당이 선 칸이 막힌 표(`withBlockers`), `player`는 실수 자리, `agent`는 그 담당이 선 칸(정수).
-* 거리는 `player`에서 그 칸 가운데(+0.5)까지다. 걸어갈 칸은 `besideCell`(내 칸에서 길이 가장 짧은 이웃 칸).
-*/
-function agentClick(grid, player, agent) {
-	if (distance(player, {
-		x: agent.x + .5,
-		y: agent.y + .5
-	}) < 2) return { kind: "open" };
-	const to = besideCell(grid, cellOf(player), agent);
-	return to === null ? { kind: "none" } : {
-		kind: "walk",
-		to
 	};
 }
 // src/office/toolbar.ts
@@ -4588,7 +4676,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-in0y0lvj.js");
+		const { webglAvailable, createScene } = await import("./scene3d-hoc4yl7r.js");
 		return {
 			webglAvailable,
 			createScene
@@ -5177,7 +5265,8 @@ async function main() {
 		}),
 		nameOf,
 		openChat: (id) => selectConversation(id),
-		say: (text) => compose?.say(text)
+		say: (text) => compose?.say(text),
+		ids: AGENT_IDS
 	});
 	const legend = document.createElement("div");
 	legend.className = "legend-wrap";
@@ -5280,4 +5369,4 @@ async function main() {
 }
 main();
 bindTopicClicks($("chat-log"), mountBasisPanel($("chat"), (input, init) => fetch(input, init)));
-export { bubbleWidth as A, followStep as C, bubbleCandidates as D, LANE_AREA_RATIO as E, overlap as M, bubbleText as O, FOLLOW_LERP as S, LOOKS as T, buildGrid as _, agentClick as a, SpotSender as b, slashAction as c, cellOf as d, entranceCell as f, ACTOR_RADIUS as g, withBlockers as h, showChooser as i, insideScreen as j, bubbleWhere as k, talkHint as l, startCell as m, speakerOrbit as n, distance as o, pathTo as p, setHint as r, nearbyAgents as s, easeInOut as t, tooFar as u, clearLine as v, DEFAULT_LOOKS as w, postSpot as x, findPath as y };
+export { insideScreen as A, DEFAULT_LOOKS as C, bubbleText as D, bubbleCandidates as E, bubbleWhere as O, followStep as S, LANE_AREA_RATIO as T, clearLine as _, agentsByDistance as a, postSpot as b, talkHint as c, entranceCell as d, pathTo as f, buildGrid as g, ACTOR_RADIUS as h, showChooser as i, overlap as j, bubbleWidth as k, tooFar as l, withBlockers as m, speakerOrbit as n, nearbyAgents as o, startCell as p, setHint as r, slashAction as s, easeInOut as t, cellOf as u, findPath as v, LOOKS as w, FOLLOW_LERP as x, SpotSender as y };
