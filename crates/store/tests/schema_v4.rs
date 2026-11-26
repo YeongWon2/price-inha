@@ -231,9 +231,19 @@ fn 이전이_도중에_실패하면_버전과_보호_트리거가_그대로이�
     assert_eq!(store.legacy_envelope_until().unwrap(), Some(7));
     assert_eq!(store.read_after(0, 100).unwrap().len(), 7);
     drop(store);
-    // 보호 트리거는 버전 2 때의 것이 모두 남아 있다(글자까지 같다).
+    // 보호 트리거는 버전 2 때의 것이 모두 남아 있다(글자까지 같다). 판 12(결정 31)가 좁은 지우기 길로 다시 만든
+    // `events_no_delete` · `room_events_no_delete`는 이름만 본다.
     let after = triggers(&path);
+    let rebuilt = ["events_no_delete", "room_events_no_delete"];
     for trigger in &before {
+        if rebuilt.contains(&trigger.0.as_str()) {
+            assert!(
+                after.iter().any(|(name, _)| name == &trigger.0),
+                "보호 트리거가 없어졌다: {}",
+                trigger.0
+            );
+            continue;
+        }
         assert!(
             after.contains(trigger),
             "보호 트리거가 바뀌었다: {trigger:?}"

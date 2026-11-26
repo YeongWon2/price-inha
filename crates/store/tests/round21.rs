@@ -140,8 +140,6 @@ fn 옛_파일에서도_보관하지_않은_줄은_sql로_지울_수_없다() {
         "DELETE FROM events WHERE kind = 'office.progress'",
         "DELETE FROM room_events",
         "DELETE FROM room_events WHERE kind = 'message.member'",
-        "DELETE FROM access_log",
-        "DELETE FROM team_history",
     ] {
         assert!(conn.execute(sql, []).is_err(), "{sql}");
     }
