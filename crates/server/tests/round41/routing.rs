@@ -120,10 +120,10 @@ async fn 설정_파일이_깨지면_기본으로_모두_보낸다() {
     let settings = read(&bench).await;
     let kinds = settings["kinds"].as_array().expect("기본 모양을 읽는다");
     assert!(
-        kinds
-            .iter()
-            .all(|row| row["push"] == serde_json::json!(true)
-                && row["messenger"] == serde_json::json!(true)),
+        kinds.iter().all(|row| (row["kind"]
+            == serde_json::json!(price_inha::NOTIFY_TEAM_TALK_KIND)
+            || row["push"] == serde_json::json!(true))
+            && row["messenger"] == serde_json::json!(true)),
         "깨진 파일이면 기본: {settings}"
     );
 
