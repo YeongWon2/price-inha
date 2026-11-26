@@ -296,6 +296,7 @@ impl Trading {
             publisher: OnceLock::new(),
             hooks: OnceLock::new(),
             proposal_hook: OnceLock::new(),
+            sell_why: Mutex::new(super::effect::SellNotes::default()),
         });
         let now = trading.clock.now();
         trading.books(now).await?;

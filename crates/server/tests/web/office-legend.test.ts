@@ -9,6 +9,7 @@ import { SOURCES, mainOf, reach } from "./source-graph";
 const OFFICE = "../../web/src/office/";
 const NEW_MODULES = ["legend.ts", "approval-bubbles.ts", "chime.ts", "done-mark.ts"].map((f) => OFFICE + f);
 const ALL: MarkId[] = ["thinking", "writing", "typing", "waiting", "failed", "approval", "done"];
+ALL.push("profit", "loss"); // (24차 3번) 익절 · 손절 연출(V66)
 
 /** 그 색을 브라우저가 읽은 모양으로(글자색 비교용). */
 function asColor(color: string): string {

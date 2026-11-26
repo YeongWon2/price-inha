@@ -39,6 +39,9 @@ import { mountBudget, type BudgetView } from "./budget-view";
 import { KIND_OFFICE_PROGRESS } from "./progress";
 import { mountProgress, type ProgressView } from "./progress-view";
 import { KIND_OFFICE_MEMO, mountMemoCard, type MemoCard } from "./memo-card";
+import { KIND_OFFICE_EFFECT } from "./effects";
+import { createEffects, type OfficeEffects } from "./effect-scene";
+import { startPatrol } from "./patrol-scene";
 
 const SESSION_PATH = API.session;
 const SNAPSHOT_PATH = API.office;
@@ -112,6 +115,8 @@ let budgetView: BudgetView | null = null;
 let progressView: ProgressView | null = null;
 /** (23번) 옆 패널의 어제 메모 카드. */
 let memoCard: MemoCard | null = null;
+/** (24차 3번) 익절 · 손절 연출(머리 위 표시 층을 감싼다). */
+let effects: OfficeEffects | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -471,6 +476,7 @@ function onFrame(text: string): void {
     else if (frame.kind === KIND_TEAM_AI_USED) { budgetView?.apply(frame.payload); }
     else if (frame.kind === KIND_OFFICE_PROGRESS) { progressView?.apply(frame.payload, Date.now()); }
     else if (frame.kind === KIND_OFFICE_MEMO) { void memoCard?.onEvent(frame.kind); }
+    else if (frame.kind === KIND_OFFICE_EFFECT) { effects?.onEffect(frame.payload); }
   }
 }
 
@@ -683,6 +689,8 @@ async function main(): Promise<void> {
     legendRoot: legend,
     gestures: document,
   });
+  effects = createEffects(state.names);
+  marks = effects.wrap(marks);
   marks.onChange(() => { if (!$("light").hidden) { renderLight(); } });
   // (51차) 위 줄 잔량 바(누르면 담당별 사용 표) · 옆 패널 진행 단계(1초마다 경과).
   budgetView = mountBudget($("bar"), { fetcher: (url, init) => fetch(url, init), nameOf });
@@ -727,6 +735,10 @@ async function main(): Promise<void> {
   }
   wireCameraTools();
   wireAutoCamera();
+  // (24차 1번) 한가한 담당의 순찰(화면만 — 3D 장면이 있을 때만, 움직임 줄이기면 하지 않는다).
+  if (state.map) {
+    startPatrol({ map: state.map, view: () => state.view, agents: () => state.agents, light: () => !$("light").hidden });
+  }
   setInterval(renderCaption, CAPTION_TICK_MS);
   // (22차 5번) 가벼운 화면의 최근 말은 12초가 지나면 내린다.
   let lightSaid = "";

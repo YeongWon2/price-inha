@@ -267,6 +267,7 @@ impl Trading {
             };
             self.executor.submit(submission).await
         } else {
+            self.note_sell(trade, purpose);
             let submission = SellSubmission {
                 trade_id: trade,
                 permit,
@@ -275,6 +276,7 @@ impl Trading {
             };
             self.executor.sell(submission).await
         };
+        self.note_order(trade, &sent);
         match sent {
             Ok(id) => Ok(Placed::Ordered(id)),
             Err(pi_exec::Error::AnomalyStop(error)) => {

@@ -86,6 +86,8 @@ impl Trading {
         }
         // 실패한 파는 주문(손절 · 팀장 팔기 등)을 때가 되면 다시 낸다(E30).
         self.retry_sells().await;
+        // (24차 C26) 시계로 체결 · 정리된 파는 주문도 팔림이면 익절 · 손절 연출을 낸다.
+        self.announce_sold().await;
     }
 
     async fn try_tick(&self) -> Result<(), TradingError> {
@@ -243,6 +245,7 @@ impl Trading {
         let calendar = self.calendar(now);
         self.observe(&quote, calendar.as_ref());
         self.executor.on_quote(&quote).map_err(exec_text)?;
+        self.announce_sold().await;
         self.watch_stops(&quote).await;
         let books = self.books(now).await?;
         self.judge_losses(&books)

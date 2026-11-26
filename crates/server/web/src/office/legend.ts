@@ -12,7 +12,8 @@
 // 색은 3D 층의 말풍선처럼 원본 고정 색(크림 말풍선 위의 녹색 계열)이다 — 다크 모드에서도 같은 말풍선 위에 보인다.
 
 /** 머리 위 표시의 종류. */
-export type MarkId = "thinking" | "writing" | "typing" | "waiting" | "failed" | "approval" | "done";
+export type MarkId = "thinking" | "writing" | "typing" | "waiting" | "failed" | "approval" | "done"
+  | "profit" | "loss";
 
 /** 머리 위 표시 하나: 글자 · 색(CSS 색 값) · 뜻(범례에 보일 쉬운 말). */
 export interface OverheadMark {
@@ -34,6 +35,9 @@ export const OVERHEAD_MARKS: readonly OverheadMark[] = [
   { id: "failed", glyph: "❗", color: "#b3412f", label: "일이 막힘(실패)" },
   { id: "approval", glyph: "✋", color: "#a4561d", label: "내 승인을 기다림 — 누르면 승인 카드가 열려요" },
   { id: "done", glyph: "✓", color: "#2f6b47", label: "일을 마침(잠깐 보였다 사라져요)" },
+  // (24차 3번) 익절 · 손절 연출(effects.ts): 국내 시세 표기처럼 오름은 빨강, 내림은 파랑.
+  { id: "profit", glyph: "🎉", color: "#c0392b", label: "익절로 팔림 — 수익률이 잠깐 보여요" },
+  { id: "loss", glyph: "🍵", color: "#2f5d9e", label: "손절로 팔림 — 손실률이 잠깐 보여요" },
 ];
 
 let legendCount = 0;
