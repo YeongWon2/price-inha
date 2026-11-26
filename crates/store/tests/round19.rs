@@ -1100,10 +1100,10 @@ fn 결정_메모는_직접_sql로도_지우지_못하고_다시_열어도_그대
 #[test]
 fn 새_저장소는_판_11이고_무결성이_맞다() {
     let (_dir, path, store) = temp_store();
-    assert_eq!(SCHEMA_VERSION, 11);
-    assert_eq!(store.info().unwrap().schema_version, 11);
+    assert_eq!(SCHEMA_VERSION, 12);
+    assert_eq!(store.info().unwrap().schema_version, 12);
     drop(store);
-    assert_eq!(raw_user_version(&path), 11);
+    assert_eq!(raw_user_version(&path), 12);
     assert_eq!(integrity(&path), "ok");
     for table in [
         "role_opinions",
@@ -1123,7 +1123,7 @@ fn 판_10_파일이_판_11로_열리고_옛_자료가_그대로다() {
     assert_eq!(raw_user_version(&path), 10);
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 11);
+    assert_eq!(store.info().unwrap().schema_version, 12);
 
     // 판 10에서 판단된 매매(담당 점수 둘)와 논의중 매매가 그대로다. 의견은 기록 없음이다.
     let old = store.get_trade(TradeId(1)).unwrap();
@@ -1176,10 +1176,10 @@ fn 판_10_파일이_판_11로_열리고_옛_자료가_그대로다() {
     store.set_player_profile("영원", "look-a", t(1)).unwrap();
     drop(store);
 
-    assert_eq!(raw_user_version(&path), 11);
+    assert_eq!(raw_user_version(&path), 12);
     assert_eq!(integrity(&path), "ok");
     let again = Store::open(&path).unwrap();
-    assert_eq!(again.info().unwrap().schema_version, 11);
+    assert_eq!(again.info().unwrap().schema_version, 12);
     assert_eq!(again.get_trade(TradeId(1)).unwrap(), old);
     assert_eq!(again.get_decision_memo(made.id).unwrap(), made);
     assert_eq!(again.player().unwrap().name, "영원");
@@ -1191,11 +1191,11 @@ fn 판_9_파일도_판_11로_열리고_새_표가_빈다() {
     let (_dir, path) = copy_of("v9.db");
     assert_eq!(raw_user_version(&path), 9);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 11);
+    assert_eq!(store.info().unwrap().schema_version, 12);
     assert_eq!(store.player().unwrap().name, PLAYER_DEFAULT_NAME);
     assert!(store.notices_page(None, 100).unwrap().is_empty());
     assert!(store.decision_memos_page(None, 100).unwrap().is_empty());
     drop(store);
-    assert_eq!(raw_user_version(&path), 11);
+    assert_eq!(raw_user_version(&path), 12);
     assert_eq!(integrity(&path), "ok");
 }
