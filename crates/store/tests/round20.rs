@@ -384,5 +384,5 @@ fn 다시_열어도_내_정지_기록이_그대로_읽히고_판은_그대로다
     let version: u32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
 }
