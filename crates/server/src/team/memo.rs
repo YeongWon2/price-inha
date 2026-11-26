@@ -280,7 +280,7 @@ impl Crew {
                 .team
                 .runner()
                 .run_turn(
-                    config,
+                    &config,
                     pi_agent::TimeLimits::MARKET,
                     &title,
                     &lesson_prompt(&input),

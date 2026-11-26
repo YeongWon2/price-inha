@@ -74,6 +74,8 @@ pub(crate) async fn ai(link: &Link, prompter: &mut Prompter<'_>, outside: &AiEnv
             }
         };
         if let Some(outcome) = outcome {
+            // (57차) 담당 모델은 마법사에서 고르지 않는다 — 설정 화면으로 안내만 한다.
+            prompter.say(crate::SETUP_MODELS_HINT);
             return outcome;
         }
     }

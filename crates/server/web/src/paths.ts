@@ -142,6 +142,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.setupDoctor,
     // 31차 고침(결정 22): 알림음 설정.
     API.setupSound,
+    // server 57차: 담당 모델 고르기.
+    API.setupModels,
     // server 39차 2 · 7번: 메신저 상태 · 토큰 등록 · 지우기 · 페어링 승인 · 빼기.
     API.messenger,
     API.messengerTelegram,

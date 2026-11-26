@@ -87,6 +87,8 @@ pub(crate) struct Desk {
     closing: AtomicBool,
     /// (22차 6번) 하루 AI 호출 상한(켤 때 값 · 저장한 값).
     ai_limit: limit::AiLimit,
+    /// (57차) 설정 화면에서 고른 담당 모델(보관 폴더의 설정 파일).
+    pub(crate) team_models: crate::setup_models::TeamModels,
 }
 
 impl Desk {
@@ -106,8 +108,10 @@ impl Desk {
             held,
         };
         let ai_limit = limit::AiLimit::load(&parts.home);
+        let team_models = crate::setup_models::TeamModels::load(&parts.home);
         let desk = Self {
             ai_limit,
+            team_models,
             presence: KeyPresence::new(Arc::clone(&parts.secrets)),
             secrets: parts.secrets,
             verifier: parts.verifier,

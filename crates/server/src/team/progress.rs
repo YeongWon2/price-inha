@@ -209,7 +209,9 @@ impl Crew {
             .with_signals(signals)
             .with_turn_retries(TURN_RETRY_MAX);
         let _clear = ClearOnDrop(self);
-        let discussing = self.team.discuss_with(request, options);
+        // (57차) 시작할 때 고른 담당 모델로 짠 팀으로 끝까지 돈다.
+        let team = self.team_now();
+        let discussing = team.discuss_with(request, options);
         let showing = async {
             while let Some((payload, called, last)) = notes.recv().await {
                 if let Some(role) = called {

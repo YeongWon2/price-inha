@@ -117,7 +117,11 @@ impl SetupView {
         body["models"] = Value::Array(
             self.models
                 .iter()
-                .map(|(agent, model)| json!({ "agent": agent, "model": model }))
+                .map(|(agent, model)| {
+                    // (57차) 설정 화면에서 고른 모델이 있으면 그것이 지금 쓰는 모델이다.
+                    let now = self.desk.team_models.saved_for(agent);
+                    json!({ "agent": agent, "model": now.as_ref().unwrap_or(model) })
+                })
                 .collect(),
         );
     }
