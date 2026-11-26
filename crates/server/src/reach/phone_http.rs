@@ -162,13 +162,17 @@ async fn approval(State(phone): State<Arc<Phone>>, Path(id): Path<String>) -> Re
     match phone.trading.approval_view(&id) {
         Ok(Some(view)) => reply(
             StatusCode::OK,
-            json!({
-                "number": view.number.as_str(),
-                "summary": phone.shown_reason(&view.reason),
-                "fingerprint": view.fingerprint.as_str(),
-                "short_code": view.short_code,
-                "status": approval_status_word(view.status),
-            }),
+            // (50차 · C24) 요청의 summary에 든 투표 수 · 한도 기록을 더한다(지문은 그대로).
+            phone.trading.with_approval_extras(
+                view.number.as_str(),
+                json!({
+                    "number": view.number.as_str(),
+                    "summary": phone.shown_reason(&view.reason),
+                    "fingerprint": view.fingerprint.as_str(),
+                    "short_code": view.short_code,
+                    "status": approval_status_word(view.status),
+                }),
+            ),
         ),
         Ok(None) => refuse(StatusCode::NOT_FOUND, "not_found"),
         Err(error) => internal_error(error),

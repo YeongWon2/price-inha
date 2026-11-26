@@ -33,6 +33,7 @@ import { SpeakerCamera } from "./speaker-camera";
 import { SPEECH_LIFE_MS } from "./speech";
 import { teamFeed, type FeedEntry } from "./team-feed";
 import { trimLines, type Line } from "./trim";
+import { bindTopicClicks, mountBasisPanel } from "./basis-panel";
 
 const SESSION_PATH = API.session;
 const SNAPSHOT_PATH = API.office;
@@ -728,3 +729,6 @@ async function main(): Promise<void> {
 }
 
 void main();
+
+// (server 50차 · F7-7 · C23) 근거 패널: 논의 줄의 종목 표시를 누르면 그 종목의 최근 매매의 근거 카드를 연다.
+bindTopicClicks($("chat-log"), mountBasisPanel($("chat"), (input, init) => fetch(input, init)));

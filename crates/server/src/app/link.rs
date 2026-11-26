@@ -136,6 +136,8 @@ async fn office_card(linked: &Linked, trading: &Trading, number: &ApprovalNumber
         "agent": approval_agent(&view.subject),
         "state": approval_state_word(view.status),
     });
+    // (50차 · C24) 폰 카드와 같은 투표 수 · 한도 기록.
+    let card = trading.with_approval_extras(view.number.as_str(), card);
     if let Err(error) = EventSink::publish(linked.sink.as_ref(), KIND_OFFICE_APPROVAL, card).await {
         tracing::warn!(%error, "사무실 승인 카드를 내지 못했습니다");
     }
