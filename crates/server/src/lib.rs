@@ -23,6 +23,7 @@ mod settings;
 mod setup;
 mod setup_doctor;
 mod setup_http;
+mod setup_models;
 mod setup_sound;
 mod slots;
 mod team;
@@ -130,6 +131,9 @@ pub use setup::{
 };
 pub use setup_doctor::{
     DIAG_FAIL, DIAG_INFO, DIAG_OK, DIAG_WARN, DIAGNOSIS_ITEMS, SETUP_DOCTOR_PATH,
+};
+pub use setup_models::{
+    MODEL_CHOICES, MODEL_NAME_MAX, SETUP_MODELS_HINT, SETUP_MODELS_PATH, TEAM_MODELS_FILE,
 };
 pub use setup_sound::SETUP_SOUND_PATH;
 pub use slots::{
