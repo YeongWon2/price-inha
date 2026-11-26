@@ -159,22 +159,9 @@ pub(crate) fn open_browser(runner: &dyn CommandRunner, url: &str) -> bool {
         .is_ok_and(|output| output.success)
 }
 
+/// (58차) 운영체제 갈래는 [`crate::browser_command`]의 순수 함수가 정한다.
 fn browser_command(url: &str) -> CommandLine {
-    let (program, mut args): (&str, Vec<String>) = if cfg!(target_os = "macos") {
-        ("open", Vec::new())
-    } else if cfg!(windows) {
-        (
-            "cmd",
-            vec!["/c".to_string(), "start".to_string(), String::new()],
-        )
-    } else {
-        ("xdg-open", Vec::new())
-    };
-    args.push(url.to_string());
-    CommandLine {
-        program: program.to_string(),
-        args,
-    }
+    crate::platform::browser_command(crate::platform::this_os(), url)
 }
 
 #[cfg(test)]

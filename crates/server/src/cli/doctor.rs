@@ -220,7 +220,7 @@ fn check_home(home: &Path) -> Check {
         );
     }
     match wide_permissions(home) {
-        Ok(None) => good(item, format!("보관 폴더 {} (권한 좁음)", home.display())),
+        Ok(None) => good(item, crate::platform::home_ok_line(home)),
         Ok(Some((what, fix))) => bad(item, what, fix),
         Err(kind) => bad(
             item,
@@ -272,9 +272,10 @@ fn wide_permissions(home: &Path) -> Result<Option<(String, String)>, std::io::Er
     }
 }
 
+/// (58차) 윈도: 권한 비트를 검사하지 않는다. 공용 폴더에 두었으면 경고한다.
 #[cfg(not(unix))]
-fn wide_permissions(_home: &Path) -> Result<Option<(String, String)>, std::io::ErrorKind> {
-    Ok(None)
+fn wide_permissions(home: &Path) -> Result<Option<(String, String)>, std::io::ErrorKind> {
+    Ok(crate::platform::shared_home_problem(home))
 }
 
 /// 잠금 때문에 저장소를 확인하지 못했다. 깨진 것이 아니므로 문제로 세지 않는다.

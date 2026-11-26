@@ -81,6 +81,7 @@ fn private_to_me(home: &Path, before: &std::fs::Metadata, opened: &std::fs::Meta
     same && narrow && current_uid(home).is_some_and(|uid| uid == opened.uid())
 }
 
+/// (58차) 윈도에서는 주인 · 권한 비트를 검사하지 않는다(그 비트가 없다 — 보관 폴더를 사용자 프로필 아래에 둔다).
 #[cfg(not(unix))]
 fn private_to_me(_home: &Path, _before: &std::fs::Metadata, _opened: &std::fs::Metadata) -> bool {
     true

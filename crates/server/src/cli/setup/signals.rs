@@ -25,12 +25,9 @@ pub(crate) fn remember_server(pid: u32) {
     SERVER_PID.store(pid, Ordering::SeqCst);
 }
 
-/// 프로세스에 끄기 신호(SIGTERM)를 보낸다. 보냈는가.
+/// 프로세스에 끄기 신호(SIGTERM)를 보낸다(윈도는 `taskkill /T /F` — [`crate::terminate_command`]). 보냈는가.
 pub(crate) fn terminate(runner: &dyn CommandRunner, pid: u32) -> bool {
-    let command = CommandLine {
-        program: "kill".to_string(),
-        args: vec!["-TERM".to_string(), pid.to_string()],
-    };
+    let command: CommandLine = crate::platform::terminate_command(crate::platform::this_os(), pid);
     runner.run(&command).is_ok_and(|output| output.success)
 }
 
@@ -56,9 +53,16 @@ pub(crate) fn watch() {
     });
 }
 
-/// 유닉스가 아니면 지킴이를 세우지 않는다(보이는 입력으로 물러선다).
+/// 유닉스가 아니면(윈도) echo를 끄지 않으므로 지킴이로 세지 않는다(보이는 입력으로 물러선다 — 새 의존 없이
+/// 글자를 숨길 안전한 길이 없다). 다만 Ctrl+C면 마법사가 띄운 서버를 끄고 끝낸다(58차).
 #[cfg(not(unix))]
-pub(crate) fn watch() {}
+pub(crate) fn watch() {
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            restore_and_exit();
+        }
+    });
+}
 
 fn restore_and_exit() -> ! {
     let runner = SystemRunner;

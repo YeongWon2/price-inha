@@ -159,6 +159,69 @@ inst_run "$t/h14" --frm x
 if [ "$code" -ne 0 ] && has "모르는 선택"; then ok "모르는 선택을 거절한다"
 else bad "모르는 선택 (종료 $code)"; show; fi
 
+# 15 install.ps1(윈도) 정적 확인 — https 만 · 해시 확인 뒤에만 놓기 · iex 창을 닫는 exit 없음 · 관리자 · 소스 짓기 · 비밀 묻기 없음
+ps1="$root/install.ps1"
+if [ -f "$ps1" ]; then
+  code_lines=$(grep -v '^[[:space:]]*#' "$ps1")
+  sha_at=$(grep -n 'Assert-Sha256 \$archive' "$ps1" | head -1 | cut -d: -f1)
+  place_at=$(grep -n 'Install-Binary \$exe' "$ps1" | head -1 | cut -d: -f1)
+  if ! grep -q 'http://' "$ps1" && grep -q "StartsWith('https://')" "$ps1"; then ok "install.ps1 은 https 주소만 받는다"
+  else bad "install.ps1 에 http 주소가 있거나 https 검사가 없다"; fi
+  if [ -n "$sha_at" ] && [ -n "$place_at" ] && [ "$sha_at" -lt "$place_at" ] && grep -q 'Get-FileHash -Algorithm SHA256' "$ps1"; then
+    ok "install.ps1 은 SHA-256 을 확인한 뒤에만 놓는다"
+  else bad "install.ps1 의 해시 확인 · 놓기 차례 (확인 ${sha_at:-없음}, 놓기 ${place_at:-없음})"; fi
+  if ! printf '%s\n' "$code_lines" | grep -E '\bexit\b' | grep -vq 'AsFile'; then ok "install.ps1 은 파일로 돌 때만 exit 한다 (iex 창을 닫지 않는다)"
+  else bad "install.ps1 에 가드 없는 exit 가 있다"; fi
+  if ! printf '%s\n' "$code_lines" | grep -Eqi 'RunAs|cargo |Invoke-Expression|\biex\b|AsSecureString'; then
+    ok "install.ps1 은 관리자 권한 · 소스 짓기 · 남의 스크립트 실행 · 비밀 묻기를 하지 않는다"
+  else bad "install.ps1 에 금지한 것(RunAs · cargo · iex · AsSecureString)이 있다"; fi
+  if grep -q "SetEnvironmentVariable('Path', \$next, 'User')" "$ps1" && grep -q 'NoPathUpdate' "$ps1" && grep -q '아직 올라온 릴리스가 없습니다' "$ps1"; then
+    ok "install.ps1 은 사용자 PATH 에만 더하고(-NoPathUpdate) 릴리스가 없으면 소스로 짓지 않고 안내한다"
+  else bad "install.ps1 의 사용자 PATH · 릴리스 없음 안내"; fi
+else
+  bad "install.ps1 이 없다"
+fi
+
+# 16 pwsh 가 있으면 install.ps1 을 가짜 묶음으로 실제로 돌려 본다(-DryRun · 해시 틀림 · 해시 파일 없음 · http)
+if command -v pwsh >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && [ -f "$ps1" ]; then
+  wz="$t/win"; wn="price-inha-v9.9.9-windows-x86_64"
+  mkdir -p "$wz/stage/$wn" "$wz/la"
+  printf 'fake\n' > "$wz/stage/$wn/price-inha.exe"
+  (cd "$wz/stage" && zip -qr "$wz/$wn.zip" "$wn")
+  (cd "$wz" && { sha256sum "$wn.zip" 2>/dev/null || shasum -a 256 "$wn.zip"; } > "$wn.zip.sha256")
+  ps_run() { out=$(env -i HOME="$wz" PATH="$t/fakebin:$PATH" LOCALAPPDATA="$wz/la" USERPROFILE="$wz" TMPDIR="$t" \
+    pwsh -NoProfile -NonInteractive -File "$ps1" "$@" </dev/null 2>&1); code=$?; }
+  ps_run -From "$wz/$wn.zip" -Prefix "$wz/p1" -DryRun
+  if [ "$code" -eq 0 ] && has "[dry-run]" && [ ! -e "$wz/p1" ]; then ok "pwsh: install.ps1 -DryRun 은 아무것도 쓰지 않는다"
+  else bad "pwsh: install.ps1 -DryRun (종료 $code)"; show; fi
+  cp "$wz/$wn.zip.sha256" "$wz/good.sha256"
+  printf '%064d  %s\n' 0 "$wn.zip" > "$wz/$wn.zip.sha256"
+  ps_run -From "$wz/$wn.zip" -Prefix "$wz/p2" -NoSetup -NoPathUpdate
+  if [ "$code" -ne 0 ] && has "SHA-256 이 맞지 않는다" && [ ! -e "$wz/p2/price-inha.exe" ]; then ok "pwsh: install.ps1 은 sha256 이 틀리면 깔지 않는다"
+  else bad "pwsh: install.ps1 sha256 틀림 (종료 $code)"; show; fi
+  rm -f "$wz/$wn.zip.sha256"
+  ps_run -From "$wz/$wn.zip" -Prefix "$wz/p3" -NoSetup -NoPathUpdate
+  if [ "$code" -ne 0 ] && has "체크섬 파일이 없다" && [ ! -e "$wz/p3" ]; then ok "pwsh: install.ps1 은 sha256 파일이 없으면 깔지 않는다"
+  else bad "pwsh: install.ps1 sha256 없음 (종료 $code)"; show; fi
+  ps_run -From "http://example.invalid/$wn.zip" -Prefix "$wz/p4" -NoSetup -NoPathUpdate
+  if [ "$code" -ne 0 ] && has "https 주소만" && [ ! -e "$wz/p4" ]; then ok "pwsh: install.ps1 은 http 주소를 거절한다"
+  else bad "pwsh: install.ps1 http (종료 $code)"; show; fi
+else
+  echo "- 참고: pwsh 없음 — install.ps1 을 실제로 돌려 보는 시험은 건너뛴다(정적 확인만 했다)"
+fi
+
+# 17 release.sh --target 윈도 --dry-run: .zip(price-inha.exe)으로 묶을 계획 · 올리기 안내 · 아무것도 쓰지 않음
+before=$(ls dist 2>/dev/null | tr '\n' ' ')
+out=$(bash scripts/release.sh --target x86_64-pc-windows-gnu --dry-run 2>&1); code=$?
+after=$(ls dist 2>/dev/null | tr '\n' ' ')
+if [ "$code" -eq 0 ] && has "windows-x86_64.zip" && has "price-inha.exe" && has "--target x86_64-pc-windows-gnu" \
+  && has "gh release create" && has "install.ps1" && [ "$before" = "$after" ]; then
+  ok "release.sh --target x86_64-pc-windows-gnu --dry-run 은 .zip 계획과 올리기 안내만 보인다"
+else bad "release.sh --target 윈도 --dry-run (종료 $code)"; show; fi
+out=$(bash scripts/release.sh --target sparc-unknown-none --dry-run 2>&1); code=$?
+if [ "$code" -ne 0 ] && has "모르는 대상"; then ok "release.sh 는 모르는 대상을 거절한다"
+else bad "release.sh 모르는 대상 (종료 $code)"; show; fi
+
 # 네트워크를 쓰지 않았다
 if [ -s "$t/net.log" ]; then bad "받는 도구를 불렀다(네트워크): $(tr '\n' ' ' < "$t/net.log")"
 else ok "네트워크 도구(curl · wget · git)를 한 번도 부르지 않았다"; fi

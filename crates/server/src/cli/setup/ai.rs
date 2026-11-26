@@ -14,6 +14,7 @@ use super::prompt::Prompter;
 use super::server::{Link, Reply, gives_up};
 use super::summary::Outcome;
 use super::{ANSWER_CLI, ANSWER_KEY, ANSWER_SKIP, SETUP_CLI_BILLING_WARNING, SETUP_CLI_LOGIN_HINT};
+use crate::platform::{CLAUDE_CODE_DOCS_URL, SETUP_CLI_INSTALL_HINT};
 use crate::setup::{KEY_AI_API_KEY, SETUP_KEYS_PATH};
 use crate::{SETUP_AI_PATH, cli_base_env, cli_refusal, find_claude};
 
@@ -34,13 +35,7 @@ struct Found {
 /// AI 연결 구역을 돈다.
 pub(crate) async fn ai(link: &Link, prompter: &mut Prompter<'_>, outside: &AiEnv<'_>) -> Outcome {
     prompter.title("AI 연결");
-    let mut found = match find_claude((outside.env)("PATH").as_deref(), None, &[]) {
-        Some(command) => {
-            let status = check(&command, outside).await;
-            Some(Found { command, status })
-        }
-        None => None,
-    };
+    let mut found = search(outside).await;
     describe(prompter, found.as_ref());
     loop {
         let logged_in = found
@@ -58,13 +53,20 @@ pub(crate) async fn ai(link: &Link, prompter: &mut Prompter<'_>, outside: &AiEnv
         } else {
             answer.to_lowercase()
         };
+        if answer == ANSWER_CLI && found.is_none() {
+            // (58차) 설치는 사용자가 한다(결정 27): 안내 → Enter → 다시 찾고 다시 묻는다.
+            prompter.say(SETUP_CLI_INSTALL_HINT);
+            if prompter.wait_enter().is_none() {
+                return Outcome::ended();
+            }
+            found = search(outside).await;
+            describe(prompter, found.as_ref());
+            continue;
+        }
         let outcome = match answer.as_str() {
             ANSWER_CLI => match found.as_mut() {
                 Some(cli) => choose_cli(link, prompter, outside, cli).await,
-                None => {
-                    prompter.say("PATH에서 claude를 찾지 못해 고를 수 없습니다");
-                    None
-                }
+                None => None,
             },
             ANSWER_KEY => Some(api_key(link, prompter).await),
             ANSWER_SKIP => Some(Outcome::skipped("고르지 않음")),
@@ -81,10 +83,19 @@ pub(crate) async fn ai(link: &Link, prompter: &mut Prompter<'_>, outside: &AiEnv
     }
 }
 
-/// 찾은 결과를 보인다(경로 · 상태만, 자격 값은 없다).
+/// `PATH`에서 CLI를 찾아 확인한다(윈도는 `claude.exe` · `claude.cmd`도 — [`find_claude`]).
+async fn search(outside: &AiEnv<'_>) -> Option<Found> {
+    let command = find_claude((outside.env)("PATH").as_deref(), None, &[])?;
+    let status = check(&command, outside).await;
+    Some(Found { command, status })
+}
+
+/// 찾은 결과를 보인다(경로 · 상태만, 자격 값은 없다). 못 찾았으면 설치 안내 주소도 보인다.
 fn describe(prompter: &mut Prompter<'_>, found: Option<&Found>) {
     let Some(found) = found else {
-        prompter.say("Claude CLI: PATH에서 찾지 못함");
+        prompter.say(&format!(
+            "Claude CLI: PATH에서 찾지 못함 — 설치 안내: {CLAUDE_CODE_DOCS_URL}"
+        ));
         return;
     };
     let state = match &found.status {

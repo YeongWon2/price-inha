@@ -30,7 +30,20 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/YeongWon
 - sudo를 쓰지 않고, 셸 설정 파일을 고치지 않고, 키를 묻지 않습니다. `~/.local/bin`이 PATH에 없으면 넣는 법만 알려 줍니다.
 - 릴리스가 없으면 소스로 짓습니다(Rust가 있어야 합니다. 없으면 설치 안내만 합니다).
 - 선택: `sh -s -- --version v0.1.0` · `--prefix <폴더>` · `--from-source` · `--dry-run`(무엇을 할지만) · `--help`. 받기 전에 내용을 보고 싶으면 `install.sh`를 먼저 내려받아 읽은 뒤 `sh install.sh`로 돌립니다.
-- 윈도는 아직 한 줄 설치가 없습니다. 아래 "소스로 짓기"를 따릅니다.
+### 한 줄 설치 (윈도)
+
+PowerShell(5.1 이상, 관리자 아님)에서:
+
+```powershell
+irm https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.ps1 | iex
+```
+
+- **git clone과 Rust가 필요 없습니다**(릴리스가 올라와 있을 때). 릴리스 묶음(`price-inha-<판>-windows-x86_64.zip`)과 `.sha256`을 https로 받아 **SHA-256을 확인한 뒤** `%LOCALAPPDATA%\price-inha\bin\price-inha.exe`에 놓습니다. 맞지 않으면 설치하지 않습니다.
+- 그 폴더를 **사용자 PATH**(관리자 권한 없이)에 더하고, 끝에 `price-inha setup`을 실행할지 묻습니다.
+- 필요한 것: **Claude Code CLI(구독) 로그인**. `price-inha setup`의 AI 연결이 `claude`(`claude.exe` · `claude.cmd`)를 찾고, 없으면 설치한 뒤 `claude auth login`으로 로그인하라고 안내하고 Enter를 누르면 다시 찾습니다(설치는 직접 합니다 — 스크립트가 대신 받아 돌리지 않습니다).
+- 릴리스가 아직 없으면 소스로 짓지 않고 "아직 올라온 릴리스가 없습니다"와 릴리스 주소를 알려 주고 끝납니다.
+- 선택: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.ps1))) -Version v0.1.0` · `-Prefix <폴더>` · `-NoPathUpdate` · `-NoSetup` · `-DryRun`(무엇을 할지만) · `-Uninstall`.
+- 자동 실행(`price-inha service install`)은 윈도에서 로그온 때 시작하는 **작업 스케줄러** 작업으로 등록합니다(관리자 권한 없음). 보관 폴더는 `%USERPROFILE%\.price-inha`이고, 윈도에서는 0700 · 0600 권한 검사를 하지 않습니다(`price-inha doctor`가 그렇게 적고, 공용 폴더에 두면 경고합니다).
 
 ### 소스로 짓기
 
@@ -62,7 +75,9 @@ price-inha service uninstall    # 자동 실행으로 등록했다면 먼저
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.sh | sh -s -- --uninstall
 ```
 
-실행 파일만 지웁니다. 키 · 기록 · 모의계좌가 든 보관 폴더(`~/.price-inha`)는 그대로 두고 위치를 알려 줍니다. 자료까지 지우려면 그 폴더를 직접 지웁니다(되돌릴 수 없습니다).
+윈도는 `price-inha service uninstall` 뒤에 `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/YeongWon2/price-inha/main/install.ps1))) -Uninstall`입니다.
+
+실행 파일만 지웁니다. 키 · 기록 · 모의계좌가 든 보관 폴더(`~/.price-inha`, 윈도는 `%USERPROFILE%\.price-inha`)는 그대로 두고 위치를 알려 줍니다. 자료까지 지우려면 그 폴더를 직접 지웁니다(되돌릴 수 없습니다).
 
 ## 실행
 
