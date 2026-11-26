@@ -18,6 +18,11 @@ impl Desk {
         if watching.source != SymbolsSource::None || !watching.symbols.is_empty() {
             return;
         }
+        let shown: Vec<&str> = symbols.iter().map(Symbol::as_str).collect();
+        tracing::info!(
+            symbols = %shown.join(","),
+            "지켜볼 종목이 없어 시연 기본 종목을 지켜봅니다(파일에 쓰지 않습니다)"
+        );
         watching.symbols = symbols;
         watching.source = SymbolsSource::Demo;
     }
