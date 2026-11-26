@@ -122,6 +122,8 @@ fn backup_of(
     Backup::new(settings, store.clone(), Arc::clone(secrets))
         // (61차, 결정 31) 보관 파일도 백업에 담는다.
         .map(|backup| backup.with_archive_dir(home.join(crate::ARCHIVE_DIR)))
+        // (62차) 비밀이 아닌 설정 파일도 담는다(되살리면 제자리).
+        .map(|backup| backup.with_config_files(home.to_path_buf(), crate::BACKUP_CONFIG_FILES))
         .map_err(|e| AppError::Backup(e.to_string()))
 }
 

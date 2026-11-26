@@ -64,6 +64,7 @@ pub(crate) use backup_http::GITHUB_API_BASE;
 pub use backup_http::{BACKUP_SETTINGS_FILE, SETUP_BACKUP_PATH, restore_backup};
 pub(crate) use backup_http::{clear_restore_leftover, routes as backup_routes};
 pub(crate) use linked::{Linked, LockNotices};
+pub(crate) use looks_http::LOOKS_FILE;
 pub(crate) use looks_http::{Looks, routes as looks_routes};
 pub(crate) use me_http::{Me, routes as me_routes};
 pub use memo_http::{KIND_OFFICE_MEMO, MEMOS_DEFAULT_DAYS, MEMOS_MAX_DAYS, MEMOS_PATH};

@@ -150,6 +150,10 @@ impl Trading {
         }
         // 오늘 정규장의 마지막 시세가 다음 거래일의 기준가다(결정 2026-11-21 11번).
         self.save_references(date)?;
+        // (62차, 결정 32) 모의계좌 스냅샷은 바뀐 때만 남으니 마감에 그날 끝값 한 줄을 남긴다(못 남겨도 마감은 한다).
+        if let Err(error) = self.store.save_paper_day_end(millis(self.clock.now())) {
+            tracing::warn!(%error, "모의계좌 마감 끝값을 남기지 못했습니다");
+        }
         {
             let _turn = lock(&self.team_turn);
             if self.store.team_state()? == TeamState::Operating {

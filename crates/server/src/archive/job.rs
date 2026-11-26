@@ -6,7 +6,7 @@ use pi_knowledge::{Knowledge, RecordText};
 use pi_store::{ArchiveCategory, KnowledgeKind, KnowledgeSource, NewArchiveBatch, UnixMillis};
 use serde_json::json;
 
-use super::file::{ensure_dir, free_name, write_verified};
+use super::file::{ensure_dir, free_name, stem_of, write_verified};
 use super::{ARCHIVE_DIR, ArchiveJob, ArchiveRun, ArchivedPeriod, summary};
 use crate::error::ArchiveError;
 
@@ -97,12 +97,11 @@ fn archive_category(
         let stem = format!("{}-{week}", category.code());
         let taken_files: Vec<String> = taken
             .iter()
-            .map(|p| format!("{}-{p}.jsonl", category.code()))
+            .map(|p| format!("{}-{p}", category.code()))
             .collect();
         let name = free_name(&dir, &stem, &taken_files);
-        let period = name
+        let period = stem_of(&name)
             .trim_start_matches(&format!("{}-", category.code()))
-            .trim_end_matches(".jsonl")
             .to_owned();
         let (file, sha) = write_verified(&dir, &name, &export.lines)?;
         let batch = NewArchiveBatch {
@@ -147,10 +146,7 @@ fn archive_knowledge(
         let group: Vec<_> = old.iter().filter(|r| r.at.0 < to).collect();
         ensure_dir(dir)?;
         let name = free_name(dir, &format!("knowledge-{week}"), &[]);
-        let period = name
-            .trim_start_matches("knowledge-")
-            .trim_end_matches(".jsonl")
-            .to_owned();
+        let period = stem_of(&name).trim_start_matches("knowledge-").to_owned();
         let lines: Vec<String> = group
             .iter()
             .map(|r| json!({"record_ref": r.record_ref, "text": r.text, "at": r.at.0}).to_string())
