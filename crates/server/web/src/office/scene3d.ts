@@ -59,6 +59,8 @@ export interface Scene {
   tool(id: ToolId): void;
   /** (32차) 내 캐릭터의 외형을 바꾼다. */
   setPlayerLook(look: string): void;
+  /** (다듬기 E 9번) 내 캐릭터의 이름표 글을 바꾼다. */
+  setPlayerName(name: string): void;
   /** (33차) 부르기 걸음을 건다(`null`이면 자리 그리기로). */
   steerAgent(id: string, steer: Steer | null): void;
   /** (33차) 담당의 지금 자리(칸 단위 실수). */
@@ -489,6 +491,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
   return {
     setAgent, setLook: actors.setLook, tool, dispose,
     setPlayerLook: (look: string) => player?.setLook(look),
+    setPlayerName: (name: string) => player?.setName(name),
     steerAgent: actors.steer,
     agentAt: (id: string) => actors.at(id),
     playerAt: () => player?.pos() ?? null,

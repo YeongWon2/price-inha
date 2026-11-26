@@ -27,6 +27,7 @@ import { hintText } from "./mention-text";
 import { createSummonScene, type SummonScene } from "./summon-scene";
 import { summonButton } from "./summon-view";
 import { placeSummons } from "./summon-tab";
+import { createMePick } from "./me-pick";
 import { interleave, mountTeamCompose, showMentions, type TeamCompose } from "./team-compose";
 import { mountControlsHint, mountToolbar, type Toolbar } from "./toolbar";
 import type { OfficeMap, Scene } from "./scene3d";
@@ -664,6 +665,7 @@ async function main(): Promise<void> {
     current: () => state.looks,
     choose: chooseLook,
     applied: () => applyLooks(),
+    me: createMePick((url, init) => fetch(url, init), () => state.me, (me) => { if (state.me) { state.me = { ...state.me, ...me }; } state.view?.setPlayerLook(me.look); state.view?.setPlayerName(me.name); }),
   });
   $("look-toggle").addEventListener("click", () => {
     if (!$("looks").hidden) { picker.close(); return; }
