@@ -43,6 +43,8 @@ pub const MESSENGER_LOCKED: &str = "틀린 코드가 많아 잠시 승인을 받
 pub const MESSENGER_OWNER_EXISTS: &str = "이미 연결된 사람이 있습니다 — 먼저 빼세요";
 /// 시연 모드에서 등록하려 할 때의 답(409).
 pub const MESSENGER_DEMO_REFUSED: &str = "시연 모드에서는 메신저를 쓰지 않습니다";
+/// (다듬기 E 7번) 토큰을 지운 답(`DELETE`, 200)의 `notice`: 이 서버에서 지워도 텔레그램 쪽 토큰은 살아 있다.
+pub const MESSENGER_REVOKE_HINT: &str = "";
 
 /// 세션 경로(`GateBuilder::protected_routes`)에 끼운다. 바꾸는 경로는 그 안에서 `pi_gate::local_only`로 닫는다.
 pub(crate) fn routes(hub: Arc<Messenger>) -> Router {

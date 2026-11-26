@@ -8,6 +8,8 @@
 //! - `diagnosis`: 5번 — 시연 진단의 "AI 연결" 줄은 시연용 가짜 AI(고른 방식은 뒤에 그대로). 표의 줄바꿈은 vitest
 //!   `setup-diag-wrap.test.ts`가 본다.
 //! - `doctor_telegram`: 6번 — `price-inha doctor` 키 줄 끝에 텔레그램 봇 토큰 있음 · 없음(값 없이).
+//! - `telegram_notice`: 7번 — 토큰 지우기 답에 BotFather 폐기 안내 칸(`notice`). 화면은 vitest
+//!   `setup-messenger-notice.test.ts`가 본다.
 
 mod common;
 mod data_key;
@@ -16,3 +18,4 @@ mod demo_symbols;
 mod diagnosis;
 mod doctor_cli;
 mod doctor_telegram;
+mod telegram_notice;
