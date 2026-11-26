@@ -43,7 +43,8 @@ async function postJson(page: Page, url: string, body: unknown): Promise<number>
 }
 
 test("팀 방에서 둘을 멘션해 보내면 둘 다 곧바로 내 곁으로 오는 중이 된다", async ({ page }) => {
-  await page.goto("/office/");
+  // 화면이 세션을 얻을 때까지 기다린다(바로 부르면 세션 전이라 401이 날 수 있다).
+  await openOffice(page);
   const [a, b] = await free(page, 2);
   const text = `@[${NAMES[a]}] @[${NAMES[b]}] 모여 주세요`;
   expect(await postJson(page, "/api/office/chat", { room: "team", text, sourceMessageId: "e2e-gather-1" })).toBe(200);
