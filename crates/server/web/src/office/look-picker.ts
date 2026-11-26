@@ -3,6 +3,7 @@
 // 크리에이티브 · 리더십)로 묶어 이름과 한 줄 소개를 보인다. 이 파일은 사무실 첫 묶음에 들어가므로 3D · 자산을 부르지 않는다.
 
 import { DEFAULT_LOOKS, LOOK_CATEGORIES, LOOKS, lookInfo } from "./looks";
+import type { MePick } from "./me-pick";
 
 /** 외형 고르기가 쓰는 것. */
 export interface PickerOptions {
@@ -14,6 +15,8 @@ export interface PickerOptions {
   choose(agent: string, look: string): Promise<Record<string, string>>;
   /** 바뀐 외형을 화면(3D)에 알린다. */
   applied(looks: Record<string, string>): void;
+  /** (다듬기 E 9번) "나" 줄. 없으면 담당만 고른다. */
+  me?: MePick;
 }
 
 /** 외형 이름(모르면 id). */
