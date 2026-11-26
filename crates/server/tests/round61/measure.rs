@@ -117,17 +117,14 @@ async fn 설정_화면_진단에_기록_용량_한_줄이_저장소_바로_뒤�
 
 // 검증: D1 D6
 #[test]
-fn 진단은_저장소_뒤에_기록_줄을_늘_문제_아님으로_낸다() {
+fn 진단은_백업_뒤에_기록_줄을_늘_문제_아님으로_낸다() {
     let home = tempfile::tempdir().unwrap();
     let empty = diagnose(home.path());
     let line = empty.check(CheckItem::Storage).expect("기록 줄");
     assert!(line.ok);
     assert_eq!(line.what, "기록: 아직 없음");
     let items: Vec<CheckItem> = empty.checks.iter().map(|c| c.item).collect();
-    let at = items
-        .iter()
-        .position(|i| *i == CheckItem::Database)
-        .unwrap();
+    let at = items.iter().position(|i| *i == CheckItem::Backup).unwrap();
     assert_eq!(items[at + 1], CheckItem::Storage);
     assert_eq!(empty.to_json()["checks"][at + 1]["item"], "storage");
 
