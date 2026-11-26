@@ -215,13 +215,15 @@ pub(crate) fn windows_home_line(home: &std::path::Path) -> String {
 /// 본인만 여는 폴더를 만든다(유닉스 0700). 윈도에는 그 비트가 없어 그냥 만든다 — 보관 폴더를 사용자 프로필
 /// 아래에 두는 것으로 대신한다([`shared_home_warning`]).
 pub(crate) fn create_private_dir(path: &std::path::Path) -> std::io::Result<()> {
-    let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
+        std::fs::DirBuilder::new().mode(0o700).create(path)
     }
-    builder.create(path)
+    #[cfg(not(unix))]
+    {
+        std::fs::DirBuilder::new().create(path)
+    }
 }
 
 /// 이미 있는 폴더의 권한을 본인만으로 좁힌다(유닉스 0700). 윈도에서는 하지 않는다([`WINDOWS_PERMISSION_NOTE`]).

@@ -1,7 +1,7 @@
 //! 진단(`price-inha doctor`). 원본 동작: Hermes 2.6(범주를 순서대로, 사람이 할 것을 번호로, 문제가 남으면
 //! 종료 코드 1) · OpenClaw 3.6(`--json`). 자동으로 고치지 않는다. 바깥(증권사 · AI · GitHub)을 부르지 않는다.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use pi_secrets::{KeyKind, KeySlot, SecretStore};
 use rusqlite::OptionalExtension;
@@ -193,8 +193,9 @@ fn bad(item: CheckItem, what: impl Into<String>, fix: impl Into<String>) -> Chec
     }
 }
 
-/// 비밀이 들 수 있는 파일들(있는 것만 본다): 키 파일과 저장소 파일.
-fn secret_files(home: &Path) -> Vec<PathBuf> {
+/// 비밀이 들 수 있는 파일들(있는 것만 본다): 키 파일과 저장소 파일. 권한(0600)을 보는 유닉스에서만 쓴다.
+#[cfg(unix)]
+fn secret_files(home: &Path) -> Vec<std::path::PathBuf> {
     let db = DB_FILE.to_string();
     [
         pi_secrets::ENV_FILE.to_string(),
