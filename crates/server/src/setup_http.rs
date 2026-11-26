@@ -32,6 +32,7 @@ const MAX_BODY_BYTES: usize = 16 * 1024;
 /// (31차) 설정 상태와 진단([`SETUP_DOCTOR_PATH`])은 [`SetupView`]가 함께 답한다.
 pub(crate) fn status_routes(view: Arc<SetupView>) -> Router {
     let desk = Arc::clone(view.desk());
+    let storage = crate::archive::storage_routes(view.store().clone());
     let viewed = Router::new()
         .route(SETUP_PATH, get(status))
         .route(SETUP_DOCTOR_PATH, get(doctor))
@@ -42,6 +43,7 @@ pub(crate) fn status_routes(view: Arc<SetupView>) -> Router {
         .route(REMOTE_KEYS_PATH, post(register_key))
         .with_state(desk)
         .merge(viewed)
+        .merge(storage)
 }
 
 /// 세션 · 같은 출처에 더해 그 컴퓨터에서만 열리는 경로: 키 등록 · 종목 등록.

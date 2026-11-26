@@ -41,7 +41,7 @@ pub enum CheckItem {
     Ollama,
     /// (19차 3번) 하루 AI 호출 상한: 늘 문제 아님. 없으면 "없음", 있으면 "N번".
     AiDailyLimit,
-    /// (61차, 결정 31) 기록 용량: 늘 문제 아님. "기록: N MB, 하루 약 X KB, 10년 약 Y GB"(저장소 바로 뒤).
+    /// (61차, 결정 31) 기록 용량: 늘 문제 아님. "기록: N MB, 하루 약 X KB, 10년 약 Y GB"(백업 뒤).
     Storage,
 }
 
@@ -163,10 +163,21 @@ pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
             check_access_key(settings, has_access_key),
             check_service(home, service),
             check_backup(home),
+            check_storage(home),
             check_ollama(home),
             check_ai_daily_limit(settings),
         ],
     }
+}
+
+/// (61차, 결정 31) 진단: 기록 용량. 늘 문제 아님(✓). 저장소를 읽기 전용으로 잰다(판을 올리지 않는다).
+fn check_storage(home: &Path) -> Check {
+    let what = match pi_store::measure_file(&home.join(DB_FILE)) {
+        Ok(Some(usage)) => crate::storage_line(&crate::storage_report(&usage)),
+        Ok(None) => "기록: 아직 없음".to_string(),
+        Err(_) => "기록: 잴 수 없음".to_string(),
+    };
+    good(CheckItem::Storage, what)
 }
 
 /// (19차 3번) 진단: 하루 AI 호출 상한. 늘 문제 아님(✓).

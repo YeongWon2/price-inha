@@ -12,11 +12,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use pi_knowledge::Knowledge;
-use pi_store::{ArchiveCategory, ReclaimReport, StorageUsage, Store};
+use pi_store::{ArchiveCategory, ReclaimReport, Store};
 
-use crate::error::ArchiveError;
+mod daily;
+mod file;
+mod job;
+mod measure;
+mod summary;
 
 /// 보관 폴더 이름(보관 폴더 `--home` 아래).
 pub const ARCHIVE_DIR: &str = "archive";
@@ -92,20 +95,7 @@ pub struct StorageReport {
     pub groups: Vec<GroupReport>,
 }
 
-/// 저장소 쓰임으로 보고를 만든다.
-pub fn storage_report(usage: &StorageUsage) -> StorageReport {
-    let _ = usage;
-    todo!()
-}
-
-/// 진단 한 줄: "기록: N MB, 하루 약 X KB, 10년 약 Y GB".
-pub fn storage_line(report: &StorageReport) -> String {
-    let _ = report;
-    todo!()
-}
-
-/// 보관 기간이 지난 기록을 덜어 낸다. `now`는 지금 시각.
-pub fn run_archive(job: &ArchiveJob, now: DateTime<Utc>) -> Result<ArchiveRun, ArchiveError> {
-    let _ = (job, now);
-    todo!()
-}
+pub(crate) use daily::spawn_daily;
+pub use job::run_archive;
+pub(crate) use measure::{storage_detail, storage_routes};
+pub use measure::{storage_line, storage_report};
