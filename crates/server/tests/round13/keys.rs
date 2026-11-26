@@ -18,7 +18,14 @@ async fn 키_화면과_다른_기기_키_등록은_세션이_없으면_401이다
     let ai = fake_ai().await;
     let bench = Bench::start(&ai.uri()).await;
     let addr = bench.addr();
-    let page = get_with(addr, KEYS_PAGE_PATH, None).await;
+    // 대조(기능 H 2번): 그 컴퓨터는 세션 없이 키 화면이 열린다(설정 화면과 같은 관문 — round56). 세션 없이 401은
+    // 그 컴퓨터 밖의 요청이다(전달 머리글이 있는 요청은 관문이 밖으로 본다).
+    let page = crate::common::send(
+        reqwest::Client::new()
+            .get(format!("{}{KEYS_PAGE_PATH}", origin_of(addr)))
+            .header("X-Forwarded-For", "203.0.113.9"),
+    )
+    .await;
     assert_eq!(page.status, 401, "{}", page.text());
     let refused = post_with(
         addr,
