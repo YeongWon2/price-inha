@@ -14,6 +14,7 @@ mod batch;
 mod clock;
 mod condition;
 mod data;
+mod discard;
 mod engine;
 pub mod error;
 mod inflight;
