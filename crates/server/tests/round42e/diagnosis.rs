@@ -31,11 +31,18 @@ async fn 시연_진단의_ai_연결_줄은_시연용_가짜_ai라고_말한다()
     let running = Running::start(home.path(), true).await;
     let reply = get(running.addr(), SETUP_DOCTOR_PATH).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
-    assert_eq!(keys_in_order(&reply.body), DIAGNOSIS_ITEMS, "항목 수 · 순서 그대로");
+    assert_eq!(
+        keys_in_order(&reply.body),
+        DIAGNOSIS_ITEMS,
+        "항목 수 · 순서 그대로"
+    );
     let ai = item(&reply.body, "ai");
     let detail = ai["detail"].as_str().unwrap();
     assert!(detail.contains("시연용 가짜 AI"), "{ai}");
-    assert!(detail.contains("API 키"), "고른 연결 방식은 그대로 적는다: {ai}");
+    assert!(
+        detail.contains("API 키"),
+        "고른 연결 방식은 그대로 적는다: {ai}"
+    );
     assert_eq!(ai["status"], json!("info"), "{ai}");
     running.close().await;
 }
@@ -47,7 +54,10 @@ async fn 실제_모드_진단의_ai_연결_줄에는_시연이_없다() {
     let running = Running::start(home.path(), false).await;
     let reply = get(running.addr(), SETUP_DOCTOR_PATH).await;
     assert_eq!(keys_in_order(&reply.body), DIAGNOSIS_ITEMS);
-    let detail = item(&reply.body, "ai")["detail"].as_str().unwrap().to_string();
+    let detail = item(&reply.body, "ai")["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(detail, "API 키", "실제 모드는 고른 방식만: {detail}");
     running.close().await;
 }

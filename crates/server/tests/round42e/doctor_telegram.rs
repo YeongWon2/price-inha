@@ -16,7 +16,10 @@ async fn doctor_키_줄_끝에_텔레그램_없음을_덧붙인다() {
     home_with_keys(home.path()).await;
     let line = keys_line(home.path());
     assert!(line.ends_with(" · 텔레그램 봇 토큰 없음"), "{line}");
-    assert!(line.starts_with("증권사 키 있음"), "앞의 글은 그대로다: {line}");
+    assert!(
+        line.starts_with("증권사 키 있음"),
+        "앞의 글은 그대로다: {line}"
+    );
 }
 
 // 검증: D1 V46 V87
@@ -37,5 +40,8 @@ async fn doctor_키_줄_끝에_텔레그램_있음을_값_없이_덧붙인다() 
     let line = keys_line(home.path());
     assert!(line.ends_with(" · 텔레그램 봇 토큰 있음"), "{line}");
     assert!(!line.contains(&BOT_TOKEN[..8]), "토큰 값은 싣지 않는다");
-    assert!(!line.contains(&BOT_TOKEN[BOT_TOKEN.len() - 6..]), "토큰 값은 싣지 않는다");
+    assert!(
+        !line.contains(&BOT_TOKEN[BOT_TOKEN.len() - 6..]),
+        "토큰 값은 싣지 않는다"
+    );
 }

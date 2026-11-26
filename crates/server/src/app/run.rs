@@ -98,6 +98,22 @@ pub(crate) struct DemoRun {
 }
 
 impl DemoRun {
+    /// 설정 책상을 연다([`super::open_desk`]). (다듬기 E 1번) 시연 실행이고 지켜보는 종목이 없으면 시연 기본 종목
+    /// ([`crate::demo_symbols`])을 조립 값으로 쓴다(파일에 쓰지 않는다, E56).
+    pub(crate) async fn open_desk(
+        &self,
+        settings: &Settings,
+        wiring: &Wiring,
+        secrets: &Arc<SecretStore>,
+        verifier: crate::KeyVerifier,
+    ) -> Result<Arc<crate::desk::Desk>, AppError> {
+        let desk = super::open_desk(settings, wiring, secrets, verifier).await?;
+        if self.default_symbols {
+            desk.use_demo_symbols(crate::demo::demo_symbols(settings.market));
+        }
+        Ok(desk)
+    }
+
     /// 시연 달력이 켜져 있으면 그 시장의 시연 달력을 주문 길의 달력으로 쓴다(조립이 이미 정한 달력이 앞선다).
     /// 그래서 하루 시작 · 마감과 깨우기 엔진이 시세 흐름이 받아 오는 달력을 기다리지 않고 처음부터 그것을 쓴다.
     fn fix_calendar(&self, market: Market, launch: &mut Launch) {

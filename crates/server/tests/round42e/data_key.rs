@@ -66,8 +66,14 @@ async fn 설정_화면의_진단_키_줄에_옛_자료_키가_없다() {
         .cloned()
         .unwrap();
     let detail = keys["detail"].as_str().unwrap();
-    assert!(!detail.contains("자료 키"), "옛 자료 키 항목을 보이지 않는다: {detail}");
-    assert!(detail.contains("DART"), "자료 키 칸(DART …)은 그대로 보인다: {detail}");
+    assert!(
+        !detail.contains("자료 키"),
+        "옛 자료 키 항목을 보이지 않는다: {detail}"
+    );
+    assert!(
+        detail.contains("DART"),
+        "자료 키 칸(DART …)은 그대로 보인다: {detail}"
+    );
     running.close().await;
 }
 
@@ -77,6 +83,12 @@ async fn doctor_키_줄에_옛_자료_키가_없다() {
     let home = tempfile::tempdir().unwrap();
     home_with_keys(home.path()).await;
     let line = keys_line(home.path());
-    assert!(!line.contains("자료 키"), "옛 자료 키 항목을 보이지 않는다: {line}");
-    assert!(line.contains("DART"), "자료 키 칸(DART …)은 그대로 보인다: {line}");
+    assert!(
+        !line.contains("자료 키"),
+        "옛 자료 키 항목을 보이지 않는다: {line}"
+    );
+    assert!(
+        line.contains("DART"),
+        "자료 키 칸(DART …)은 그대로 보인다: {line}"
+    );
 }

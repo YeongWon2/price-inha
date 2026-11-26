@@ -220,7 +220,9 @@ fn chat_reply(role: Role, conversation: &str) -> String {
         echo.push('…');
     }
     if echo.is_empty() {
-        format!("{name}입니다. 시연이라 실제 자료를 보지 않고 답합니다 — 키를 등록하면 실제로 살펴봅니다. (시연)")
+        format!(
+            "{name}입니다. 시연이라 실제 자료를 보지 않고 답합니다 — 키를 등록하면 실제로 살펴봅니다. (시연)"
+        )
     } else {
         format!(
             "{name}입니다. '{echo}'에 대해서는 시연이라 실제 자료를 보지 않았습니다 — 키를 등록하면 실제로 살펴보고 답합니다. (시연)"

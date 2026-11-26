@@ -57,16 +57,17 @@ pub use cli::{
     ServiceStatus, SetupContext, SetupRequest, SetupSection, ShownAccessKey, SystemRunner, VERSION,
     WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor, open, restore, setup,
 };
+pub use demo::demo_symbols;
 pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,
 };
-pub use demo::demo_symbols;
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::{
     AppError, CliError, ServiceError, SettingsError, SetupRefusal, TeamError, TradingError,
 };
 pub use keys::{AiKeys, BrokerKeys, KeyVerifier, SecretsRedactor, Upstreams};
 pub use log::{HTTP_LOG_TARGETS, RedactedLine, RedactingWriter, install_logging, log_targets};
+pub use messenger::MESSENGER_REVOKE_HINT;
 pub use messenger::{
     KIND_MESSENGER, MESSENGER_ACTION_PAIRED, MESSENGER_ACTION_REVOKED,
     MESSENGER_ACTION_TOKEN_REMOVED, MESSENGER_ACTION_TOKEN_SET, MESSENGER_ALREADY_STOPPED,
@@ -80,7 +81,6 @@ pub use messenger::{
     MESSENGER_TELEGRAM_PATH, MESSENGER_UNKNOWN, MESSENGER_WEB_ONLY, MESSENGER_WRONG_CODE,
     MessengerWiring, TELEGRAM_KEYS,
 };
-pub use messenger::MESSENGER_REVOKE_HINT;
 pub use notify_settings::{
     NOTIFY_INVALID_QUIET, NOTIFY_KIND_LABELS, NOTIFY_LOCKED_KINDS, NOTIFY_LOCKED_OFF,
     NOTIFY_QUIET_DEFAULT_END, NOTIFY_QUIET_DEFAULT_START, NOTIFY_SETTINGS_FILE,

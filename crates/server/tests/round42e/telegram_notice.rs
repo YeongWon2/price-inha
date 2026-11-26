@@ -34,7 +34,11 @@ async fn 토큰을_지우면_답에_botfather_폐기_안내가_붙고_옛_칸은
         "{}",
         reply.text
     );
-    assert_eq!(keys_of(&reply.body), ["notice", "removed"], "칸 하나만 더한다");
+    assert_eq!(
+        keys_of(&reply.body),
+        ["notice", "removed"],
+        "칸 하나만 더한다"
+    );
     running.assert_stayed_home().await;
     running.close().await;
 }

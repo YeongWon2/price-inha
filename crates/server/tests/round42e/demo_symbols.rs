@@ -53,7 +53,10 @@ fn 종목_없는_시연_조립은_기본_종목마다_시연_업종을_넣는다
         real.launch.trading.rules.sectors.is_empty(),
         "실제 조립에는 시연 값이 섞이지 않는다(E56)"
     );
-    assert!(!home.path().join(WATCHLIST_FILE).exists(), "파일에 쓰지 않는다");
+    assert!(
+        !home.path().join(WATCHLIST_FILE).exists(),
+        "파일에 쓰지 않는다"
+    );
 }
 
 // 검증: V32 E56 D14
@@ -69,7 +72,12 @@ async fn 키도_종목도_없는_시연은_기본_종목을_지켜보고_출처�
         "{}",
         status.text
     );
-    assert_eq!(status.body["symbols_source"], json!("demo"), "{}", status.text);
+    assert_eq!(
+        status.body["symbols_source"],
+        json!("demo"),
+        "{}",
+        status.text
+    );
     assert!(
         !symbols_registered(&status.body),
         "시연 기본 종목은 등록한 것이 아니다: {}",
@@ -90,7 +98,12 @@ async fn 키도_종목도_없는_시연은_기본_종목을_지켜보고_출처�
     assert_eq!(reply.status, 200, "{}", reply.text);
     let status = get(running.addr(), SETUP_PATH).await;
     assert_eq!(status.body["symbols"], json!(["000660"]), "{}", status.text);
-    assert_eq!(status.body["symbols_source"], json!("saved"), "{}", status.text);
+    assert_eq!(
+        status.body["symbols_source"],
+        json!("saved"),
+        "{}",
+        status.text
+    );
     running.assert_stayed_home().await;
     running.close().await;
 }
@@ -103,6 +116,11 @@ async fn 저장된_종목이_있는_시연은_그것을_쓰고_기본_종목을_
     let running = Running::start(home.path(), true).await;
     let status = get(running.addr(), SETUP_PATH).await;
     assert_eq!(status.body["symbols"], json!(["000660"]), "{}", status.text);
-    assert_eq!(status.body["symbols_source"], json!("saved"), "{}", status.text);
+    assert_eq!(
+        status.body["symbols_source"],
+        json!("saved"),
+        "{}",
+        status.text
+    );
     running.close().await;
 }
