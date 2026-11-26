@@ -51,6 +51,8 @@ mod turns;
 mod guide;
 mod guide_book;
 mod guide_http;
+// (백로그 T) 1층으로 가는 지침 후보 → 개선안 · 승인 요청.
+mod guide_rules;
 
 use std::collections::HashMap;
 use std::sync::Arc;

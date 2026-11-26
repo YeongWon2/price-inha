@@ -29,7 +29,7 @@ fn ymd(date: NaiveDate) -> String {
 }
 
 /// 저장된 하루 시작 · 마감 이벤트의 날짜들(서버가 그 날 정규장 세션을 본 거래일).
-fn recorded_days(store: &pi_store::Store) -> BTreeSet<NaiveDate> {
+pub(super) fn recorded_days(store: &pi_store::Store) -> BTreeSet<NaiveDate> {
     let mut days = BTreeSet::new();
     let mut after = 0;
     loop {

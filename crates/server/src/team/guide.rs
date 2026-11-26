@@ -15,13 +15,12 @@ use pi_store::{HISTORY_PAGE_MAX, TradeId};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
+use super::guide_rules::to_rules_payload;
 use super::{Crew, KIND_GUIDELINE};
+use crate::TeamError;
 
 /// 지침 문턱(조정자 해석 · 결정 30, 이름 붙은 상수는 `pi_journal::GUIDELINE_*`).
 pub(super) const RULES: GuidelineRules = GuidelineRules::DEFAULT;
-
-/// 1층 길로 보낸 후보 이벤트의 까닭.
-const WHY_LAYER_ONE: &str = "layer_one";
 
 /// 바뀐 것 하나의 이벤트 내용.
 pub(super) fn change_payload(book: &GuidelineBook, change: &GuidelineChange) -> Value {
@@ -39,24 +38,15 @@ pub(super) fn change_payload(book: &GuidelineBook, change: &GuidelineChange) -> 
     })
 }
 
-/// 승격 · 회고의 이벤트 내용들(바뀐 차례, 1층 길로 보낸 후보는 끝에).
+/// 승격 · 회고의 이벤트 내용들(바뀐 차례). 1층 길로 보낸 후보의 이벤트는 개선안을 낸 뒤 끝에 남긴다
+/// ([`super::guide_rules::to_rules_payload`]).
 fn payloads(book: &GuidelineBook, promotion: &Promotion, retro: &[GuidelineChange]) -> Vec<Value> {
-    let mut out: Vec<Value> = promotion
+    promotion
         .changes
         .iter()
         .chain(retro)
         .map(|change| change_payload(book, change))
-        .collect();
-    out.extend(promotion.to_rules.iter().map(|candidate| {
-        json!({
-            "action": "to_rules",
-            "id": Value::Null,
-            "kind": candidate.kind.word(),
-            "why": WHY_LAYER_ONE,
-            "into": Value::Null,
-        })
-    }));
-    out
+        .collect()
 }
 
 impl Crew {
@@ -83,15 +73,32 @@ impl Crew {
 
     /// 논의가 끝났다: 사기면 사자 판단 수와 쓰임을 남기고, 지켜보기면 넣었던 피하기 지침의 막음을 센다. 팔기는
     /// 사지도 막지도 않았으니 그 매매의 쓰임만 지운다.
+    ///
+    /// (백로그 T) 사자 판단은 판단한 날짜(시장 날짜)로 센다 — 하루 정리가 그 날짜의 하루 기록에 넣는다.
     pub(super) fn note_guideline_outcome(&self, trade: TradeId, outcome: &DiscussionOutcome) {
+        let date = self
+            .trading
+            .date_of(self.clock.now())
+            .format("%Y-%m-%d")
+            .to_string();
         self.guide.update(|book| match outcome.decision {
-            Decision::Buy => book.note_decision(trade.0, true),
-            Decision::Watch(_) => book.note_decision(trade.0, false),
+            Decision::Buy => book.note_decision_on(trade.0, true, &date),
+            Decision::Watch(_) => book.note_decision_on(trade.0, false, &date),
             Decision::Sell => book.forget(trade.0),
         });
     }
 
+    /// (백로그 T) 논의가 오류로 끝났다: 사지도 막지도 않았으니 넣었던 지침의 쓰임을 센 것 없이 지우고, 논의의 오류를
+    /// 돌려준다.
+    pub(super) fn discussion_failed(&self, trade: TradeId, error: &pi_agent::Error) -> TeamError {
+        self.guide.update(|book| book.forget(trade.0));
+        TeamError::Agent(error.to_string())
+    }
+
     /// 하루 정리 때: 끝난 매매의 쓰임을 세고, 되풀이된 것을 올리고, 그날 처음이면 회고한다. 바뀐 것마다 이벤트.
+    ///
+    /// (백로그 T) 날 수는 기록된 거래일(하루 시작 · 마감 기록)로 센다 — 하루 정리를 돌지 않은 거래일도 든다. 1층 길로
+    /// 보낸 후보는 글이 확실히 읽히면 개선안 · 승인 요청을 만들고, 그 이벤트에 개선안 번호를 단다.
     pub(super) async fn learn_guidelines(&self) {
         let now = self.clock.now();
         let at = now.timestamp_millis();
@@ -110,18 +117,27 @@ impl Crew {
         let closed = self.closed_trades().await;
         let candidates = guideline_candidates(&reviews, &memos, &closed, &RULES);
         let results: Vec<(i64, Decimal)> = closed.iter().map(|c| (c.trade, c.pnl)).collect();
-        let events = self.guide.update(|book| {
+        let recorded: Vec<String> = super::memo_days::recorded_days(&self.store)
+            .into_iter()
+            .map(|day| day.format("%Y-%m-%d").to_string())
+            .collect();
+        let (events, to_rules) = self.guide.update(|book| {
             book.settle(&results, at);
             let promotion = book.promote(candidates, at, &RULES);
-            let retro = if book.close_day(&date) {
+            let retro = if book.close_days(&date, &recorded) {
                 book.retrospect(at, &RULES)
             } else {
                 Vec::new()
             };
-            payloads(book, &promotion, &retro)
+            (payloads(book, &promotion, &retro), promotion.to_rules)
         });
         for payload in events {
             self.record_guideline(payload).await;
+        }
+        for candidate in &to_rules {
+            let proposal = self.propose_layer_one(candidate, &memos).await;
+            self.record_guideline(to_rules_payload(candidate, proposal))
+                .await;
         }
     }
 
