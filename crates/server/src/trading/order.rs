@@ -272,6 +272,7 @@ impl Trading {
             };
             self.executor.sell(submission).await
         };
+        self.note_order(trade, &sent);
         match sent {
             Ok(id) => Ok(Placed::Ordered(id)),
             Err(pi_exec::Error::AnomalyStop(error)) => {

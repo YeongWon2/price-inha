@@ -23,6 +23,7 @@ mod books_race;
 mod chosen;
 mod day;
 mod due;
+mod effect;
 mod http;
 mod link;
 mod marks;
@@ -37,7 +38,6 @@ mod stop;
 mod templates;
 mod view;
 mod watch;
-mod effect;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -402,7 +402,7 @@ pub struct Trading {
     /// (28차 3번) 승인 카드 길로 온 개선안 답을 개선안 답하기 길로 보내는 자리(팀을 연 조립이 붙인다).
     proposal_hook: OnceLock<ProposalHook>,
     /// (24차 C26) 익절 · 손절로 낸 파는 주문의 까닭(매매 번호 → 까닭). 팔림이 되면 연출 이벤트를 내고 지운다.
-    sell_why: Mutex<HashMap<TradeId, pi_rules::Purpose>>,
+    sell_why: Mutex<effect::SellNotes>,
 }
 
 impl Trading {

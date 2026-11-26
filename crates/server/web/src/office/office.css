@@ -206,3 +206,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .legend ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .legend li { display: flex; gap: 8px; align-items: center; }
 .legend-glyph { flex: none; width: 22px; text-align: center; font-size: 14px; font-weight: 700; }
+/* (24차 3번) 익절 · 손절 연출: 매매 담당 머리 위에 잠깐(effect-scene.ts). 모양은 머리 위 ✓ 표시와 같은 말풍선. */
+.overhead-effects { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.overhead-effect { position: absolute; left: 0; top: 0; will-change: transform; }
+.mark-effect { display: inline-flex; gap: 4px; align-items: center; justify-content: center; min-width: 28px; height: 26px;
+  padding: 0 8px; border: 1px solid #cdd7c7; border-radius: 12px 12px 12px 3px; background: #fffdf4; font-size: 14px;
+  font-weight: 700; line-height: 1; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+  pointer-events: none; animation: mark-effect-pop .3s ease-out; }
+.mark-effect[data-effect="profit"] { border-color: #e6b3ab; }
+.mark-effect[data-effect="loss"] { border-color: #b4c5df; }
+@keyframes mark-effect-pop { from { opacity: 0; transform: translateY(6px) scale(.9); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mark-effect { animation: none; } }
+#light-list li > .mark-effect { align-self: center; width: auto; height: 30px; border-radius: 8px; box-shadow: none; }
