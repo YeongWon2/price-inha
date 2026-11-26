@@ -39,6 +39,7 @@ pub use error::{AiError, RegistryError};
 pub use ollama::{
     OLLAMA_DEFAULT_BASE_URL, OLLAMA_DEFAULT_MAX_INPUT_CHARS, OLLAMA_DEFAULT_MAX_INPUTS_PER_REQUEST,
     OLLAMA_DEFAULT_TIMEOUT, OLLAMA_PROVIDER_ID, OllamaConfig, OllamaEmbeddingProvider,
+    OllamaReach, ollama_reach,
 };
 pub use redact::{NoRedaction, Redactor};
 pub use retry::{RETRY_AFTER_CAP, RETRY_MAX_DELAY, RetryBackoff, parse_retry_after};
