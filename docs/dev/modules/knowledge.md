@@ -106,3 +106,21 @@ D10 M7 V22 V23
 - `tool.rs`는 포트가 붙은 **키워드** 검색의 `semantic`이 `Available`이기를 기대한다 → `semantic_status()`는 그대로 두고, `reindexing` 등은 `hybrid_search` · `semantic_search`의 결과에만 싣는다.
 - `semantic.rs`의 "포트 호출은 한 번에 많아야 한 번"(`embed_missing`)을 `reembed_step`도 지킨다. 포트 없을 때 `semantic_search`가 `no_embedder`인 것도 그대로.
 - `Embedder` trait에 메서드를 더할 때는 **기본 구현을 둔다**(잠긴 `FakeEmbedder`가 그대로 컴파일돼야 한다). `Condition`에 칸을 더해도 잠긴 테스트는 모두 `..any_condition()`을 써서 깨지지 않는다.
+
+## 5차 작업 (2026-11-27 조정자, 결정 31 — 사용자 "경량화 작업도 해야 해, 임베딩해서 압축한다던가")
+
+동작 잠금 차수다. 별도 작업 폴더(기능 M, 결정 28 방식)에서 red → green으로 만든 것을 main에 합쳤고, 이 차수는 합친 구현에서 시험이 모두 통과하는지 보고 잠근다.
+
+1. **임베딩 줄이기**: 새로 넣는 임베딩은 i8 정수 양자화(벡터마다 크기 값 f32 하나 + 차원마다 i8, 길이 = 차원 + 4)로 둔다. `quantize` / `dequantize` / `cosine` / `stored_vector`(옛 f32 줄도 읽는다) / `rank_by_vector`. 옛 f32 줄은 다음 다시 넣기 때 바뀐다.
+2. **요약으로 바꾸기**: `old_external_records` / `replace_with_summary` — 보관 기간이 지난 바깥 자료(market_note · external) 조각을 그 주의 요약 기록 하나로 바꾼다(요약만 색인 · 임베딩).
+
+- 원본 동작 근거: `docs/research/openclaw.md` 3.6(색인은 요약 · 원문 기록 아님). 양자화는 결정 31의 조정자 해석.
+- 시험으로 확인할 것: 되살린 값의 오차가 한 칸 안, 코사인 순위 상위가 거의 같다, 새 임베딩은 q8로 저장되고 되살려 읽는다, 옛 f32 줄을 읽는다, 요약 바꾸기.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 `tests/suite/quant.rs`의 `양자화해도_코사인_순위의_상위가_거의_같다` | 고침 | 시험 결함. 무작위 64차원 벡터에서는 1등과 2등의 차이가 i8 양자화 오차보다 작은 질의가 있어 "1등이 같다"는 너무 엄격하다. "정확한 1등이 양자화한 상위 3 안에 있다"로 바꾼다. 상위 10 중 8개 이상 · 평균 95% 겹침 단언은 그대로 |
+| `tests/suite/semantic.rs`의 임베딩 바이트 기대값 · `tests/suite/main.rs`(새 모듈 줄) | 고침 | 임베딩 저장이 f32 → q8로 바뀐 것이 이 차수의 목적(결정 31) — 기대 바이트만 `quantize(받은 벡터)`로 |
+| 그 밖의 knowledge 시험 | 유지 | 동작이 바뀌지 않는다 |
