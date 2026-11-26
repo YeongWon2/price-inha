@@ -8,7 +8,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use pi_market::{Clock, FakeAdapter, Market, MarketAdapter, MarketCalendar, Session, SessionKind, Symbol, TradingDay};
+use pi_market::{
+    Clock, FakeAdapter, Market, MarketAdapter, MarketCalendar, Session, SessionKind, Symbol,
+    TradingDay,
+};
 use pi_trigger::{
     DataChange, DataKind, DataPush, MemoryStore, Monotonic, Ports, StopSignal, Trigger,
     TriggerConfig, TriggerEvent, Wake, WakeError, Waker,
@@ -158,14 +161,29 @@ async fn tick(bench: &Bench) {
 async fn 구독을_끈_종류의_묶인_사건은_버리고_남은_종류만_깨운다() {
     let t0 = Utc.with_ymd_and_hms(2026, 11, 16, 1, 0, 0).unwrap();
     let b = bench(t0);
-    assert_eq!(b.trigger.push_data(change(DataKind::News, "news-1", t0)), DataPush::Queued);
     assert_eq!(
-        b.trigger.push_data(change(DataKind::Disclosure, "dart-1", t0)),
+        b.trigger.push_data(change(DataKind::News, "news-1", t0)),
         DataPush::Queued
     );
-    assert_eq!(b.trigger.push_data(change(DataKind::News, "news-2", t0)), DataPush::Queued);
-    assert_eq!(b.trigger.discard_data(&[DataKind::News]), 2, "뉴스 둘을 버린다");
-    assert_eq!(b.trigger.discard_data(&[DataKind::News]), 0, "두 번 버릴 것은 없다");
+    assert_eq!(
+        b.trigger
+            .push_data(change(DataKind::Disclosure, "dart-1", t0)),
+        DataPush::Queued
+    );
+    assert_eq!(
+        b.trigger.push_data(change(DataKind::News, "news-2", t0)),
+        DataPush::Queued
+    );
+    assert_eq!(
+        b.trigger.discard_data(&[DataKind::News]),
+        2,
+        "뉴스 둘을 버린다"
+    );
+    assert_eq!(
+        b.trigger.discard_data(&[DataKind::News]),
+        0,
+        "두 번 버릴 것은 없다"
+    );
     b.clock.advance(Duration::from_secs(31));
     tick(&b).await;
     assert_eq!(woken_ids(&b), vec!["dart-1".to_string()]);
@@ -176,7 +194,8 @@ async fn 구독을_끈_종류의_묶인_사건은_버리고_남은_종류만_깨
 async fn 장_밖에_보관한_사건도_버려_장이_열려도_깨우지_않는다() {
     let night = Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap();
     let b = bench(night);
-    b.trigger.push_data(change(DataKind::Macro, "macro-1", night));
+    b.trigger
+        .push_data(change(DataKind::Macro, "macro-1", night));
     b.clock.advance(Duration::from_secs(31));
     tick(&b).await;
     assert!(woken_ids(&b).is_empty(), "장 밖이라 보관한다");
@@ -185,11 +204,13 @@ async fn 장_밖에_보관한_사건도_버려_장이_열려도_깨우지_않는
             .discard_data(&[DataKind::Disclosure, DataKind::Financials, DataKind::Macro]),
         1
     );
-    b.clock.set(Utc.with_ymd_and_hms(2026, 11, 16, 0, 5, 0).unwrap());
+    b.clock
+        .set(Utc.with_ymd_and_hms(2026, 11, 16, 0, 5, 0).unwrap());
     tick(&b).await;
     assert!(woken_ids(&b).is_empty(), "버린 사건으로는 깨우지 않는다");
     assert_eq!(
-        b.trigger.push_data(change(DataKind::Macro, "macro-1", night)),
+        b.trigger
+            .push_data(change(DataKind::Macro, "macro-1", night)),
         DataPush::Duplicate,
         "버려도 중복 표는 그대로다(같은 사건으로 다시 깨우지 않는다)"
     );
