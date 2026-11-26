@@ -30,30 +30,25 @@ impl ProposalNotices {
 
     /// [`ProposalNotices::read`]와 같고, 이번에 저장소에서 읽은 이벤트 수를 함께 준다.
     fn read_counted(&self, store: &Store, kind: &str) -> Result<(Vec<Value>, usize), StoreError> {
-        let _ = &self.0;
-        let mut found = Vec::new();
-        let mut after = 0;
+        // 잡은 채로 읽어, 함께 읽는 쪽이 같은 이벤트를 두 번 싣지 않게 한다.
+        let mut seen = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let mut read = 0;
         loop {
-            let events = store.read_after(after, READ_PAGE)?;
+            let events = store.read_after(seen.after, READ_PAGE)?;
             let Some(last) = events.last() else {
-                return Ok((found, read));
+                return Ok((seen.found.clone(), read));
             };
-            after = last.seq;
+            let next = last.seq;
             read += events.len();
-            found.extend(
+            seen.found.extend(
                 events
                     .into_iter()
                     .filter(|event| event.kind == kind)
                     .map(|event| event.payload),
             );
+            seen.after = next;
         }
     }
-}
-
-#[allow(dead_code)]
-fn lock(seen: &Mutex<Seen>) -> std::sync::MutexGuard<'_, Seen> {
-    seen.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]

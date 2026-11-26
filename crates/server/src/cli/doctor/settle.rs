@@ -6,6 +6,10 @@
 //! 나왔을 때 곁 파일의 있고 없음이 그 사이 바뀌었으면 한 번만 다시 본다(그때의 방법으로 다시 연다). 바뀌지
 //! 않았으면 처음 결과 그대로다(정말 깨진 저장소를 가리지 않는다).
 
+use std::path::Path;
+
+use crate::cli::peek::has_side_files;
+
 /// `attempt`를 한 번 돌리고, 결과가 문제(`bad`)이고 그 사이 곁 파일의 있고 없음(`side_files`)이 바뀌었으면 한 번
 /// 더 돌려 그 결과를 준다.
 pub(super) fn settled<T>(
@@ -13,8 +17,22 @@ pub(super) fn settled<T>(
     bad: impl Fn(&T) -> bool,
     side_files: impl Fn() -> bool,
 ) -> T {
-    let _ = (&bad, &side_files);
-    attempt()
+    let before = side_files();
+    let first = attempt();
+    if bad(&first) && side_files() != before {
+        return attempt();
+    }
+    first
+}
+
+/// 진단 2(저장소)를 곁 파일 경쟁에 견디게 본다([`settled`]).
+pub(super) fn database(home: &Path) -> (super::Check, Option<bool>) {
+    let path = home.join(crate::DB_FILE);
+    settled(
+        || super::check_database(home),
+        |(check, _)| !check.ok,
+        || has_side_files(&path),
+    )
 }
 
 #[cfg(test)]

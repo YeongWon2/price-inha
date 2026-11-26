@@ -32,6 +32,7 @@ mod notes;
 mod notices;
 mod poll;
 mod proposal_seen;
+mod wake_session;
 mod quota;
 mod review;
 mod rules;
@@ -334,6 +335,8 @@ pub struct Crew {
     ports: pi_agent::Ports,
     /// (기능 L) 팀 지침 장부(보관 폴더의 파일 하나).
     guide: guide_book::GuideBook,
+    /// (백로그 Q) 개선안마다 남긴 승인 요청 이벤트를 읽어 둔 것(매번 처음부터 읽지 않는다).
+    proposal_seen: proposal_seen::ProposalNotices,
 }
 
 impl Crew {

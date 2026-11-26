@@ -21,9 +21,6 @@ use crate::trading::{
 };
 use crate::{TeamError, TradingError};
 
-/// 이벤트를 한 번에 읽는 개수.
-const READ_PAGE: usize = 1_000;
-
 fn millis(at: DateTime<Utc>) -> UnixMillis {
     UnixMillis(at.timestamp_millis())
 }
@@ -210,21 +207,8 @@ impl Crew {
 
     /// 개선안마다 남긴 승인 요청 이벤트(개선안 번호 → 내용).
     pub(super) fn proposal_notices(&self) -> Result<Vec<Value>, TeamError> {
-        let mut found = Vec::new();
-        let mut after = 0;
-        loop {
-            let events = self.store.read_after(after, READ_PAGE)?;
-            let Some(last) = events.last() else {
-                return Ok(found);
-            };
-            after = last.seq;
-            found.extend(
-                events
-                    .into_iter()
-                    .filter(|event| event.kind == KIND_PROPOSAL)
-                    .map(|event| event.payload),
-            );
-        }
+        // (백로그 Q) 읽은 이벤트 번호까지 기억해 두고 그 뒤에 생긴 것만 읽는다.
+        Ok(self.proposal_seen.read(&self.store, KIND_PROPOSAL)?)
     }
 
     /// 개선안 목록(번호 순서).
@@ -325,6 +309,9 @@ impl Crew {
         }
         // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 승인을 닫거나 소비하기 전에 거절한다(V21 · E28):
         // 승인 번호는 그대로 기다리고 개선안 · 템플릿도 그대로다. 잠김이 풀린 뒤 같은 번호로 다시 답할 수 있다.
+        // (백로그 Q) 잠김 확인부터 값 반영까지 승격 판정 · 실전 승격과 같은 차례로 돈다(반영됨인데 값은 그대로가
+        // 되지 않게).
+        let _turn = self.trading.template_turn();
         let waiting = self.approvals.get(number).map_err(approval_error)?;
         let waiting = waiting.is_some_and(|view| view.status == ApprovalStatus::Pending);
         if waiting && self.trading.template_locked()? {

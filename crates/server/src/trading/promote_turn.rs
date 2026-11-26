@@ -24,8 +24,18 @@ impl TemplateTurn {
 
 /// 통계를 잴 때의 템플릿(`before`)이 지금 쓰는 템플릿(`now`)과 같은 판이고 아직 모의중인가.
 pub(super) fn still_same(before: &Template, now: Option<&Template>) -> bool {
-    let _ = (before, now, TemplateState::Simulating);
-    true
+    now.is_some_and(|now| {
+        now.id == before.id
+            && now.revision == before.revision
+            && now.state == TemplateState::Simulating
+    })
+}
+
+impl super::Trading {
+    /// 쓰는 템플릿을 바꾸는 일의 차례를 잡는다([`TemplateTurn`]). 잡은 동안 기다리지 않는다.
+    pub(crate) fn template_turn(&self) -> MutexGuard<'_, ()> {
+        self.template_turn.hold()
+    }
 }
 
 #[cfg(test)]

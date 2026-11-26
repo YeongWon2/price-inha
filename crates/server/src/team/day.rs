@@ -138,6 +138,8 @@ impl Crew {
                 ProposalSource::Review => cooled.push(proposal),
             }
         }
+        // (백로그 Q) 잠김 확인부터 값 반영까지 승격 판정 · 실전 승격과 같은 차례로 돈다.
+        let _turn = self.trading.template_turn();
         // 쓰는 템플릿의 값이 잠겨 있으면(승격대기 · 실전중) 반영을 건너뛰고 냉각중으로 둔다(V21). 하루 판단은
         // 그대로 간다. 잠김이 풀린 뒤의 거래일 시작에 반영한다.
         if !cooled.is_empty() && self.trading.template_locked()? {

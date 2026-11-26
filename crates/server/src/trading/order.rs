@@ -283,6 +283,11 @@ impl Trading {
                 self.anomaly()?;
                 Err(TradingError::Broker(error.to_string()))
             }
+            // (백로그 Q · E25) 실전중 템플릿의 사는 주문은 나가지 않는다: 매매에 까닭을 남긴다.
+            Err(error @ pi_exec::Error::AccountKindMismatch { .. }) if purpose.is_buy() => {
+                self.live_blocked(trade);
+                Err(exec_text(error))
+            }
             Err(error) => Err(exec_text(error)),
         }
     }

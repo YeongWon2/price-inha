@@ -232,9 +232,14 @@ impl Crew {
             .run_turn(&config, limits, title, input)
             .await
         {
-            Ok(outcome) => Some(outcome.text),
+            Ok(outcome) => {
+                // (백로그 Q) 깨우기마다 새 제목의 세션이다: 끝나면 닫는다.
+                self.close_wake_session(title, Some(outcome.session));
+                Some(outcome.text)
+            }
             Err(error) => {
                 tracing::warn!(%error, "뉴스 공시 시세 담당이 깨우기에 답하지 못했다");
+                self.close_wake_session(title, None);
                 None
             }
         }

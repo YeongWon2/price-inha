@@ -5,6 +5,7 @@
 
 mod approvals;
 mod due;
+mod due_scan;
 mod error;
 mod execute;
 mod handling;
