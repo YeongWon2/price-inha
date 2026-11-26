@@ -53,7 +53,7 @@ describe("화면이 부르는 경로", () => {
         "/api/notify/settings",
       ]),
     );
-    expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers"]));
+    expect(sorted(SCREEN_PATHS.keys)).toEqual(sorted(["/api/remote/keys", "/api/setup/slots", "/api/setup/providers", "/api/session"]));
     expect(sorted(SCREEN_PATHS.office)).toEqual(
       sorted([
         "/api/session",
