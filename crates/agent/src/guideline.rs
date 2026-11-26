@@ -20,6 +20,26 @@ pub const GUIDELINE_CHARS_MAX: usize = 1_200;
 
 /// 브리핑 뒤에 붙이는 "팀 지침" 블록. 줄이 없으면 빈 글이다. 줄은 가린 뒤 상한 안에서만 넣는다.
 pub(crate) fn block(lines: &[String], redactor: &dyn Redactor) -> String {
-    let _ = (lines, redactor);
-    String::new()
+    let mut kept: Vec<String> = Vec::new();
+    let mut used = 0_usize;
+    for line in lines {
+        if kept.len() >= GUIDELINE_LINES_MAX {
+            break;
+        }
+        let line = redactor.redact(line.trim());
+        let chars = line.chars().count();
+        if line.is_empty() || used + chars > GUIDELINE_CHARS_MAX {
+            continue;
+        }
+        used += chars;
+        kept.push(line);
+    }
+    if kept.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("{GUIDELINE_BLOCK_TITLE}\n{GUIDELINE_BLOCK_NOTE}\n");
+    for line in kept {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out
 }

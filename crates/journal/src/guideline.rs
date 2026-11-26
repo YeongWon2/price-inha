@@ -183,13 +183,29 @@ impl Guideline {
 
     /// 익절 비율(백분율, 내림). 쓰임이 없으면 `None`.
     pub fn win_rate_pct(&self) -> Option<u32> {
-        let _ = self;
-        None
+        (self.uses > 0).then(|| self.wins.saturating_mul(100) / self.uses)
     }
 
     /// 판단 글의 한 줄: `[<종류 말>] <글> (언제: <조건>)`.
     pub fn line(&self) -> String {
-        String::new()
+        format!(
+            "[{}] {} (언제: {})",
+            self.kind.label(),
+            self.text,
+            self.when
+        )
+    }
+
+    /// 고르기의 성적: `(익절 + 1) / (쓰임 + 2)`를 견줄 수 있는 분자 · 분모로.
+    fn score(&self) -> (u64, u64) {
+        (u64::from(self.wins) + 1, u64::from(self.uses) + 2)
+    }
+
+    /// 내린다.
+    pub(crate) fn retire(&mut self, why: &str, now: i64) {
+        self.state = GuidelineState::Retired;
+        self.retired_why = Some(why.to_string());
+        self.updated_at = now;
     }
 }
 
@@ -285,6 +301,9 @@ pub struct GuidelineBook {
     /// 다음 지침 번호.
     #[serde(default)]
     pub next_id: u32,
+    /// 1층 길로 보낸 후보의 열쇠(같은 후보를 날마다 다시 보내지 않는다).
+    #[serde(default)]
+    pub sent_to_rules: Vec<String>,
 }
 
 impl GuidelineBook {
@@ -293,50 +312,154 @@ impl GuidelineBook {
     /// 성적은 익절 비율을 쓰임이 적을 때 반으로 당긴 값(`(익절 + 1) / (쓰임 + 2)`)이고, 같으면 최근에 바뀐 것 · 번호
     /// 순서다. 줄([`Guideline::line`])을 더해 글자 상한을 넘는 지침은 건너뛰고 다음 것을 본다.
     pub fn select(&self, symbol: &str, rules: &GuidelineRules) -> Vec<&Guideline> {
-        let _ = (symbol, rules);
-        Vec::new()
+        let fitting = self
+            .ranked()
+            .into_iter()
+            .filter(|g| g.symbol.as_deref().is_none_or(|only| only == symbol));
+        let mut picked = Vec::new();
+        let mut used = 0_usize;
+        for guideline in fitting {
+            if picked.len() >= rules.max_items {
+                break;
+            }
+            let chars = guideline.line().chars().count();
+            if used + chars > rules.max_chars {
+                continue;
+            }
+            used += chars;
+            picked.push(guideline);
+        }
+        picked
+    }
+
+    /// 활성 지침 전부를 성적 순으로([`GuidelineBook::select`]와 같은 차례, 상한 · 종목 없이).
+    pub fn ranked(&self) -> Vec<&Guideline> {
+        let mut active: Vec<&Guideline> =
+            self.guidelines.iter().filter(|g| g.is_active()).collect();
+        active.sort_by(|a, b| {
+            let ((an, ad), (bn, bd)) = (a.score(), b.score());
+            (bn * ad)
+                .cmp(&(an * bd))
+                .then(b.updated_at.cmp(&a.updated_at))
+                .then(a.id.cmp(&b.id))
+        });
+        active
+    }
+
+    /// 그 매매의 쓰임을 센 것 없이 지운다(팔기 판단처럼 사지도 막지도 않은 논의).
+    pub fn forget(&mut self, trade: i64) {
+        self.pending.retain(|use_| use_.trade != trade);
+    }
+
+    /// 번호로 찾는다(바꿀 수 있게).
+    pub(crate) fn find_mut(&mut self, id: &str) -> Option<&mut Guideline> {
+        self.guidelines.iter_mut().find(|g| g.id == id)
+    }
+
+    /// 새 지침 번호.
+    pub(crate) fn fresh_id(&mut self) -> String {
+        self.next_id += 1;
+        format!("g{}", self.next_id)
     }
 
     /// 판단 글에 넣었다: 그 매매의 쓰임을 남기고(같은 매매면 바꾼다) 넣은 지침의 `last_used_day`를 오늘로 한다.
     pub fn note_injected(&mut self, trade: i64, ids: &[String]) {
-        let _ = (trade, ids);
+        let day = self.day;
+        for id in ids {
+            if let Some(guideline) = self.find_mut(id) {
+                guideline.last_used_day = day;
+            }
+        }
+        self.pending.retain(|use_| use_.trade != trade);
+        if !ids.is_empty() {
+            self.pending.push(PendingUse {
+                trade,
+                ids: ids.to_vec(),
+            });
+        }
     }
 
     /// 논의가 끝났다. 샀으면 오늘의 사자 판단 수를 하나 늘리고 쓰임을 남겨 둔다(끝날 때 센다). 사지 않았으면 그
     /// 매매의 쓰임을 지우고, 넣었던 활성 피하기 지침마다 `blocks`를 하나 늘린다.
     pub fn note_decision(&mut self, trade: i64, bought: bool) {
-        let _ = (trade, bought);
+        if bought {
+            self.today_buys = self.today_buys.saturating_add(1);
+            return;
+        }
+        let Some(at) = self.pending.iter().position(|use_| use_.trade == trade) else {
+            return;
+        };
+        let dropped = self.pending.remove(at);
+        for id in &dropped.ids {
+            if let Some(guideline) = self.find_mut(id)
+                && guideline.is_active()
+                && guideline.kind == GuidelineKind::Avoid
+            {
+                guideline.blocks = guideline.blocks.saturating_add(1);
+            }
+        }
     }
 
     /// 끝난 매매(번호 · 손익)로 쓰임을 센다: 넣은 지침마다 쓰임 +1, 손익 > 0이면 익절, < 0이면 손절. 센 매매는
     /// 쓰임 목록에서 지우고 그 번호들을 돌려준다.
     pub fn settle(&mut self, closed: &[(i64, rust_decimal::Decimal)], now: i64) -> Vec<i64> {
-        let _ = (closed, now);
-        Vec::new()
+        let mut done = Vec::new();
+        let pending = std::mem::take(&mut self.pending);
+        for use_ in pending {
+            let Some((_, pnl)) = closed.iter().find(|(trade, _)| *trade == use_.trade) else {
+                self.pending.push(use_);
+                continue;
+            };
+            for id in &use_.ids {
+                if let Some(guideline) = self.find_mut(id) {
+                    guideline.uses = guideline.uses.saturating_add(1);
+                    if pnl.is_sign_positive() && !pnl.is_zero() {
+                        guideline.wins = guideline.wins.saturating_add(1);
+                    } else if pnl.is_sign_negative() && !pnl.is_zero() {
+                        guideline.losses = guideline.losses.saturating_add(1);
+                    }
+                    guideline.updated_at = now;
+                }
+            }
+            done.push(use_.trade);
+        }
+        done
     }
 
     /// 하루 정리: 날짜가 마지막 정리와 다르면 날 수를 하나 늘리고 그날의 사자 판단 수를 남긴 뒤 참. 같은 날이면 거짓.
     pub fn close_day(&mut self, date: &str) -> bool {
-        let _ = date;
-        false
+        if self.last_close.as_deref() == Some(date) {
+            return false;
+        }
+        self.day = self.day.saturating_add(1);
+        self.days.push(DayTally {
+            date: date.to_string(),
+            buys: self.today_buys,
+        });
+        let over = self.days.len().saturating_sub(GUIDELINE_TALLY_KEEP);
+        self.days.drain(..over);
+        self.today_buys = 0;
+        self.last_close = Some(date.to_string());
+        true
     }
 
     /// 사람이 끈다(까닭 `person`).
     pub fn retire_by_person(&mut self, id: &str, now: i64) -> PersonRetire {
-        let _ = (id, now);
-        PersonRetire::NotFound
+        let Some(guideline) = self.find_mut(id) else {
+            return PersonRetire::NotFound;
+        };
+        if !guideline.is_active() {
+            return PersonRetire::AlreadyRetired;
+        }
+        guideline.retire(WHY_PERSON, now);
+        PersonRetire::Retired(GuidelineChange {
+            action: GuidelineAction::Retired,
+            id: id.to_string(),
+            why: WHY_PERSON.to_string(),
+            into: None,
+        })
     }
 }
 
-/// 글이 1층(한도 · 금지 · 승인 길)을 바꾸려는가: 숫자 한도(숫자 뒤 `%` · `원` · `주` · `배` · `퍼센트` · `만` · `억`),
-/// 종목 지정(여섯 자리 이상 숫자), 한도 · 금지 · 승인 우회 낱말. 이런 글은 지침이 되지 못하고 1층 개선안 길로만 간다.
-pub fn touches_layer_one(text: &str) -> bool {
-    let _ = text;
-    false
-}
-
-/// 두 글의 비슷함(백분율): 공백을 뺀 글자 두 개 묶음의 겹침(자카드). 둘 다 짧아 묶음이 없으면 같은 글일 때만 100.
-pub fn similarity_pct(a: &str, b: &str) -> u32 {
-    let _ = (a, b);
-    0
-}
+/// 사람이 끈 까닭.
+const WHY_PERSON: &str = "person";

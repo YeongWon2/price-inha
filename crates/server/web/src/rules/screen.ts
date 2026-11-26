@@ -12,6 +12,8 @@
 // - (server 35차 3번) 금지 종목 · 업종표 묶음(`GET` · `POST /api/rules/config`, 그리기는 config-view.ts): 띄울 때 한 번
 //   읽고, 이 묶음만 못 읽으면 그 묶음 안에만 못 읽음을 보인다(다른 묶음은 그대로). 고치던 줄(초안)은 저장하거나
 //   화면을 다시 열 때까지 남는다 — 개선안에 답한 뒤 다시 읽을 때도 지우지 않는다.
+// - (기능 L · 결정 30) "팀 지침(AI가 배운 것)" 묶음(`GET /api/guidelines` · 끄기, 그리기는 guide-panel.ts): 띄울 때 한 번
+//   따로 불러와 읽고, 개선안 목록 뒤에 둔다. 이 묶음만 못 읽으면 그 묶음 안에만 못 읽음을 보인다.
 import "../ui/admin.css";
 import "./rules.css";
 import { API } from "../paths";
@@ -29,6 +31,7 @@ import {
 } from "./model";
 import { renderCaps, renderProposals, renderRules } from "./view";
 import type { ConfigPanel } from "./config-panel";
+import type { GuidePanel } from "./guide-panel";
 
 /** 빈 상태 줄에 `data-role`을 단다. */
 function empty(role: string, text: string): HTMLElement {
@@ -53,6 +56,10 @@ class RulesScreen {
   private config: ConfigPanel | null = null;
   /** 그 묶음을 불러오기 전 · 못 불러왔을 때의 자리. */
   private readonly configSlot = el("div", "rul-cfg-holder");
+  /** (기능 L) 팀 지침 묶음. 첫 화면을 가볍게 따로 불러온다. */
+  private guide: GuidePanel | null = null;
+  /** 그 묶음을 불러오기 전 · 못 불러왔을 때의 자리. */
+  private readonly guideSlot = el("div", "rul-guide-holder");
 
   constructor(main: HTMLElement) {
     main.append(this.body);
@@ -68,6 +75,7 @@ class RulesScreen {
    */
   async load(withConfig = true): Promise<void> {
     const configRead = withConfig ? this.loadConfig() : Promise.resolve();
+    const guideRead = withConfig ? this.loadGuides() : Promise.resolve();
     try {
       const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals)]);
       if (!rules.ok || typeof rules.body !== "object" || rules.body === null) throw new Error(`rules ${rules.status}`);
@@ -79,7 +87,24 @@ class RulesScreen {
       this.rows = [];
       this.renderFailed();
     }
-    await configRead;
+    await Promise.all([configRead, guideRead]);
+  }
+
+  /** (기능 L) 팀 지침 묶음을 (처음이면 불러와) 읽고, 그려 둔 자리를 그 묶음으로 바꾼다. */
+  private async loadGuides(): Promise<void> {
+    if (!this.guide) {
+      this.guideSlot.replaceChildren(loading());
+      try {
+        const { GuidePanel } = await import("./guide-panel");
+        this.guide ??= new GuidePanel();
+      } catch {
+        this.guideSlot.replaceChildren(el("p", "rul-hint", "팀 지침을 불러오지 못했습니다. 화면을 다시 열어 주세요."));
+        return;
+      }
+    }
+    const panel = this.guide;
+    await panel.load();
+    if (this.guideSlot.isConnected) this.guideSlot.replaceWith(panel.element());
   }
 
   /** 금지 종목 · 업종표 묶음을 (처음이면 불러와) 읽고, 그려 둔 자리를 그 묶음으로 바꾼다. */
@@ -128,7 +153,8 @@ class RulesScreen {
       hint("위험을 키우는 개선안은 승인 뒤 냉각중이 되고 다음 거래일부터 반영됩니다."),
       list,
     );
-    this.body.replaceChildren(rulesCard, capsCard, this.config?.element() ?? this.configSlot, proposalsCard);
+    const guides = this.guide?.element() ?? this.guideSlot;
+    this.body.replaceChildren(rulesCard, capsCard, this.config?.element() ?? this.configSlot, proposalsCard, guides);
   }
 
   private rulesHint(rules: RulesReply): string {

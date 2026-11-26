@@ -9,6 +9,7 @@ pub mod error;
 mod guideline;
 mod guideline_learn;
 mod guideline_review;
+mod guideline_text;
 mod improve;
 mod memo;
 mod review;
@@ -22,9 +23,10 @@ pub use guideline::{
     GUIDELINE_SIMILAR_PCT, GUIDELINE_STALE_DAYS, GUIDELINE_TALLY_KEEP, GUIDELINE_TEXT_MAX_CHARS,
     GUIDELINE_UNBLOCK_DAYS, GUIDELINE_UNBLOCK_KEEP_PCT, GUIDELINE_UNBLOCK_MIN_EARLIER, Guideline,
     GuidelineAction, GuidelineBook, GuidelineChange, GuidelineKind, GuidelineRules, GuidelineState,
-    PendingUse, PersonRetire, similarity_pct, touches_layer_one,
+    PendingUse, PersonRetire,
 };
 pub use guideline_learn::{Candidate, ClosedTrade, Promotion, guideline_candidates};
+pub use guideline_text::{similarity_pct, touches_layer_one};
 pub use improve::{Improvement, RuleOutcome, increases_risk};
 pub use memo::{
     ClosePrices, LessonInput, LessonWriter, MemoBrief, OTHER_SYMBOL_LESSONS, Redactor,

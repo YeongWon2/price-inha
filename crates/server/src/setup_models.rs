@@ -233,7 +233,7 @@ fn save(home: &Path, models: &BTreeMap<String, String>) -> Result<(), SetupRefus
 
 /// 이 요청이 그 컴퓨터에서 왔는가: `pi_gate::local_only`와 같은 판단(관문이 넣은 상대 주소가 루프백이고 전달
 /// 헤더가 하나도 없다). 상대 주소를 모르면 아니다.
-fn from_this_computer(peer: Option<&Peer>, headers: &HeaderMap) -> bool {
+pub(crate) fn from_this_computer(peer: Option<&Peer>, headers: &HeaderMap) -> bool {
     peer.is_some_and(|Peer(ip)| ip.to_canonical().is_loopback())
         && FORWARDING_HEADERS
             .iter()

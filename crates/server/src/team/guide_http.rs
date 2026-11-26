@@ -19,6 +19,14 @@
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use pi_gate::Peer;
+use pi_journal::{Guideline, PersonRetire};
+use serde_json::{Value, json};
 
 use super::Crew;
 
@@ -33,6 +41,73 @@ pub const KIND_GUIDELINE: &str = "guideline";
 
 /// 세션 경로에 끼운다(끄기는 안에서 `pi_gate::local_only`로 닫는다).
 pub(crate) fn routes(crew: Arc<Crew>) -> Router {
-    let _ = crew;
+    let retire = Router::new()
+        .route(GUIDELINE_RETIRE_PATH, post(retire_one))
+        .with_state(Arc::clone(&crew));
     Router::new()
+        .route(GUIDELINES_PATH, get(list))
+        .with_state(crew)
+        .merge(pi_gate::local_only(retire))
+}
+
+/// JSON 응답. 브라우저나 중간 자리가 간직하지 않게 한다.
+fn reply(status: StatusCode, body: Value) -> Response {
+    (status, [(CACHE_CONTROL, "no-store")], axum::Json(body)).into_response()
+}
+
+/// 지침 하나의 읽기 모양.
+fn view(guideline: &Guideline) -> Value {
+    json!({
+        "id": guideline.id,
+        "kind": guideline.kind.word(),
+        "text": guideline.text,
+        "when": guideline.when,
+        "symbol": guideline.symbol,
+        "basis": guideline.basis,
+        "uses": guideline.uses,
+        "wins": guideline.wins,
+        "losses": guideline.losses,
+        "win_rate_pct": guideline.win_rate_pct(),
+        "created_at": guideline.created_at,
+        "updated_at": guideline.updated_at,
+        "state": if guideline.is_active() { "active" } else { "retired" },
+        "retired_why": guideline.retired_why,
+    })
+}
+
+async fn list(
+    State(crew): State<Arc<Crew>>,
+    peer: Option<axum::Extension<Peer>>,
+    headers: HeaderMap,
+) -> Response {
+    let editable = crate::setup_models::from_this_computer(peer.as_deref(), &headers);
+    let book = crew.guide.read();
+    let active: Vec<Value> = book.ranked().into_iter().map(view).collect();
+    let mut gone: Vec<&Guideline> = book.guidelines.iter().filter(|g| !g.is_active()).collect();
+    gone.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.id.cmp(&b.id)));
+    let retired: Vec<Value> = gone.into_iter().map(view).collect();
+    reply(
+        StatusCode::OK,
+        json!({ "active": active, "retired": retired, "editable": editable }),
+    )
+}
+
+async fn retire_one(State(crew): State<Arc<Crew>>, Path(id): Path<String>) -> Response {
+    let now = crew.clock.now().timestamp_millis();
+    let (outcome, payload) = crew.guide.update(|book| {
+        let outcome = book.retire_by_person(&id, now);
+        let payload = match &outcome {
+            PersonRetire::Retired(change) => Some(super::guide::change_payload(book, change)),
+            _ => None,
+        };
+        (outcome, payload)
+    });
+    if outcome == PersonRetire::NotFound {
+        return reply(StatusCode::NOT_FOUND, json!({ "error": "not_found" }));
+    }
+    if let Some(payload) = payload {
+        tracing::info!(id = %id, "사람이 팀 지침 하나를 껐습니다");
+        crew.record_guideline(payload).await;
+    }
+    reply(StatusCode::OK, json!({ "id": id, "state": "retired" }))
 }
