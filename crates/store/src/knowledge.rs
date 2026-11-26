@@ -212,6 +212,11 @@ impl Store {
             if known.is_none() {
                 return Err(StoreError::ChunkNotFound(id));
             }
+            // (21차) 한 조각에는 한 가지 모양만 남는다.
+            conn.execute(
+                "DELETE FROM knowledge_embeddings_q8 WHERE chunk_id = ?1",
+                [id.0],
+            )?;
             conn.execute(
                 "INSERT INTO knowledge_embeddings (chunk_id, model, dims, embedding)
                  VALUES (?1, ?2, ?3, ?4)
@@ -233,9 +238,11 @@ impl Store {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
-            found
-                .map(|(model, dims, bytes)| decode(model, dims, bytes))
-                .transpose()
+            if let Some((model, dims, bytes)) = found {
+                return decode(model, dims, bytes).map(Some);
+            }
+            // (21차) f32 줄이 없으면 정수 양자화 줄.
+            crate::embed_q8::read_q8(conn, id)
         })
     }
 
@@ -250,6 +257,8 @@ impl Store {
                 "SELECT c.id FROM knowledge_chunks c
                  WHERE NOT EXISTS (SELECT 1 FROM knowledge_embeddings e
                                    WHERE e.chunk_id = c.id AND e.model = ?1)
+                   AND NOT EXISTS (SELECT 1 FROM knowledge_embeddings_q8 q
+                                   WHERE q.chunk_id = c.id AND q.model = ?1)
                  ORDER BY c.id LIMIT ?2",
             )?;
             let ids = stmt
@@ -302,7 +311,7 @@ pub(crate) fn kind_code(kind: KnowledgeKind) -> &'static str {
     }
 }
 
-fn source_code(source: KnowledgeSource) -> &'static str {
+pub(crate) fn source_code(source: KnowledgeSource) -> &'static str {
     match source {
         KnowledgeSource::Mine => "mine",
         KnowledgeSource::Team => "team",
@@ -472,7 +481,11 @@ fn score_of(relevance_micros: i64) -> i64 {
     i64::try_from(score.max(1)).unwrap_or(1_000_000)
 }
 
-fn decode(model: String, dims: i64, bytes: Vec<u8>) -> Result<ChunkEmbedding, StoreError> {
+pub(crate) fn decode(
+    model: String,
+    dims: i64,
+    bytes: Vec<u8>,
+) -> Result<ChunkEmbedding, StoreError> {
     let dims = u32::try_from(dims)
         .map_err(|_| StoreError::Incompatible(format!("임베딩 차원 값이 이상하다: {dims}")))?;
     Ok(ChunkEmbedding {

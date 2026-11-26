@@ -13,6 +13,7 @@
 
 mod approval;
 mod archive;
+mod archive_sql;
 mod chunkmeta;
 mod codec;
 mod embed_q8;
@@ -96,7 +97,8 @@ pub use usage::{ReclaimReport, StorageUsage, UsageGroup, measure_file};
 /// (13차) 지식 조각 갱신으로 줄을 겹치게 바꾸는 길과 열린 상태가 아닌 매매에 방향을 처음 정하는 길을 막으며 9로 올린다.
 /// (15차) 개선안 출처 · 사용자 변경 반영 길 · 사무실 외형 표를 더하며 10으로 올린다.
 /// (19차) 내 캐릭터 · 담당 의견과 팀장 요약 · 공지 · 결정 메모 표를 더하며 11로 올린다.
-pub const SCHEMA_VERSION: u32 = 11;
+/// (21차, 결정 31) 보관 묶음 표 · 보관으로 옮긴 범위만 지우는 좁은 길 · 정수 양자화 임베딩 표를 더하며 12로 올린다.
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// 이벤트 종류 이름의 가장 긴 길이(글자 수). (3차)
 ///
