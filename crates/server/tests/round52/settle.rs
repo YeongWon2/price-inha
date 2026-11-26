@@ -109,9 +109,12 @@ async fn 정산_날_종가가_없으면_기다리다_5거래일_더_지나면_�
 async fn 교훈은_하루_ai_상한의_팀장_예비분을_쓰지_않아_상한이면_정산_대기로_남는다() {
     // 검증: N20
     // 상한 2번이면 팀장 예비분(최소 2번)을 빼고 남는 몫이 없다.
-    let bench = Bench::start().await.with_ai_limit(2).await;
-    bench.script(DemoTurn::Review, &lesson_reply(LESSON));
+    // (54차 대조) 상한이 턴 단위면 상한 2에서는 논의가 팀장 몫만으로 돌아 사기로 판단되지 않는다. 사기 판단을 먼저
+    // 만들고 상한을 정한다(정산 날은 새로 센다).
+    let bench = Bench::start().await;
     let trade = bench.judged_buy(MEMO_SYMBOL).await;
+    let bench = bench.with_ai_limit(2).await;
+    bench.script(DemoTurn::Review, &lesson_reply(LESSON));
     bench.close_on(decision_day(), MEMO_SYMBOL, 100_000);
     bench.close_on(days_after(5), MEMO_SYMBOL, 90_000);
 
