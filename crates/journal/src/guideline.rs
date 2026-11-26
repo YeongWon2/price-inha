@@ -304,6 +304,10 @@ pub struct GuidelineBook {
     /// 1층 길로 보낸 후보의 열쇠(같은 후보를 날마다 다시 보내지 않는다).
     #[serde(default)]
     pub sent_to_rules: Vec<String>,
+    /// (백로그 T) 마지막 하루 정리 이후의 사자 판단 수를 판단한 날짜별로(`note_decision_on`). 하루 정리가 그 날짜의
+    /// 하루 기록에 넣고 비운다.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_buys: Vec<DayTally>,
 }
 
 impl GuidelineBook {
