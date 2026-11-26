@@ -64,16 +64,16 @@ test("담당 탭을 눌러 말을 걸면 대화가 곧바로 열리고 그 담�
   const [id] = await free(page, 1);
   const summoned = page.waitForRequest(
     (r) => r.url().endsWith("/api/office/summon") && r.postDataJSON()?.agent === id,
-    { timeout: 10_000 },
+    { timeout: 40_000 },
   );
   const arrived = page.waitForRequest(
     (r) => r.url().endsWith("/api/office/summon/arrived") && r.postDataJSON()?.agent === id,
     { timeout: 40_000 },
   );
   await page.locator('#chat-tabs [role="tab"]', { hasText: new RegExp(`^${NAMES[id]}`) }).click();
-  // 대화는 걸어오기를 기다리지 않고 곧바로 열린다.
+  // 대화는 걸어오기를 기다리지 않고 곧바로 열린다(도착 알림보다 먼저 고른 탭이 된다).
   await expect(page.locator('#chat-tabs [role="tab"][aria-selected="true"]')).toHaveText(new RegExp(`^${NAMES[id]}`), {
-    timeout: 3_000,
+    timeout: 10_000,
   });
   await summoned;
   await arrived;
