@@ -3,21 +3,25 @@
 //! 이번 차수는 키워드 · 조건 검색이다. 임베딩은 [`Embedder`] 포트로 받고, 없으면 뜻 검색은
 //! "쓸 수 없음"을 결과로 돌려준다(오류가 아니다, D10). 시각은 모두 인자로 받는다.
 
+mod archive;
 mod chunk;
 mod condition;
 mod embed;
 pub mod error;
 mod meta;
 mod output;
+mod quant;
 mod rank;
 mod reindex;
 mod search;
 
+pub use archive::OldRecord;
 pub use chunk::{CHUNK_OVERLAP, CHUNK_TOKENS, INDEX_PREFIX_CHARS, TextChunk, split_chunks};
 pub use condition::{Condition, TradeCatalog, TradeRecord};
 pub use embed::{EmbedReport, Embedder, SemanticStatus, SharedEmbedder};
 pub use error::{EmbedError, Error};
 pub use output::{SNIPPET_CHARS, SearchMode, SearchOutput, ToolHit};
+pub use quant::{cosine, dequantize, quantize};
 pub use reindex::{IndexSettings, ReembedProgress, ReindexPlan, ReindexReason};
 
 use pi_store::{ChunkId, KnowledgeKind, KnowledgeSource, NewKnowledgeRecord, Store, UnixMillis};
