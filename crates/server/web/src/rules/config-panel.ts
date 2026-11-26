@@ -1,5 +1,6 @@
 // 규칙 화면의 금지 종목 · 업종표 묶음 하나의 상태와 서버 부르기(server 35차 3번): 읽기(`GET`) · 초안 고치기 · 저장
 // (`POST`). 값 검사는 입력 편의일 뿐이고 최종 판단은 서버다(서버 답으로 다시 그린다). 그리기는 config-view.ts.
+import "./config.css";
 import { API } from "../paths";
 import { call, el } from "../ui/call";
 import {

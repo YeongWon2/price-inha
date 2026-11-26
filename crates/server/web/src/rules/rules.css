@@ -82,25 +82,6 @@
 /* 금지 종목 · 업종표(35차) */
 .rul-cfg-holder { min-width: 0; }
 .rul-cfg-holder > .ui-card { margin: 0; min-width: 0; }
-.rul-cfg-heading { margin: var(--space-4) 0 var(--space-2); color: var(--text); font-size: var(--font-size-md); }
-.rul-cfg-warn {
-  margin: 0 0 var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-sm);
-  color: var(--warning);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-}
-.rul-cfg-table .rul-cfg-act { width: 1%; text-align: right; white-space: nowrap; }
-.rul-cfg-table .rul-cfg-act .ui-button { padding: var(--space-1) var(--space-2); font-size: var(--font-size-sm); }
-.rul-cfg-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2) var(--space-3); margin-top: var(--space-3); }
-.rul-cfg-field { margin: 0; flex: 1 1 140px; min-width: 0; }
-.rul-cfg-field .ui-input { width: 100%; box-sizing: border-box; }
-.rul-cfg-problem { margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--font-size-sm); }
-.rul-cfg-save { display: grid; gap: var(--space-2); justify-items: start; margin-top: var(--space-4); }
-.rul-cfg-result { margin: 0; color: var(--success); font-size: var(--font-size-sm); font-weight: 600; }
-.rul-cfg-readonly, .rul-cfg-failed { margin: var(--space-3) 0 0; color: var(--text-muted); font-size: var(--font-size-sm); }
 
 /* 폰 폭: 규칙 표는 줄마다 접는다(가로로 밀지 않는다). */
 @media (max-width: 600px) {

@@ -22,8 +22,6 @@ import "./history.css";
 import { API, tradePath } from "../paths";
 import { LOAD_FAILED, call, el } from "../ui/call";
 import { button, card, emptyState, errorLine, loading } from "../ui/parts";
-import { readBasisCard } from "../ui/basis-card";
-import { renderBasisCard } from "../ui/basis-card-view";
 import {
   approvalRows,
   basisLines,
@@ -48,7 +46,7 @@ import {
   selectTab,
   type HistoryTab,
 } from "./view";
-import { mountMemoTab, type MemoTab } from "./memos";
+import type { MemoTab } from "./memos";
 
 /** JSON 몸통을 읽는다. 실패(상태 · 모양)면 던진다. */
 async function read<T>(url: string): Promise<T> {
@@ -172,8 +170,8 @@ class HistoryScreen {
   private readonly summaryBody = el("div", "his-summary-body");
   private readonly dateInput = el("input", "ui-input his-date");
   private summaryLoaded = false;
-  /** (23번) 결정 메모 탭. */
-  private readonly memos: MemoTab;
+  /** (23번) 결정 메모 탭. 첫 화면을 가볍게(N21) 처음 고를 때 불러온다. */
+  private memos: Promise<MemoTab> | null = null;
   /** 펼친 줄의 근거(다시 펼칠 때 다시 읽지 않는다). */
   private readonly details = new Map<number, HTMLElement>();
 
@@ -223,7 +221,6 @@ class HistoryScreen {
     );
 
     panels.summary.append(card("하루 정리", this.datePicker(), this.summaryBody));
-    this.memos = mountMemoTab(panels.memos, (url, init) => fetch(url, { ...init, credentials: "same-origin" }));
     main.append(tabs, ...TABS.map(([name]) => panels[name]));
   }
 
@@ -249,7 +246,28 @@ class HistoryScreen {
     selectTab(this.tabs, this.panels, name);
     if (name === "summary" && !this.summaryLoaded) void this.loadSummary(null);
     if (name === "approvals" && !this.approvals.loaded) void this.approvals.load(null);
-    if (name === "memos") void this.memos.open();
+    if (name === "memos") void this.openMemos();
+  }
+
+  /** 결정 메모 탭: 처음이면 그 묶음을 불러와 판에 달고(불러오는 중 · 실패 줄), 첫 쪽을 읽는다. */
+  private async openMemos(): Promise<void> {
+    const panel = this.panels.memos;
+    if (!this.memos) {
+      panel.replaceChildren(loading());
+      this.memos = import("./memos").then(({ mountMemoTab }) => {
+        panel.replaceChildren();
+        return mountMemoTab(panel, (url, init) => fetch(url, { ...init, credentials: "same-origin" }));
+      });
+    }
+    let tab: MemoTab;
+    try {
+      tab = await this.memos;
+    } catch {
+      this.memos = null;
+      panel.replaceChildren(failed(() => void this.openMemos()));
+      return;
+    }
+    await tab.open();
   }
 
   /** 좌우 방향키 · Home · End로 탭을 옮긴다. */
@@ -309,7 +327,12 @@ class HistoryScreen {
     wait.append(loading());
     item.append(wait);
     try {
-      const detail = await read<TradeDetail>(tradePath(id));
+      // 근거 카드 묶음은 첫 화면을 가볍게(N21) 처음 펼칠 때 함께 불러온다.
+      const [detail, { readBasisCard }, { renderBasisCard }] = await Promise.all([
+        read<TradeDetail>(tradePath(id)),
+        import("../ui/basis-card"),
+        import("../ui/basis-card-view"),
+      ]);
       const side = `방향 ${sideText(detail.side)} · 수량 ${detail.quantity === null ? "없음" : `${detail.quantity}주`}`;
       const node = renderDetail(basisLines(detail), flowRows(detail), side);
       // (50차 · C23 · V68 · V69) 근거에 실린 담당별 의견 · 팀장 요약으로 근거 카드(사무실과 같은 카드).

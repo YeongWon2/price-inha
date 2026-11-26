@@ -28,7 +28,7 @@ import {
   type RulesReply,
 } from "./model";
 import { renderCaps, renderProposals, renderRules } from "./view";
-import { ConfigPanel } from "./config-panel";
+import type { ConfigPanel } from "./config-panel";
 
 /** 빈 상태 줄에 `data-role`을 단다. */
 function empty(role: string, text: string): HTMLElement {
@@ -49,8 +49,10 @@ class RulesScreen {
   /** 개선안 번호 → 그 줄에 남길 답 결과 문구. */
   private readonly notes = new Map<number, AnswerMessage>();
   private busy = false;
-  /** 금지 종목 · 업종표 묶음(읽기 · 초안 · 저장). */
-  private readonly config = new ConfigPanel();
+  /** 금지 종목 · 업종표 묶음(읽기 · 초안 · 저장). 첫 화면을 가볍게(N21) 따로 불러온다. */
+  private config: ConfigPanel | null = null;
+  /** 그 묶음을 불러오기 전 · 못 불러왔을 때의 자리. */
+  private readonly configSlot = el("div", "rul-cfg-holder");
 
   constructor(main: HTMLElement) {
     main.append(this.body);
@@ -65,9 +67,9 @@ class RulesScreen {
    * 업종표도 다시 읽는다(그 묶음의 실패는 그 묶음 안에만 보인다).
    */
   async load(withConfig = true): Promise<void> {
+    const configRead = withConfig ? this.loadConfig() : Promise.resolve();
     try {
-      const configRead = withConfig ? this.config.load() : Promise.resolve();
-      const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals), configRead]);
+      const [rules, proposals] = await Promise.all([call("GET", API.rules), call("GET", API.proposals)]);
       if (!rules.ok || typeof rules.body !== "object" || rules.body === null) throw new Error(`rules ${rules.status}`);
       if (!proposals.ok || typeof proposals.body !== "object" || proposals.body === null) {
         throw new Error(`proposals ${proposals.status}`);
@@ -77,6 +79,27 @@ class RulesScreen {
       this.rows = [];
       this.renderFailed();
     }
+    await configRead;
+  }
+
+  /** 금지 종목 · 업종표 묶음을 (처음이면 불러와) 읽고, 그려 둔 자리를 그 묶음으로 바꾼다. */
+  private async loadConfig(): Promise<void> {
+    if (!this.config) {
+      this.configSlot.replaceChildren(loading());
+      try {
+        const { ConfigPanel } = await import("./config-panel");
+        this.config ??= new ConfigPanel();
+      } catch {
+        const retry = button("다시 시도", "accent");
+        retry.dataset.action = "retry";
+        retry.addEventListener("click", () => void this.loadConfig());
+        this.configSlot.replaceChildren(errorLine(LOAD_FAILED), retry);
+        return;
+      }
+    }
+    const panel = this.config;
+    await panel.load();
+    if (this.configSlot.isConnected) this.configSlot.replaceWith(panel.element());
   }
 
   private render(rules: RulesReply, proposals: ProposalsReply): void {
@@ -105,7 +128,7 @@ class RulesScreen {
       hint("위험을 키우는 개선안은 승인 뒤 냉각중이 되고 다음 거래일부터 반영됩니다."),
       list,
     );
-    this.body.replaceChildren(rulesCard, capsCard, this.config.element(), proposalsCard);
+    this.body.replaceChildren(rulesCard, capsCard, this.config?.element() ?? this.configSlot, proposalsCard);
   }
 
   private rulesHint(rules: RulesReply): string {
