@@ -2,9 +2,12 @@
 // 원본 DeskRPG와 같게(docs/research/metaverse-office-refs.md C절): 거리는 칸 단위 곧은 거리이고 2칸 **미만**이 안이다
 // (원본 64px, 엄격히 `<`). 가까운 순으로 고른다. 안내 글 "○○을(를) 클릭하거나 /를 눌러 대화"(조사는 받침에 맞춘다).
 // `/`: 후보 하나면 바로 열고, 둘 이상이면 "누구와 대화?" 목록, 없으면 아무 일 없다(E42). 장면 없이 시험하는 순수 모듈.
+// (59차 · 결정 29) 말을 걸면 대화는 곧바로 열리고 그 담당이 내 곁으로 온다 — 내 캐릭터는 걷지 않는다. `/`의 후보는
+// 2칸 제한 없이 모든 담당(가까운 순)이고, 2칸 안내 글은 그대로다.
 
 import type { Grid, Point } from "./nav";
-import { besideCell, cellOf } from "./pathfind";
+import { gatherCell } from "./gather";
+import { cellOf } from "./pathfind";
 
 /** 말 걸 수 있는 거리(칸). 이보다 **가까우면**(엄격히 작으면) 안이다. */
 export const TALK_RADIUS = 2;
@@ -26,18 +29,21 @@ export function distance(a: Point, b: Point): number {
 
 /** `player`에서 [`TALK_RADIUS`] 안의 담당 id, 가까운 순(같으면 id 글자 순). */
 export function nearbyAgents(player: Point, agents: readonly AgentSpot[]): string[] {
+  return byDistance(player, agents, TALK_RADIUS);
+}
+
+/** 담당 id를 가까운 순으로 늘어놓는다(같으면 id 글자 순). */
+function byDistance(player: Point, agents: readonly AgentSpot[], within: number): string[] {
   return agents
     .map((a) => ({ agent: a.agent, d: distance(player, a) }))
-    .filter((a) => a.d < TALK_RADIUS)
+    .filter((a) => a.d < within)
     .sort((a, b) => a.d - b.d || (a.agent < b.agent ? -1 : a.agent > b.agent ? 1 : 0))
     .map((a) => a.agent);
 }
 
-/** 모든 담당 id, 가까운 순. 뼈대(red). */
+/** (결정 29) `/`의 후보: 거리 제한 없이 모든 담당 id, 가까운 순(같으면 id 글자 순). */
 export function agentsByDistance(player: Point, agents: readonly AgentSpot[]): string[] {
-  void player;
-  void agents;
-  return [];
+  return byDistance(player, agents, Infinity);
 }
 
 /** 목적격 조사: 마지막 글자가 받침 있는 한글이면 "을", 받침 없는 한글이면 "를", 한글이 아니면 "을(를)". */
@@ -68,15 +74,18 @@ export function tooFar(player: Point, agent: Point): boolean {
   return distance(player, agent) >= TALK_RADIUS;
 }
 
-/** 담당을 눌렀을 때 할 일(2b): 2칸 안이면 open, 멀면 그 담당 옆 빈 칸으로 walk(도착하면 연다), 갈 수 없으면 none. */
-export type AgentClick = { kind: "open" } | { kind: "walk"; to: Point } | { kind: "none" };
+/**
+ * 담당을 눌렀을 때 할 일(2b · 결정 29): 대화는 거리 상관없이 곧바로 연다. 2칸 안이면 `open`(이미 곁이라 부르지 않는다),
+ * 멀면 그 담당이 내 곁 빈 칸 `to`로 `come`(내 캐릭터는 걷지 않는다), 담당이 올 길이 없으면 `open`.
+ */
+export type AgentClick = { kind: "open" } | { kind: "come"; to: Point };
 
 /**
- * 담당 누르기. `grid`는 담당이 선 칸이 막힌 표(`withBlockers`), `player`는 실수 자리, `agent`는 그 담당이 선 칸(정수).
- * 거리는 `player`에서 그 칸 가운데(+0.5)까지다. 걸어갈 칸은 `besideCell`(내 칸에서 길이 가장 짧은 이웃 칸).
+ * 담당 누르기. `grid`는 걷기 표, `player`는 실수 자리, `agent`는 그 담당이 선 칸(정수). 거리는 `player`에서 그 칸
+ * 가운데(+0.5)까지다. 올 칸은 `gatherCell`(내 칸 둘레에서 그 담당에게서 길이 가장 짧은 빈 칸 — `taken`은 잡힌 칸).
  */
-export function agentClick(grid: Grid, player: Point, agent: Point): AgentClick {
+export function agentClick(grid: Grid, player: Point, agent: Point, taken: readonly Point[] = []): AgentClick {
   if (distance(player, { x: agent.x + 0.5, y: agent.y + 0.5 }) < TALK_RADIUS) return { kind: "open" };
-  const to = besideCell(grid, cellOf(player), agent);
-  return to === null ? { kind: "none" } : { kind: "walk", to };
+  const to = gatherCell(grid, agent, cellOf(player), taken);
+  return to === null ? { kind: "open" } : { kind: "come", to };
 }

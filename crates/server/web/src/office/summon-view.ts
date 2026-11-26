@@ -2,16 +2,18 @@
 // (docs/research/metaverse-office-refs.md F절 · C절):
 // - 단계 `office.summon` `{"agent", "phase", "reason", "at"}`: 자리(idle) → 오는 중(called) → 곁에서 기다림(waiting) →
 //   돌아가는 중(returning) → 자리. 이벤트로 단계가 바뀌면 그대로 그린다(다른 화면에서 불러도 보인다).
-// - 오는 중: 이미 1.125칸(원본 36px) 안이면 걷지 않고 바로 도착. 아니면 내 곁 빈 칸(32차 `besideCell` — 내 칸의 네 이웃
-//   가운데 담당 칸에서 길이 가장 짧은 칸)까지 초당 9.4칸(원본 300px/s)으로 걷는다. 도착하면 도착 알림을 보낸다.
+// - 오는 중: 이미 1.125칸(원본 36px) 안이면 걷지 않고 바로 도착. 아니면 내 곁 빈 칸까지 초당 9.4칸(원본 300px/s)으로
+//   걷는다. 도착하면 도착 알림을 보낸다. 곁 칸은 (59차 · 결정 29) `gather.ts`의 자리 나누기 — 내 칸의 네 이웃 가운데 담당
+//   칸에서 길이 가장 짧은 칸(32차 `besideCell`과 같다), 다른 담당이 서 있거나 잡은 칸은 건너뛰고, 네 이웃이 차면 바깥 고리.
 // - 곁에서 기다림: 나를 보고 선다(가로 · 세로 가운데 큰 축 쪽 네 방향, 같으면 세로).
 // - 돌아가는 중: 자기 자리까지 초당 4.7칸(원본 150px/s)으로 걷고, 닿으면 도착 알림을 보낸다.
 // - 부름(`call`)으로 와서 도착하면 1:1 대화를 연다. 멘션(`mention`)으로 온 담당은 열지 않는다(답은 채팅 패널).
+//   (결정 29) 말을 걸어(1:1을 열어) 부른 담당도 열지 않는다(이미 열려 있다).
 // - 회의 중(409 `meeting_reserved`)이면 "○○은(는) 지금 회의 중이에요" 안내(E47)를 보이고 걸어오지 않는다.
 // three.js 없이 칸 좌표와 DOM 단추만 다룬다.
 
 import type { Grid, Point } from "./nav";
-import { besideCell } from "./pathfind";
+import { gatherCell } from "./gather";
 import type { Facing } from "./player";
 import type { ViewRoom } from "./summon-client";
 
@@ -74,8 +76,8 @@ export type SummonDraw =
 
 /**
  * 단계 `phase`에서 칸 `agent`의 담당을 어떻게 그릴지. `player`는 내 칸, `home`은 그 담당의 자리 칸.
- * - `called`: `agent`가 `player`에서 [`ARRIVE_RADIUS`] 안이면 `arrived`, 아니면 `besideCell(grid, agent, player)`로
- *   `walk`(빠르기 [`SUMMON_SPEED`]), 곁 칸이 없으면 `stay`.
+ * - `called`: `agent`가 `player`에서 [`ARRIVE_RADIUS`] 안이면 `arrived`, 아니면 `gatherCell(grid, agent, player, taken)`로
+ *   `walk`(빠르기 [`SUMMON_SPEED`]), 곁 칸이 없으면 `stay`. `taken`은 다른 담당이 서 있거나 잡은 칸.
  * - `waiting`: `face`(나를 보는 쪽, [`facingToward`]).
  * - `returning`: `home`으로 `walk`(빠르기 [`RETURN_SPEED`]).
  * - `idle`: `home`.
@@ -83,11 +85,10 @@ export type SummonDraw =
 export function summonDraw(
   phase: SummonPhase, grid: Grid, agent: Point, player: Point, home: Point, taken: readonly Point[] = [],
 ): SummonDraw {
-  void taken;
   switch (phase) {
     case "called": {
       if (arrivedNear(agent, player)) return { kind: "arrived" };
-      const to = besideCell(grid, agent, player);
+      const to = gatherCell(grid, agent, player, taken);
       return to ? { kind: "walk", to, speed: SUMMON_SPEED } : { kind: "stay" };
     }
     case "waiting":
@@ -112,10 +113,12 @@ export function arrivedNear(pos: Point, target: Point): boolean {
   return Math.hypot(target.x - pos.x, target.y - pos.y) <= ARRIVE_RADIUS;
 }
 
-/** 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). */
+/**
+ * 도착했을 때 1:1 대화를 여는가: 부름(`call`)이면 참, 멘션으로 왔으면 거짓(4a3 · 4c4). (결정 29) 말을 걸어(`talked`)
+ * 부른 담당은 대화가 이미 열려 있으므로 거짓.
+ */
 export function opensConversation(reason: SummonReason | null, talked = false): boolean {
-  void talked;
-  return reason === "call";
+  return reason === "call" && !talked;
 }
 
 /** 회의 중 안내(E47): `{이름}{은/는} 지금 회의 중이에요`(받침 있으면 "은", 없으면 "는", 한글이 아니면 "은(는)"). */

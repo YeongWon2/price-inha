@@ -44,6 +44,7 @@ mod me_http;
 mod memo_http;
 mod notice_http;
 mod office_bridge;
+mod office_gather;
 mod office_http;
 mod office_work;
 mod phone_http;

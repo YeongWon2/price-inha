@@ -678,6 +678,7 @@ async function main(): Promise<void> {
       nameOf,
       openChat: (id) => selectConversation(id),
       say: (text) => compose?.say(text),
+      ids: AGENT_IDS,
     });
   }
   const legend = document.createElement("div");

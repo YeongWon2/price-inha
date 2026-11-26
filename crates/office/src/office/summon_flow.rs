@@ -124,8 +124,9 @@ impl Office {
         }
     }
 
-    /// 팀 방에서 멘션된 담당의 답 턴이 시작됐다(원본: 턴 시작과 동시에 이동). `Called`(까닭 `Mention`)로 들어간다.
-    /// 논의 중이면 [`Error::MeetingReserved`](답은 채팅에만 간다). 이미 불려 온 담당이면 그대로.
+    /// 팀 방에서 멘션된 담당 하나를 곁으로 부른다(33차: 답 턴이 시작될 때 · 원본: 턴 시작과 동시에 이동).
+    /// `Called`(까닭 `Mention`)로 들어간다. 논의 중이면 [`Error::MeetingReserved`](답은 채팅에만 간다). 이미 불려 온
+    /// 담당이면 그대로. (59차 · 결정 29) 서버는 멘션이 정해진 그때 [`Office::mention_posted`]로 모두를 한꺼번에 부른다.
     pub async fn mention_turn_started(&self, agent: Agent) -> Result<SummonPhase, Error> {
         self.call_in(agent, SummonReason::Mention).await
     }
@@ -137,8 +138,15 @@ impl Office {
         &self,
         agents: &[Agent],
     ) -> Vec<(Agent, Result<SummonPhase, Error>)> {
-        let _ = agents;
-        Vec::new()
+        let mut called: Vec<(Agent, Result<SummonPhase, Error>)> = Vec::with_capacity(agents.len());
+        for &agent in agents {
+            if called.iter().any(|(seen, _)| *seen == agent) {
+                continue;
+            }
+            let phase = self.call_in(agent, SummonReason::Mention).await;
+            called.push((agent, phase));
+        }
+        called
     }
 
     /// 사용자가 방을 떠났다(화면이 알린다). 팀 방을 떠나면 멘션으로 온 담당(`Called` · `Waiting`)이

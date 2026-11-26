@@ -43,7 +43,7 @@ export function pathTo(grid: Grid, from: Point, to: Point): Point[] | null {
 }
 
 /** 길의 길이(칸): 출발 칸 가운데에서 점들을 이은 거리. */
-function lengthOf(from: Point, path: readonly Point[]): number {
+export function lengthOf(from: Point, path: readonly Point[]): number {
   let total = 0;
   let here = { x: from.x + 0.5, y: from.y + 0.5 };
   for (const p of path) {

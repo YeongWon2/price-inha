@@ -53,9 +53,10 @@ impl OfficeDesk {
                 continue;
             }
             lock(&self.texts).insert(response.request_id.clone(), text.clone());
-            lock(&self.mentions).insert(response.request_id.clone());
             agents.push(response.agent);
         }
+        // (결정 29) 메신저에서 온 팀 방 글도 멘션된 담당 모두가 곧바로 곁으로 온다.
+        self.gather(&agents).await;
         tokio::spawn(Arc::clone(self).work_in_turn(agents));
         Ok(turns)
     }
