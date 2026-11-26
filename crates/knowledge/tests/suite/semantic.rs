@@ -73,7 +73,12 @@ async fn embed_missing_stores_little_endian_f32_bytes_with_model_and_dims() {
         .expect("있다");
     assert_eq!(emb.model, FakeEmbedder::MODEL);
     assert_eq!(emb.dims, 3);
-    assert_eq!(emb.bytes, FakeEmbedder::bytes_of(&chunk.text));
+    // (결정 31) 받은 f32 벡터는 정수 양자화 바이트로 둔다.
+    let given: Vec<f32> = FakeEmbedder::bytes_of(&chunk.text)
+        .chunks(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+    assert_eq!(emb.bytes, pi_knowledge::quantize(&given));
     assert!(
         f.store
             .chunks_missing_embedding(FakeEmbedder::MODEL, 10)
