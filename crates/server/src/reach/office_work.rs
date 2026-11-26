@@ -1,8 +1,8 @@
 //! 사무실 답 만들기(뒤에서 돈다): 담당 대기열에서 차례가 온 응답에 AI 턴으로 답한다.
 //!
-//! (33차) 멘션으로 받은 턴은 시작하는 순간 그 담당을 곁으로 부르고(`mention_turn_started`, 원본: 턴 시작과 동시에
-//! 이동), 팀 방 답은 답 속 멘션으로 이어 말하게 한다(`complete_with_relay`). 1:1 답이 끝나면 곁에서 기다리는
-//! 담당의 10초를 다시 센다.
+//! 팀 방 답은 답 속 멘션으로 이어 말하게 한다(`complete_with_relay`). (결정 29) 멘션된 담당은 턴이 시작될 때가
+//! 아니라 멘션이 정해진 그때 곁으로 온다(`gather` — 팀 방 글은 `team_chat`, 이어 말하기는 여기 `relay`).
+//! 1:1 답이 끝나면 곁에서 기다리는 담당의 10초를 다시 센다.
 
 use std::sync::Arc;
 
@@ -29,7 +29,6 @@ impl OfficeDesk {
                 return;
             }
         };
-        self.come_if_mentioned(&next).await;
         let text = lock(&self.texts)
             .remove(&next.request_id)
             .unwrap_or_default();
@@ -76,18 +75,8 @@ impl OfficeDesk {
         }
     }
 
-    /// (33차 2번) 멘션으로 받은 턴이면 그 담당을 곁으로 부른다. 논의 중이면 오지 않고 답만 간다.
-    async fn come_if_mentioned(&self, next: &ChatResponse) {
-        if !lock(&self.mentions).remove(&next.request_id) {
-            return;
-        }
-        match self.linked.office.mention_turn_started(next.agent).await {
-            Ok(_) | Err(pi_office::Error::MeetingReserved { .. }) => {}
-            Err(error) => tracing::warn!(%error, "멘션된 담당을 부르지 못했다"),
-        }
-    }
-
     /// 답 속 멘션으로 이어 말하게 된 담당들에게 차례로 답을 맡긴다. 그 담당이 받는 글은 처음 글과 앞 담당의 답이다.
+    /// (결정 29) 이어 말할 담당은 정해진 그때 곧바로 곁으로 온다(앞 담당의 턴 · 자기 턴을 기다리지 않는다).
     fn relay(
         self: &Arc<Self>,
         text: &str,
@@ -102,11 +91,14 @@ impl OfficeDesk {
         let said: String = said.chars().take(OFFICE_TEXT_MAX * 2).collect();
         let mut agents = Vec::with_capacity(follow_ups.len());
         for follow in follow_ups {
-            lock(&self.texts).insert(follow.request_id.clone(), said.clone());
-            lock(&self.mentions).insert(follow.request_id);
+            lock(&self.texts).insert(follow.request_id, said.clone());
             agents.push(follow.agent);
         }
-        tokio::spawn(Arc::clone(self).work_in_turn(agents));
+        let desk = Arc::clone(self);
+        tokio::spawn(async move {
+            desk.gather(&agents).await;
+            desk.work_in_turn(agents).await;
+        });
     }
 
     /// 담당들이 차례로 답한다(멘션 · 공지 확인 답의 "차례로").

@@ -1,7 +1,7 @@
 //! 사무실 경로(세션이 있어야 열린다): 접속 스냅샷 [`OFFICE_PATH`]와 말하기 [`OFFICE_CHAT_PATH`].
 //! (33차) 팀 방 멘션 글은 `team_chat`, 답 만들기는 `office_work`, 공지는 `notice_http`, 부르기는 `summon_http`에 있다.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -65,8 +65,6 @@ pub(crate) struct OfficeDesk {
     trading: Option<Arc<Trading>>,
     /// 답을 기다리는 글(응답 번호 → 가린 글).
     pub(super) texts: Mutex<HashMap<String, String>>,
-    /// (33차 2번) 멘션으로 받은 답 턴(응답 번호). 턴이 시작되면 그 담당이 곁으로 온다.
-    pub(super) mentions: Mutex<HashSet<String>>,
     /// (33차 3번) 받은 공지의 처음 답(글 번호 → 답). 같은 글 번호는 한 번만 처리한다.
     pub(super) notice_replies: tokio::sync::Mutex<Vec<(String, Value)>>,
     /// 담당마다 한 번에 하나씩 답한다.
@@ -164,7 +162,6 @@ impl OfficeDesk {
             store,
             trading,
             texts: Mutex::new(HashMap::new()),
-            mentions: Mutex::new(HashSet::new()),
             notice_replies: tokio::sync::Mutex::new(Vec::new()),
             turns,
             sent: Mutex::new(HashMap::new()),

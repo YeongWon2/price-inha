@@ -1,0 +1,470 @@
+//! 59차 시험의 공용 도우미(round35의 것을 본떠 이 차수가 쓰는 것만 남겼다 — round35는 고치지 않는다):
+//! 실행 파일 조립으로 띄우기(가짜 AI 뜸) · 시계 · 바깥 주소 자리의 로컬 가짜 서버 · 세션 · 요청 · 이벤트 읽기.
+//! 바깥 주소 자리는 모두 로컬 가짜 서버다.
+
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use chrono::{DateTime, FixedOffset, NaiveDate, TimeZone, Utc};
+use pi_ai::AnthropicConfig;
+use pi_data::{DataConfig, NAVER_NEWS_KEYS, NaverNewsConfig};
+use pi_market::{Clock, Symbol, TossConfig};
+use pi_secrets::{
+    Credentials, KeyKind, KeySlot, ProviderKeys, SecretStore, Verifier, VerifyFailure,
+};
+use pi_store::Store;
+use price_inha::{
+    App, Crew, DemoAi, DemoTurn, KIND_OFFICE_SUMMON, RunAssembly, Settings, Upstreams,
+    run_assembly, save_watchlist,
+};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use wiremock::matchers::any;
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// 한 걸음을 기다리는 가장 긴 시간.
+pub const STEP: Duration = Duration::from_secs(15);
+/// 지켜볼 종목(국내, 보관 폴더에 저장한다).
+pub const WATCHED: &str = "005930";
+/// 보관 폴더에 등록하는 DART 키(진짜 키처럼 보이지 않는다). 가리기를 보는 데 쓴다.
+pub const DART_KEY: &str = "test-dart-key-round35-zz";
+/// 다른 기기로 보일 때의 상대 주소(사설 대역, 실제로 닿지 않는다).
+const REMOTE_PEER: [u8; 4] = [100, 64, 0, 35];
+
+// ───────────── 시계 · 날짜 ─────────────
+
+/// 시험이 정하는 시계. 자는 것은 짧게만 잔다. 시험이 정한 가짜 AI 뜸과 같은 길이는 그만큼 실제로 잔다.
+pub struct TestClock {
+    now: AtomicI64,
+    pause: Duration,
+}
+
+impl TestClock {
+    fn at(time: DateTime<Utc>, pause: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            now: AtomicI64::new(time.timestamp_millis()),
+            pause,
+        })
+    }
+
+    fn read(&self) -> DateTime<Utc> {
+        Utc.timestamp_millis_opt(self.now.load(Ordering::SeqCst))
+            .unwrap()
+    }
+}
+
+#[async_trait]
+impl Clock for TestClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.read()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        if !self.pause.is_zero() && duration == self.pause {
+            tokio::time::sleep(duration).await;
+        } else {
+            tokio::time::sleep(duration.min(Duration::from_millis(10))).await;
+        }
+    }
+}
+
+/// 2026-11-21 토요일(시연 달력은 매일을 거래일로 본다).
+pub fn saturday() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 11, 21).unwrap()
+}
+
+/// 그 날의 한국 시각(UTC+9).
+pub fn kst(date: NaiveDate, hour: u32, minute: u32) -> DateTime<Utc> {
+    FixedOffset::east_opt(9 * 3600)
+        .unwrap()
+        .from_local_datetime(&date.and_hms_opt(hour, minute, 0).unwrap())
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+/// 시험의 기본 시각: 토요일 10:00(한국).
+pub fn morning() -> DateTime<Utc> {
+    kst(saturday(), 10, 0)
+}
+
+// ───────────── "실제" 주소 자리의 가짜 서버 ─────────────
+
+/// 무엇을 물어도 503으로 답하는 로컬 가짜 서버.
+async fn refusing_server() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// 증권사 · AI · 자료 · 뉴스 주소 자리의 가짜 서버들.
+struct Outside {
+    broker: MockServer,
+    ai: MockServer,
+    data: MockServer,
+    news: MockServer,
+}
+
+impl Outside {
+    async fn start() -> Outside {
+        Outside {
+            broker: refusing_server().await,
+            ai: refusing_server().await,
+            data: refusing_server().await,
+            news: refusing_server().await,
+        }
+    }
+}
+
+// ───────────── 보관 폴더 · 설정 · 조립 ─────────────
+
+fn no_env(_name: &str) -> Option<String> {
+    None
+}
+
+fn settings(home: &Path) -> Settings {
+    let home = home.to_str().unwrap();
+    let list = [
+        "--home",
+        home,
+        "--port",
+        "0",
+        "--interval-ms",
+        "20",
+        "--retry-initial-ms",
+        "20",
+        "--retry-max-ms",
+        "40",
+        "--demo",
+    ];
+    let args: Vec<String> = list.iter().map(|s| (*s).to_string()).collect();
+    Settings::parse(&args, &no_env, None).expect("설정을 읽어야 한다")
+}
+
+/// 무엇이든 받는 시험용 확인자(바깥으로 나가지 않는다).
+struct AcceptAll;
+
+impl Verifier for AcceptAll {
+    async fn verify(&self, _kind: KeyKind, _values: &Credentials) -> Result<(), VerifyFailure> {
+        Ok(())
+    }
+
+    async fn verify_slot(
+        &self,
+        _slot: KeySlot,
+        _values: &Credentials,
+    ) -> Result<(), VerifyFailure> {
+        Ok(())
+    }
+
+    async fn verify_provider(
+        &self,
+        _keys: ProviderKeys,
+        _values: &Credentials,
+    ) -> Result<(), VerifyFailure> {
+        Ok(())
+    }
+}
+
+/// 띄우기 전 보관 폴더에 모든 키를 등록하고 지켜볼 종목을 저장한다. 값은 진짜 키처럼 보이지 않는다.
+async fn prepare(home: &Path) {
+    let secrets = SecretStore::open(home).unwrap();
+    let broker = Credentials::new()
+        .with("client_id", "test-client-id-round35")
+        .with("client_secret", "test-client-secret-round35");
+    secrets
+        .register(KeyKind::Broker, broker, &AcceptAll)
+        .await
+        .unwrap();
+    let ai = Credentials::new().with("api_key", "test-ai-key-round35-zz");
+    secrets
+        .register(KeyKind::AiApiKey, ai, &AcceptAll)
+        .await
+        .unwrap();
+    let slots = [
+        (KeySlot::Dart, DART_KEY),
+        (KeySlot::Ecos, "test-ecos-key-round35-zz"),
+        (KeySlot::Fred, "test-fred-key-round35-zz"),
+    ];
+    for (slot, value) in slots {
+        let values = Credentials::new().with(slot.fields()[0], value);
+        secrets
+            .register_slot(slot, values, &AcceptAll)
+            .await
+            .unwrap();
+    }
+    let naver = Credentials::new()
+        .with("client_id", "test-naver-id-round35")
+        .with("client_secret", "test-naver-secret-round35");
+    secrets
+        .register_provider(NAVER_NEWS_KEYS.provider_keys(), naver, &AcceptAll)
+        .await
+        .unwrap();
+    save_watchlist(home, &[Symbol::new(WATCHED)]).unwrap();
+}
+
+/// 실행 파일 조립에서 시계 · 바깥 주소 · CLI 찾는 자리 · 가짜 AI 뜸 · 상대 주소만 바꾼다.
+fn bend(
+    mut assembly: RunAssembly,
+    clock: &Arc<TestClock>,
+    outside: &Outside,
+    pause: Duration,
+    remote: &Arc<AtomicBool>,
+) -> RunAssembly {
+    assembly.wiring.clock = Arc::clone(clock) as Arc<dyn Clock>;
+    assembly.wiring.cli_locations = Vec::new();
+    assembly.wiring.upstreams = Upstreams {
+        toss: TossConfig {
+            base_url: outside.broker.uri(),
+            timeout: Duration::from_secs(3),
+            token_failure_cooldown: Duration::ZERO,
+            ..TossConfig::default()
+        },
+        anthropic: AnthropicConfig {
+            base_url: outside.ai.uri(),
+            timeout: Duration::from_secs(3),
+            max_retries: 0,
+            retry_base_delay: Duration::from_millis(1),
+        },
+    };
+    let flag = Arc::clone(remote);
+    let peer: pi_gate::PeerOverride = Arc::new(move |addr: SocketAddr| {
+        if flag.load(Ordering::SeqCst) {
+            SocketAddr::from((REMOTE_PEER, addr.port()))
+        } else {
+            addr
+        }
+    });
+    assembly.wiring.peer_override = Some(peer);
+    if let Some(team) = assembly.launch.team.as_mut() {
+        let data = outside.data.uri();
+        team.data = DataConfig::new(data.clone(), data.clone(), data);
+        team.data.timeout = Duration::from_secs(3);
+        team.news = NaverNewsConfig::new(outside.news.uri()).with_timeout(Duration::from_secs(3));
+    }
+    assembly.demo_ai_pause = pause;
+    assembly
+}
+
+async fn launch(
+    home: &Path,
+    clock: &Arc<TestClock>,
+    outside: &Outside,
+    pause: Duration,
+    remote: &Arc<AtomicBool>,
+) -> App {
+    let settings = settings(home);
+    let assembly = bend(run_assembly(&settings, None), clock, outside, pause, remote);
+    tokio::time::timeout(STEP, App::launch_run(settings, assembly))
+        .await
+        .expect("서버가 시간 안에 떠야 한다")
+        .expect("서버가 떠야 한다")
+}
+
+/// 띄울 모양: 실행 파일의 `--demo` 조립 · 가짜 AI 뜸(기본 0).
+pub struct Plan {
+    pause: Duration,
+}
+
+impl Plan {
+    /// 실행 파일의 `--demo` 조립. 가짜 AI 뜸은 0.
+    pub fn demo() -> Plan {
+        Plan {
+            pause: Duration::ZERO,
+        }
+    }
+
+    /// 가짜 AI 답마다 그 뜸을 둔다(논의가 그만큼 오래 열려 있다).
+    pub fn pause(mut self, pause: Duration) -> Plan {
+        self.pause = pause;
+        self
+    }
+
+    /// 이 모양으로 그 시각에 띄운다.
+    pub async fn start(self, at: DateTime<Utc>) -> Bench {
+        let dir = tempfile::tempdir().unwrap();
+        prepare(dir.path()).await;
+        let clock = TestClock::at(at, self.pause);
+        let outside = Outside::start().await;
+        let remote = Arc::new(AtomicBool::new(false));
+        let app = launch(dir.path(), &clock, &outside, self.pause, &remote).await;
+        Bench {
+            _dir: dir,
+            _outside: outside,
+            _clock: clock,
+            _remote: remote,
+            app,
+        }
+    }
+}
+
+/// 떠 있는 서버 하나와 그 보관 폴더 · 시계 · 가짜 서버들.
+pub struct Bench {
+    _dir: TempDir,
+    _outside: Outside,
+    _clock: Arc<TestClock>,
+    _remote: Arc<AtomicBool>,
+    pub app: App,
+}
+
+impl Bench {
+    /// 기본 모양(뜸 없음 · 상한 없음)으로 토요일 10:00에 띄운다.
+    pub async fn start() -> Bench {
+        Plan::demo().start(morning()).await
+    }
+
+    /// 끈다.
+    pub async fn close(self) {
+        tokio::time::timeout(STEP, self.app.shutdown())
+            .await
+            .expect("시간 안에 꺼져야 한다")
+            .expect("끄기가 성공해야 한다");
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.app.local_addr()
+    }
+
+    pub fn store(&self) -> Store {
+        self.app.store()
+    }
+
+    pub fn crew(&self) -> Arc<Crew> {
+        self.app.crew().expect("실행 파일 조립은 팀을 잇는다")
+    }
+
+    /// 시연용 가짜 AI.
+    pub fn demo_ai(&self) -> Arc<DemoAi> {
+        self.crew().demo_ai().expect("시연 모드다")
+    }
+
+    /// 가짜 AI의 답을 정한다.
+    pub fn script(&self, turn: DemoTurn, reply: &str) {
+        self.demo_ai().script(turn, reply);
+    }
+
+    /// 새 세션으로 같은 출처에서 JSON을 보낸다.
+    pub async fn post(&self, path: &str, body: &Value) -> Reply {
+        let cookie = session(self.addr()).await;
+        post(self.addr(), path, &cookie, body).await
+    }
+}
+
+// ───────────── 기다리기 · 이벤트 ─────────────
+
+/// 조건이 될 때까지 기다린다(가장 길게 [`STEP`]).
+pub async fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + STEP;
+    while !done() {
+        assert!(Instant::now() < deadline, "시간 안에 되지 않았다: {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// 저장된 이벤트 가운데 그 종류인 것의 내용(번호 순서).
+pub fn events(store: &Store, kind: &str) -> Vec<Value> {
+    store
+        .read_after(0, 100_000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == kind)
+        .map(|event| event.payload)
+        .collect()
+}
+
+/// 그 담당의 부르기 단계 이벤트([`KIND_OFFICE_SUMMON`], 번호 순서).
+pub fn summons(store: &Store, agent: &str) -> Vec<Value> {
+    events(store, KIND_OFFICE_SUMMON)
+        .into_iter()
+        .filter(|e| e["agent"] == agent)
+        .collect()
+}
+
+/// 그 담당의 부르기 단계 이벤트 가운데 그 단계인 것이 있는가.
+pub fn has_phase(store: &Store, agent: &str, phase: &str) -> bool {
+    summons(store, agent).iter().any(|e| e["phase"] == phase)
+}
+
+// ───────────── HTTP ─────────────
+
+/// 받은 응답: 상태 · 본문 글자 · JSON 본문(JSON이 아니면 `Null`).
+pub struct Reply {
+    pub status: u16,
+    pub text: String,
+    pub body: Value,
+}
+
+async fn send(request: reqwest::RequestBuilder) -> Reply {
+    let reply = tokio::time::timeout(STEP, request.send())
+        .await
+        .expect("응답이 시간 안에 와야 한다")
+        .expect("요청이 닿아야 한다");
+    let status = reply.status().as_u16();
+    let text = reply.text().await.expect("본문");
+    let body = serde_json::from_str(&text).unwrap_or(Value::Null);
+    Reply { status, text, body }
+}
+
+pub fn origin_of(addr: SocketAddr) -> String {
+    format!("http://{addr}")
+}
+
+/// 같은 출처에서 세션을 받아 `Cookie` 헤더 글자를 돌려준다.
+pub async fn session(addr: SocketAddr) -> String {
+    let origin = origin_of(addr);
+    let reply = tokio::time::timeout(
+        STEP,
+        reqwest::Client::new()
+            .post(format!("{origin}{}", pi_gate::SESSION_PATH))
+            .header("Origin", &origin)
+            .send(),
+    )
+    .await
+    .expect("응답이 시간 안에 와야 한다")
+    .expect("요청이 닿아야 한다");
+    assert!(reply.status().is_success(), "세션을 받아야 한다");
+    reply
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .map(|raw| raw.split(';').next().unwrap().trim().to_string())
+        .expect("세션 쿠키가 있어야 한다")
+}
+
+/// `POST` JSON 글자 `body`. `cookie` · `origin`이 `None`이면 그 머리를 붙이지 않는다.
+pub async fn post_raw(
+    addr: SocketAddr,
+    path: &str,
+    cookie: Option<&str>,
+    origin: Option<&str>,
+    body: &str,
+) -> Reply {
+    let mut request = reqwest::Client::new()
+        .post(format!("{}{path}", origin_of(addr)))
+        .header("Content-Type", "application/json")
+        .body(body.to_owned());
+    if let Some(cookie) = cookie {
+        request = request.header("Cookie", cookie);
+    }
+    if let Some(origin) = origin {
+        request = request.header("Origin", origin);
+    }
+    send(request).await
+}
+
+/// 같은 출처 · 그 세션으로 JSON을 `POST`한다.
+pub async fn post(addr: SocketAddr, path: &str, cookie: &str, body: &Value) -> Reply {
+    let origin = origin_of(addr);
+    post_raw(addr, path, Some(cookie), Some(&origin), &body.to_string()).await
+}
+
+/// 팀 방 멘션 글의 몸통(`agent` 없음).
+pub fn team_text(text: &str, source: &str) -> Value {
+    json!({"room": "team", "text": text, "sourceMessageId": source})
+}

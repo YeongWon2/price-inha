@@ -95,8 +95,9 @@ describe("담당 누르기", () => {
     // 검증: V56
     const grid = withBlockers(buildGrid({ cols: 20, rows: 20 }), [{ x: 10, y: 5 }]);
     expect(agentClick(grid, { x: 9.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "open" });
-    expect(agentClick(grid, { x: 2.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "walk", to: { x: 9, y: 5 } });
-    expect(agentClick(grid, { x: 17.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "walk", to: { x: 11, y: 5 } });
+    // 대조(결정 29): 멀면 내가 걷지 않고 그 담당이 내 곁 빈 칸으로 온다(대화는 곧바로 연다).
+    expect(agentClick(grid, { x: 2.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "come", to: { x: 3, y: 5 } });
+    expect(agentClick(grid, { x: 17.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "come", to: { x: 16, y: 5 } });
   });
 
   it("갈 수 있는 옆 칸이 없으면 아무 일 없다", () => {
@@ -108,6 +109,7 @@ describe("담당 누르기", () => {
       { x: 10, y: 4 },
       { x: 10, y: 6 },
     ]);
-    expect(agentClick(grid, { x: 2.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "none" });
+    // 대조(결정 29): 담당이 올 수 없어도 대화는 연다(아무도 걷지 않는다).
+    expect(agentClick(grid, { x: 2.5, y: 5.5 }, { x: 10, y: 5 })).toEqual({ kind: "open" });
   });
 });

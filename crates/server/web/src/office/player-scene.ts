@@ -2,6 +2,9 @@
 // 걷기(player.ts) · 바닥 · 담당 누르기(pathfind.ts · nearby.ts) · 2칸 안내 · `/` · "누구와 대화?" · 멀어지면 닫힘 ·
 // 자리 띄엄띄엄 남기기(player-sync.ts). 장면(scene3d.ts)이 프레임마다 `step`을 부르고, 누르기를 `tapAgent` ·
 // `tapFloor`로 넘긴다. 대화 탭을 여닫는 일은 사무실 입구(main.ts)가 `hooks`로 한다.
+// (59차 · 결정 29) 담당을 누르면 거리 상관없이 곧바로 대화를 열고(그 담당이 내 곁으로 오는 일은 대화 바꿈을 받는
+// summon-scene이 한다), 내 캐릭터는 걷지 않는다. `/`의 후보는 2칸 제한 없이 모든 담당(가까운 순). 멀어지면 닫힘은
+// 담당이 한 번 곁(2칸 안)에 온 뒤 **내가** 걸어 멀어질 때만이다(담당이 오는 중 · 돌아가는 중에는 닫지 않는다).
 
 import { buildGrid, type Grid, type NavMap, type Point } from "./nav";
 import { cellOf, entranceCell, startCell, withBlockers, type EntranceMap } from "./pathfind";
@@ -9,7 +12,7 @@ import { ArrowState, PlayerWalker } from "./player";
 import { createPlayerBody } from "./player3d";
 import { arrowOf, isTalkKey, isTypingTarget, preventsDefault } from "./player-keys";
 import { SpotSender, postSpot, type Fetcher, type Me, type Spot } from "./player-sync";
-import { agentClick, distance, nearbyAgents, slashAction, talkHint, tooFar, TALK_RADIUS } from "./nearby";
+import { agentsByDistance, nearbyAgents, slashAction, talkHint, tooFar } from "./nearby";
 import { setHint, showChooser } from "./toolbar";
 
 type Obj = any;
@@ -91,11 +94,13 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
   stage.appendChild(hint);
   let chooser: HTMLElement | null = null;
   let chooserFor = "";
-  /** 걸어가서 닿으면 대화를 열 담당. */
-  let openOnArrival: string | null = null;
   /** 다가가 연 대화(멀어지면 닫는다). */
   let talkingTo: string | null = null;
+  /** 그 담당이 한 번 곁(2칸 안)에 왔는가(온 뒤에만 멀어지면 닫는다). */
+  let met = false;
   let near: string[] = [];
+  /** `/`의 후보: 모든 담당, 가까운 순. */
+  let everyone: string[] = [];
   let lastSpot = "";
 
   const nameOf = (id: string) => names[id] ?? id;
@@ -112,8 +117,8 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
 
   function open(id: string): void {
     closeChooser();
-    openOnArrival = null;
     talkingTo = id;
+    met = false;
     hooks.openChat(id);
   }
 
@@ -124,11 +129,11 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
   }
 
   function slash(): void {
-    const action = slashAction(near);
+    const action = slashAction(everyone);
     if (action.kind === "open") { open(action.agent); return; }
     if (action.kind === "choose") {
       chooser = showChooser(stage, action.agents.map((id) => ({ id, name: nameOf(id) })), (id) => open(id));
-      chooserFor = action.agents.join();
+      chooserFor = [...action.agents].sort().join();
       chooser.querySelector<HTMLButtonElement>("button[data-agent]")?.focus();
     }
   }
@@ -161,34 +166,29 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
   function step(dt: number, t: number, wall: number): void {
     const blocked = withBlockers(base, agentCells());
     walker.setGrid(blocked);
-    if (arrows.any()) { openOnArrival = null; }
     const before = walker.pos();
-    const wasFollowing = walker.following();
     walker.step(arrows.held(), Math.min(dt, MAX_STEP_SECONDS));
     const pos = walker.pos();
     const walking = Math.hypot(pos.x - before.x, pos.y - before.y) > MOVED_EPSILON;
     body.update(pos, walker.facing(), walking, dt, t);
 
     const agents = options.agents();
-    near = nearbyAgents(pos, agents.map((a) => ({ agent: a.id, x: a.x, y: a.z })));
-    // 걸어가서 닿았으면 연다(그사이 담당이 떠났으면 열지 않는다).
-    if (openOnArrival && wasFollowing && !walker.following()) {
-      const target = agentAt(openOnArrival);
-      const id = openOnArrival;
-      openOnArrival = null;
-      if (target && distance(pos, { x: target.x, y: target.z }) < TALK_RADIUS) { open(id); }
-    }
-    // 다가가 연 대화는 멀어지면 닫는다(사용자가 다른 탭으로 옮겼으면 놓아 준다).
+    const spots = agents.map((a) => ({ agent: a.id, x: a.x, y: a.z }));
+    near = nearbyAgents(pos, spots);
+    everyone = agentsByDistance(pos, spots);
+    // 연 대화는 그 담당이 곁에 온 뒤 내가 걸어 멀어지면 닫는다(사용자가 다른 탭으로 옮겼으면 놓아 준다).
     if (talkingTo && hooks.conversation() !== talkingTo) { talkingTo = null; }
     if (talkingTo) {
       const target = agentAt(talkingTo);
-      if (!target || tooFar(pos, { x: target.x, y: target.z })) {
+      const far = !target || tooFar(pos, { x: target.x, y: target.z });
+      if (!far) { met = true; }
+      if (far && met && walking) {
         hooks.closeChat(talkingTo);
         talkingTo = null;
       }
     }
     setHint(hint, near.length > 0 ? talkHint(nameOf(near[0])) : null);
-    if (chooser && near.join() !== chooserFor) { closeChooser(); }
+    if (chooser && [...everyone].sort().join() !== chooserFor) { closeChooser(); }
 
     const cell = walker.cell();
     const spot: Spot = { x: cell.x, y: cell.y, dir: walker.facing() };
@@ -205,21 +205,11 @@ export function createPlayerScene(options: PlayerSceneOptions): PlayerScene {
     step,
     placeTag: (camera, width, height) => body.placeTag(camera, width, height),
     tapAgent(id: string): void {
-      const target = agentAt(id);
-      if (!target) { return; }
-      const cell = cellOf({ x: target.x, y: target.z });
-      const others = agentCells();
-      const blocked = withBlockers(base, others.some((c) => c.x === cell.x && c.y === cell.y) ? others : [...others, cell]);
-      const click = agentClick(blocked, walker.pos(), cell);
-      if (click.kind === "open") { open(id); return; }
-      if (click.kind === "walk") {
-        walker.setGrid(blocked);
-        if (walker.walkTo(click.to)) { openOnArrival = id; }
-      }
+      // (결정 29) 거리 상관없이 곧바로 연다. 그 담당이 내 곁으로 오는 일은 대화 바꿈(summon-scene)이 한다.
+      if (agentAt(id)) { open(id); }
     },
     tapFloor(cell: Point): boolean {
       walker.setGrid(withBlockers(base, agentCells()));
-      openOnArrival = null;
       return walker.walkTo(cell);
     },
     setLook: (look: string) => body.setLook(look),
