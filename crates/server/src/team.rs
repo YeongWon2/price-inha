@@ -40,6 +40,9 @@ mod tools;
 mod wake;
 // (50차) 근거 카드 칸: 근거 경로 · 히스토리의 매매 하나가 함께 쓴다.
 pub(crate) mod card;
+// (51차) 하루 AI 잔량 · 논의 진행 단계.
+mod budget;
+mod progress;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -60,7 +63,9 @@ pub(crate) use http::routes;
 pub(crate) use link::{CrewLinks, role_of};
 pub(crate) use wake::spawn_trigger;
 
+pub use budget::{KIND_TEAM_AI_USED, TEAM_BUDGET_PATH};
 pub use demo_ai::{DemoAi, DemoTurn};
+pub use progress::KIND_OFFICE_PROGRESS;
 
 /// 투자 팀 담당 명단(V1). `GET` → `{"members": [{"id": 담당 id, "name": 담당 이름}, …]}`.
 /// 명단 순서(`pi_agent::Role::ALL`)로 6명이다. 세션이 있어야 열린다.
@@ -311,6 +316,8 @@ pub struct Crew {
     ai_cap: quota::DailyQuota,
     /// (16차 3번) 상한에 닿았다고 알린 마지막 날(같은 날 한 번만 알린다).
     ai_cap_told: std::sync::Mutex<Option<chrono::NaiveDate>>,
+    /// (51차) 담당별 하루 AI 사용과 사무실 표시판(진행 단계 · 잔량).
+    meter: budget::Meter,
 }
 
 impl Crew {

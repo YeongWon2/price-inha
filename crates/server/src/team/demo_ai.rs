@@ -57,6 +57,8 @@ pub struct DemoAi {
     closed: AtomicBool,
     /// 끄기를 기다리던 뜸에 알린다.
     closing: Notify,
+    /// (51차) 턴 → 앞으로 공급자 장애로 답할 남은 횟수.
+    failing: Mutex<HashMap<DemoTurn, u32>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -110,6 +112,32 @@ impl DemoAi {
     /// 그 턴의 답을 정한다. 다시 정하면 바뀐다. 이 뒤로 그 턴은 이 글을 답한다.
     pub fn script(&self, turn: DemoTurn, reply: impl Into<String>) {
         lock(&self.scripts).insert(turn, reply.into());
+    }
+
+    /// (51차) 이 뒤로 그 턴의 요청 `times`번을 공급자 장애(503)로 답한다(다시 시도 · 오류 표시 시험용, E51).
+    /// 받은 글은 그대로 남긴다([`DemoAi::prompts`]). 0이면 지운다.
+    pub fn fail_next(&self, turn: DemoTurn, times: u32) {
+        let mut failing = lock(&self.failing);
+        if times == 0 {
+            failing.remove(&turn);
+        } else {
+            failing.insert(turn, times);
+        }
+    }
+
+    /// 그 턴을 이번에 실패로 답할 차례인가(남은 횟수를 하나 쓴다).
+    fn take_failure(&self, turn: DemoTurn) -> bool {
+        let mut failing = lock(&self.failing);
+        match failing.get_mut(&turn) {
+            Some(left) if *left > 0 => {
+                *left -= 1;
+                if *left == 0 {
+                    failing.remove(&turn);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     /// 받은 요청들의 마지막 사용자 글(받은 순서). 가리기를 거친 뒤의 글이다.
@@ -209,7 +237,11 @@ impl AiProvider for DemoAi {
             .map(|message| message.content.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let text = self.reply(turn_of(&request, &last), &conversation);
+        let turn = turn_of(&request, &last);
+        if self.take_failure(turn) {
+            return Err(AiError::ProviderUnavailable { status: 503 });
+        }
+        let text = self.reply(turn, &conversation);
         self.rest().await;
         Ok(CompletionResponse {
             text,

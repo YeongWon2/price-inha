@@ -93,6 +93,8 @@ export const API = {
   teamStop: "/api/team/stop",
   // 알림 전달처 · 조용한 시간(server 40차 4 · 6번, 결정 24): 읽기 `GET` · 통째 바꾸기 `POST`(그 컴퓨터만).
   notifySettings: "/api/notify/settings",
+  // 하루 AI 잔량(server 51차, C22): 읽기 `GET`. 바뀌면 이벤트 `team.ai_used`(같은 모양)로도 온다.
+  teamBudget: "/api/team/budget",
 } as const;
 
 /** 매매 하나 경로 `/api/trades/{id}`(server 29차 1번, 번호는 주소 글자로 감싼다). */
@@ -160,6 +162,8 @@ export const SCREEN_PATHS: Readonly<Record<ScreenName, readonly string[]>> = {
     API.officeSummon,
     API.officeSummonArrived,
     API.officeSummonView,
+    // server 51차: 하루 AI 잔량 읽기.
+    API.teamBudget,
     API.socket,
     ...APPROVALS,
     // server 50차: 근거 패널 — 매매 목록(종목의 최근 매매 찾기) · 근거 카드 읽기.

@@ -34,6 +34,10 @@ import { SPEECH_LIFE_MS } from "./speech";
 import { teamFeed, type FeedEntry } from "./team-feed";
 import { trimLines, type Line } from "./trim";
 import { bindTopicClicks, mountBasisPanel } from "./basis-panel";
+import { KIND_TEAM_AI_USED } from "./budget";
+import { mountBudget, type BudgetView } from "./budget-view";
+import { KIND_OFFICE_PROGRESS } from "./progress";
+import { mountProgress, type ProgressView } from "./progress-view";
 
 const SESSION_PATH = API.session;
 const SNAPSHOT_PATH = API.office;
@@ -102,6 +106,9 @@ let compose: TeamCompose | null = null;
 let summons: SummonScene | null = null;
 /** (34차) 머리 위 ✋ · ✓ · 승인 알림음 · 범례. */
 let marks: OfficeMarks | null = null;
+/** (51차) 위 줄 하루 AI 잔량 바 · 옆 패널 논의 진행 단계. */
+let budgetView: BudgetView | null = null;
+let progressView: ProgressView | null = null;
 /** 이 시각까지 받은 `office.talk`은 다시 이을 때 다시 받은 것일 수 있다. */
 let replayUntil = 0;
 
@@ -458,6 +465,8 @@ function onFrame(text: string): void {
     else if (frame.kind === "office.notice_ack") { compose?.onAck(frame.payload); }
     else if (frame.kind === "office.summon") { summons?.onEvent(frame.payload); }
     else if (frame.kind === "office.message") { onMessengerLine(frame.payload); }
+    else if (frame.kind === KIND_TEAM_AI_USED) { budgetView?.apply(frame.payload); }
+    else if (frame.kind === KIND_OFFICE_PROGRESS) { progressView?.apply(frame.payload, Date.now()); }
   }
 }
 
@@ -544,6 +553,8 @@ async function loadSnapshot(): Promise<void> {
     if (typeof snap.last_seq === "number") { state.lastSeq = snap.last_seq; }
     // (34차 1번) 기다리는 승인의 ✋를 채운다(소리 없이, E49).
     marks?.sync(snap.pending_approvals, false);
+    // (51차, C21) 지금 도는 논의의 진행 단계(없으면 null — 숨긴다).
+    progressView?.apply((snap as { progress?: unknown }).progress ?? null, Date.now());
   } catch {
     // 스냅샷이 없으면 이벤트만으로 그린다.
   }
@@ -603,6 +614,8 @@ async function start(): Promise<void> {
       state.meLoaded = state.me !== null;
     }
     if (state.lastSeq === null) { await loadSnapshot(); await compose?.load(); }
+    // (51차) 이을 때마다 하루 AI 잔량을 다시 읽는다(그 뒤로는 team.ai_used 이벤트).
+    void budgetView?.load();
     openSocket();
   } catch {
     setConn("연결 끊김 (마지막으로 받은 상태 유지) · 다시 잇는 중", "bad");
@@ -667,6 +680,10 @@ async function main(): Promise<void> {
     gestures: document,
   });
   marks.onChange(() => { if (!$("light").hidden) { renderLight(); } });
+  // (51차) 위 줄 잔량 바(누르면 담당별 사용 표) · 옆 패널 진행 단계(1초마다 경과).
+  budgetView = mountBudget($("bar"), { fetcher: (url, init) => fetch(url, init), nameOf });
+  progressView = mountProgress($("chat"), nameOf);
+  setInterval(() => { progressView?.tick(Date.now()); }, 1000);
   wireChat();
   renderTabs();
   renderLog(true);

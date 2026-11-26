@@ -54,6 +54,8 @@ mod summon_http;
 mod summon_sink;
 mod talk_feed;
 mod team_chat;
+// (51차) 논의 진행 단계 · 하루 AI 잔량 표시판.
+mod progress_board;
 
 pub(crate) use assets::routes as asset_routes;
 pub(crate) use backup_http::GITHUB_API_BASE;
@@ -65,6 +67,7 @@ pub(crate) use me_http::{Me, routes as me_routes};
 pub(crate) use office_bridge::BridgeTurn;
 pub(crate) use office_http::{OfficeDesk, routes as office_routes};
 pub(crate) use phone_http::{Phone, routes as phone_routes};
+pub(crate) use progress_board::ProgressBoard;
 pub(crate) use semantic::{Semantic, SemanticSettings};
 pub(crate) use semantic_http::routes as semantic_routes;
 pub(crate) use summary::daily_summary;

@@ -102,6 +102,8 @@ pub(crate) struct Linked {
     messenger: OnceLock<Weak<crate::messenger::Messenger>>,
     /// (40차) 알림 전달처 설정 · 조용한 시간(보관 폴더의 파일). 전달처는 [`Linked::deliver`]에서 고른다.
     pub(crate) notify: NotifyBook,
+    /// (51차) 논의 진행 단계 · 하루 AI 잔량 표시판(팀이 붙으면 팀이 쓴다).
+    pub(crate) progress: Arc<super::ProgressBoard>,
 }
 
 fn backup_of(
@@ -165,6 +167,7 @@ impl Linked {
             Arc::clone(&sink) as Arc<dyn EventSink>
         ));
         let budget = Arc::new(super::SpareBudget::default());
+        let sink_for_board = Arc::clone(&sink) as Arc<dyn EventSink>;
         // (33차) 공지 저장소 · 가리기와 하루 AI 호출 판정을 끼운다. 부르기 단계는 감싼 포트가 따로 낸다.
         let office = Office::new(team, office_sink, Arc::new(Clocked(Arc::clone(clock))))
             .with_notices(store.clone(), Arc::new(Hidden(Arc::clone(secrets))))
@@ -193,6 +196,7 @@ impl Linked {
             stale: AtomicBool::new(false),
             messenger: OnceLock::new(),
             notify,
+            progress: Arc::new(super::ProgressBoard::new(sink_for_board)),
         })
     }
 

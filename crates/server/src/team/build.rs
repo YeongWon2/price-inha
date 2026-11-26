@@ -188,6 +188,7 @@ impl Crew {
         // (22차 6번) 상한 값은 논의를 열 때마다 정한다(켤 때 값, 없으면 설정 화면이 저장한 값).
         let ai_cap =
             super::quota::DailyQuota::new(store.clone(), super::quota::AI_USED_KEY, u32::MAX);
+        let meter = super::budget::Meter::new(store.clone());
         let crew = Arc::new(Crew {
             journal: Journal::new(store.clone()),
             store,
@@ -210,6 +211,7 @@ impl Crew {
             discussing: Arc::default(),
             ai_cap,
             ai_cap_told: Mutex::new(None),
+            meter,
         });
         let _ = crew.tools.crew.set(Arc::downgrade(&crew));
         Ok(crew)

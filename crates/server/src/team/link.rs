@@ -37,7 +37,7 @@ pub(crate) struct CrewLinks {
 }
 
 /// 담당 → 사무실의 담당.
-fn office_agent(role: Role) -> Agent {
+pub(super) fn office_agent(role: Role) -> Agent {
     match role {
         Role::Scout => Agent::News,
         Role::Strategy => Agent::Strategy,

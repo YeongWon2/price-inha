@@ -29,6 +29,8 @@ pub(crate) fn routes(crew: Arc<Crew>) -> Router {
         .route(PROPOSALS_PATH, get(proposals))
         .route(PROPOSAL_ANSWER_PATH, post(answer))
         .route(RULES_VIEW_PATH, get(rules))
+        // (51차, C22) 하루 AI 잔량.
+        .route(super::TEAM_BUDGET_PATH, get(super::budget::budget_route))
         .with_state(crew)
 }
 
