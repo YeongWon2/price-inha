@@ -295,6 +295,10 @@ async fn chat(
     lock(&desk.texts).insert(response.request_id.clone(), text);
     // (33차 4번) 곁에서 기다리는 담당에게 말을 걸면 10초를 다시 센다.
     office.note_conversation(ask.agent);
+    // (54차) 사람이 직접 물은 채팅 답은 막지 않고 그 담당 · 팀의 AI 호출 하나로 센다.
+    if let Some(crew) = &desk.crew {
+        crew.count_turn(ask.agent);
+    }
     tokio::spawn(Arc::clone(&desk).work(ask.agent));
     reply(StatusCode::OK, chat_json(&response))
 }

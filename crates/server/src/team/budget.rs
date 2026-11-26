@@ -1,7 +1,7 @@
 //! (51차, 차수 표 21번) 하루 AI 잔량(C22 · M13 · N14 · E52).
 //!
-//! - 팀 상한 · 그날 쓴 수는 지금의 하루 AI 호출 셈 그대로다(논의 하나 · 깨우기 턴 하나 · 공지 확인 답 · 이어 말하기
-//!   하나가 하나). 막는 것도 지금처럼 팀 전체 상한이다. 상한이 없어도 그날 쓴 수는 센다(잔량 바에 쓴 수를 보인다).
+//! - 팀 상한 · 그날 쓴 수는 (54차) AI 호출(턴) 단위다: 담당별 사용과 같은 턴을 같은 때 센다(담당별 사용의 합 =
+//!   쓴 수, [`super::turns`]). 상한이 없어도 그날 쓴 수는 센다(잔량 바에 쓴 수를 보인다).
 //! - 담당별 사용은 담당마다 그날 쓴 AI 호출 수다: 논의의 담당 턴(논의 · 다시 시도 · 점수 · 팀장 판단)마다 하나,
 //!   깨우기 턴 · 공지 확인 답 · 이어 말하기는 그 담당에 하나. 한국 날짜로 새로 세고 저장소에 남긴다(다시 켜도
 //!   그날 것은 남는다 — 하루 호출 수를 남기는 방식과 같다).
@@ -25,8 +25,8 @@ use serde_json::{Value, json};
 
 use super::Crew;
 use super::link::office_agent;
-use super::notices::leader_reserve;
 use super::quota::kst_date;
+use super::turns::{call_budget, mode_name};
 use crate::reach::ProgressBoard;
 
 /// 하루 AI 잔량 읽기(C22). `GET` → `{"limit": 수 | null, "used", "reserve", "remaining": 수 | null,
@@ -73,7 +73,7 @@ impl Meter {
     }
 
     /// 오늘 그 담당의 호출 하나를 센다(저장소에 남긴다).
-    fn add(&self, now: DateTime<Utc>, agent: Agent) {
+    pub(super) fn add(&self, now: DateTime<Utc>, agent: Agent) {
         let today = kst_date(now);
         let mut used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
         let mut tally = self.today(&used, today);
@@ -181,16 +181,10 @@ pub(super) fn budget_json(limit: Option<u32>, used: u32, tally: &Tally) -> Value
             "mode": "normal", "ratio": null, "level": null, "members": members,
         });
     };
-    let reserve = leader_reserve(limit);
-    let wrap_up_at = reserve + limit.div_ceil(5);
-    let remaining = limit.saturating_sub(used);
-    let mode = if remaining <= reserve {
-        "leader_only"
-    } else if remaining <= wrap_up_at {
-        "wrap_up"
-    } else {
-        "normal"
-    };
+    // (54차) 논의에 넘기는 예산과 같은 값 · 같은 판정을 쓴다.
+    let shared = call_budget(limit, used);
+    let (reserve, wrap_up_at, remaining) = (shared.reserve, shared.wrap_up_at, shared.remaining);
+    let mode = mode_name(shared);
     let base = f64::from(limit.saturating_sub(reserve)) / f64::from(MEMBER_COUNT);
     let members: Vec<Value> = order
         .iter()
@@ -220,18 +214,11 @@ impl Crew {
         let _ = self.meter.board.set(board);
     }
 
-    /// 지금 하루 상한(켤 때 값, 없으면 설정 화면이 저장한 값).
-    fn ai_limit(&self) -> Option<u32> {
-        self.wiring
-            .ai_daily_limit
-            .or_else(|| self.desk.saved_ai_limit())
-    }
-
     /// 지금 잔량(C22).
     pub(crate) fn budget(&self) -> Value {
         let now = self.clock.now();
         budget_json(
-            self.ai_limit(),
+            self.day_limit(),
             self.ai_cap.peek(now),
             &self.meter.peek(now),
         )
@@ -250,10 +237,10 @@ impl Crew {
         board.budget(self.budget());
     }
 
-    /// 그 담당의 AI 호출 하나를 센다(팀 상한과 따로, 담당별 사용만).
+    /// 그 담당의 AI 호출(턴) 하나를 센다. (54차) 팀의 쓴 수에도 하나를 더한다(막지 않는다 — 논의 안의 턴은
+    /// agent가 넘겨받은 예산으로 막는다).
     pub(super) fn note_member_call(&self, role: Role) {
-        self.meter.add(self.clock.now(), office_agent(role));
-        self.publish_budget();
+        self.count_turn(office_agent(role));
     }
 
     /// (51차) 공지 확인 답 · 이어 말하기 한 번을 하루 상한에서 잡고, 잡았으면 그 담당의 호출로 센다.

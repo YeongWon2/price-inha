@@ -249,7 +249,8 @@ impl Crew {
     async fn ask_lessons(&self, inputs: Vec<LessonInput>) -> HashMap<TradeId, String> {
         let mut answers = HashMap::new();
         for input in inputs.into_iter().take(LESSONS_PER_CLOSE) {
-            if !self.take_spare_ai_call() {
+            // (54차) 교훈 턴은 복기 담당의 호출 하나다(팀 · 담당별로 센다).
+            if !self.take_spare_ai_call_by(super::link::office_agent(Role::Review)) {
                 tracing::warn!("하루 AI 호출 상한이라 교훈을 다음 마감에 묻는다");
                 break;
             }
