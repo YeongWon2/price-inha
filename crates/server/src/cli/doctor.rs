@@ -14,9 +14,11 @@ use crate::{DB_FILE, Settings};
 
 mod host;
 mod ollama;
+mod update;
 
 use host::{check_access_key, check_address, check_backup, check_service};
 use ollama::check_ollama;
+use update::check_update;
 
 /// 진단 항목. 이 순서대로 본다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +45,8 @@ pub enum CheckItem {
     AiDailyLimit,
     /// (61차, 결정 31) 기록 용량: 늘 문제 아님. "기록: N MB, 하루 약 X KB, 10년 약 Y GB"(백업 뒤).
     Storage,
+    /// (65차) 새 판: 서버가 남긴 확인 기록만 읽는다(바깥에 묻지 않는다). 늘 문제 아님(알리기만).
+    Update,
 }
 
 /// 항목 하나의 결과. 키 값 · 길이 · 앞뒤 글자를 싣지 않는다(N8).
@@ -145,6 +149,7 @@ fn item_name(item: CheckItem) -> &'static str {
         CheckItem::Ollama => "ollama",
         CheckItem::AiDailyLimit => "ai_daily_limit",
         CheckItem::Storage => "storage",
+        CheckItem::Update => "update",
     }
 }
 
@@ -164,6 +169,7 @@ pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
             check_service(home, service),
             check_backup(home),
             check_storage(home),
+            check_update(home),
             check_ollama(home),
             check_ai_daily_limit(settings),
         ],

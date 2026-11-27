@@ -29,6 +29,11 @@ async fn change(State(semantic): State<Arc<Semantic>>, body: Bytes) -> Response 
             StatusCode::BAD_REQUEST,
             json!({"error": SEMANTIC_LOOPBACK_ONLY}),
         ),
+        // (65차, 결정 34) 같은 집 다른 기기를 켰어도 공인 주소 · 도메인은 받지 않는다.
+        Err(ChangeError::NotPrivate) => reply(
+            StatusCode::BAD_REQUEST,
+            json!({"error": super::SEMANTIC_PRIVATE_ONLY}),
+        ),
         Err(ChangeError::Save(error)) => {
             tracing::warn!(%error, "뜻 검색 설정을 남기지 못했습니다");
             reply(

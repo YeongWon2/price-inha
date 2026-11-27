@@ -6,7 +6,7 @@ use chrono::{FixedOffset, TimeZone};
 use serde_json::Value;
 
 use super::{Check, CheckItem, bad, good};
-use crate::cli::service::Service;
+use crate::cli::service::{SERVER_ERROR_LOG, SERVER_LOGS_DIR, Service};
 use crate::{BACKUP_SETTINGS_FILE, Settings};
 
 /// 진단 4: 여는 주소 · 포트를 쓸 수 있나. 이미 쓰는 것이 있으면 그 사실만 알린다.
@@ -71,7 +71,7 @@ pub(super) fn check_service(home: &Path, service: &Service<'_>) -> Check {
             );
         }
     };
-    let Some(installed) = status.home else {
+    let Some(installed) = status.home.clone() else {
         return good(
             item,
             "서비스로 등록하지 않았습니다(늘 돌리려면 price-inha service install)",
@@ -87,6 +87,21 @@ pub(super) fn check_service(home: &Path, service: &Service<'_>) -> Check {
             format!(
                 "price-inha service uninstall 뒤 price-inha service install --home {} 로 다시 등록합니다",
                 home.display()
+            ),
+        );
+    }
+    // (65차) macOS에서 계속 죽는 서비스: 기록 파일 자리를 알린다.
+    if status.keeps_dying() {
+        let code = status.last_exit_code.unwrap_or_default();
+        let log = home.join(SERVER_LOGS_DIR).join(SERVER_ERROR_LOG);
+        return bad(
+            item,
+            format!(
+                "서비스가 계속 죽습니다(마지막 종료 코드 {code}, 서비스 관리자가 다시 띄우는 중)"
+            ),
+            format!(
+                "{} 를 열어 까닭을 본 뒤 price-inha service restart 합니다",
+                log.display()
             ),
         );
     }

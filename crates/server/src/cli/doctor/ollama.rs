@@ -7,29 +7,36 @@ use std::path::Path;
 use pi_ai::AiError;
 
 use super::{Check, CheckItem, bad, good};
-use crate::reach::SemanticSettings;
+use crate::reach::{SemanticSettings, outside_line};
 
 /// 진단 8: 뜻 검색이 꺼져 있으면 문제가 아니다. 켜져 있으면 Ollama에 닿고 모델이 있어야 한다.
 pub(super) fn check_ollama(home: &Path) -> Check {
     let item = CheckItem::Ollama;
     let settings = SemanticSettings::load(home);
+    // (65차, 결정 34) 같은 집 다른 기기의 Ollama면 "임베딩을 이 컴퓨터 밖(사설망 …)으로 보냄"을 늘 덧붙인다.
+    let outside = outside_line(&settings)
+        .map(|line| format!(" · {line}"))
+        .unwrap_or_default();
     if !settings.enabled {
-        return good(item, "뜻 검색 꺼짐(Ollama에 묻지 않습니다)");
+        return good(
+            item,
+            format!("뜻 검색 꺼짐(Ollama에 묻지 않습니다){outside}"),
+        );
     }
     let (base_url, model) = (settings.base_url.clone(), settings.model.clone());
     match ask(&settings) {
         Some(Ok(())) => good(
             item,
-            format!("뜻 검색 켜짐: Ollama {base_url} · 모델 {model}"),
+            format!("뜻 검색 켜짐: Ollama {base_url} · 모델 {model}{outside}"),
         ),
         Some(Err(AiError::InvalidRequest { .. })) => bad(
             item,
-            format!("뜻 검색 켜짐: Ollama({base_url})에 모델 {model}이 없습니다"),
+            format!("뜻 검색 켜짐: Ollama({base_url})에 모델 {model}이 없습니다{outside}"),
             format!("ollama pull {model}"),
         ),
         _ => bad(
             item,
-            format!("뜻 검색 켜짐: Ollama({base_url})에 닿지 않습니다"),
+            format!("뜻 검색 켜짐: Ollama({base_url})에 닿지 않습니다{outside}"),
             "Ollama를 켜세요(ollama serve). 주소가 맞는지 설정 화면의 뜻 검색에서 확인하세요",
         ),
     }

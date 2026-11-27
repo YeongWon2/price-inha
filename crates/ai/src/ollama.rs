@@ -2,8 +2,13 @@
 //!
 //! 요청 · 응답 모양은 Ollama 공식 API 문서(`docs/api.md` "Generate Embeddings" ·
 //! "List Local Models", `docs/api/errors.mdx`)를 따른다. 주소는 루프백만 받는다(V23).
+//! (결정 34) 같은 집 다른 기기의 Ollama는 켜야만 쓴다: [`OllamaEmbeddingProvider::on_private_network`]만
+//! 사설망 주소([`ollama_reach`])를 받는다.
 
+mod reach;
 mod wire;
+
+pub use reach::{OllamaReach, ollama_reach};
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -110,15 +115,49 @@ impl OllamaEmbeddingProvider {
             .connect_timeout(limits.connect_timeout)
             .build()
             .ok();
+        Ok(Self::assemble(config, limits, client))
+    }
+
+    /// (결정 34) 같은 집 다른 기기의 Ollama도 받는 공급자. 주소가 루프백이거나 사설망([`ollama_reach`]가
+    /// [`OllamaReach::PrivateNetwork`])일 때만 만들고, 공인 주소 · 도메인은 [`AiError::InsecureBaseUrl`]로 거부한다.
+    /// 보내는 글은 [`Self::new`]처럼 가린다. 리다이렉트를 따라가지 않고 프록시를 거치지 않으며, 이름(`*.local`)은
+    /// 사설망 · 루프백 주소로 풀릴 때만 잇는다. 만들 때 아무것도 보내지 않는다.
+    pub fn on_private_network(
+        config: OllamaConfig,
+        limits: AnthropicLimits,
+    ) -> Result<Self, AiError> {
+        if ollama_reach(&config.base_url) == OllamaReach::Outside {
+            return Err(AiError::InsecureBaseUrl);
+        }
+        let loopback = [
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+            SocketAddr::from((Ipv6Addr::LOCALHOST, 0)),
+        ];
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .resolve_to_addrs("localhost", &loopback)
+            .dns_resolver(reach::HomeOnlyResolver)
+            .connect_timeout(limits.connect_timeout)
+            .build()
+            .ok();
+        Ok(Self::assemble(config, limits, client))
+    }
+
+    fn assemble(
+        config: OllamaConfig,
+        limits: AnthropicLimits,
+        client: Option<reqwest::Client>,
+    ) -> Self {
         let seed = limits.jitter_seed.unwrap_or_else(http::random_seed);
         let backoff = RetryBackoff::new(config.retry_base_delay, limits.max_retry_delay, seed);
-        Ok(Self {
+        Self {
             retrier: Retrier::new(config.max_retries, limits.retry_after_unit, backoff),
             config,
             limits,
             redactor: Arc::new(NoRedaction),
             client,
-        })
+        }
     }
 
     /// 보내는 글마다 거칠 가리기 자리를 끼운다(E38 · V47). 길이 판단은 가린 뒤 글로 한다.

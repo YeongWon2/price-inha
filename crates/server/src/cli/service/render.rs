@@ -65,7 +65,7 @@ impl Service<'_> {
     pub(super) fn unit(&self) -> String {
         let exec: Vec<String> = std::iter::once(self.setup.exe.to_string_lossy().into_owned())
             .chain(self.program_args())
-            .map(|arg| systemd_quote(&arg))
+            .map(|arg| systemd_exec_quote(&arg))
             .collect();
         format!(
             "[Unit]
@@ -92,7 +92,7 @@ NoNewPrivileges=yes
 WantedBy=default.target
 ",
             exec = exec.join(" "),
-            home = self.home_text(),
+            home = systemd_specifiers(&self.home_text()),
             path = systemd_quote(&format!("PATH={}", self.setup.path_env)),
             fatal = CONFIG_FATAL_EXIT,
         )
@@ -218,13 +218,47 @@ pub(super) fn systemd_quote(arg: &str) -> String {
     }
 }
 
-/// Windows 명령줄 인자 하나. 빈칸이 있으면 큰따옴표로 감싼다.
+/// (65차) systemd `ExecStart` 인자 하나: [`systemd_quote`]에 더해 `$`를 `$$`로 적는다(환경 변수 풀이를 막는다).
+pub(super) fn systemd_exec_quote(arg: &str) -> String {
+    systemd_quote(&arg.replace('$', "$$"))
+}
+
+/// (65차) systemd 지정자 풀이를 막는다: `%` → `%%`(`WorkingDirectory=`는 따옴표 · `$` 풀이가 없다).
+pub(super) fn systemd_specifiers(text: &str) -> String {
+    text.replace('%', "%%")
+}
+
+/// (65차) unit에서 읽은 `WorkingDirectory=` 값을 되돌린다(`%%` → `%`).
+pub(super) fn systemd_unspecifiers(text: &str) -> String {
+    text.replace("%%", "%")
+}
+
+/// Windows 명령줄 인자 하나. 빈칸 · 따옴표가 있으면 큰따옴표로 감싼다(`CommandLineToArgvW` 규칙). (65차)
+/// 따옴표 앞의 `\`와 끝의 `\`는 겹쳐 적어 닫는 따옴표가 글자로 읽히지 않게 한다.
 pub(super) fn windows_quote(arg: &str) -> String {
-    if arg.is_empty() || arg.chars().any(|c| c.is_whitespace() || c == '"') {
-        format!("\"{}\"", arg.replace('"', "\\\""))
-    } else {
-        arg.to_string()
+    if !(arg.is_empty() || arg.chars().any(|c| c.is_whitespace() || c == '"')) {
+        return arg.to_string();
     }
+    let mut quoted = String::from('"');
+    let mut slashes = 0usize;
+    for c in arg.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(slashes * 2 + 1));
+                quoted.push('"');
+                slashes = 0;
+            }
+            other => {
+                quoted.push_str(&"\\".repeat(slashes));
+                quoted.push(other);
+                slashes = 0;
+            }
+        }
+    }
+    quoted.push_str(&"\\".repeat(slashes * 2));
+    quoted.push('"');
+    quoted
 }
 
 #[cfg(test)]

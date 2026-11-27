@@ -9,7 +9,6 @@
 //! 않는다: 비밀 보관소를 여는 것(기록 가리기)은 `run`과 `access-key`뿐이다. `run --log-file <경로>`를 주면
 //! 기록을 표준 오류 대신 그 파일에 덧붙여 쓴다(가리기는 그대로 거친다).
 
-use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -22,6 +21,11 @@ use price_inha::{
     RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
     SettingsError, SetupContext, SetupRequest, SystemRunner, VERSION, access_key, access_key_with,
     announce_addr, doctor, install_logging, restore, run_assembly,
+};
+// (65차) 기록 파일 돌려 쓰기 · 서비스 등록 안내 · 새 판 알리기.
+use price_inha::{
+    LOG_FILE_KEEP, LOG_FILE_MAX_BYTES, RotatingLogFile, service_env_notes, spawn_update_check,
+    update_check_url,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -61,34 +65,14 @@ fn show(text: &str) {
     let _ = std::io::stdout().flush();
 }
 
-/// 기록 파일을 덧붙여 쓰게 연다. 부모 폴더가 없으면 만든다. 유닉스에서는 새 파일을 0600으로 만든다.
-fn open_log_file(path: &Path) -> std::io::Result<File> {
-    if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let file = options.open(path)?;
-    #[cfg(unix)]
-    {
-        // 이미 있던 파일이 넓게 열려 있으면 좁힌다.
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(file)
-}
-
-/// 기록이 가는 곳: `--log-file`을 줬고 열 수 있으면 그 파일, 아니면 표준 오류.
+/// 기록이 가는 곳: `--log-file`을 줬고 열 수 있으면 그 파일, 아니면 표준 오류. (65차) 파일은 크기 상한
+/// ([`LOG_FILE_MAX_BYTES`])을 넘으면 옛 파일([`LOG_FILE_KEEP`]개)로 돌려 쓴다. 부모 폴더가 없으면 만들고,
+/// 유닉스에서는 0600이다.
 fn log_sink(log_file: Option<&Path>) -> BoxMakeWriter {
     let Some(path) = log_file else {
         return BoxMakeWriter::new(std::io::stderr);
     };
-    match open_log_file(path) {
+    match RotatingLogFile::open(path, LOG_FILE_MAX_BYTES, LOG_FILE_KEEP) {
         Ok(file) => BoxMakeWriter::new(Mutex::new(file)),
         Err(error) => {
             say(&format!(
@@ -353,7 +337,12 @@ fn service_command(action: ServiceAction, settings: &Settings, args: &[String]) 
     let result = match action {
         ServiceAction::Install { start_now, dry_run } => service
             .install(InstallOptions { start_now, dry_run })
-            .map(|report| show_report(&report, "서비스를 등록했습니다.")),
+            .map(|mut report| {
+                // (65차) 환경 변수로만 준 `--bind` · `--port`는 정의에 실리지 않는다는 안내.
+                let lookup = |name: &str| std::env::var(name).ok();
+                report.notes.extend(service_env_notes(&lookup, &without_home(args)));
+                show_report(&report, "서비스를 등록했습니다.")
+            }),
         ServiceAction::Uninstall { dry_run } => service
             .uninstall(dry_run)
             .map(|report| show_report(&report, "서비스를 멈추고 정의를 지웠습니다.")),
@@ -367,6 +356,9 @@ fn service_command(action: ServiceAction, settings: &Settings, args: &[String]) 
             .restart()
             .map(|report| show_report(&report, "서비스를 다시 띄웠습니다.")),
         ServiceAction::Status => service.status().map(|status| {
+            let dying = status
+                .keeps_dying()
+                .then(|| status.last_exit_code.unwrap_or_default());
             let home = status
                 .home
                 .map_or_else(|| "없음".to_string(), |home| home.display().to_string());
@@ -375,6 +367,12 @@ fn service_command(action: ServiceAction, settings: &Settings, args: &[String]) 
                 if status.installed { "예" } else { "아니요" },
                 if status.running { "예" } else { "아니요" },
             ));
+            // (65차) macOS에서 계속 죽는 서비스를 알린다.
+            if let Some(code) = dying {
+                show(&format!(
+                    "안내: 서비스가 계속 죽습니다(마지막 종료 코드 {code}). price-inha doctor 로 기록 파일 자리를 봅니다\n"
+                ));
+            }
         }),
     };
     match result {
@@ -446,12 +444,15 @@ async fn run(
 ) -> Result<(), Failure> {
     let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
+    let home = settings.home.clone();
     // 보관소를 열지 못했으면 앱이 다시 열어 보고 그 오류를 알린다.
     // (W5 2차 · 3차 · 24차) 실행 파일의 조립은 라이브러리의 `run_assembly`에 있다(시험도 같은 조립을 쓴다):
     // 투자 팀 · 사무실 · 폰 알림 · 지식 검색까지 잇고, `--demo`면 시연 달력 · 시연용 가짜 공시를 켠다.
     let assembly = run_assembly(&settings, secrets);
     let started = App::launch_run(settings, assembly).await;
     let app = started.map_err(Failure::App)?;
+    // (65차) 새 판이 있으면 알리기만 한다(하루 한 번, 내려받지 않는다). 시연 모드 · 확인 주소가 없는 조립은 띄우지 않는다.
+    let update = spawn_update_check(home, update_check_url(), demo);
     let mode = if demo {
         // (24차 4번) 시연 모드는 바깥으로 나가지 않는다(키가 등록돼 있어도).
         " (시연 모드: 가짜 시세 · 가짜 AI · 모의계좌)"
@@ -465,6 +466,9 @@ async fn run(
     ));
     let waited = wait_for_stop().await;
     say("끄는 중입니다");
+    if let Some(update) = update {
+        update.abort();
+    }
     // 신호를 기다리지 못했어도 연결과 저장소는 정리하고 끝낸다.
     app.shutdown().await.map_err(Failure::App)?;
     waited.map_err(|_| Failure::Signal)

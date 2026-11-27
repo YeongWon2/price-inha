@@ -21,6 +21,7 @@ pub use doctor::{Check, CheckItem, DoctorReport, doctor};
 pub use open::{OPEN_NO_SERVER, OPEN_NO_SERVER_EXIT, OPEN_SCREENS, OpenRequest, OpenScreen, open};
 pub use restore::{RestoreRequest, RestoreSummary, restore};
 pub use runner::{CommandLine, CommandOutput, CommandRunner, SystemRunner};
+pub use service::service_env_notes;
 pub use service::{
     CONFIG_FATAL_EXIT, InstallOptions, LAUNCHD_FILE, LAUNCHD_LABEL, Os, SERVER_ERROR_LOG,
     SERVER_LOG, SERVER_LOGS_DIR, SYSTEMD_UNIT, Service, ServiceDefinition, ServiceReport,
