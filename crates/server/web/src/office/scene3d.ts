@@ -32,6 +32,8 @@ import type { ToolId } from "./toolbar";
 import { PointerGesture } from "./gesture";
 import type { MarksLayer } from "./marks-scene";
 import type { SpeechBoard } from "./speech";
+import { createFrameBudget } from "./frame-budget";
+import { rendererName, softwareRenderer } from "./render-kind";
 
 /** three의 값(형 정의 없이 묶는다 — three.d.ts). */
 type Obj = any;
@@ -172,6 +174,12 @@ function roomTags(labels: HTMLElement, map: OfficeMap): { el: HTMLElement; x: nu
 export function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker, marks }: SceneOptions): Scene {
   let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   const renderer = makeRenderer(pixelRatio);
+  // (백로그 T 6번) 소프트웨어 그리기면 처음부터 가볍게(그림자 끄기 · 해상도 최저) — render-kind.ts.
+  if (softwareRenderer(rendererName(renderer.getContext()))) {
+    renderer.shadowMap.enabled = false;
+    pixelRatio = MIN_PIXEL_RATIO;
+    renderer.setPixelRatio(pixelRatio);
+  }
   host.appendChild(renderer.domElement);
   const canvas = renderer.domElement;
   const scene = new THREE.Scene();
@@ -373,6 +381,18 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
     windowStart = now;
     frameTimes = [];
   }
+  // (백로그 T 6번) 아주 느린 장이 이어지면(소프트웨어 그리기 · 느린 기기) 곧바로 한 번 가볍게 한다: 그림자를 끄고
+  // 해상도를 최저로. 그리기가 주 스레드를 덜 막아 탭 누르기 같은 입력이 밀리지 않는다(frame-budget.ts).
+  const budget = createFrameBudget();
+  function lighten(): void {
+    renderer.shadowMap.enabled = false;
+    scene.traverse((o: Obj) => {
+      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) { m.needsUpdate = true; }
+    });
+    pixelRatio = MIN_PIXEL_RATIO;
+    renderer.setPixelRatio(pixelRatio);
+    resize();
+  }
 
   const projected = new THREE.Vector3();
   function placeRoomTags(width: number, height: number): void {
@@ -419,6 +439,7 @@ export function createScene({ host, labels, map, names, looks, onPick, onLost, f
       for (const s of spots) { actors.placeTag(s.id, tags.get(s.id) ?? null); }
     }
     measure(now, frameMs);
+    if (budget.note(frameMs) === "lighten" && renderer.shadowMap.enabled) { lighten(); }
   }
   raf = requestAnimationFrame(frameStep);
 

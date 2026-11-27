@@ -10,6 +10,9 @@ mod guideline;
 mod guideline_learn;
 mod guideline_review;
 mod guideline_text;
+// (백로그 T) 1층 후보 → 개선안 · 기록된 거래일로 날 수.
+mod guideline_days;
+mod guideline_rules;
 mod improve;
 mod memo;
 mod review;
@@ -26,6 +29,7 @@ pub use guideline::{
     PendingUse, PersonRetire,
 };
 pub use guideline_learn::{Candidate, ClosedTrade, Promotion, guideline_candidates};
+pub use guideline_rules::{GUIDELINE_RULE_STEP_PCT, candidate_trades, rule_change_of};
 pub use guideline_text::{similarity_pct, touches_layer_one};
 pub use improve::{Improvement, RuleOutcome, increases_risk};
 pub use memo::{

@@ -186,7 +186,7 @@ impl Crew {
         // 실패해 논의가 오류로 끝나도 남는다.
         self.note_decision(trade.id);
         self.attach(trade.id, &gathered)?;
-        let outcome = result.map_err(|error| TeamError::Agent(error.to_string()))?;
+        let outcome = result.map_err(|error| self.discussion_failed(trade.id, &error))?;
         // (기능 L) 샀는지 · 막았는지를 지침 장부에 남긴다.
         self.note_guideline_outcome(trade.id, &outcome);
         Ok(Discussed {
