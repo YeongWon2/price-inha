@@ -145,6 +145,8 @@ fn requests(
 
 /// 기간 안에 공시가 없을 때의 자료 내용(사용자 결정 18).
 const NO_DISCLOSURE: &str = "공시 없음";
+/// 고유번호가 없어 그 종목의 공시 · 재무를 물을 수 없을 때의 자료 이름 뒤쪽.
+const UNREACHABLE: &str = "받을 수 없음(고유번호 없음)";
 
 /// 하루 상한에 닿아 묻지 않은 자료의 글.
 fn limited(kind: FactKind) -> &'static str {
@@ -237,40 +239,60 @@ pub(super) async fn gather(
                 }
                 (request.kind(), fetched)
             }
-            Err(kind) => (kind, Ok(Fetched::Missing(kind))),
-        };
-        let name = kind_name(kind);
-        match fetched {
-            Ok(Fetched::Facts(facts)) if !facts.is_empty() => {
-                let saved = store.save_facts(&facts.iter().map(new_fact).collect::<Vec<_>>())?;
-                gathered
-                    .facts
-                    .extend(saved.iter().map(|fact| (fact.id, fact.known_at)));
-                if kind == FactKind::Disclosure {
-                    gathered.disclosures.extend(facts.iter().cloned());
-                }
-                let known = facts.iter().map(|f| f.known_at).max().unwrap_or(now);
-                let source = &facts[0].source;
+            // (round64, 10b 보강 2 2번) 고유번호가 없어 묻지 못한 자리는 "공시 없음"(기간 안에 공시가 없음)이 아니라
+            // "받을 수 없음"이다 — 내용 없는 자료라 지켜보기로 남는다(E32).
+            Err(kind) => {
                 gathered.items.push(DataItem {
-                    name: format!("{name} · {} · {}", source.name.as_str(), source.url),
-                    content: Some(content(&facts)),
-                    known_at: millis(known),
+                    name: format!("{} · {UNREACHABLE}", kind_name(kind)),
+                    content: None,
+                    known_at: millis(now),
                 });
+                continue;
             }
-            // (사용자 결정 18) 기간 안에 공시가 없다(DART "조회된 데이터 없음" 013)는 것도 자료다: 빈 자료가 아니다.
-            Ok(Fetched::Missing(FactKind::Disclosure)) => gathered.items.push(DataItem {
-                name: name.to_string(),
-                content: Some(NO_DISCLOSURE.to_string()),
-                known_at: millis(now),
-            }),
-            _ => gathered.items.push(DataItem {
-                name: name.to_string(),
-                content: None,
-                known_at: millis(now),
-            }),
-        }
+        };
+        absorb(&mut gathered, store, (kind, fetched), now)?;
     }
     Ok(gathered)
+}
+
+/// 받은 자료 하나를 묶음에 넣는다(받은 것은 저장소에도). 기간 안에 공시가 없는 것도 자료다.
+fn absorb(
+    gathered: &mut Gathered,
+    store: &Store,
+    (kind, fetched): (FactKind, Result<Fetched, DataError>),
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
+    let name = kind_name(kind);
+    match fetched {
+        Ok(Fetched::Facts(facts)) if !facts.is_empty() => {
+            let saved = store.save_facts(&facts.iter().map(new_fact).collect::<Vec<_>>())?;
+            gathered
+                .facts
+                .extend(saved.iter().map(|fact| (fact.id, fact.known_at)));
+            if kind == FactKind::Disclosure {
+                gathered.disclosures.extend(facts.iter().cloned());
+            }
+            let known = facts.iter().map(|f| f.known_at).max().unwrap_or(now);
+            let source = &facts[0].source;
+            gathered.items.push(DataItem {
+                name: format!("{name} · {} · {}", source.name.as_str(), source.url),
+                content: Some(content(&facts)),
+                known_at: millis(known),
+            });
+        }
+        // (사용자 결정 18) 기간 안에 공시가 없다(DART "조회된 데이터 없음" 013)는 것도 자료다: 빈 자료가 아니다.
+        Ok(Fetched::Missing(FactKind::Disclosure)) => gathered.items.push(DataItem {
+            name: name.to_string(),
+            content: Some(NO_DISCLOSURE.to_string()),
+            known_at: millis(now),
+        }),
+        _ => gathered.items.push(DataItem {
+            name: name.to_string(),
+            content: None,
+            known_at: millis(now),
+        }),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -317,6 +339,35 @@ mod tests {
         fake.set(FactKind::Disclosure, Err(failed));
         let item = disclosure_item(&fake).await;
         assert!(item.content.is_none());
+    }
+
+    #[tokio::test]
+    async fn 고유번호가_없는_종목의_공시_재무_자리는_받을_수_없음이고_빈_자료다() {
+        let fake = FakeDataAdapter::new();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("facts.db")).unwrap();
+        let wiring = TeamWiring::official();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let now = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 11, 16, 1, 0, 0).unwrap();
+        let gathered = gather(&fake, &store, &wiring, "100010", (today, now))
+            .await
+            .unwrap();
+        for kind in ["disclosure", "financials"] {
+            let item = gathered
+                .items
+                .iter()
+                .find(|item| item.name.starts_with(kind))
+                .unwrap();
+            assert_eq!(item.name, format!("{kind} · {UNREACHABLE}"));
+            assert!(item.content.is_none(), "받을 수 없으면 빈 자료다(E32)");
+        }
+        assert!(
+            gathered
+                .items
+                .iter()
+                .all(|item| item.content.as_deref() != Some(NO_DISCLOSURE)),
+            "공시 없음이 아니다"
+        );
     }
 
     #[tokio::test]

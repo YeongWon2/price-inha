@@ -70,6 +70,24 @@ impl DailyQuota {
         true
     }
 
+    /// (round64) 쓴 요청 하나를 되돌린다(바깥에 묻지 않고 끝난 요청 — 키 없음 등). 그날 쓴 수가 0이면 그대로.
+    pub(super) fn give_back(&self, now: DateTime<Utc>) {
+        let today = kst_date(now);
+        let mut used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some((date, count)) = *used else {
+            return;
+        };
+        if date != today || count == 0 {
+            return;
+        }
+        let count = count - 1;
+        *used = Some((today, count));
+        let text = format!("{} {count}", today.format("%Y-%m-%d"));
+        if let Err(error) = self.store.set_knowledge_meta(self.key, &text) {
+            tracing::warn!(%error, "하루 요청 수를 남기지 못했습니다");
+        }
+    }
+
     /// (51차) 오늘(한국 날짜) 쓴 수를 읽기만 한다(쓰지 않는다).
     pub(super) fn peek(&self, now: DateTime<Utc>) -> u32 {
         let today = kst_date(now);
@@ -141,16 +159,25 @@ impl DartQuota {
 #[async_trait]
 impl DataAdapter for DartQuota {
     async fn fetch(&self, request: &FactRequest) -> Result<Fetched, DataError> {
-        if is_dart(request) {
-            let now = self.clock.now();
-            if !self.quota.take(now) {
-                self.note_limit(now);
-                return Err(DataError::RateLimited {
-                    origin: SourceName::Dart,
-                });
-            }
+        if !is_dart(request) {
+            return self.inner.fetch(request).await;
         }
-        self.inner.fetch(request).await
+        let now = self.clock.now();
+        if !self.quota.take(now) {
+            self.note_limit(now);
+            return Err(DataError::RateLimited {
+                origin: SourceName::Dart,
+            });
+        }
+        let fetched = self.inner.fetch(request).await;
+        // (round64, 10b 보강 2 2번) 키가 없거나 읽지 못해 바깥에 묻지 않은 요청은 하루 수에 세지 않는다.
+        if matches!(
+            fetched,
+            Err(DataError::NoKey { .. } | DataError::KeyUnreadable { .. })
+        ) {
+            self.quota.give_back(now);
+        }
+        fetched
     }
 }
 

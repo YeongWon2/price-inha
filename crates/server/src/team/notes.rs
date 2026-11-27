@@ -73,16 +73,33 @@ fn millis(at: DateTime<Utc>) -> UnixMillis {
     UnixMillis(at.timestamp_millis())
 }
 
+/// 글의 짧은 지문(FNV-1a 64비트, 다시 켜도 같다).
+fn fingerprint(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
 /// 공시 하나를 바깥 자료 기록으로(제목 = 보고서명, 요약 = 회사 · 접수일, 링크 = 출처 주소, 시각 = 접수일).
 fn disclosure_record(fact: &Fact) -> RecordText {
     let report = match &fact.value {
         FactValue::Text(text) => text.clone(),
         FactValue::Number(number) => number.to_string(),
     };
+    // (round64, 10c N3 참고) 접수번호가 없거나 비면 회사 · 안 시각 · 보고서 이름의 지문으로 키를 지어, 같은 때 받은
+    // 다른 공시가 같은 기록 키로 서로 덮어쓰지 않게 한다.
     let receipt = fact
         .reference
         .clone()
-        .unwrap_or_else(|| format!("{}-{}", fact.subject, fact.known_at.timestamp_millis()));
+        .filter(|r| !r.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}-{}-{:016x}",
+                fact.subject,
+                fact.known_at.timestamp_millis(),
+                fingerprint(&report)
+            )
+        });
     let filed = fact
         .published_on
         .map_or_else(|| "-".to_string(), |d| d.format(DATE_FORMAT).to_string());

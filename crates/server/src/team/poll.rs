@@ -37,6 +37,7 @@ use super::changes::Changes;
 use super::demo_feed::DemoDisclosures;
 use super::news::Searched;
 use super::seen::Seen;
+use super::subscribe::Resubscribe;
 use super::{Crew, facts};
 
 /// 고리를 다시 보는 간격(시계의 쉬기로 잰다).
@@ -66,10 +67,10 @@ fn midnight(date: NaiveDate) -> Option<DateTime<Utc>> {
 
 /// (10b-2) 쓰는 템플릿이 구독하는 깨우기. 기본값은 아무것도 걸지 않음.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Subscribed {
-    quote: bool,
-    disclosure: bool,
-    news: bool,
+pub(super) struct Subscribed {
+    pub(super) quote: bool,
+    pub(super) disclosure: bool,
+    pub(super) news: bool,
 }
 
 impl Subscribed {
@@ -110,6 +111,8 @@ pub(super) struct Poller {
     changes: Changes,
     /// (24차 3번) 시연용 가짜 공시(실행 파일의 시연 조립만 켠다).
     demo: Option<DemoDisclosures>,
+    /// (round64) 구독이 바뀔 때 다시 걸기(끌 때 대기열 버리기 · 다시 켤 때 쌓인 것으로 깨우지 않기).
+    resubscribe: Resubscribe,
 }
 
 impl Poller {
@@ -124,6 +127,7 @@ impl Poller {
             last_news: None,
             changes: Changes::default(),
             demo: None,
+            resubscribe: Resubscribe::default(),
         }
     }
 
@@ -139,7 +143,10 @@ impl Poller {
             if *stop.borrow() {
                 return;
             }
-            let subscribed = Subscribed::of(&self.crew);
+            let subscribed = self.resubscribe.read(&self.crew, &self.trigger);
+            if self.resubscribe.take_rebase_changes() {
+                self.changes.rebase();
+            }
             self.refresh_conditions(subscribed.quote).await;
             let now = self.crew.clock.now();
             if let Some(open) = self.session_open(now) {
@@ -256,6 +263,13 @@ impl Poller {
                 self.news(symbol, now).await;
             }
         }
+        // (round64) 다시 켠 뒤 첫 가져오기가 끝났다: 그 뒤로는 새것으로 깨운다.
+        if dart {
+            self.resubscribe.rebase_dart = false;
+        }
+        if news {
+            self.resubscribe.rebase_news = false;
+        }
     }
 
     /// 하루 상한을 지키는 간격: 자료 간격과 `하루 × 종목 수 ÷ 상한` 가운데 긴 것.
@@ -306,7 +320,8 @@ impl Poller {
                 ))
             })
             .collect();
-        self.push(&Seen::key("dart", symbol.as_str()), fresh);
+        let rebase = self.resubscribe.rebase_dart;
+        self.push_or_rebase(&Seen::key("dart", symbol.as_str()), fresh, rebase);
     }
 
     /// 그 종목의 뉴스를 가져와 처음 보는 것을 넘긴다(키가 없거나 상한이면 묻지 않는다).
@@ -335,7 +350,8 @@ impl Poller {
                 (id, change)
             })
             .collect();
-        self.push(&Seen::key("naver", symbol.as_str()), fresh);
+        let rebase = self.resubscribe.rebase_news;
+        self.push_or_rebase(&Seen::key("naver", symbol.as_str()), fresh, rebase);
     }
 
     /// 자료 사건의 뼈대(번호 · 시각은 부르는 쪽이 채운다).
@@ -366,6 +382,22 @@ impl Poller {
         };
         let pushed = self.trigger.push_data(change);
         tracing::debug!(?pushed, "시연용 가짜 공시를 넣었다");
+    }
+
+    /// (round64) `rebase`면 처음 보는 것을 본 것으로만 적고 넘기지 않는다(다시 켠 뒤 첫 가져오기). 아니면 [`Poller::push`].
+    fn push_or_rebase(&mut self, key: &str, fresh: Vec<(String, DataChange)>, rebase: bool) {
+        if !rebase {
+            self.push(key, fresh);
+            return;
+        }
+        let skipped = self.seen.take_new(&self.crew.store, key, fresh).len();
+        if skipped > 0 {
+            tracing::info!(
+                key,
+                skipped,
+                "구독을 다시 켜기 전에 쌓인 자료로는 깨우지 않는다"
+            );
+        }
     }
 
     /// 처음 보는 것만 깨우기 엔진에 넘긴다. 속도 제한으로 받지 않은 것은 다음에 다시 넘긴다.

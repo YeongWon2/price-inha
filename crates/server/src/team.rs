@@ -32,10 +32,14 @@ mod notes;
 mod notices;
 mod poll;
 mod quota;
+// (round64) 검색 도구의 바깥 글 표시 · 시간 제한 · 시장 메모(교훈) 색인.
+mod recall;
+// (round64) 구독이 바뀔 때 다시 걸기(쌓인 사건 · 대기열).
 mod review;
 mod rules;
 mod scout;
 mod seen;
+mod subscribe;
 mod talk;
 mod tools;
 mod wake;

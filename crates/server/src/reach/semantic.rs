@@ -130,6 +130,21 @@ impl Embedder for ProviderEmbedder {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
         embed_with(self.provider.as_ref(), &self.model, texts.to_vec()).await
     }
+
+    /// (round64) 검색 질의는 질의로 보낸다(공급자가 질의와 색인 글을 달리 다룰 수 있게).
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let request = EmbeddingRequest {
+            model: self.model.clone(),
+            inputs: vec![text.to_string()],
+            purpose: EmbedPurpose::Query,
+            dimensions: None,
+        };
+        let vectors = embed_request(self.provider.as_ref(), request).await?;
+        vectors
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbedError::Failed("질의에 벡터가 없다".to_string()))
+    }
 }
 
 async fn embed_with(
@@ -143,6 +158,13 @@ async fn embed_with(
         purpose: EmbedPurpose::Document,
         dimensions: None,
     };
+    embed_request(provider, request).await
+}
+
+async fn embed_request(
+    provider: &dyn EmbeddingProvider,
+    request: EmbeddingRequest,
+) -> Result<Vec<Vec<f32>>, EmbedError> {
     match provider.embed(request).await {
         Ok(response) => Ok(response.vectors),
         Err(error @ (AiError::Connection | AiError::Timeout)) => {
@@ -356,8 +378,14 @@ impl Semantic {
                 match me.ready() {
                     Some(engine) if last.is_none_or(|at| now - at >= interval) => {
                         last = Some(now);
+                        // (round64) 설정이 바뀌면(끄기 포함) 진행 중인 걸음도 끊는다 — 끈 뒤에 답이 와도 두지 않는다.
                         tokio::select! {
                             _ = stop.wait_for(|stop| *stop) => return,
+                            _ = changed.changed() => {
+                                tracing::debug!("뜻 검색 설정이 바뀌어 다시 만들기 걸음을 끊었다");
+                                last = None;
+                                continue;
+                            }
                             () = me.step(engine, batch) => {}
                         }
                     }

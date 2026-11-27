@@ -271,8 +271,14 @@ impl Crew {
         }
     }
 
-    /// 검색 도구의 몸통([`Crew::search_knowledge`]).
+    /// 검색 도구의 몸통([`Crew::search_knowledge`]). (round64) 바깥 자료 적중의 글에는 "바깥 글" 표시를 붙인다.
     pub(super) async fn search_tool(&self, input: &Value) -> Result<SearchOutput, TeamError> {
+        let mut output = self.search_by_mode(input).await?;
+        super::recall::mark_outside(&mut output);
+        Ok(output)
+    }
+
+    async fn search_by_mode(&self, input: &Value) -> Result<SearchOutput, TeamError> {
         let links = self
             .links
             .get()
@@ -306,12 +312,17 @@ impl Crew {
             Some("semantic") => {
                 let query = text_of(input, "query").ok_or_else(|| refused("질의가 비었다"))?;
                 let embedded = links.semantic.as_ref().and_then(|s| s.knowledge());
-                embedded
-                    .as_ref()
-                    .unwrap_or(knowledge)
-                    .semantic_search(query, self.now_ms())
+                let chosen = embedded.as_ref().unwrap_or(knowledge);
+                let limit = self.wiring.semantic_search_timeout;
+                // (round64) 질의 임베딩이 늦으면 시간 제한으로 끊고 키워드 결과를 준다.
+                match tokio::time::timeout(limit, chosen.semantic_search(query, self.now_ms()))
                     .await
-                    .map_err(failed)
+                {
+                    Ok(found) => found.map_err(failed),
+                    Err(_) => {
+                        super::recall::timed_out(knowledge, query, self.now_ms()).map_err(failed)
+                    }
+                }
             }
             _ => Err(refused(
                 "모드는 keyword · condition · semantic 가운데 하나다",

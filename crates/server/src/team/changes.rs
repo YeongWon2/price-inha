@@ -32,6 +32,8 @@ type Values = BTreeMap<String, String>;
 #[derive(Default)]
 pub(super) struct Changes {
     last_day: Option<NaiveDate>,
+    /// (round64) 참이면 다음 하루 보기는 지난번 값만 새로 두고 넘기지 않는다(공시 구독을 다시 켠 뒤).
+    rebase: bool,
 }
 
 impl Changes {
@@ -42,14 +44,21 @@ impl Changes {
             return;
         }
         self.last_day = Some(today);
+        let push = !std::mem::take(&mut self.rebase);
         for symbol in crew.desk.symbols() {
             if let Some(request) = facts::financials(&crew.wiring, symbol.as_str(), today) {
-                check(crew, trigger, &request, Some(&symbol), now).await;
+                check(crew, trigger, &request, (Some(&symbol), push), now).await;
             }
         }
         for request in facts::macros(&crew.wiring, today) {
-            check(crew, trigger, &request, None, now).await;
+            check(crew, trigger, &request, (None, push), now).await;
         }
+    }
+
+    /// (round64) 공시 구독을 다시 켰다: 꺼진 사이 바뀐 재무 · 거시 값으로 깨우지 않게, 다음 하루 보기는 지난번 값만
+    /// 새로 둔다. 오늘 이미 봤으면 다음 날 보기가 그렇게 한다.
+    pub(super) fn rebase(&mut self) {
+        self.rebase = true;
     }
 }
 
@@ -120,7 +129,7 @@ async fn check(
     crew: &Crew,
     trigger: &Trigger,
     request: &FactRequest,
-    symbol: Option<&Symbol>,
+    (symbol, push): (Option<&Symbol>, bool),
     now: DateTime<Utc>,
 ) {
     let Some(found) = fetch(crew, request).await else {
@@ -135,8 +144,8 @@ async fn check(
         return;
     }
     save(crew, &key, &values);
-    // 처음 받은 값은 지난번 값으로만 둔다.
-    let Some(before) = before else {
+    // 처음 받은 값은 지난번 값으로만 둔다. (round64) 구독을 다시 켠 뒤 첫 보기도 그렇다.
+    let Some(before) = before.filter(|_| push) else {
         return;
     };
     let source = found[0].source.name.as_str().to_lowercase();
