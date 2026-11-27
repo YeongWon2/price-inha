@@ -54,7 +54,9 @@ async fn 시연_하루의_스냅샷은_시세만_바뀐_줄을_남기지_않고_
         &path,
         "SELECT COALESCE(SUM(LENGTH(state)), 0) FROM paper_snapshots",
     );
-    eprintln!("시연 하루 스냅샷: {rows}줄 · {bytes}바이트 (이 차수 전 1,319줄 · 약 678KB)");
-    assert!(rows <= 20, "시세만 바뀐 줄은 남지 않는다: {rows}줄");
+    assert!(
+        rows <= 20,
+        "시세만 바뀐 줄은 남지 않는다: {rows}줄 · {bytes}바이트 (이 차수 전 1,319줄 · 약 678KB)"
+    );
     bench.close().await;
 }
