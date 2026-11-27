@@ -30,6 +30,7 @@ use crate::{
 };
 use ai::{AiNow, Held, hold};
 pub(crate) use ai::{AiParts, Work, prepare_work};
+pub(crate) use limit::AI_LIMIT_FILE;
 pub(crate) use limit::limit_request;
 pub use limit::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 

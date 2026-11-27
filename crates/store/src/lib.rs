@@ -57,7 +57,10 @@ pub use embed_scan::ChunkVector;
 pub use error::{DenyReason, StoreError, Transition};
 pub use fact::{FactId, FactValue, NewFact, StoredFact};
 pub use history::{ApprovalLine, HISTORY_PAGE_MAX, TemplateHistoryLine, TradeFlow, TradeListItem};
-pub use keep::{ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PaperSnapshot};
+pub use keep::{
+    ACCESS_KEY_SALT_MIN_BYTES, AccessKeyHash, AccessKeyRecord, PAPER_SNAPSHOT_MARKET_FIELDS,
+    PaperSnapshot,
+};
 pub use knowledge::{
     ChunkEmbedding, ChunkId, KnowledgeChunk, KnowledgeHit, KnowledgeKind, KnowledgeQuery,
     KnowledgeSource, NewKnowledgeRecord,
@@ -119,6 +122,8 @@ pub struct Store {
     conn: Arc<Mutex<rusqlite::Connection>>,
     /// 연 파일의 경로. 스냅샷이 따로 연결을 열어 이 손잡이의 잠금을 쥐지 않고 뜬다.
     path: Arc<PathBuf>,
+    /// (22차, 결정 32) 시세 관찰 칸만 달라 쓰지 않은 가장 나중 모의계좌 상태 값(마감 끝값으로 쓴다). 메모리에만 있다.
+    paper_tail: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 impl Store {
@@ -146,6 +151,7 @@ impl Store {
         Ok(Store {
             conn: Arc::new(Mutex::new(conn)),
             path: Arc::new(path),
+            paper_tail: Arc::new(Mutex::new(None)),
         })
     }
 

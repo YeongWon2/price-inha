@@ -24,7 +24,7 @@ pub const AI_DAILY_LIMIT_KEY: &str = "daily_limit";
 pub const SETUP_AI_DAILY_LIMIT: &str = "ai_daily_limit";
 
 /// 저장한 상한을 두는 파일 이름(보관 폴더 안). 비밀이 아니다. 모양 `{"daily_limit": 수 | null}`.
-const AI_LIMIT_FILE: &str = "ai-limit.json";
+pub(crate) const AI_LIMIT_FILE: &str = "ai-limit.json";
 
 /// 켤 때 값과 저장한 값.
 #[derive(Default)]

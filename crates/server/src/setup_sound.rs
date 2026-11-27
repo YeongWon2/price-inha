@@ -46,7 +46,7 @@ use crate::setup_http::{body_of, registered, reply};
 const ENABLED: &str = "enabled";
 
 /// 저장한 값을 두는 파일 이름(보관 폴더 안). 비밀이 아니다. 모양 `{"enabled": bool}`.
-const SOUND_FILE: &str = "sound.json";
+pub(crate) const SOUND_FILE: &str = "sound.json";
 
 /// 저장한 값이 없거나 읽지 못했을 때의 값(켜짐).
 const SOUND_DEFAULT: bool = true;

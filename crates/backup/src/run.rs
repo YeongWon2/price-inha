@@ -35,6 +35,8 @@ pub struct Backup {
     secrets: Arc<SecretStore>,
     /// (결정 31) 함께 담을 보관 폴더.
     archive_dir: Option<PathBuf>,
+    /// (6차) 함께 담을 설정 파일: 보관 폴더와 그 안의 파일 이름들.
+    config: Option<(PathBuf, Vec<String>)>,
 }
 
 /// 성공한 올리기.
@@ -108,12 +110,21 @@ impl Backup {
             store,
             secrets,
             archive_dir: None,
+            config: None,
         })
     }
 
     /// (결정 31) 보관 폴더(`archive/`)의 보관 파일(`*.jsonl`)도 묶음에 담는다. 폴더가 없으면 스냅샷만 담는다.
     pub fn with_archive_dir(mut self, dir: PathBuf) -> Self {
         self.archive_dir = Some(dir);
+        self
+    }
+
+    /// (6차) 보관 폴더 `home` 바로 아래의 비밀이 아닌 설정 파일 `names`도 묶음에 이름 그대로 담는다(되살리면 제자리).
+    /// 없는 파일은 건너뛰고, 키 파일([`pi_secrets::BACKUP_EXCLUDED_FILES`]) 등 담을 수 없는 이름은 줘도 담지 않는다.
+    pub fn with_config_files(mut self, home: PathBuf, names: &[&str]) -> Self {
+        let names = names.iter().map(|n| (*n).to_owned()).collect();
+        self.config = Some((home, names));
         self
     }
 
@@ -218,6 +229,9 @@ impl Backup {
             path: SNAPSHOT_FILE.to_owned(),
             bytes,
         }];
+        if let Some((home, names)) = &self.config {
+            files.extend(crate::config::bundle_files(home, names)?);
+        }
         if let Some(dir) = &self.archive_dir {
             files.extend(crate::archive::bundle_files(dir)?);
         }
@@ -237,12 +251,14 @@ impl Backup {
             },
             files,
         };
-        if bundle
-            .files
-            .iter()
-            .any(|f| self.secrets.contains_registered(&f.bytes))
-        {
-            return Err(BackupError::SecretFound);
+        for file in &bundle.files {
+            // (6차) gzip 보관 파일은 풀어 본 원문도 본다(압축된 바이트에서는 비밀이 숨는다).
+            let plain = crate::archive::plain_view(file)?;
+            let found = self.secrets.contains_registered(&file.bytes)
+                || plain.is_some_and(|p| self.secrets.contains_registered(&p));
+            if found {
+                return Err(BackupError::SecretFound);
+            }
         }
         crate::bundle::verify_in(&bundle, root)?;
         let sealed = seal(&bundle, &self.settings.recipient)?;

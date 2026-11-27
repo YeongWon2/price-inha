@@ -18,6 +18,7 @@
 
 mod archive;
 mod bundle;
+mod config;
 mod error;
 mod remote;
 mod restore;
