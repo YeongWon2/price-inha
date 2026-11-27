@@ -215,6 +215,7 @@ impl Crew {
             ai_cap_told: Mutex::new(None),
             meter,
             ports,
+            proposal_seen: super::proposal_seen::ProposalNotices::default(),
         });
         let _ = crew.tools.crew.set(Arc::downgrade(&crew));
         Ok(crew)

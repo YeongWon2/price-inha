@@ -26,11 +26,13 @@ mod due;
 mod effect;
 mod http;
 mod link;
+mod live_block;
 mod marks;
 #[cfg(test)]
 mod money_safety;
 mod order;
 mod promote;
+mod promote_turn;
 mod retry;
 mod rules_config;
 mod rules_config_http;
@@ -419,6 +421,8 @@ pub struct Trading {
     proposal_hook: OnceLock<ProposalHook>,
     /// (24차 C26) 익절 · 손절로 낸 파는 주문의 까닭(매매 번호 → 까닭). 팔림이 되면 연출 이벤트를 내고 지운다.
     sell_why: Mutex<effect::SellNotes>,
+    /// (백로그 Q) 쓰는 템플릿의 값 · 상태를 바꾸는 일(개선안 반영 · 승격 판정 · 실전 승격)의 차례 잠금.
+    template_turn: promote_turn::TemplateTurn,
 }
 
 impl Trading {

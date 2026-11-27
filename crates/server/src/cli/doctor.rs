@@ -15,6 +15,7 @@ use crate::{DB_FILE, Settings};
 mod host;
 mod ollama;
 mod update;
+mod settle;
 
 use host::{check_access_key, check_address, check_backup, check_service};
 use ollama::check_ollama;
@@ -157,7 +158,7 @@ fn item_name(item: CheckItem) -> &'static str {
 pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
     let home = &settings.home;
     let home_check = check_home(home);
-    let (database, has_access_key) = check_database(home);
+    let (database, has_access_key) = settle::database(home);
     let keys = check_keys(home, home_check.ok);
     DoctorReport {
         checks: vec![

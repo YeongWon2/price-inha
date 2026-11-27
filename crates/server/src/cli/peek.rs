@@ -26,7 +26,7 @@ fn uri_path(path: &Path) -> String {
 }
 
 /// 곁 파일(`<저장소>-wal` · `<저장소>-shm`)이 하나라도 있나.
-fn has_side_files(path: &Path) -> bool {
+pub(crate) fn has_side_files(path: &Path) -> bool {
     ["-wal", "-shm"].iter().any(|suffix| {
         let mut name = path.as_os_str().to_os_string();
         name.push(suffix);

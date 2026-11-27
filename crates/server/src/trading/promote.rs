@@ -73,6 +73,15 @@ impl Trading {
             "passed": short.is_empty(),
             "short": serde_json::to_value(&short).unwrap_or(Value::Null),
         });
+        // (백로그 Q) 통계를 재는 동안 개선안 반영 등으로 쓰는 템플릿이 바뀌었으면 이 마감에는 올리지 않는다.
+        let _turn = self.template_turn();
+        if !super::promote_turn::still_same(&template, self.template_in_use()?.as_ref()) {
+            tracing::info!(
+                template = template.id.0,
+                "승격 기준을 재는 사이 템플릿이 바뀌어 다음 마감에 다시 잽니다"
+            );
+            return Ok(());
+        }
         let at = millis(self.clock.now());
         self.store.append_at(KIND_PROMOTION_CHECK, &record, at)?;
         if verdict != Verdict::Passed {
@@ -196,6 +205,8 @@ impl Trading {
     }
 
     fn try_reconcile(&self) -> Result<(), TradingError> {
+        // (백로그 Q) 실전 승격의 답과 겹치지 않게 같은 차례로 돈다.
+        let _turn = self.template_turn();
         let pending = self
             .store
             .templates_in_state(TemplateState::PromotionPending)?;
@@ -285,6 +296,8 @@ impl Trading {
         shown: &str,
         decision: Decision,
     ) -> Result<Answered, TradingError> {
+        // (백로그 Q) 맞춰 보기 · 승격 판정과 같은 차례로 돈다(겹쳐 실전중이 됐는데 답이 500이 되지 않게).
+        let _turn = self.template_turn();
         // 전체 정지 중의 승인은 승인을 닫기 전에 거절한다: 승인 번호는 그대로 기다리고, 다시 시작한 뒤 같은
         // 번호로 답할 수 있다. 이 확인과 답 사이에 멈춘 것은 맞춰 보기([`Trading::reconcile_promotions`])가 잇는다.
         if decision == Decision::Approve && self.store.team_state()? == TeamState::FullStop {

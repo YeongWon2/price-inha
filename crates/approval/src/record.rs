@@ -42,7 +42,6 @@ pub(crate) struct Record {
     pub(crate) consumed: bool,
     pub(crate) wait_until: Option<UnixMillis>,
     pub(crate) expires_at: Option<UnixMillis>,
-    pub(crate) resolved_at: Option<UnixMillis>,
 }
 
 impl Record {
@@ -92,7 +91,6 @@ pub(crate) fn decode(row: &ApprovalRequest) -> Option<Record> {
         consumed: row.consumed_at.is_some(),
         wait_until: s.get("wait_until")?.as_i64().map(UnixMillis),
         expires_at: s.get("expires_at")?.as_i64().map(UnixMillis),
-        resolved_at: row.resolved_at,
     })
 }
 
@@ -120,7 +118,7 @@ fn subject_json(subject: &Subject) -> Value {
     }
 }
 
-fn subject_from(v: &Value) -> Option<Subject> {
+pub(crate) fn subject_from(v: &Value) -> Option<Subject> {
     match v.get("kind")?.as_str()? {
         "order" => order_from(v).map(Subject::Order),
         "live_promotion" => Some(Subject::LivePromotion {
@@ -176,6 +174,9 @@ pub(crate) struct Memo {
     notice: HashMap<String, Notice>,
     voided: HashSet<String>,
     handled: HashMap<String, DueHandling>,
+    /// (5차) 이 번호 아래의 요청은 모두 닫혔고 답 없음 · 만료인 주문 요청은 처리 기록이 있다(`unhandled_due`가 다시
+    /// 읽지 않는다). 늘 커지기만 한다.
+    due_floor: i64,
 }
 
 impl Memo {
@@ -239,6 +240,16 @@ impl Memo {
 
     pub(crate) fn handling(&self, number: &ApprovalNumber) -> Option<DueHandling> {
         self.handled.get(number.as_str()).cloned()
+    }
+
+    /// (5차) 처리 기록을 다시 볼 필요가 없는 바닥 번호.
+    pub(crate) fn due_floor(&self) -> i64 {
+        self.due_floor
+    }
+
+    /// (5차) 바닥을 올린다(내리지 않는다).
+    pub(crate) fn raise_due_floor(&mut self, floor: i64) {
+        self.due_floor = self.due_floor.max(floor);
     }
 
     /// 번호로 저장소 줄을 찾는다. 모르는 번호면 표를 다시 읽는다.

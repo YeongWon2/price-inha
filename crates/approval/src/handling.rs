@@ -7,6 +7,9 @@ use crate::error::Error;
 use crate::record::{self, Record};
 use crate::subject::{OrderSubject, Side, Subject};
 
+/// 막힌 까닭 글([`DueHandling::Blocked`])을 처리 기록에 남기는 상한(글자 수). 넘으면 앞에서부터 이만큼만 남긴다.
+pub const BLOCKED_REASON_MAX_CHARS: usize = 200;
+
 /// 답 없음 · 만료로 닫힌 주문 요청을 호출하는 쪽이 어떻게 처리했는지(E22).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DueHandling {
@@ -48,6 +51,7 @@ impl Approvals {
         handling: DueHandling,
     ) -> Result<(), Error> {
         let now = self.clock.now();
+        let handling = capped(handling);
         // 기억을 잡은 채로 보고 남겨, 같은 관리자에서 두 번 남지 않게 한다.
         let mut memo = self.memo()?;
         let Some(found) = memo.find(&self.store, number)? else {
@@ -78,37 +82,42 @@ impl Approvals {
     ///
     /// 할 일은 [`expire_due`](Approvals::expire_due)와 같은 규칙이되, 지금 시각(시계)이 신호 유효 시간의
     /// 끝 이후면 [`DueAction::Dropped`](crate::DueAction::Dropped)다. 읽기만 한다.
+    ///
+    /// (5차) 처리 기록이 남은 옛 요청은 다시 읽지 않는다: 관리자마다 "이 번호 아래는 모두 닫히고 처리됐다"는
+    /// 바닥을 기억해 두고 그 위의 닫힌 요청만 읽는다([`crate::due_scan`]).
     pub fn unhandled_due(&self) -> Result<Vec<DueOutcome>, Error> {
         let now = self.clock.now();
-        let memo = self.memo()?;
-        let mut closed: Vec<Record> = Vec::new();
-        for status in [ApprovalStatus::NoAnswer, ApprovalStatus::Expired] {
-            closed.extend(
-                self.store
-                    .approvals_in_status(status)?
-                    .iter()
-                    .filter_map(record::decode)
-                    .filter(|r| closed_order(r).is_some() && memo.handling(&r.number).is_none()),
-            );
-        }
-        closed.sort_by_key(|r| (r.resolved_at.unwrap_or(UnixMillis(i64::MIN)).0, r.id));
+        let mut memo = self.memo()?;
+        let mut closed = crate::due_scan::scan(&self.store, &mut memo)?;
+        closed.sort_by_key(|r| (r.resolved_at.unwrap_or(UnixMillis(i64::MIN)).0, r.id.0));
         Ok(closed
             .into_iter()
-            .filter_map(|found| {
-                let order = closed_order(&found)?;
+            .map(|found| {
                 let action = if found.expired_at(now) {
                     DueAction::Dropped
                 } else {
-                    due_action(found.status, order, memo.notice(&found.number))
+                    due_action(found.status, &found.order, memo.notice(&found.number))
                 };
-                Some(DueOutcome {
-                    number: found.number.clone(),
-                    subject: found.subject.clone(),
+                DueOutcome {
+                    number: found.number,
+                    subject: Subject::Order(found.order),
                     status: found.status,
                     action,
-                })
+                }
             })
             .collect())
+    }
+}
+
+/// 막힌 까닭 글을 [`BLOCKED_REASON_MAX_CHARS`] 글자까지만 남긴다(글자 단위라 한글이 깨지지 않는다).
+fn capped(handling: DueHandling) -> DueHandling {
+    match handling {
+        DueHandling::Blocked { reason } if reason.chars().count() > BLOCKED_REASON_MAX_CHARS => {
+            DueHandling::Blocked {
+                reason: reason.chars().take(BLOCKED_REASON_MAX_CHARS).collect(),
+            }
+        }
+        other => other,
     }
 }
 

@@ -297,6 +297,7 @@ impl Trading {
             hooks: OnceLock::new(),
             proposal_hook: OnceLock::new(),
             sell_why: Mutex::new(super::effect::SellNotes::default()),
+            template_turn: super::promote_turn::TemplateTurn::default(),
         });
         let now = trading.clock.now();
         trading.books(now).await?;

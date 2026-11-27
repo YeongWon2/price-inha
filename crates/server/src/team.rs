@@ -31,6 +31,7 @@ mod news;
 mod notes;
 mod notices;
 mod poll;
+mod proposal_seen;
 mod quota;
 mod review;
 mod rules;
@@ -39,6 +40,7 @@ mod seen;
 mod talk;
 mod tools;
 mod wake;
+mod wake_session;
 // (50차) 근거 카드 칸: 근거 경로 · 히스토리의 매매 하나가 함께 쓴다.
 pub(crate) mod card;
 // (51차) 하루 AI 잔량 · 논의 진행 단계.
@@ -335,6 +337,8 @@ pub struct Crew {
     ports: pi_agent::Ports,
     /// (기능 L) 팀 지침 장부(보관 폴더의 파일 하나).
     guide: guide_book::GuideBook,
+    /// (백로그 Q) 개선안마다 남긴 승인 요청 이벤트를 읽어 둔 것(매번 처음부터 읽지 않는다).
+    proposal_seen: proposal_seen::ProposalNotices,
 }
 
 impl Crew {
