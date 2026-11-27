@@ -53,6 +53,27 @@ impl Knowledge {
             return Ok(output);
         }
         let candidates = max.saturating_mul(self.config.candidate_multiplier.max(1));
+        let (hits, relaxed) = self.keyword_hits(request, candidates)?;
+        output.relaxed = relaxed;
+        let ranked = self.rank_hits(hits, now);
+        let picked = self.pick(ranked, max);
+        for hit in picked {
+            output.results.push(self.tool_hit(&hit.chunk, hit.shown)?);
+        }
+        Ok(output)
+    }
+
+    /// 키워드 후보를 `candidates`개까지 모은다: 모든 낱말(AND)로 찾고, 없으면 낱말마다(OR) 찾아 합친다.
+    /// 풀어서 찾아 적중이 있으면 둘째 값이 참이다. 질의에 낱말이 없으면 빈 목록이다.
+    pub(crate) fn keyword_hits(
+        &self,
+        request: &SearchRequest,
+        candidates: usize,
+    ) -> Result<(Vec<KnowledgeHit>, bool), Error> {
+        let words: Vec<&str> = request.text.split_whitespace().collect();
+        if words.is_empty() || candidates == 0 {
+            return Ok((Vec::new(), false));
+        }
         let query = |text: &str| KnowledgeQuery {
             text: text.to_string(),
             kinds: request.kinds.clone(),
@@ -61,6 +82,7 @@ impl Knowledge {
             max: candidates,
         };
         let mut hits = self.store.search_knowledge(query(&words.join(" ")))?;
+        let mut relaxed = false;
         if hits.is_empty() && words.len() > 1 {
             let mut merged: BTreeMap<i64, KnowledgeHit> = BTreeMap::new();
             for word in &words {
@@ -69,14 +91,9 @@ impl Knowledge {
                 }
             }
             hits = merged.into_values().collect();
-            output.relaxed = !hits.is_empty();
+            relaxed = !hits.is_empty();
         }
-        let ranked = self.rank_hits(hits, now);
-        let picked = self.pick(ranked, max);
-        for hit in picked {
-            output.results.push(self.tool_hit(&hit.chunk, hit.shown)?);
-        }
-        Ok(output)
+        Ok((hits, relaxed))
     }
 
     /// 감쇠를 곱하고, 점수순(같으면 조각 번호순)으로 늘어놓고, 문턱을 적용한다.

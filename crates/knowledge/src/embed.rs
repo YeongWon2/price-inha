@@ -16,6 +16,15 @@ pub trait Embedder: Send + Sync {
     fn dims(&self) -> u32;
     /// 글마다 벡터 하나(같은 순서 · 같은 개수 · 길이 `dims`).
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError>;
+    /// (6차) 검색 질의 하나의 벡터. 질의와 색인 글을 공급자가 달리 다룰 수 있게 따로 둔다(Voyage `input_type`).
+    /// 기본은 [`Embedder::embed`]의 첫 것이고, 답이 비면 [`EmbedError::Failed`].
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let vectors = self.embed(&[text.to_string()]).await?;
+        vectors
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbedError::Failed("질의에 벡터가 없다".to_string()))
+    }
 }
 
 /// 뜻 검색을 쓸 수 있는지(검색 도구의 결과에 늘 실린다).

@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use pi_approval::{ApprovalNumber, ApprovalView, Decision, Notice, Subject};
 use pi_knowledge::TradeRecord;
 use pi_paper::{Broker, Order, OrderGroup, OrderStatus, Side};
-use pi_store::{ApprovalStatus, ProposalId, TeamCause, TradeId, TradeState};
+use pi_store::{ApprovalStatus, ProposalId, TeamCause, TradeId, TradeState, UnixMillis};
 use rust_decimal::Decimal;
 
 use super::Trading;
@@ -307,10 +307,18 @@ impl Trading {
                     .filter(|o| trade_of(o) == Some(trade.id.0))
                     .collect();
                 let pnl = (!mine.is_empty()).then(|| mine.iter().map(|o| cash_flow(o)).sum());
+                // (round64, 10c N3 참고) 닫힌 시각은 복기 시각일 수 있는 `updated_at`이 아니라 마지막으로 팔린 체결
+                // 시각이다. 팔린 체결을 모르면 `updated_at`.
+                let sold_at = mine
+                    .iter()
+                    .filter(|o| o.side == Side::Sell)
+                    .filter_map(|o| o.execution.filled_at)
+                    .max()
+                    .map(|at| UnixMillis(at.timestamp_millis()));
                 TradeRecord {
                     record_ref: trade.id.0.to_string(),
                     symbol: trade.symbol,
-                    closed_at: trade.updated_at,
+                    closed_at: sold_at.unwrap_or(trade.updated_at),
                     pnl,
                 }
             })

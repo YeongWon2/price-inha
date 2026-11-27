@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use pi_market::{Market, MarketCalendar, SessionKind, Symbol};
 
-use crate::{DataChange, DataPush, DataTriggerConfig, TriggerEvent};
+use crate::{DataChange, DataKind, DataPush, DataTriggerConfig, TriggerEvent};
 
 /// 중복 표의 크기. 넘으면 가장 오래된 것부터 지운다.
 pub(crate) const DEDUPE_CAPACITY: usize = 4096;
@@ -217,6 +217,25 @@ impl DataState {
         let reason = "전체 정지 중이라 모인 사건을 깨우지 않고 버린다";
         warn_dropped(dropped, &markets, reason);
         self.dropped += dropped;
+    }
+
+    /// (7차) 구독을 끈 종류의 사건을 묶음 · 장 밖 보관에서 버린다(비게 된 묶음 · 보관도 지운다). 버린 수를 준다.
+    /// 버린 사건은 "버린 수"(상한 · 전체 정지)에 세지 않고, 중복 표는 그대로 둔다(같은 사건으로 다시 깨우지 않는다).
+    pub(crate) fn discard(&mut self, kinds: &[DataKind]) -> usize {
+        let mut removed = 0;
+        for batch in &mut self.batches {
+            let before = batch.events.len();
+            batch.events.retain(|p| !kinds.contains(&p.change.kind));
+            removed += before - batch.events.len();
+        }
+        self.batches.retain(|batch| !batch.events.is_empty());
+        for (_, events) in &mut self.held {
+            let before = events.len();
+            events.retain(|p| !kinds.contains(&p.change.kind));
+            removed += before - events.len();
+        }
+        self.held.retain(|(_, events)| !events.is_empty());
+        removed
     }
 
     /// 지난 보고 뒤로 버린 수를 가져간다.

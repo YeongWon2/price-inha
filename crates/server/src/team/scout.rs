@@ -120,25 +120,58 @@ fn macro_lines(events: &[TriggerEvent]) -> Vec<String> {
         .collect()
 }
 
+/// (round64) 종목 코드 뒤에 오면 "고르지 않는다"는 뜻인 말(부정 문맥).
+const NEGATIONS: [&str; 9] = [
+    "없",
+    "아니",
+    "제외",
+    "말고",
+    "빼",
+    "무관",
+    "불필요",
+    "않",
+    "pass",
+];
+/// 종목 코드의 말 덩이를 끊는 글자(문장 · 나열의 끝).
+const CLAUSE_ENDS: [char; 8] = ['.', ',', ';', '\n', '!', '?', '·', '/'];
+
 /// 담당의 답에 나온 지켜보는 종목 코드(6자리, 처음 나온 순서, 겹침 없이, 많아야 [`MACRO_PICKS`]개).
+/// (round64) 코드 바로 뒤의 말 덩이(다음 코드나 문장 · 나열의 끝까지)에 부정의 말("볼 것 없음" · "관련 없음" ·
+/// "제외" 따위)이 있으면 그 코드는 고르지 않는다.
 fn picks(reply: &str, watched: &[Symbol]) -> Vec<Symbol> {
+    let chars: Vec<char> = reply.chars().collect();
     let mut found: Vec<Symbol> = Vec::new();
-    let mut digits = String::new();
-    for c in reply.chars().chain(std::iter::once(' ')) {
-        if c.is_ascii_digit() {
-            digits.push(c);
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_digit() {
+            i += 1;
             continue;
         }
+        let start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        let digits: String = chars[start..i].iter().collect();
         if digits.len() == 6
+            && !negated(&chars[i..])
             && let Some(symbol) = watched.iter().find(|s| s.as_str() == digits)
             && !found.contains(symbol)
         {
             found.push(symbol.clone());
         }
-        digits.clear();
     }
     found.truncate(MACRO_PICKS);
     found
+}
+
+/// 코드 뒤의 말 덩이(다음 숫자나 [`CLAUSE_ENDS`]까지)에 [`NEGATIONS`]의 말이 있나.
+fn negated(after: &[char]) -> bool {
+    let clause: String = after
+        .iter()
+        .take_while(|c| !c.is_ascii_digit() && !CLAUSE_ENDS.contains(c))
+        .collect();
+    let clause = clause.to_lowercase();
+    NEGATIONS.iter().any(|word| clause.contains(word))
 }
 
 /// 볼 것이 없다는 답인가.
@@ -339,5 +372,19 @@ mod tests {
         let names: Vec<&str> = found.iter().map(Symbol::as_str).collect();
         assert_eq!(names, ["005930", "000660", "100010"]);
         assert!(picks("(pass)", &watched).is_empty());
+    }
+
+    #[test]
+    fn 볼_것_없다는_말이_뒤에_붙은_코드는_고르지_않는다() {
+        let watched: Vec<Symbol> = ["005930", "000660", "100010"]
+            .into_iter()
+            .map(Symbol::new)
+            .collect();
+        let found = picks(
+            "005930은 볼 것 없음, 000660은 제외. 100010 살펴볼 만함",
+            &watched,
+        );
+        let names: Vec<&str> = found.iter().map(Symbol::as_str).collect();
+        assert_eq!(names, ["100010"]);
     }
 }

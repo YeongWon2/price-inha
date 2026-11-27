@@ -242,6 +242,8 @@ impl Crew {
             closed.extend(self.journal.settle_memos(&ymd(today), &second, at)?);
         }
         self.tell_closed(&closed, at);
+        // (round64) 정산된 교훈을 시장 메모로 색인한다.
+        self.index_lessons(&closed);
         Ok(())
     }
 
