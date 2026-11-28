@@ -34,7 +34,11 @@ mod setup_sound;
 mod slots;
 mod team;
 mod trading;
+mod unverified;
 mod update_check;
+pub use unverified::{
+    UNVERIFIED_HELD, UNVERIFIED_KEYS_FILE, UNVERIFIED_PENDING, UNVERIFIED_REMOVED,
+};
 
 pub use access_http::{ACCESS_KEY_PATH, ACCESS_LOG_PATH, ACCESS_UNLOCK_PATH};
 pub use ai_link::{
