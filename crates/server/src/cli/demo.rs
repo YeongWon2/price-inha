@@ -14,12 +14,18 @@
 use std::io::Write;
 use std::net::{IpAddr, TcpListener};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use pi_store::{NewTemplate, TemplateState, UnixMillis};
 use pi_template::{Style, Template};
 
 use super::open::{OpenScreen, open_browser};
 use super::runner::CommandRunner;
+use crate::demo_day::{
+    DEMO_DAY_MINUTES_DEFAULT, DEMO_DAY_MINUTES_MIN, DemoDayClock, DemoDayOrigin, demo_day_origin,
+    save_demo_day,
+};
 use crate::{App, AppError, RunAssembly, Settings, SettingsError};
 
 /// 시연 보관 폴더 이름 뒤에 붙이는 글자.
@@ -55,25 +61,107 @@ pub struct DemoPlan {
     pub day_minutes: u32,
 }
 
-/// (결정 36) `--demo-day-minutes <수>`를 빼서 읽고 나머지로 [`demo_settings`]를 부른다.
+/// (결정 36) 하루 길이를 받는 인자.
+const ARG_DAY: &str = "--demo-day-minutes";
+
+/// (결정 36) 짧은 하루에서 장 마감 뒤 회차 · 장 시작 전 브리핑이 장 끝 · 시작에서 떨어진 시간.
+const SHORT_DAY_SCHEDULE_GAP: Duration = Duration::from_secs(30);
+/// (결정 36) 짧은 하루의 가짜 공시 간격(장중 15분 안에 여러 번 논의가 열리게).
+const SHORT_DAY_DISCLOSURE_EVERY: Duration = Duration::from_secs(120);
+
+/// (결정 36) `--demo-day-minutes <수>`를 빼서 읽고 나머지로 [`demo_settings`]를 부른다. 주지 않으면
+/// [`DEMO_DAY_MINUTES_DEFAULT`], 0이면 짧은 하루를 끈다. 1 ~ [`DEMO_DAY_MINUTES_MIN`] − 1 · 읽을 수 없는 값은 거부한다.
 pub fn demo_plan(
-    _args: &[String],
-    _env: &dyn Fn(&str) -> Option<String>,
-    _user_home: Option<&Path>,
-    _no_open: bool,
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+    user_home: Option<&Path>,
+    no_open: bool,
 ) -> Result<(Settings, DemoPlan), SettingsError> {
-    todo!()
+    let invalid = SettingsError::InvalidValue { name: ARG_DAY };
+    let mut rest = Vec::new();
+    let mut day_minutes = DEMO_DAY_MINUTES_DEFAULT;
+    let mut given = args.iter();
+    while let Some(arg) = given.next() {
+        if arg != ARG_DAY {
+            rest.push(arg.clone());
+            continue;
+        }
+        let value = given.next().ok_or_else(|| invalid.clone())?;
+        day_minutes = value
+            .parse::<u32>()
+            .ok()
+            .filter(|minutes| *minutes == 0 || *minutes >= DEMO_DAY_MINUTES_MIN)
+            .ok_or_else(|| invalid.clone())?;
+    }
+    let settings = demo_settings(&rest, env, user_home)?;
+    let request = DemoRequest { no_open };
+    Ok((
+        settings,
+        DemoPlan {
+            request,
+            day_minutes,
+        },
+    ))
 }
 
-/// (결정 36) 계획대로 띄운다(짧은 하루 · 체험 폴더 표시).
+/// (결정 36) 계획대로 띄운다: 체험 폴더의 시작점을 읽어(없으면 새로) 짧은 하루를 켜면 체험 시계
+/// ([`DemoDayClock`]) · 짧은 일정 · 짧은 가짜 공시 간격을 조립에 넣고, 띄운 뒤 시작점(체험 폴더 표시)을 남기고
+/// [`start_demo`]와 같이 안내 · 사무실 주소를 찍고 브라우저를 연다.
 pub async fn start_demo_plan(
-    _settings: Settings,
-    _assembly: RunAssembly,
-    _plan: &DemoPlan,
-    _output: &mut dyn Write,
-    _runner: &dyn CommandRunner,
+    settings: Settings,
+    mut assembly: RunAssembly,
+    plan: &DemoPlan,
+    output: &mut dyn Write,
+    runner: &dyn CommandRunner,
 ) -> Result<App, AppError> {
-    todo!()
+    let home = settings.home.clone();
+    let market = settings.market;
+    let origin = demo_day_origin(&home, plan.day_minutes, market, assembly.wiring.clock.now());
+    if plan.day_minutes > 0 {
+        shorten_day(&mut assembly, origin, market);
+    }
+    let app = App::launch_run(settings, assembly).await?;
+    if let Err(error) = save_demo_day(&home, &origin) {
+        tracing::warn!("체험 폴더 표시를 남기지 못했습니다: {}", error.kind());
+    }
+    let addr = crate::announce_addr(app.local_addr());
+    let url = format!("http://{addr}{}", OpenScreen::Office.path());
+    let _ = writeln!(output, "{DEMO_NOTICE}");
+    let _ = writeln!(output, "시연 보관 폴더: {}", home.display());
+    let _ = writeln!(output, "{url}");
+    if plan.day_minutes > 0 {
+        let session = plan.day_minutes - 5;
+        let _ = writeln!(
+            output,
+            "{DEMO_DAY_NOTICE} {}분입니다 — 장 시작 전 1분 · 장중 {session}분 · 마감 뒤 4분, 그다음은 다음 거래일입니다(--demo-day-minutes 0이면 하루 종일 장)",
+            plan.day_minutes
+        );
+    }
+    match seed_template(&app) {
+        Ok(true) => {
+            let _ = writeln!(output, "{DEMO_TEMPLATE_NOTICE}");
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!("시연 템플릿을 골라 두지 못했습니다: {error}"),
+    }
+    if !plan.request.no_open && !open_browser(runner, &url) {
+        let _ = writeln!(output, "브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
+    }
+    Ok(app)
+}
+
+/// 짧은 하루를 조립에 넣는다: 체험 시계, 장 마감 뒤 회차 · 브리핑 간격, 가짜 공시 간격.
+fn shorten_day(assembly: &mut RunAssembly, origin: DemoDayOrigin, market: pi_market::Market) {
+    let inner = Arc::clone(&assembly.wiring.clock);
+    assembly.wiring.clock = Arc::new(DemoDayClock::new(inner, origin, market));
+    if let Some(team) = assembly.launch.team.as_mut() {
+        team.schedule.after_close_delay = SHORT_DAY_SCHEDULE_GAP;
+        team.schedule.briefing_lead = SHORT_DAY_SCHEDULE_GAP;
+    }
+    assembly.demo.disclosure_every = assembly
+        .demo
+        .disclosure_every
+        .map(|every| every.min(SHORT_DAY_DISCLOSURE_EVERY));
 }
 
 /// 기본 포트가 차 있을 때 바로 뒤에서 찾아보는 포트 수.
@@ -100,10 +188,13 @@ pub fn demo_settings(
     Ok(settings)
 }
 
-/// (67차) 받은 인자와 프로세스의 환경 변수 · 홈 폴더로 [`demo_settings`]를 부른다(실행 파일의 `demo`).
-pub fn demo_from_process(args: &[String]) -> Result<Settings, SettingsError> {
+/// (67차) 받은 인자와 프로세스의 환경 변수 · 홈 폴더로 [`demo_plan`]을 부른다(실행 파일의 `demo`).
+pub fn demo_from_process(
+    args: &[String],
+    no_open: bool,
+) -> Result<(Settings, DemoPlan), SettingsError> {
     let env = |name: &str| std::env::var(name).ok();
-    demo_settings(args, &env, std::env::home_dir().as_deref())
+    demo_plan(args, &env, std::env::home_dir().as_deref(), no_open)
 }
 
 /// 설정 인자 이름들(`crate::Settings`와 같은 글자).
@@ -132,6 +223,7 @@ fn is_free(bind: IpAddr, port: u16) -> bool {
 }
 
 /// 시연 서버를 띄우고 안내 · 사무실 주소를 찍고 브라우저를 연다. 뜬 앱을 돌려준다(끄는 것은 부르는 쪽).
+/// 짧은 하루는 끈 채로([`start_demo_plan`]의 하루 길이 0) 체험 폴더 표시만 남긴다.
 pub async fn start_demo(
     settings: Settings,
     assembly: RunAssembly,
@@ -139,24 +231,11 @@ pub async fn start_demo(
     output: &mut dyn Write,
     runner: &dyn CommandRunner,
 ) -> Result<App, AppError> {
-    let home = settings.home.clone();
-    let app = App::launch_run(settings, assembly).await?;
-    let addr = crate::announce_addr(app.local_addr());
-    let url = format!("http://{addr}{}", OpenScreen::Office.path());
-    let _ = writeln!(output, "{DEMO_NOTICE}");
-    let _ = writeln!(output, "시연 보관 폴더: {}", home.display());
-    let _ = writeln!(output, "{url}");
-    match seed_template(&app) {
-        Ok(true) => {
-            let _ = writeln!(output, "{DEMO_TEMPLATE_NOTICE}");
-        }
-        Ok(false) => {}
-        Err(error) => tracing::warn!("시연 템플릿을 골라 두지 못했습니다: {error}"),
-    }
-    if !request.no_open && !open_browser(runner, &url) {
-        let _ = writeln!(output, "브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
-    }
-    Ok(app)
+    let plan = DemoPlan {
+        request: *request,
+        day_minutes: 0,
+    };
+    start_demo_plan(settings, assembly, &plan, output, runner).await
 }
 
 /// 고른 템플릿이 하나도 없으면(어느 상태든) 스윙 템플릿을 모의중으로 하나 만든다(템플릿 화면에서 고른 것과 같은 값).

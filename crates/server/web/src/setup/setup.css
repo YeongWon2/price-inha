@@ -81,3 +81,6 @@
 td.setup-diag-text { white-space: normal; overflow-wrap: anywhere; min-width: 12em; }
 /* (57차) 담당 모델 고르기 표의 단추 줄. */
 .setup-extra-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+
+/* (결정 36) 체험판 안내 줄: 시연에서 가짜로 도는 자리 바로 앞. */
+.trial-note { color: var(--warning); font-size: var(--font-size-sm); margin: var(--space-1) 0 var(--space-3); }

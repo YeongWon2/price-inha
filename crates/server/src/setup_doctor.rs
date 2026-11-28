@@ -119,6 +119,10 @@ impl SetupView {
 
     /// 설정 상태에 더하는 칸: `market` · `models`.
     pub(crate) fn add_to_status(&self, body: &mut Value) {
+        // (결정 36) `price-inha demo`의 체험 폴더면 화면이 체험판 안내 줄을 그린다.
+        if self.desk.trial() {
+            body["trial"] = json!(true);
+        }
         body["market"] = json!(market_id(self.market));
         body["models"] = Value::Array(
             self.models

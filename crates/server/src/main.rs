@@ -18,10 +18,11 @@ use std::sync::{Arc, Mutex};
 use pi_secrets::SecretStore;
 use pi_store::UnixMillis;
 use price_inha::{
-    AccessKeyRequest, App, AppError, CliError, Command, DemoRequest, InstallOptions, OpenRequest,
+    AccessKeyRequest, App, AppError, CliError, Command, DemoPlan, InstallOptions, OpenRequest,
     RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
     SettingsError, SetupContext, SetupRequest, SystemRunner, VERSION, access_key, access_key_with,
-    announce_addr, demo_from_process, doctor, install_logging, restore, run_assembly, start_demo,
+    announce_addr, demo_from_process, doctor, install_logging, restore, run_assembly,
+    start_demo_plan,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
@@ -38,7 +39,7 @@ const USAGE: &str = "쓰는 법: price-inha [run] [--home <폴더>] [--bind <IP>
   price-inha restore <백업 파일> --identity <age 비밀키 파일> --into <빈 폴더>
   price-inha setup [ai|broker|symbols|messenger|service|open] [--dry-run] [설정 인자들]
   price-inha open [home|office|account|templates|rules|history] [--print] [설정 인자들]
-  price-inha demo [--no-open] [--home <폴더>] [--port <수>]   키 없이 시연 서버를 켜고 사무실을 연다
+  price-inha demo [--no-open] [--demo-day-minutes <수>] [--home <폴더>] [--port <수>]   키 없이 체험 서버를 켜고 사무실을 연다
   price-inha --version";
 
 /// 설정 치명 오류의 종료 코드(서비스 관리자가 이 코드로는 다시 띄우지 않는다).
@@ -182,9 +183,10 @@ fn main() -> ExitCode {
 async fn dispatch(command: Command) -> ExitCode {
     match command {
         Command::Run { args } => serve(Settings::from_process_env(&args), None).await,
-        Command::Demo { no_open, args } => {
-            serve(demo_from_process(&args), Some(DemoRequest { no_open })).await
-        }
+        Command::Demo { no_open, args } => match demo_from_process(&args, no_open) {
+            Ok((settings, plan)) => serve(Ok(settings), Some(plan)).await,
+            Err(error) => settings_failed(&error),
+        },
         Command::Service { action, args } => match settings_of(&args) {
             Ok(settings) => {
                 init_plain_tracing();
@@ -285,8 +287,8 @@ fn failed(error: &CliError) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// 포그라운드로 띄운다(지금 동작). `demo`면 시연으로 띄운다(안내 · 사무실 열기, 67차).
-async fn serve(settings: Result<Settings, SettingsError>, demo: Option<DemoRequest>) -> ExitCode {
+/// 포그라운드로 띄운다(지금 동작). `demo`면 시연으로 띄운다(안내 · 사무실 주소는 `start_demo_plan`이 찍는다, 67차).
+async fn serve(settings: Result<Settings, SettingsError>, demo: Option<DemoPlan>) -> ExitCode {
     let secrets = init_tracing(settings.as_ref().ok(), true);
     // 기록 파일로 띄운 것(예약 작업)은 표준 오류를 볼 수 없다: 뜨지 못한 까닭을 기록에도 남긴다(가리기를 거친다).
     let to_file = settings.as_ref().is_ok_and(|s| s.log_file.is_some());
@@ -446,7 +448,7 @@ fn restore_command(backup: PathBuf, identity: PathBuf, into: PathBuf) -> ExitCod
 async fn run(
     settings: Result<Settings, SettingsError>,
     secrets: Option<Arc<SecretStore>>,
-    demo_command: Option<DemoRequest>,
+    demo_command: Option<DemoPlan>,
 ) -> Result<(), Failure> {
     let settings = settings.map_err(Failure::Settings)?;
     let demo = settings.demo;
@@ -456,7 +458,7 @@ async fn run(
     let assembly = run_assembly(&settings, secrets);
     let mut out = std::io::stdout();
     let started = match demo_command {
-        Some(request) => start_demo(settings, assembly, &request, &mut out, &SystemRunner).await,
+        Some(plan) => start_demo_plan(settings, assembly, &plan, &mut out, &SystemRunner).await,
         None => App::launch_run(settings, assembly).await,
     };
     let app = started.map_err(Failure::App)?;
@@ -466,7 +468,6 @@ async fn run(
     } else {
         " (필수 설정이 빠져 있으면 이 주소의 설정 화면에서 등록합니다)"
     };
-    // (67차) `demo`는 안내 · 사무실 주소를 이미 찍었다.
     if demo_command.is_none() {
         say(&format!(
             "http://{} 에서 열렸습니다{mode}. 끄려면 Ctrl+C",

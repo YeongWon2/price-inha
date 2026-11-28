@@ -182,7 +182,7 @@ fn demo_day(market: Market, date: NaiveDate) -> TradingDay {
 
 /// 그 시장 날짜 · 시각(자정부터 센 분)의 UTC 시각. 국내는 UTC+9, 미국은 미 동부 시각(서머타임이면 UTC-4,
 /// 아니면 UTC-5)이다.
-fn market_time(market: Market, date: NaiveDate, minute: u32) -> Option<DateTime<Utc>> {
+pub(crate) fn market_time(market: Market, date: NaiveDate, minute: u32) -> Option<DateTime<Utc>> {
     let offset_hours: i64 = match market {
         Market::Us if us_eastern_dst(date, minute) => -4,
         Market::Us => -5,
