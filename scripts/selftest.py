@@ -474,16 +474,32 @@ def main():
 
         # --- 흔들림 (2026-11-28): 실패한 시험 하나만 혼자 한 번 다시 돌린다
         flag = tmp / "flaky-once"
-        ct = [py, "scripts/cargo_tests.py", "store"]
+        ct = [py, "scripts/cargo_tests.py", "market"]
         case(fx, "흔들림: 한 번 떨어진 시험은 혼자 다시 돌려 통과하면 통과로 치고 기록한다",
-             lambda: append(fx, "crates/store/tests/t.rs",
+             lambda: append(fx, "crates/market/tests/t.rs",
                             f'#[test]\nfn flaky_once() {{\n    let p = std::path::Path::new("{flag}");\n'
                             '    if !p.exists() {\n        std::fs::write(p, "1").unwrap();\n        panic!("처음엔 실패");\n    }\n}'),
              ["bash", "-c", f"rm -f {flag}; {' '.join(ct)} && cat .pipeline/flaky.json"],
              ["흔들림: flaky_once — 혼자 다시 돌려 통과", '"count": 1'], should_fail=False)
+        okf = tmp / "ok-mods"
+        case(fx, "흔들림: 흔들림으로 통과한 모듈은 캐시에 적을 통과 목록에 넣지 않는다(보안 검토 3)",
+             lambda: append(fx, "crates/market/tests/t.rs",
+                            f'#[test]\nfn flaky_twice() {{\n    let p = std::path::Path::new("{flag}2");\n'
+                            '    if !p.exists() {\n        std::fs::write(p, "1").unwrap();\n        panic!("처음엔 실패");\n    }\n}'),
+             ["bash", "-c", f"rm -f {flag}2 {okf}; {py} scripts/cargo_tests.py --out {okf} market && echo \"목록=[$(cat {okf})]\""],
+             ["흔들림: flaky_twice", "목록=[]"], should_fail=False)
         case(fx, "흔들림: 혼자 다시 돌려도 떨어지면 실패다",
-             lambda: append(fx, "crates/store/tests/t.rs", '#[test]\nfn always_bad() {\n    panic!("늘 실패");\n}'),
-             ct, ["✗ 3 테스트: store", "혼자 다시 돌려도 실패: always_bad"])
+             lambda: append(fx, "crates/market/tests/t.rs", '#[test]\nfn always_bad() {\n    panic!("늘 실패");\n}'),
+             ct, ["✗ 3 테스트: market", "혼자 다시 돌려도 실패: always_bad"])
+        case(fx, "흔들림: 돈 · 안전 모듈(store)은 혼자 다시 돌려 통과로 치지 않는다(보안 검토 3)",
+             lambda: append(fx, "crates/store/tests/t.rs",
+                            f'#[test]\nfn flaky_risk() {{\n    let p = std::path::Path::new("{flag}3");\n'
+                            '    if !p.exists() {\n        std::fs::write(p, "1").unwrap();\n        panic!("처음엔 실패");\n    }\n}'),
+             ["bash", "-c", f"rm -f {flag}3; {py} scripts/cargo_tests.py store"],
+             ["✗ 3 테스트: store", "돈 · 안전 모듈이라 흔들림 다시 돌리기를 하지 않는다"])
+        case(fx, "캐시: 계획 뒤 작업 트리가 바뀌면 통과를 적지 않는다(보안 검토 2)", None,
+             ["bash", "-c", f"PLAN_TREE=0000000000000000000000000000000000000000 {py} scripts/affected.py --record test:market abc 2>&1; echo 적힘=$(grep -c abc .pipeline/cache/passed.json 2>/dev/null || echo 0)"],
+             ["캐시에 적지 않음: test:market", "적힘=0"], should_fail=False)
 
         # --- 동작 잠금 G1 의 범위: 바뀐 · 새 시험 대상만
         def lock_new_test():

@@ -18,6 +18,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from affected import RISK  # noqa: E402 — 돈 · 안전 모듈 목록은 한곳(affected.py)에
+
 ROOT = Path(__file__).resolve().parent.parent
 FLAKY = ROOT / ".pipeline/flaky.json"
 FLAKY_MAX = 5  # 이보다 많이 떨어지면 흔들림이 아니라 진짜 실패로 보고 다시 돌리지 않는다
@@ -95,7 +98,10 @@ def one(m, targets):
         return True, f"통과 {n}개", []
     fails = failures(out)
     tail = "\n".join(out.strip().splitlines()[-60:])
-    if not fails or len(fails) > FLAKY_MAX:
+    # (보안 검토 3) 돈 · 안전 모듈은 혼자 다시 돌려 통과로 치지 않는다 — 병렬에서만 터지는 동시성 결함일 수 있다.
+    if not fails or len(fails) > FLAKY_MAX or m in RISK:
+        if m in RISK and fails:
+            tail += "\n(돈 · 안전 모듈이라 흔들림 다시 돌리기를 하지 않는다)"
         return False, tail, []
     flaky = []
     for args, name in fails:
@@ -136,7 +142,9 @@ def main():
             for name in flaky:
                 print(f"  흔들림: {name} — 혼자 다시 돌려 통과 (.pipeline/flaky.json 에 쌓음)")
                 note_flaky(m, name)
-            ok_mods.append(m)
+            # (보안 검토 3) 흔들림으로 통과한 결과는 캐시에 적지 않는다(다음에도 다시 돈다).
+            if not flaky:
+                ok_mods.append(m)
         else:
             fail = 1
             print(f"✗ 3 테스트: {m}{scope} — 고치기: 아래 실패한 시험을 본다. 잠긴 시험은 고치지 않고 src 를 고친다")

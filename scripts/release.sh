@@ -101,13 +101,18 @@ if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "- 참고:
 # 릴리스 앞 검사(2026-11-28 사용자 "릴리즈 직전에도 전체 다 돌리는 것보다 이번에 올라가는 영향이 있는 범위만"):
 # 직전 릴리스 태그 뒤로 바뀐 것이 영향을 주는 범위만 돈다(같은 입력으로 통과한 검사는 캐시). 직전 태그가 없으면
 # 전체. 스크립트 · 규칙 · 루트 Cargo가 바뀌었으면 영향 계산이 스스로 전체로 넓힌다. docs/dev/pipeline.md 5장.
-prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -vx "$tag" | head -1 || true)
-if [ -n "$prev" ]; then
-  echo "- 릴리스 앞 검사: $prev 뒤로 바뀐 것의 영향 범위"
-  run bash scripts/verify.sh --affected --base "$prev"
+# (보안 검토 1 · 4) 정식 판 태그(v숫자.숫자.숫자)만 직전 릴리스로 본다(rc · 다른 이름 태그는 뺀다). 고른 태그가 지금
+# 커밋과 같으면 바뀐 것이 없어 보이므로 전체로 돈다. 캐시는 쓰지 않는다(통과 기록은 손으로 적을 수 있다).
+prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$tag" | head -1 || true)
+if [ -n "$prev" ] && [ "$(git rev-parse "$prev^{commit}" 2>/dev/null)" = "$(git rev-parse HEAD)" ]; then
+  echo "- 릴리스 앞 검사: 직전 태그 $prev 가 지금 커밋과 같아 전체(캐시 없이)"
+  run bash scripts/verify.sh --full --no-cache
+elif [ -n "$prev" ]; then
+  echo "- 릴리스 앞 검사: $prev 뒤로 바뀐 것의 영향 범위(캐시 없이)"
+  run bash scripts/verify.sh --affected --base "$prev" --no-cache
 else
-  echo "- 릴리스 앞 검사: 직전 릴리스 태그가 없어 전체"
-  run bash scripts/verify.sh --full
+  echo "- 릴리스 앞 검사: 직전 릴리스 태그가 없어 전체(캐시 없이)"
+  run bash scripts/verify.sh --full --no-cache
 fi
 run "${build[@]}"
 if [ "$dry" -eq 0 ]; then

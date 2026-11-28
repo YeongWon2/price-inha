@@ -547,6 +547,12 @@ def plan(base, focus, wip, full=False):
 def main():
     args = sys.argv[1:]
     if args[:1] == ["--record"] and len(args) >= 3:
+        # (보안 검토 2) 시험이 도는 사이 작업 트리가 바뀌었으면(계획 때의 PLAN_TREE와 다르면) 적지 않는다 —
+        # 바뀐 트리로 통과한 결과를 계획 때 지문으로 굳히지 않는다.
+        planned = os.environ.get("PLAN_TREE", "")
+        if planned and work_tree() != planned:
+            print(f"캐시에 적지 않음: {args[1]} — 시험이 도는 사이 작업 트리가 바뀜", file=sys.stderr)
+            return
         record(args[1], args[2], args[3:] or ["*"])
         return
     if args[:1] == ["--deps"] and len(args) == 2:

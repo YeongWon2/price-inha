@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # G2 기계 검사. 0으로 끝나야 "끝났다"고 말할 수 있다. docs/dev/pipeline.md 5장.
-#   scripts/verify.sh [--full]   전체 (릴리스 앞: scripts/verify.sh --full --no-cache)
+#   scripts/verify.sh [--full]   전체 (릴리스 앞은 scripts/release.sh가 직전 정식 태그 뒤 영향 범위를 캐시 없이 돌린다)
 #   scripts/verify.sh <모듈>...  그 모듈만 (다른 모듈이 아직 red일 때)
 #   scripts/verify.sh --affected [--base <ref>] [--focus a,b] [--wip c,d]
 #       영향 범위만(scripts/affected.py): 바뀐 크레이트 · 기대는 크레이트 · 돈 · 안전 크레이트의 시험, 바뀐 화면의 시험.
@@ -49,6 +49,9 @@ else
   plan=$("$PY" scripts/affected.py --plan --full $nocache) || { echo "✗ 범위 계산 실패"; exit 2; }
 fi
 eval "$plan"
+# (보안 검토 2) 계획 때의 작업 트리 — 기록할 때 같은지 본다(affected.py --record).
+PLAN_TREE=$("$PY" -c "import sys; sys.path.insert(0, 'scripts'); import affected; print(affected.work_tree())" 2>/dev/null || true)
+export PLAN_TREE
 
 inter() { local x out=""; for x in $1; do has "$2" "$x" && out="$out $x"; done; echo "${out# }"; }
 if [ "$picked" -eq 1 ]; then
