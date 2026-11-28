@@ -11,6 +11,7 @@ mod late;
 mod registry;
 mod step;
 mod symbols;
+mod volume;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,6 +32,7 @@ use crate::{
 use fetch::{Fetched, Plan};
 use late::Board;
 use step::{Rested, Step, failure_state, millis};
+use volume::Volumes;
 
 pub(crate) use late::market_date;
 pub(crate) use registry::Registered;
@@ -81,6 +83,8 @@ pub(crate) struct Feed {
     /// (W5 1차) 받은 시세 · 달력을 넘길 주문 길.
     trading: Option<Arc<Trading>>,
     stale_hook: Option<StaleHook>,
+    /// (V32) 종목마다 그날 누적 거래량.
+    volumes: Volumes,
 }
 
 impl Feed {
@@ -111,6 +115,7 @@ impl Feed {
             calendar_log: LogGate::new(LOG_EVERY),
             trading: None,
             stale_hook: None,
+            volumes: Volumes::default(),
         }
     }
 
@@ -220,6 +225,7 @@ impl Feed {
     /// 시세 받기를 멈췄다: 간직한 것을 버리고, 늦은 종목 · 거절된 종목 알림을 거둔다.
     fn halt(&mut self) {
         self.board.forget();
+        self.volumes.forget();
         self.announce_stale();
         self.remember_rejected(Vec::new());
         self.calendar_retry_at = None;
@@ -255,6 +261,7 @@ impl Feed {
             let plan = self.plan();
             self.board.asked(&plan.asking(), self.clock.now());
             let fetched = self.fetch_watching(adapter, plan).await;
+            self.read_volumes(adapter, &fetched, demo).await;
             let came = match (&fetched, &self.trading) {
                 (Ok(fetched), Some(_)) => fetched.quotes.clone(),
                 _ => Vec::new(),
@@ -345,8 +352,10 @@ impl Feed {
         if !demo {
             self.status(FEED_LIVE);
         }
-        self.publisher
-            .publish_transient(KIND_QUOTES, self.board.quotes_payload(&self.symbols, demo));
+        let mut payload = self.board.quotes_payload(&self.symbols, demo);
+        let today = market_date(self.market, self.clock.now());
+        self.volumes.decorate(&mut payload, today);
+        self.publisher.publish_transient(KIND_QUOTES, payload);
         Step::wait(self.pace.interval.max(MIN_INTERVAL))
     }
 

@@ -24,6 +24,8 @@ pub(crate) struct DemoAdapter {
     ticks: AtomicU64,
     /// (24차) 시연 달력을 내는가.
     calendar: bool,
+    /// (V32) 종목마다 그날(시장 날짜)과 그날 가짜 체결 수량의 합.
+    traded: Mutex<HashMap<Symbol, (NaiveDate, i64)>>,
 }
 
 /// 가격 모양: 한 걸음의 크기 · 처음 값의 범위(걸음 수) · 소수 자리.
@@ -44,6 +46,7 @@ impl DemoAdapter {
             minor: Mutex::new(HashMap::new()),
             ticks: AtomicU64::new(0),
             calendar: false,
+            traded: Mutex::new(HashMap::new()),
         }
     }
 
@@ -92,6 +95,26 @@ impl DemoAdapter {
             moved
         };
         Decimal::new(*value, shape.scale)
+    }
+}
+
+impl DemoAdapter {
+    /// (V32) 받을 때마다 그 종목에 가짜 체결 한 건(국내 10~500주, 미국 1~200주)을 더한다. 날(시장 날짜)이 바뀌면 0부터.
+    fn trade(&self, symbol: &Symbol, tick: u64, now: DateTime<Utc>) {
+        let roll =
+            i64::try_from(mix(fnv1a(symbol.as_str().as_bytes()) ^ tick.rotate_left(17)) % 50)
+                .unwrap_or(0);
+        let quantity = match self.market {
+            Market::Us => roll * 4 + 1,
+            _ => (roll + 1) * 10,
+        };
+        let date = crate::feed::market_date(self.market, now);
+        let mut traded = self.traded.lock().unwrap_or_else(PoisonError::into_inner);
+        let entry = traded.entry(symbol.clone()).or_insert((date, 0));
+        if entry.0 != date {
+            *entry = (date, 0);
+        }
+        entry.1 = entry.1.saturating_add(quantity);
     }
 }
 
@@ -243,8 +266,23 @@ impl MarketAdapter for DemoAdapter {
                 exchange_time: Some(now),
                 received_at: now,
             });
+            self.trade(symbol, tick, now);
         }
         self.fake.quotes(symbols).await
+    }
+
+    /// (V32) 그날 가짜 체결 수량의 합. 그날 아직 받은 적이 없으면 0이다.
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<Decimal>, MarketError> {
+        let traded = self.traded.lock().unwrap_or_else(PoisonError::into_inner);
+        let sum = match traded.get(symbol) {
+            Some((day, sum)) if *day == date => *sum,
+            _ => 0,
+        };
+        Ok(Some(Decimal::from(sum)))
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
