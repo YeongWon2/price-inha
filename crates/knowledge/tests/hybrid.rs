@@ -2,6 +2,7 @@
 //!
 //! 잠긴 `tests/suite/`를 고치지 않으려고 따로 둔 시험 바이너리다. 가짜 임베딩만 쓴다(바깥 요청 없음).
 //! 가짜 임베딩은 낱말로 방향을 정한다: "하락" · "떨어" → x, "상승" · "오름" → y, 그 밖 → z.
+//! (6차) 2026-11-27 백로그 작업을 합쳐 잠금.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
