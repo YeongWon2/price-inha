@@ -8,6 +8,7 @@ import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
 import { aiLimitRequest, formatAiLimit, parseAiLimit, readAiLimit } from "./ai-limit";
 import { mountSetupExtras } from "./extras";
 import { placeTrialNotes } from "./trial";
+import { fillVolume } from "./volume";
 
 // 공통 메뉴(server 26차 3번): 화면 맨 위 자리에 단다.
 mountMenu(document.getElementById("menu"), "setup");
@@ -123,6 +124,7 @@ function byId(id: string): HTMLInputElement {
     var row: Data = { tr: tr, last: null };
     setText(cell(tr), symbol);
     row.price = cell(tr, "num");
+    row.volume = cell(tr, "num");
     row.currency = cell(tr);
     row.at = cell(tr);
     $quotes.appendChild(tr);
@@ -143,6 +145,7 @@ function byId(id: string): HTMLInputElement {
       if (isFinite(price)) { row.last = price; }
       row.price.className = "num" + direction;
       setText(row.price, quote.price);
+      fillVolume(row.volume, quote);
       setText(row.currency, quote.currency || "");
       setText(row.at, timeText(quote.received_at));
     });

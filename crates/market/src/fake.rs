@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 
 use crate::{
     Market, MarketAdapter, MarketCalendar, MarketError, Quote, Symbol, TradingDay, TradingStatus,
@@ -18,6 +19,8 @@ struct State {
     calendar: Option<MarketCalendar>,
     quote_failure: Option<MarketError>,
     statuses: HashMap<Symbol, TradingStatus>,
+    /// (V32) 종목마다 정한 날짜와 그날 거래량.
+    volumes: HashMap<Symbol, (NaiveDate, Decimal)>,
 }
 
 /// 정해 준 시세와 달력을 돌려주는 어댑터. 바깥으로 요청을 보내지 않는다.
@@ -62,6 +65,12 @@ impl FakeAdapter {
     /// 넘긴 순서)을 준다. 하나도 정하지 않았으면 `None`이다.
     pub fn set_status(&self, symbol: Symbol, status: TradingStatus) {
         self.state().statuses.insert(symbol, status);
+    }
+
+    /// (V32) 종목의 그날 누적 거래량을 정한다. `daily_volume`은 같은 날짜면 이 값, 그보다 뒤 날짜면 0(그날 아직
+    /// 체결 없음), 앞 날짜이거나 정하지 않은 종목이면 `None`(모름)이다.
+    pub fn set_volume(&self, symbol: Symbol, date: NaiveDate, volume: Decimal) {
+        self.state().volumes.insert(symbol, (date, volume));
     }
 
     /// 잠금 안의 값은 한 번에 하나씩만 바꾸므로, 다른 스레드가 잠금을 쥔 채 죽었어도
@@ -109,6 +118,18 @@ impl MarketAdapter for FakeAdapter {
                 })
                 .collect(),
         ))
+    }
+
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<Decimal>, MarketError> {
+        Ok(match self.state().volumes.get(symbol) {
+            Some((day, volume)) if *day == date => Some(*volume),
+            Some((day, _)) if *day < date => Some(Decimal::ZERO),
+            _ => None,
+        })
     }
 
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {

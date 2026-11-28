@@ -73,6 +73,7 @@ pub const FEED_BROKER_REJECTED: &str = "broker_rejected";
 pub const FEED_BROKER_UNREACHABLE: &str = "broker_unreachable";
 /// 지나가는 이벤트 종류: 시세 묶음.
 /// 내용은 `{"demo": bool, "quotes": [{"symbol", "price"(십진수 글자), "currency", "received_at"(유닉스 밀리초)}]}`.
+/// (V32) 그날 누적 거래량을 아는 종목에는 `"volume"`(십진수 글자, 주 수)이 더 있다. 모르면 그 칸이 없다.
 pub const KIND_QUOTES: &str = "quotes";
 /// 지나가는 이벤트 종류: 시세 늦음(N6). 내용은 `{"symbols": [늦은 종목들], "hours_unknown": bool}`.
 ///

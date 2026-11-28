@@ -51,4 +51,13 @@ impl MarketAdapter for Registered {
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
         self.calendar.calendar(date).await
     }
+
+    /// (V32) 거래량도 그 시장의 기본 공급자에게 묻는다(지금은 토스 하나).
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<rust_decimal::Decimal>, MarketError> {
+        self.calendar.daily_volume(symbol, date).await
+    }
 }

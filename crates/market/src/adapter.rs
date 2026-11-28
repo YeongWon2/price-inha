@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
 
 use crate::{Market, MarketCalendar, MarketError, Quote, Session, Symbol, TradingStatus};
 
@@ -31,6 +32,21 @@ pub trait MarketAdapter: Send + Sync {
         symbols: &[Symbol],
     ) -> Result<Option<Vec<(Symbol, TradingStatus)>>, MarketError> {
         let _ = symbols;
+        Ok(None)
+    }
+
+    /// (V32) 그 종목의 그날(`date`, 그 시장의 날짜) 누적 거래량.
+    ///
+    /// - `Ok(Some(수량))`: 그날 거래량. 그날 아직 체결이 없으면(공급자의 마지막 일봉이 그 날짜보다 앞) 0이다
+    ///   (거래일이 바뀌면 0부터).
+    /// - `Ok(None)`: 모른다(이 공급자는 거래량을 주지 않는다 · 일봉이 하나도 없다). 기본은 요청을 보내지 않고
+    ///   `Ok(None)`이다.
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<Decimal>, MarketError> {
+        let _ = (symbol, date);
         Ok(None)
     }
 }
