@@ -83,7 +83,7 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 
-**세 범위**: `scripts/verify.sh`(= `--full`)는 전체, `scripts/verify.sh <모듈>…`은 그 모듈만, `scripts/verify.sh --affected [--base <ref>] [--focus a,b] [--wip c,d]`는 영향 범위다. G2(`pipeline.py gate G2`)와 push 전 관문은 영향 범위로 돈다. **릴리스 앞에는 `scripts/verify.sh --full --no-cache`를 한 번 돈다** — `scripts/release.sh`가 빌드 전에 먼저 부른다(실패하면 묶지 않는다). 끝났다는 기준(verify 0)은 그대로다.
+**세 범위**: `scripts/verify.sh`(= `--full`)는 전체, `scripts/verify.sh <모듈>…`은 그 모듈만, `scripts/verify.sh --affected [--base <ref>] [--focus a,b] [--wip c,d]`는 영향 범위다. G2(`pipeline.py gate G2`)와 push 전 관문은 영향 범위로 돈다. **릴리스 앞에는 `scripts/release.sh`가 직전 릴리스 태그 뒤로 바뀐 것의 영향 범위(`--affected --base <직전 태그>`, 캐시 그대로)를 돌린다 — 직전 태그가 없으면 `--full`(2026-11-28 사용자 "릴리즈 직전에도 전체 다 돌리는 것보다 이번에 올라가는 영향이 있는 범위만"). 캐시 없이 전부 보려면 손으로 `scripts/verify.sh --full --no-cache`.sh`가 빌드 전에 먼저 부른다(실패하면 묶지 않는다). 끝났다는 기준(verify 0)은 그대로다.
 
 **영향 범위** (QMIT 결정 6 · 2026-11-28 사용자 "수정 파일이 영향 있는 곳만 테스트 돌려야지 … 리스크 있는 곳들만 실제 영향이 있는 부분만"). `scripts/affected.py`가 기준(기본 `origin/main`, 없으면 `HEAD~1`; G2는 그 차수가 열린 커밋 — reopen 때 또는 처음 N1을 시작한 때)과 작업 트리(커밋 안 된 것 포함)의 차이로 고른다. 줄이는 것은 "영향이 없음이 확실한 시험"뿐이고, 건너뛴 것은 한 줄씩 `건너뜀: <검사> — 까닭(…)`으로 찍는다.
 

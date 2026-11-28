@@ -98,9 +98,17 @@ fi
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then echo "- 참고: 작업 폴더에 커밋하지 않은 변경이 있다(묶음에 들어간다)"; fi
 if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "- 참고: 태그 $tag 가 아직 없다 — 올리기 전에 git tag $tag 를 만든다"; fi
 
-# 릴리스 앞 전체 검사 한 번, 캐시 없이(2026-11-28): 평소 G2 · push 전 검사는 영향 범위 · 캐시만 보므로
-# 여기서 모든 모듈의 시험 · 화면 · e2e · 설치 스크립트 시험을 다시 돌린다. docs/dev/pipeline.md 5장.
-run bash scripts/verify.sh --full --no-cache
+# 릴리스 앞 검사(2026-11-28 사용자 "릴리즈 직전에도 전체 다 돌리는 것보다 이번에 올라가는 영향이 있는 범위만"):
+# 직전 릴리스 태그 뒤로 바뀐 것이 영향을 주는 범위만 돈다(같은 입력으로 통과한 검사는 캐시). 직전 태그가 없으면
+# 전체. 스크립트 · 규칙 · 루트 Cargo가 바뀌었으면 영향 계산이 스스로 전체로 넓힌다. docs/dev/pipeline.md 5장.
+prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -vx "$tag" | head -1 || true)
+if [ -n "$prev" ]; then
+  echo "- 릴리스 앞 검사: $prev 뒤로 바뀐 것의 영향 범위"
+  run bash scripts/verify.sh --affected --base "$prev"
+else
+  echo "- 릴리스 앞 검사: 직전 릴리스 태그가 없어 전체"
+  run bash scripts/verify.sh --full
+fi
 run "${build[@]}"
 if [ "$dry" -eq 0 ]; then
   if [ -z "$target" ]; then
