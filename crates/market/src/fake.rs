@@ -120,6 +120,18 @@ impl MarketAdapter for FakeAdapter {
         ))
     }
 
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<Decimal>, MarketError> {
+        Ok(match self.state().volumes.get(symbol) {
+            Some((day, volume)) if *day == date => Some(*volume),
+            Some((day, _)) if *day < date => Some(Decimal::ZERO),
+            _ => None,
+        })
+    }
+
     async fn calendar(&self, date: NaiveDate) -> Result<MarketCalendar, MarketError> {
         if let Some(calendar) = &self.state().calendar {
             return Ok(calendar.clone());

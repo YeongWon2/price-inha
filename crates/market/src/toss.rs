@@ -16,8 +16,12 @@ use crate::{
     Quote, Symbol,
 };
 
+mod candle;
 mod http;
 mod wire;
+
+/// (V32) 캔들 경로(한도 그룹 `MARKET_DATA_CHART`).
+const CANDLES_PATH: &str = "/api/v1/candles";
 
 #[cfg(test)]
 mod tests;
@@ -394,6 +398,23 @@ impl MarketAdapter for TossAdapter {
         let date = date.format("%Y-%m-%d").to_string();
         let body = self.inner.get(path, &[("date", &date)]).await?;
         wire::parse_calendar(&body, self.market)
+    }
+
+    /// (V32) `GET /api/v1/candles?symbol=&interval=1d&count=1`의 맨 앞 일봉으로 그날 누적 거래량을 정한다
+    /// (현재가 응답에는 거래량 칸이 없다). 종목 글자가 틀리면 요청 없이 [`MarketError::InvalidSymbol`]이다.
+    async fn daily_volume(
+        &self,
+        symbol: &Symbol,
+        date: NaiveDate,
+    ) -> Result<Option<rust_decimal::Decimal>, MarketError> {
+        Symbol::parse(symbol.as_str())?;
+        let query = [
+            ("symbol", symbol.as_str()),
+            ("interval", "1d"),
+            ("count", "1"),
+        ];
+        let body = self.inner.get(CANDLES_PATH, &query).await?;
+        candle::parse_daily_volume(&body, date)
     }
 }
 
