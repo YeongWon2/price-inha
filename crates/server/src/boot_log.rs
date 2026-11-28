@@ -44,3 +44,16 @@ pub fn cap_boot_log(path: &Path, max: u64) -> std::io::Result<bool> {
     file.flush()?;
     Ok(true)
 }
+
+/// 기록 파일로 띄울 때(서비스): 보관 폴더의 켜지기 전 오류 파일(`<home>/logs/server.error.log`)이
+/// [`BOOT_LOG_MAX_BYTES`]를 넘었으면 마지막 줄들만 남긴다. 못 줄여도 띄우기는 그대로 한다(기록에만 남긴다).
+pub fn cap_home_boot_log(home: &Path) {
+    let path = home
+        .join(crate::SERVER_LOGS_DIR)
+        .join(crate::SERVER_ERROR_LOG);
+    match cap_boot_log(&path, BOOT_LOG_MAX_BYTES) {
+        Ok(true) => tracing::info!("켜지기 전 오류 파일을 상한으로 줄였다"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(kind = %error.kind(), "켜지기 전 오류 파일을 줄이지 못했다"),
+    }
+}

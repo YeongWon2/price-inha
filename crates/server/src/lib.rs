@@ -189,4 +189,4 @@ pub use update_check::{
 };
 
 // (68차, 백로그 U 5번) macOS 서비스의 켜지기 전 오류 파일을 작은 상한으로 줄인다.
-pub use boot_log::{BOOT_LOG_MAX_BYTES, cap_boot_log};
+pub use boot_log::{BOOT_LOG_MAX_BYTES, cap_boot_log, cap_home_boot_log};
