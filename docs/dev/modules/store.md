@@ -112,7 +112,7 @@
 
 ## 9차 작업: 템플릿 · 승인 · 개선안 · 모의계좌 스냅샷 · 접속 키 표 (로드맵 W1, 2026-11-16 결정)
 
-근거: `dev.md` E36 · M3 · M4 · M5 · M6 · V6 · V29 · V30, `docs/dev/roadmap.md`. 원본 근거: 승인 상태 기계 `docs/research/triggers-approval-memory-deep.md` 3.2 · 3.4, 접속 기록 `docs/research/remote-access-security.md` 4.5.
+근거: `dev.md` E36 · M3 · M4 · M5 · M6 · V6 · V29 · V30, 로드맵 W1(옛 `docs/dev/roadmap.md`, git 기록). 원본 근거: 승인 상태 기계 `docs/research/triggers-approval-memory-deep.md` 3.2 · 3.4, 접속 기록 `docs/research/remote-access-security.md` 4.5.
 아래를 **테스트로 먼저 쓰고** 구현한다. 공개 API는 더하기만 한다. 스키마는 새 버전으로 올린다(옛 파일을 지우지 않고 올린다).
 
 1. **템플릿 표와 전이 강제** (M3 · E36 · V29 · V30): 템플릿 값(판 번호 붙은 JSON)과 상태(모의중 · 승격대기 · 실전중 · 멈춤). 실전중은 승인 번호와 기준 통과 기록이 함께 있어야 한다. 전체 정지가 되면 실전중 템플릿은 멈춤으로.

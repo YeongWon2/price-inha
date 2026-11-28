@@ -9,7 +9,7 @@
 - 설치와 실행, 처음 설정: `docs/research/install-and-cli.md`. 로컬 접속: `docs/research/remote-access-security.md`. CLI 백엔드 조립: `docs/research/cli-backend.md` 5.6 · 5.7.
 - 각 차수가 잇는 모듈의 원본 근거는 그 모듈의 지시서를 따른다.
 
-## 앞으로의 차수 (로드맵 `docs/dev/roadmap.md` W5)
+## 앞으로의 차수 (로드맵 W5 — 옛 `docs/dev/roadmap.md`, git 기록)
 
 아래를 차수마다 **테스트로 먼저 쓰고** 구현한다. 새 테스트는 새 최상위 테스트 파일에 쓴다(잠긴 파일은 고치지 않는다).
 
