@@ -21,6 +21,7 @@ mod inflight;
 mod model;
 mod plan;
 mod queue;
+mod returned;
 mod schedule;
 mod store;
 mod tick;
