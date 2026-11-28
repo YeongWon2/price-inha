@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/guide-panel-jc7fyqqs.js","assets/menu-ixz3ji1b.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/guide-panel-cccldnyz.css","assets/config-panel-nqki1l03.js","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
-import { n as API, t as mountMenu } from "./menu-ixz3ji1b.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/guide-panel-kl9ac09p.js","assets/menu-kc5ybrux.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/guide-panel-cccldnyz.css","assets/config-panel-ccgioy8j.js","assets/config-panel-e9uc9ja1.css"])))=>i.map(i=>d[i]);
+import { n as API, t as mountMenu } from "./menu-kc5ybrux.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
@@ -290,7 +290,7 @@ var RulesScreen = class {
 			this.guideSlot.replaceChildren(loading());
 			try {
 				const { GuidePanel } = await __vitePreload(async () => {
-					const { GuidePanel } = await import("./guide-panel-jc7fyqqs.js");
+					const { GuidePanel } = await import("./guide-panel-kl9ac09p.js");
 					return { GuidePanel };
 				}, __vite__mapDeps([0,1,2,3,4,5,6]));
 				this.guide ??= new GuidePanel();
@@ -309,7 +309,7 @@ var RulesScreen = class {
 			this.configSlot.replaceChildren(loading());
 			try {
 				const { ConfigPanel } = await __vitePreload(async () => {
-					const { ConfigPanel } = await import("./config-panel-nqki1l03.js");
+					const { ConfigPanel } = await import("./config-panel-ccgioy8j.js");
 					return { ConfigPanel };
 				}, __vite__mapDeps([7,1,2,3,4,5,8]));
 				this.config ??= new ConfigPanel();

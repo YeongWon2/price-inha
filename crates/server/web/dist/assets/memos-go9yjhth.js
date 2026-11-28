@@ -1,4 +1,4 @@
-import { n as API } from "./menu-ixz3ji1b.js";
+import { n as API } from "./menu-kc5ybrux.js";
 import { r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as readMemoPage, n as memoRows } from "./memo-model-pzip3mr0.js";
 import { a as errorLine, i as emptyState, n as button, r as card, s as loading } from "./parts-ma3d1o7o.js";

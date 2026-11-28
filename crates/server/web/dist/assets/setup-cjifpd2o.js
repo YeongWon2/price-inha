@@ -1,8 +1,8 @@
-import { n as API, t as mountMenu } from "./menu-ixz3ji1b.js";
+import { n as API, t as mountMenu } from "./menu-kc5ybrux.js";
 import { n as submitKeyFields, t as applyKeyFieldRules } from "./field-e6l8inco.js";
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, o as field, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
-import { n as soundEnabled, t as saveSound } from "./sound-pref-om8v2p4r.js";
+import { n as soundEnabled, t as saveSound } from "./sound-pref-ctkxfhgf.js";
 // src/setup/ai-limit.ts
 /** 설정 상태에서 하루 AI 호출 상한을 읽는 칸 이름. */
 var AI_LIMIT_FIELD = "ai_daily_limit";
@@ -615,6 +615,30 @@ async function mountNotify(root) {
 	const settings = await readSettings();
 	root.replaceChildren(settings === null ? failedBlock$1() : notifyBlock(settings));
 }
+// src/setup/semantic-lan.ts
+/** 켜기 칸의 글. */
+var SEMANTIC_LAN_LABEL = "같은 집 다른 기기(사설망)의 Ollama 허용";
+/** 켜기 칸과 "밖으로 보냄" 줄을 만든다. */
+function semanticLan(privateNetwork, outside) {
+	const holder = field(SEMANTIC_LAN_LABEL, "semantic-lan", "checkbox");
+	const box = holder.querySelector("input");
+	const line = el("div", "setup-extra-outside");
+	const paint = (on, text) => {
+		box.checked = on === true;
+		line.replaceChildren(...typeof text === "string" && text !== "" ? [outsideLine(text)] : []);
+	};
+	paint(privateNetwork, outside);
+	return {
+		nodes: [holder, line],
+		checked: () => box.checked,
+		paint
+	};
+}
+function outsideLine(text) {
+	const node = el("p", "hint", text);
+	node.dataset.role = "semantic-outside";
+	return node;
+}
 // src/setup/models-view.ts
 /** "직접 입력" 고르기의 값. */
 var MODEL_CUSTOM = "__custom__";
@@ -836,7 +860,8 @@ var SEMANTIC_REBUILD_NOTE = "켜졌습니다. 기존 기록의 뜻 색인은 한
 var SEMANTIC_ERRORS = {
 	loopback_only: "Ollama 주소는 같은 컴퓨터(127.0.0.1 · localhost)만 됩니다. 주소를 확인하세요.",
 	invalid_input: "주소와 모델 이름을 모두 적어 주세요.",
-	local_only: "뜻 검색 설정은 이 컴퓨터에서만 바꿀 수 있습니다."
+	local_only: "뜻 검색 설정은 이 컴퓨터에서만 바꿀 수 있습니다.",
+	private_only: "같은 집 다른 기기는 사설망 주소(192.168.x.x · 10.x.x.x · 172.16~31.x.x · 이름.local)만 됩니다. 주소를 확인하세요."
 };
 /** 진단 상태 → 배지 글. */
 var DIAG_LABELS = {
@@ -967,10 +992,15 @@ function restoreGuide(backup) {
 function semanticOf(value) {
 	const body = record(value);
 	if (typeof body.enabled !== "boolean" || typeof body.base_url !== "string" || typeof body.model !== "string") return null;
+	const lan = {
+		private_network: body.private_network === true,
+		outside: typeof body.outside === "string" ? body.outside : null
+	};
 	return {
 		enabled: body.enabled,
 		base_url: body.base_url,
-		model: body.model
+		model: body.model,
+		...lan
 	};
 }
 /** 뜻 검색 바꾸기 실패 까닭 → 화면 글. */
@@ -997,9 +1027,11 @@ function semanticCard(initial) {
 	toggle.dataset.action = "semantic-toggle";
 	const message = el("div", "setup-extra-message");
 	message.setAttribute("aria-live", "polite");
+	const lan = semanticLan(current.private_network, current.outside);
 	const paint = () => {
 		state.textContent = current.enabled ? "켜짐" : "꺼짐";
 		toggle.textContent = current.enabled ? "끄기" : "켜기";
+		lan.paint(current.private_network, current.outside);
 	};
 	toggle.addEventListener("click", () => {
 		if (busy) return;
@@ -1011,6 +1043,7 @@ function semanticCard(initial) {
 			base_url: inputOf(urlField).value,
 			model: inputOf(modelField).value
 		};
+		if (lan.checked()) Object.assign(body, { private_network: true });
 		call("POST", API.setupSemantic, body).then((reply) => {
 			const next = reply.ok ? semanticOf(reply.body) : null;
 			if (!next) return message.replaceChildren(errorLine(semanticError(reply.body)));
@@ -1025,7 +1058,7 @@ function semanticCard(initial) {
 		});
 	});
 	paint();
-	return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), toggle, message);
+	return block("semantic", "뜻 검색", state, urlField, modelField, el("p", "hint", SEMANTIC_LOOPBACK_NOTE), ...lan.nodes, toggle, message);
 }
 /** [`soundSetting`]의 자리와, 서버에서 읽은 값을 칸에 보이고 나면 끝나는 약속(던지지 않는다). */
 function soundBlock() {

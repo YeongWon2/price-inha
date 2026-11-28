@@ -1,4 +1,4 @@
-import { n as API } from "./menu-ixz3ji1b.js";
+import { n as API } from "./menu-kc5ybrux.js";
 import { n as call, r as el } from "./call-enmqzayl.js";
 import { a as errorLine, c as table, i as emptyState, n as button, r as card } from "./parts-ma3d1o7o.js";
 /** 이 컴퓨터가 아니면 보이는 안내 글. */

@@ -1,4 +1,4 @@
-import { n as API } from "./menu-ixz3ji1b.js";
+import { n as API } from "./menu-kc5ybrux.js";
 import { n as call } from "./call-enmqzayl.js";
 /** 서버 답에서 `enabled`(참 · 거짓)를 꺼낸다. 모양이 다르면 `null`. */
 function enabledOf(body) {

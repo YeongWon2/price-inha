@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/memos-pdrl00k2.js","assets/menu-ixz3ji1b.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/memo-model-pzip3mr0.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/basis-card-view-dxesydpj.js","assets/basis-card-f0d1wup9.js","assets/basis-card-view-mgazxvz8.css"])))=>i.map(i=>d[i]);
-import { n as API, t as mountMenu, u as tradePath } from "./menu-ixz3ji1b.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/memos-go9yjhth.js","assets/menu-kc5ybrux.js","assets/menu-gyo1roft.css","assets/call-enmqzayl.js","assets/memo-model-pzip3mr0.js","assets/parts-ma3d1o7o.js","assets/parts-d414mxxc.css","assets/basis-card-view-dxesydpj.js","assets/basis-card-f0d1wup9.js","assets/basis-card-view-mgazxvz8.css"])))=>i.map(i=>d[i]);
+import { n as API, t as mountMenu, u as tradePath } from "./menu-kc5ybrux.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
@@ -544,7 +544,7 @@ var HistoryScreen = class {
 		if (!this.memos) {
 			panel.replaceChildren(loading());
 			this.memos = __vitePreload(async () => {
-				const { mountMemoTab } = await import("./memos-pdrl00k2.js");
+				const { mountMemoTab } = await import("./memos-go9yjhth.js");
 				return { mountMemoTab };
 			}, __vite__mapDeps([0,1,2,3,4,5,6])).then(({ mountMemoTab }) => {
 				panel.replaceChildren();

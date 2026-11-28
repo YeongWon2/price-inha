@@ -1,4 +1,4 @@
-import { A as insideScreen, C as DEFAULT_LOOKS, D as bubbleText, E as bubbleCandidates, O as bubbleWhere, S as followStep, _ as clearLine, a as agentsByDistance, b as postSpot, c as talkHint, d as entranceCell, f as pathTo, g as buildGrid, h as ACTOR_RADIUS, i as showChooser, j as overlap, k as bubbleWidth, l as tooFar, m as withBlockers, n as speakerOrbit, o as nearbyAgents, p as startCell, r as setHint, s as slashAction, t as easeInOut, u as cellOf, v as findPath, w as LOOKS, x as FOLLOW_LERP, y as SpotSender } from "./office-jqj7hq6d.js";
+import { A as insideScreen, C as DEFAULT_LOOKS, D as bubbleText, E as bubbleCandidates, O as bubbleWhere, S as followStep, _ as clearLine, a as agentsByDistance, b as postSpot, c as talkHint, d as entranceCell, f as pathTo, g as buildGrid, h as ACTOR_RADIUS, i as showChooser, j as overlap, k as bubbleWidth, l as tooFar, m as withBlockers, n as speakerOrbit, o as nearbyAgents, p as startCell, r as setHint, s as slashAction, t as easeInOut, u as cellOf, v as findPath, w as LOOKS, x as FOLLOW_LERP, y as SpotSender } from "./office-i92ejxje.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors
@@ -41643,6 +41643,37 @@ var PointerGesture = class {
 		return this.start !== null && this.far >= 5;
 	}
 };
+function createFrameBudget() {
+	let run = 0;
+	let done = false;
+	return {
+		note(frameMs) {
+			if (done) return null;
+			run = frameMs > 100 ? run + 1 : 0;
+			if (run < 5) return null;
+			done = true;
+			return "lighten";
+		},
+		lightened: () => done
+	};
+}
+// src/office/render-kind.ts
+/** 소프트웨어 그리기 장치 이름에 드는 낱말(대소문자 무시). */
+var SOFTWARE_NAMES = /swiftshader|llvmpipe|softpipe|software|basic render/i;
+/** WebGL 그리기 장치 이름이 소프트웨어 그리기인가. 모르는 이름 · 빈 이름은 아니다. */
+function softwareRenderer(name) {
+	return SOFTWARE_NAMES.test(name);
+}
+/** WebGL 맥락의 그리기 장치 이름(가려진 이름을 알 수 없으면 보이는 이름). 읽지 못하면 빈 글. */
+function rendererName(gl) {
+	try {
+		const info = gl.getExtension("WEBGL_debug_renderer_info");
+		const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+		return typeof name === "string" ? name : "";
+	} catch {
+		return "";
+	}
+}
 // src/office/scene3d.ts
 var FOV = 38;
 var MIN_POLAR = .15;
@@ -41725,6 +41756,11 @@ function roomTags(labels, map) {
 function createScene({ host, labels, map, names, looks, onPick, onLost, follow, player: playerOptions, speech, speaker, marks }) {
 	let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 	const renderer = makeRenderer(pixelRatio);
+	if (softwareRenderer(rendererName(renderer.getContext()))) {
+		renderer.shadowMap.enabled = false;
+		pixelRatio = MIN_PIXEL_RATIO;
+		renderer.setPixelRatio(pixelRatio);
+	}
 	host.appendChild(renderer.domElement);
 	const canvas = renderer.domElement;
 	const scene = new Scene();
@@ -41988,6 +42024,16 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 		windowStart = now;
 		frameTimes = [];
 	}
+	const budget = createFrameBudget();
+	function lighten() {
+		renderer.shadowMap.enabled = false;
+		scene.traverse((o) => {
+			for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) m.needsUpdate = true;
+		});
+		pixelRatio = MIN_PIXEL_RATIO;
+		renderer.setPixelRatio(pixelRatio);
+		resize();
+	}
 	const projected = new Vector3();
 	function placeRoomTags(width, height) {
 		for (const tag of rooms) {
@@ -42039,6 +42085,7 @@ function createScene({ host, labels, map, names, looks, onPick, onLost, follow, 
 			for (const s of spots) actors.placeTag(s.id, tags.get(s.id) ?? null);
 		}
 		measure(now, frameMs);
+		if (budget.note(frameMs) === "lighten" && renderer.shadowMap.enabled) lighten();
 	}
 	raf = requestAnimationFrame(frameStep);
 	function dispose() {

@@ -1,6 +1,6 @@
-import { a as approvalPath, l as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-ixz3ji1b.js";
+import { a as approvalPath, l as tradeBasisPath, n as API, o as decidePath, r as OFFICE_LOOK_PATHS, t as mountMenu } from "./menu-kc5ybrux.js";
 import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
-import { n as soundEnabled } from "./sound-pref-om8v2p4r.js";
+import { n as soundEnabled } from "./sound-pref-ctkxfhgf.js";
 import { i as readBasisCard } from "./basis-card-f0d1wup9.js";
 import { n as renderBasisCard } from "./basis-card-view-dxesydpj.js";
 import { i as readMemoList, r as pendingCount, t as cardMemos } from "./memo-model-pzip3mr0.js";
@@ -4676,7 +4676,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-hoc4yl7r.js");
+		const { webglAvailable, createScene } = await import("./scene3d-evsaz603.js");
 		return {
 			webglAvailable,
 			createScene

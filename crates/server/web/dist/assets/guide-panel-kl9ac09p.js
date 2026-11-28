@@ -1,4 +1,4 @@
-import { n as API, s as guidelineRetirePath } from "./menu-ixz3ji1b.js";
+import { n as API, s as guidelineRetirePath } from "./menu-kc5ybrux.js";
 import { n as call, r as el } from "./call-enmqzayl.js";
 import { i as emptyState, n as button, r as card, t as badge } from "./parts-ma3d1o7o.js";
 // src/rules/guide-model.ts
