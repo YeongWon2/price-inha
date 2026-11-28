@@ -81,9 +81,14 @@ impl DemoAdapter {
         let floor = shape.floor_steps * shape.step;
         let start = floor + i64::try_from(seed % shape.span_steps).unwrap_or(0) * shape.step;
         let value = minor.entry(symbol.clone()).or_insert(start);
-        // -3 ~ +3 걸음. 0이면 한 걸음 올린다.
-        let roll = i64::try_from(mix(seed ^ tick) % 7).unwrap_or(0) - 3;
-        let steps = if roll == 0 { 1 } else { roll };
+        // -3 ~ +3 걸음. 0이면 (결정 36) 한쪽으로 쏠리지 않게 섞은 값의 다른 자리로 한 걸음 올리거나 내린다.
+        let mixed = mix(seed ^ tick);
+        let roll = i64::try_from(mixed % 7).unwrap_or(0) - 3;
+        let steps = match roll {
+            0 if (mixed >> 32) & 1 == 0 => 1,
+            0 => -1,
+            _ => roll,
+        };
         let moved = value.saturating_add(steps * shape.step);
         // 바닥 아래로 내려가려 하면 반대로 움직인다(값은 늘 바뀐다).
         *value = if moved < floor {
