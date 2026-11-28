@@ -365,6 +365,10 @@ pub const DAILY_SUMMARY_PATH: &str = "/api/daily-summary";
 ///   `before`로 주면 다음 쪽이 겹침 · 빠짐 없이 이어진다.
 /// - `state`는 매매 상태 글자(`discussing` · `judged` · `awaiting_approval` · `blocked` · `ordered` · `holding` ·
 ///   `sold` · `reviewed`)이고 그 상태인 매매만 낸다. 다른 글자면 400 `{"error": "invalid_input"}`.
+/// - (69차) 논의중 매매의 마지막 논의가 지켜보기로 끝났으면 줄에 `watched: {"reason_code", "at"}`, 오류로 끝났으면
+///   `failed: {"reason_code", "at"}`이 붙는다(상태는 그대로 `discussing`, 다시 논의가 열리면 칸이 없다 —
+///   `crate::team::discussion_end`). 거르기는 논의중을 나눈다: `discussing`은 끝이 없는 논의중, `watched` ·
+///   `failed`는 그 끝인 논의중 매매다.
 /// - `before`가 1 이상의 정수가 아니면 400 `{"error": "invalid_input"}`. 빈 저장소면 빈 목록 · `next` `null`.
 /// - 세션이 있어야 열린다(원격은 세션 없이 401).
 pub const TRADES_PATH: &str = "/api/trades";
@@ -400,6 +404,7 @@ pub const HISTORY_DEFAULT_MAX: usize = 20;
 ///   통화 최소 단위를 그 시장 통화(`currency`, 설정의 시장)의 십진수 글자로 바꾼 것이다(원화는 그대로, 달러는
 ///   센트 → 달러). 판단 전이면 빈 칸은 `null` · 빈 목록이다. 글은 가린 것이다.
 /// - `summary`는 [`crate::TRADE_BASIS_PATH`]의 `summary`와 같은 글이다(화면은 근거를 따로 부르지 않는다).
+/// - (69차) 목록의 줄처럼 끝난 논의 칸(`watched` · `failed`)이 붙는다.
 /// - 없는 번호면 404 `{"error": "not_found"}`, 번호가 정수가 아니면 400.
 /// - 세션이 있어야 열린다(원격은 세션 없이 401).
 pub const TRADE_PATH: &str = "/api/trades/{id}";

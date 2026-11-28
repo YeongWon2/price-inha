@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use super::office_http::reply;
 use super::phone_http::{Phone, internal_error, refuse};
 use super::{APPROVAL_LOG_PATH, HISTORY_DEFAULT_MAX, TRADE_PATH, TRADES_PATH};
+use crate::team::discussion_end::{EndFilter, end_fields, ended_page, with_end};
 use crate::trading::approval_status_word;
 
 /// 쪽 읽기 값: `before` · `max` · 거르기 글자.
@@ -105,6 +106,10 @@ async fn trades(State(phone): State<Arc<Phone>>, RawQuery(query): RawQuery) -> R
     let Some(paging) = paging(query.as_deref(), "state") else {
         return refuse(StatusCode::BAD_REQUEST, "invalid_input");
     };
+    // (69차) 논의중은 끝난 논의(지켜봄 · 끝나지 못함)와 나눠 거른다.
+    if let Some(filter) = paging.filter.as_deref().and_then(EndFilter::parse) {
+        return ended_trades(&phone, &paging, filter);
+    }
     let state = match paging.filter.as_deref() {
         None => None,
         Some(word) => {
@@ -126,12 +131,37 @@ async fn trades(State(phone): State<Arc<Phone>>, RawQuery(query): RawQuery) -> R
                 Ok::<_, StoreError>(!store.trade_page(Some(TradeId(last)), 1, state)?.is_empty())
             })?;
             Ok((rows, next))
+        })
+        .and_then(|(rows, next)| {
+            let items = rows
+                .iter()
+                .map(|row| with_end(store, row.id, row.state, trade_item(row)))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((items, next))
         });
     match read {
-        Ok((rows, next)) => reply(
-            StatusCode::OK,
-            json!({ "trades": rows.iter().map(trade_item).collect::<Vec<_>>(), "next": next }),
-        ),
+        Ok((items, next)) => reply(StatusCode::OK, json!({ "trades": items, "next": next })),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// (69차) 논의중을 나눈 거르기(`discussing` · `watched` · `failed`)의 쪽.
+fn ended_trades(phone: &Phone, paging: &Paging, filter: EndFilter) -> Response {
+    let before = paging.before.map(TradeId);
+    match ended_page(&phone.store, before, paging.max, filter) {
+        Ok((rows, next)) => {
+            let items: Vec<Value> = rows
+                .iter()
+                .map(|(row, end)| {
+                    let mut item = trade_item(row);
+                    if let Value::Object(map) = &mut item {
+                        map.extend(end_fields(end.as_ref()));
+                    }
+                    item
+                })
+                .collect();
+            reply(StatusCode::OK, json!({ "trades": items, "next": next }))
+        }
         Err(error) => internal_error(error),
     }
 }
@@ -242,8 +272,12 @@ async fn trade(State(phone): State<Arc<Phone>>, Path(id): Path<String>) -> Respo
         .and_then(|(trade, flow)| Ok((trade, flow, phone.store.trade_opinions(id)?)));
     match read {
         Ok(read) => {
-            let body = trade_body(&phone, &read.0, &read.1);
-            reply(StatusCode::OK, with_card(&phone, body, &read))
+            let body = with_card(&phone, trade_body(&phone, &read.0, &read.1), &read);
+            // (69차) 논의중이면 끝난 논의 칸.
+            match with_end(&phone.store, id, read.0.state, body) {
+                Ok(body) => reply(StatusCode::OK, body),
+                Err(error) => internal_error(error),
+            }
         }
         Err(StoreError::TradeNotFound(_)) => refuse(StatusCode::NOT_FOUND, "not_found"),
         Err(error) => internal_error(error),

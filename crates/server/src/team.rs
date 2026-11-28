@@ -59,6 +59,8 @@ mod guide_book;
 mod guide_http;
 // (백로그 T) 1층으로 가는 지침 후보 → 개선안 · 승인 요청.
 mod guide_rules;
+// (69차) 끝난 논의(지켜보기 · 오류)의 표시 칸: 매매 목록 · 매매 하나 · 근거 경로가 함께 쓴다.
+pub(crate) mod discussion_end;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -93,6 +95,7 @@ pub const TEAM_MEMBERS_PATH: &str = "/api/team/members";
 /// 매매 근거 읽기(C6 · V18). `GET /api/trades/{id}/basis` → `{"id": 매매 번호, "summary": 쉬운 말 요약}`.
 /// 요약은 `pi_journal::Journal::read_basis`의 것 그대로다. 없는 매매는 404 `{"error": "not_found"}`.
 /// 세션이 있어야 열린다.
+/// (69차) 논의중 매매의 마지막 논의가 끝났으면 `watched` · `failed` 칸(`discussion_end`)이 붙는다.
 pub const TRADE_BASIS_PATH: &str = "/api/trades/{id}/basis";
 
 /// 규칙 개선안 목록. `GET` → `{"proposals": [{"id", "state": "proposed" | "cooling" | "applied" | "rejected",

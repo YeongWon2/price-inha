@@ -8,6 +8,7 @@ import "./basis-panel.css";
 import { API, tradeBasisPath } from "../paths";
 import { readBasisCard } from "../ui/basis-card";
 import { renderBasisCard } from "../ui/basis-card-view";
+import { discussionEndKind, discussionEndText, type EndFields } from "../ui/discussion-end";
 
 /** `fetch`와 같은 모양(시험에서 바꿔 끼운다). */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -53,6 +54,18 @@ function latestOf(list: unknown, symbol: string): number | null {
   return null;
 }
 
+/** (69차) 근거 응답이 끝난 논의(지켜봄 · 끝나지 못함)면 카드 위에 둘 줄 `[data-role="discussion-end"]`. */
+function endLine(reply: unknown): Node[] {
+  const fields = typeof reply === "object" && reply !== null ? (reply as EndFields) : {};
+  const kind = discussionEndKind(fields);
+  const text = discussionEndText(fields);
+  if (kind === null || text === null) return [];
+  const line = make("p", "basis-panel-note", text);
+  line.dataset.role = "discussion-end";
+  line.dataset.ended = kind;
+  return [line];
+}
+
 /** 자리(`host`) 끝에 근거 패널을 붙인다. */
 export function mountBasisPanel(host: HTMLElement, fetcher: FetchLike): BasisPanel {
   const element = make("section", "basis-panel");
@@ -84,8 +97,9 @@ export function mountBasisPanel(host: HTMLElement, fetcher: FetchLike): BasisPan
   };
   const openTrade = async (id: number) => {
     try {
-      const card = readBasisCard(await readJson(fetcher, tradeBasisPath(id)));
-      show(`${TITLE} · 매매 ${id}번`, renderBasisCard(card));
+      const reply = await readJson(fetcher, tradeBasisPath(id));
+      const card = readBasisCard(reply);
+      show(`${TITLE} · 매매 ${id}번`, ...endLine(reply), renderBasisCard(card));
     } catch {
       failed();
     }

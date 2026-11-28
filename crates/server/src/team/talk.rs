@@ -7,9 +7,10 @@ use pi_agent::{DiscussionLimits, DiscussionOutcome, DiscussionRequest, Role};
 use pi_data::{FactValue, Fetched};
 use pi_market::Symbol;
 use pi_store::{
-    AccountKind, NewRoomEvent, NewTrade, RoomActorKind, StoredFact, TradeId, UnixMillis,
+    AccountKind, NewRoomEvent, NewTrade, RoomActorKind, StoreError, StoredFact, TradeId, UnixMillis,
 };
 
+use super::discussion_end::{DISCUSSION_ERROR, GATHER_FAILED};
 use super::facts::{self, Gathered};
 use super::{Crew, Discussed, TRADE_ROOM_PREFIX};
 use crate::TeamError;
@@ -136,23 +137,11 @@ impl Crew {
             account: AccountKind::Paper,
             at: self.now_millis(),
         })?;
-        let today = self.trading.date_of(now);
-        let gathered = facts::gather(
-            self.data.as_ref(),
-            &self.store,
-            &self.wiring,
-            symbol,
-            (today, now),
-        )
-        .await?;
-        let mut gathered = gathered;
-        let news = self.news.gather(symbol, now).await?;
-        if let Some(news) = &news {
-            gathered.items.push(news.item.clone());
-            gathered.facts.extend(news.facts.iter().copied());
-            gathered.asked += 1;
-            gathered.failed += u32::from(news.failed);
-        }
+        // (69차) 자료를 모으다 오류가 나면 방 로그에 오류 끝을 남긴다(매매는 논의중 그대로).
+        let (gathered, news) = self
+            .gather_all(symbol, now)
+            .await
+            .inspect_err(|_| self.note_failed(trade.id, GATHER_FAILED))?;
         self.index_external(&gathered, news.as_ref());
         self.trading.note_data(!gathered.all_failed());
         let price = self
@@ -186,7 +175,11 @@ impl Crew {
         // 실패해 논의가 오류로 끝나도 남는다.
         self.note_decision(trade.id);
         self.attach(trade.id, &gathered)?;
-        let outcome = result.map_err(|error| self.discussion_failed(trade.id, &error))?;
+        // (69차) 논의가 오류로 끝나면 매매는 논의중 그대로이므로 방 로그에 오류 끝을 남긴다(표시만).
+        let outcome = result.map_err(|error| {
+            self.note_failed(trade.id, DISCUSSION_ERROR);
+            self.discussion_failed(trade.id, &error)
+        })?;
         // (기능 L) 샀는지 · 막았는지를 지침 장부에 남긴다.
         self.note_guideline_outcome(trade.id, &outcome);
         Ok(Discussed {
@@ -214,6 +207,31 @@ impl Crew {
             self.at_table(false).await;
         }
         result
+    }
+
+    /// 논의 자료(공시 · 지표 등)와 뉴스를 모은다. 뉴스가 있으면 자료 목록에 더한다.
+    async fn gather_all(
+        &self,
+        symbol: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(Gathered, Option<super::news::NewsGathered>), StoreError> {
+        let today = self.trading.date_of(now);
+        let source = (self.data.as_ref(), &self.store, &self.wiring);
+        let mut gathered =
+            facts::gather(source.0, source.1, source.2, symbol, (today, now)).await?;
+        let news = self.news.gather(symbol, now).await?;
+        if let Some(news) = &news {
+            gathered.items.push(news.item.clone());
+            gathered.facts.extend(news.facts.iter().copied());
+            gathered.asked += 1;
+            gathered.failed += u32::from(news.failed);
+        }
+        Ok((gathered, news))
+    }
+
+    /// (69차) 그 매매의 방 로그에 논의 오류 끝을 남긴다(매매 상태는 그대로).
+    fn note_failed(&self, trade: TradeId, code: &str) {
+        super::discussion_end::note_failed(&self.store, trade, code, self.now_millis());
     }
 
     /// (10b 9번) 링크가 이상해 버린 뉴스 기사 수를 그 매매의 방 로그에 남긴다(결정 2026-11-21 16번).

@@ -1,6 +1,12 @@
 // 히스토리 화면의 화면 모델(server 29차 · C30 · V83 · V84 · F7-7 · F7-9): 서버 응답을 화면이 그릴 줄로 바꾸는 순수 함수.
 // DOM을 만지지 않는다(그리기는 view.ts, 서버 부르기는 screen.ts). 금액은 그 시장 돈 모양, 시각은 한국 시각 글이다.
-import type { DiscussionEnd, EndKind } from "../ui/discussion-end";
+import {
+  discussionEndAt,
+  discussionEndKind,
+  discussionEndText,
+  type DiscussionEnd,
+  type EndKind,
+} from "../ui/discussion-end";
 
 /** 매매 상태 글자(서버 그대로, 스펙의 매매 상태표 차례). */
 export type TradeState =
@@ -26,11 +32,13 @@ export const TRADE_STATES: readonly TradeState[] = [
 ];
 
 /** (69차) 매매 거르기 글자: 논의중을 셋(논의중 · 지켜봄 · 끝나지 못함)으로 나눈 뒤 나머지 상태. */
-export const TRADE_FILTERS: readonly string[] = [];
+export const TRADE_FILTERS: readonly string[] = ["discussing", "watched", "failed", ...TRADE_STATES.slice(1)];
 
-/** (69차) 매매 거르기 글자의 글. 모르는 글자는 그대로. */
+/** (69차) 매매 거르기 글자의 글: 지켜봄 · 끝나지 못함, 나머지는 상태 글. 모르는 글자는 그대로. */
 export function tradeFilterLabel(word: string): string {
-  return word;
+  if (word === "watched") return "지켜봄";
+  if (word === "failed") return "끝나지 못함";
+  return tradeStateLabel(word);
 }
 
 /** 승인 요청 결과 글자(서버 그대로). */
@@ -278,21 +286,26 @@ export function tradeRows(reply: TradesReply): TradeRow[] {
     id: item.id,
     symbol: item.symbol,
     state: item.state,
-    stateLabel: tradeStateLabel(item.state),
-    ended: null,
+    stateLabel: discussionEndText(item) ?? tradeStateLabel(item.state),
+    ended: discussionEndKind(item),
     created: timeText(item.created_at),
     updated: timeText(item.updated_at),
     decided: item.decided_at === null ? null : timeText(item.decided_at),
   }));
 }
 
-/** 상태 흐름의 줄(응답 차례 = 시각 순서). */
+/** 상태 흐름의 줄(응답 차례 = 시각 순서). (69차) 끝난 논의면 끝에 그 줄(`state`는 `watched` · `failed`). */
 export function flowRows(detail: TradeDetail): FlowRow[] {
-  return detail.states.map((change) => ({
+  const rows = detail.states.map((change) => ({
     state: change.state,
     label: tradeStateLabel(change.state),
     at: timeText(change.at),
   }));
+  const kind = discussionEndKind(detail);
+  const label = discussionEndText(detail);
+  const at = discussionEndAt(detail);
+  if (kind !== null && label !== null && at !== null) rows.push({ state: kind, label, at: timeText(at) });
+  return rows;
 }
 
 /** 글이 비었으면 [`NONE_TEXT`]. */
