@@ -1,4 +1,4 @@
-import { A as insideScreen, C as DEFAULT_LOOKS, D as bubbleText, E as bubbleCandidates, O as bubbleWhere, S as followStep, _ as clearLine, a as agentsByDistance, b as postSpot, c as talkHint, d as entranceCell, f as pathTo, g as buildGrid, h as ACTOR_RADIUS, i as showChooser, j as overlap, k as bubbleWidth, l as tooFar, m as withBlockers, n as speakerOrbit, o as nearbyAgents, p as startCell, r as setHint, s as slashAction, t as easeInOut, u as cellOf, v as findPath, w as LOOKS, x as FOLLOW_LERP, y as SpotSender } from "./office-i92ejxje.js";
+import { A as insideScreen, C as DEFAULT_LOOKS, D as bubbleText, E as bubbleCandidates, O as bubbleWhere, S as followStep, _ as clearLine, a as agentsByDistance, b as postSpot, c as talkHint, d as entranceCell, f as pathTo, g as buildGrid, h as ACTOR_RADIUS, i as showChooser, j as overlap, k as bubbleWidth, l as tooFar, m as withBlockers, n as speakerOrbit, o as nearbyAgents, p as startCell, r as setHint, s as slashAction, t as easeInOut, u as cellOf, v as findPath, w as LOOKS, x as FOLLOW_LERP, y as SpotSender } from "./office-f0lr86yc.js";
 /**
 * @license
 * Copyright 2010-2026 Three.js Authors

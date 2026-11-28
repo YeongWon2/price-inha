@@ -3,6 +3,7 @@ import { t as renderApprovalExtras } from "./approval-extras-nqc3sg5q.js";
 import { n as soundEnabled } from "./sound-pref-ctkxfhgf.js";
 import { i as readBasisCard } from "./basis-card-f0d1wup9.js";
 import { n as renderBasisCard } from "./basis-card-view-dxesydpj.js";
+import { n as discussionEndKind, r as discussionEndText } from "./discussion-end-nlri37k1.js";
 import { i as readMemoList, r as pendingCount, t as cardMemos } from "./memo-model-pzip3mr0.js";
 import { t as __vitePreload } from "./preload-helper-ncxx81pw.js";
 var PENDING$1 = "pending";
@@ -3541,6 +3542,17 @@ function latestOf(list, symbol) {
 	}
 	return null;
 }
+/** (69차) 근거 응답이 끝난 논의(지켜봄 · 끝나지 못함)면 카드 위에 둘 줄 `[data-role="discussion-end"]`. */
+function endLine(reply) {
+	const fields = typeof reply === "object" && reply !== null ? reply : {};
+	const kind = discussionEndKind(fields);
+	const text = discussionEndText(fields);
+	if (kind === null || text === null) return [];
+	const line = make("p", "basis-panel-note", text);
+	line.dataset.role = "discussion-end";
+	line.dataset.ended = kind;
+	return [line];
+}
 /** 자리(`host`) 끝에 근거 패널을 붙인다. */
 function mountBasisPanel(host, fetcher) {
 	const element = make("section", "basis-panel");
@@ -3571,8 +3583,9 @@ function mountBasisPanel(host, fetcher) {
 	};
 	const openTrade = async (id) => {
 		try {
-			const card = readBasisCard(await readJson(fetcher, tradeBasisPath(id)));
-			show(`${TITLE} · 매매 ${id}번`, renderBasisCard(card));
+			const reply = await readJson(fetcher, tradeBasisPath(id));
+			const card = readBasisCard(reply);
+			show(`${TITLE} · 매매 ${id}번`, ...endLine(reply), renderBasisCard(card));
 		} catch {
 			failed();
 		}
@@ -4676,7 +4689,7 @@ function showLight(reason) {
 }
 async function show3d() {
 	const { webglAvailable, createScene } = await __vitePreload(async () => {
-		const { webglAvailable, createScene } = await import("./scene3d-evsaz603.js");
+		const { webglAvailable, createScene } = await import("./scene3d-c8s3z7jm.js");
 		return {
 			webglAvailable,
 			createScene

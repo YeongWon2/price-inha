@@ -17,18 +17,20 @@ use std::sync::{Arc, Mutex};
 use pi_secrets::SecretStore;
 use pi_store::UnixMillis;
 use price_inha::{
-    AccessKeyRequest, App, AppError, CliError, Command, DemoPlan, InstallOptions, OpenRequest,
-    RedactingWriter, RestoreRequest, Service, ServiceAction, ServiceReport, ServiceSetup, Settings,
-    SettingsError, SetupContext, SetupRequest, SystemRunner, VERSION, access_key, access_key_with,
-    announce_addr, demo_from_process, doctor, install_logging, restore, run_assembly,
-    start_demo_plan,
+    AccessKeyRequest, App, AppError, CliError, Command, DemoPlan, OpenRequest, RedactingWriter,
+    RestoreRequest, Service, ServiceSetup, Settings, SettingsError, SetupContext, SetupRequest,
+    SystemRunner, VERSION, access_key, access_key_with, announce_addr, demo_from_process, doctor,
+    install_logging, restore, run_assembly, start_demo_plan,
 };
 // (65차) 기록 파일 돌려 쓰기 · 서비스 등록 안내 · 새 판 알리기.
 use price_inha::{
-    LOG_FILE_KEEP, LOG_FILE_MAX_BYTES, RotatingLogFile, service_env_notes, spawn_update_check,
-    update_check_url,
+    LOG_FILE_KEEP, LOG_FILE_MAX_BYTES, RotatingLogFile, spawn_update_check, update_check_url,
 };
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
+
+// `service` 하위 명령(줄 수 상한 때문에 따로 둔다).
+mod service_cli;
+use service_cli::service_command;
 
 /// 설정 · 명령을 읽지 못했을 때 보여 주는 쓰는 법. 비밀 값을 받는 인자는 없다.
 const USAGE: &str = "쓰는 법: price-inha [run] [--home <폴더>] [--bind <IP>] [--port <수>] \
@@ -291,101 +293,6 @@ async fn serve(settings: Result<Settings, SettingsError>, demo: Option<DemoPlan>
         Err(Failure::Settings(error)) => settings_failed(&error),
         Err(Failure::App(error)) => fail(&format!("서버 오류: {error}")),
         Err(Failure::Signal) => fail("끄기 신호를 기다릴 수 없습니다"),
-    }
-}
-
-/// 서비스 정의가 띄울 `run` 인자: 준 설정 인자에서 `--home <폴더>`를 뺀 것(정의는 절대 경로로 따로 싣는다).
-fn without_home(args: &[String]) -> Vec<String> {
-    let mut kept = Vec::new();
-    let mut rest = args.iter();
-    while let Some(arg) = rest.next() {
-        if arg == "--home" {
-            rest.next();
-        } else {
-            kept.push(arg.clone());
-        }
-    }
-    kept
-}
-
-/// 서비스 명령이 한(할) 일을 보여 준다.
-fn show_report(report: &ServiceReport, done: &str) {
-    let mut text = String::new();
-    if report.dry_run {
-        text.push_str("할 일만 보여 줍니다(쓰지도 부르지도 않았습니다).\n");
-    } else {
-        text.push_str(&format!("{done}\n"));
-    }
-    if let Some(definition) = &report.definition {
-        text.push_str(&format!("정의 파일: {}\n", definition.path.display()));
-        if report.dry_run {
-            text.push_str(&format!("{}\n", definition.contents));
-        }
-    }
-    for command in &report.commands {
-        text.push_str(&format!(
-            "  $ {} {}\n",
-            command.program,
-            command.args.join(" ")
-        ));
-    }
-    for note in &report.notes {
-        text.push_str(&format!("안내: {note}\n"));
-    }
-    show(&text);
-}
-
-fn service_command(action: ServiceAction, settings: &Settings, args: &[String]) -> ExitCode {
-    let setup = match ServiceSetup::for_this_computer(&settings.home, without_home(args)) {
-        Ok(setup) => setup,
-        Err(error) => return failed(&CliError::from(error)),
-    };
-    let runner = SystemRunner;
-    let service = Service::new(setup, &runner);
-    let result = match action {
-        ServiceAction::Install { start_now, dry_run } => service
-            .install(InstallOptions { start_now, dry_run })
-            .map(|mut report| {
-                // (65차) 환경 변수로만 준 `--bind` · `--port`는 정의에 실리지 않는다는 안내.
-                let lookup = |name: &str| std::env::var(name).ok();
-                report.notes.extend(service_env_notes(&lookup, &without_home(args)));
-                show_report(&report, "서비스를 등록했습니다.")
-            }),
-        ServiceAction::Uninstall { dry_run } => service
-            .uninstall(dry_run)
-            .map(|report| show_report(&report, "서비스를 멈추고 정의를 지웠습니다.")),
-        ServiceAction::Start => service
-            .start()
-            .map(|report| show_report(&report, "서비스를 띄웠습니다.")),
-        ServiceAction::Stop => service
-            .stop()
-            .map(|report| show_report(&report, "서비스를 멈췄습니다.")),
-        ServiceAction::Restart => service
-            .restart()
-            .map(|report| show_report(&report, "서비스를 다시 띄웠습니다.")),
-        ServiceAction::Status => service.status().map(|status| {
-            let dying = status
-                .keeps_dying()
-                .then(|| status.last_exit_code.unwrap_or_default());
-            let home = status
-                .home
-                .map_or_else(|| "없음".to_string(), |home| home.display().to_string());
-            show(&format!(
-                "등록: {}\n도는 중: {}\n가리키는 보관 폴더: {home}\n",
-                if status.installed { "예" } else { "아니요" },
-                if status.running { "예" } else { "아니요" },
-            ));
-            // (65차) macOS에서 계속 죽는 서비스를 알린다.
-            if let Some(code) = dying {
-                show(&format!(
-                    "안내: 서비스가 계속 죽습니다(마지막 종료 코드 {code}). price-inha doctor 로 기록 파일 자리를 봅니다\n"
-                ));
-            }
-        }),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => failed(&CliError::from(error)),
     }
 }
 

@@ -1149,6 +1149,70 @@ async function mountSetupExtras(root) {
 	]);
 	await models;
 }
+// src/setup/trial.ts
+/** 시연에서 가짜로 도는 자리들(설정 화면의 차례). */
+var TRIAL_SPOTS = [
+	{
+		anchor: "reg-broker",
+		text: "체험판에서는 증권사 키를 실제로 확인하지 않고 가짜 시세로 돌립니다 · 실제 시세는 실제판(price-inha run)에서 쓸 수 있습니다"
+	},
+	{
+		anchor: "reg-ai",
+		text: "체험판에서는 AI를 가짜로 돌립니다(키를 실제로 확인하지 않습니다) · 실제 AI 판단은 실제판에서 쓸 수 있습니다"
+	},
+	{
+		anchor: "reg-slot-dart",
+		text: "체험판에서는 공시 · 뉴스를 가짜로 돌립니다 · 실제 공시 · 뉴스는 실제판에서 쓸 수 있습니다"
+	},
+	{
+		anchor: "setup-extras",
+		text: "체험판에서는 텔레그램 메신저와 자동 실행(price-inha service)을 쓰지 않습니다 · 실제판에서 쓸 수 있습니다"
+	}
+];
+/** 안내 줄의 표시. */
+var ROLE = "trial-note";
+/** 설정 상태가 체험판이면 자리마다 안내 줄을 그린다(이미 있으면 그대로). 새로 그린 줄 수. */
+function placeTrialNotes(doc, status) {
+	if (status.trial !== true) return 0;
+	let drawn = 0;
+	for (const spot of TRIAL_SPOTS) {
+		const found = doc.getElementById(spot.anchor);
+		if (!found) continue;
+		const heading = found.closest("h3, h4");
+		const parent = (heading ?? found).parentNode;
+		const next = heading ? heading.nextElementSibling : found;
+		const existing = heading ? heading.nextElementSibling : found.previousElementSibling;
+		if (!parent || existing?.dataset.role === ROLE) continue;
+		const note = doc.createElement("p");
+		note.className = "trial-note";
+		note.dataset.role = ROLE;
+		note.textContent = spot.text;
+		parent.insertBefore(note, next);
+		drawn += 1;
+	}
+	return drawn;
+}
+// src/setup/volume.ts
+var MAN = 1e4;
+var EOK = 1e8;
+/** 소수 한 자리까지(끝의 .0은 뺀다). */
+function oneDecimal(value) {
+	return (Math.round(value * 10) / 10).toString();
+}
+/** 거래량 글자를 쉬운 말로: "1,234주" · "1.2만주" · "3.5억주". 십진수 글자가 아니거나 음수면 빈 글자. */
+function volumeText(value) {
+	if (typeof value !== "string" || !/^[0-9]+(\.[0-9]+)?$/.test(value)) return "";
+	const shares = Number(value);
+	if (!Number.isFinite(shares)) return "";
+	const rounded = Math.round(shares);
+	if (rounded < MAN) return `${rounded.toLocaleString("ko-KR")}주`;
+	if (Math.round(shares / MAN * 10) / 10 < MAN) return `${oneDecimal(shares / MAN)}만주`;
+	return `${oneDecimal(shares / EOK)}억주`;
+}
+/** 시세 한 칸의 거래량을 그 칸에 그린다(모르면 비운다). */
+function fillVolume(cell, quote) {
+	cell.textContent = volumeText(typeof quote === "object" && quote !== null ? quote.volume : void 0);
+}
 // src/setup/main.ts
 mountMenu(document.getElementById("menu"), "setup");
 /** 이 화면의 요소. 칸 · 단추 · 글 자리를 같은 모양(value · checked · disabled · hidden · textContent)으로 다룬다. */
@@ -1254,6 +1318,7 @@ function rowFor(symbol) {
 	};
 	setText(cell(tr), symbol);
 	row.price = cell(tr, "num");
+	row.volume = cell(tr, "num");
 	row.currency = cell(tr);
 	row.at = cell(tr);
 	$quotes.appendChild(tr);
@@ -1270,6 +1335,7 @@ function showQuotes(payload) {
 		if (isFinite(price)) row.last = price;
 		row.price.className = "num" + direction;
 		setText(row.price, quote.price);
+		fillVolume(row.volume, quote);
 		setText(row.currency, quote.currency || "");
 		setText(row.at, timeText(quote.received_at));
 	});
@@ -1373,6 +1439,7 @@ function showSetupStatus(status) {
 	var fixed = status.symbols_source === "argument";
 	setText($symbolsNow, symbols.length === 0 ? "" : "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" : status.symbols_source === "demo" ? " (시연용 기본 종목 — 종목을 등록하면 그것으로 바뀝니다)" : ""));
 	showView(status.started === true, status.demo === true);
+	placeTrialNotes(document, status);
 }
 function loadSetup() {
 	fetch(SETUP_PATH, {

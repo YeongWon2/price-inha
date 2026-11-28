@@ -3,19 +3,30 @@ import { n as API, t as mountMenu, u as tradePath } from "./menu-kc5ybrux.js";
 /* empty css               */
 import { n as call, r as el, t as LOAD_FAILED } from "./call-enmqzayl.js";
 import { a as errorLine, i as emptyState, n as button, r as card, s as loading, t as badge } from "./parts-ma3d1o7o.js";
+import { n as discussionEndKind, r as discussionEndText, t as discussionEndAt } from "./discussion-end-nlri37k1.js";
 import { t as __vitePreload } from "./preload-helper-ncxx81pw.js";
-// src/history/model.ts
-/** 매매 상태 글자 전부(상태 거르기의 고르기 차례). */
-var TRADE_STATES = [
+/** (69차) 매매 거르기 글자: 논의중을 셋(논의중 · 지켜봄 · 끝나지 못함)으로 나눈 뒤 나머지 상태. */
+var TRADE_FILTERS = [
 	"discussing",
-	"judged",
-	"awaiting_approval",
-	"blocked",
-	"ordered",
-	"holding",
-	"sold",
-	"reviewed"
+	"watched",
+	"failed",
+	...[
+		"discussing",
+		"judged",
+		"awaiting_approval",
+		"blocked",
+		"ordered",
+		"holding",
+		"sold",
+		"reviewed"
+	].slice(1)
 ];
+/** (69차) 매매 거르기 글자의 글: 지켜봄 · 끝나지 못함, 나머지는 상태 글. 모르는 글자는 그대로. */
+function tradeFilterLabel(word) {
+	if (word === "watched") return "지켜봄";
+	if (word === "failed") return "끝나지 못함";
+	return tradeStateLabel(word);
+}
 /** 승인 요청 결과 글자 전부(상태 거르기의 고르기 차례). */
 var APPROVAL_STATUSES = [
 	"pending",
@@ -117,19 +128,29 @@ function tradeRows(reply) {
 		id: item.id,
 		symbol: item.symbol,
 		state: item.state,
-		stateLabel: tradeStateLabel(item.state),
+		stateLabel: discussionEndText(item) ?? tradeStateLabel(item.state),
+		ended: discussionEndKind(item),
 		created: timeText(item.created_at),
 		updated: timeText(item.updated_at),
 		decided: item.decided_at === null ? null : timeText(item.decided_at)
 	}));
 }
-/** 상태 흐름의 줄(응답 차례 = 시각 순서). */
+/** 상태 흐름의 줄(응답 차례 = 시각 순서). (69차) 끝난 논의면 끝에 그 줄(`state`는 `watched` · `failed`). */
 function flowRows(detail) {
-	return detail.states.map((change) => ({
+	const rows = detail.states.map((change) => ({
 		state: change.state,
 		label: tradeStateLabel(change.state),
 		at: timeText(change.at)
 	}));
+	const kind = discussionEndKind(detail);
+	const label = discussionEndText(detail);
+	const at = discussionEndAt(detail);
+	if (kind !== null && label !== null && at !== null) rows.push({
+		state: kind,
+		label,
+		at: timeText(at)
+	});
+	return rows;
 }
 /** 글이 비었으면 [`NONE_TEXT`]. */
 function orNone(text) {
@@ -240,7 +261,7 @@ function renderFilter(role, caption, words, label) {
 }
 /** 매매 상태 거르기. */
 function renderTradeFilter() {
-	return renderFilter("trade-state", "상태", TRADE_STATES, tradeStateLabel);
+	return renderFilter("trade-state", "상태", TRADE_FILTERS, tradeFilterLabel);
 }
 /** 승인 결과 거르기. */
 function renderApprovalFilter() {
@@ -249,7 +270,7 @@ function renderApprovalFilter() {
 /** 매매 상태의 배지 색. */
 function tradeTone(state) {
 	if (state === "blocked") return "danger";
-	if (state === "awaiting_approval") return "warning";
+	if (state === "awaiting_approval" || state === "failed") return "warning";
 	if (state === "sold" || state === "reviewed" || state === "holding") return "success";
 	return "neutral";
 }
@@ -279,13 +300,14 @@ function renderTradeRows(rows) {
 		const item = el("li", "his-trade");
 		item.dataset.trade = String(row.id);
 		item.dataset.state = row.state;
+		if (row.ended !== null) item.dataset.ended = row.ended;
 		const toggle = el("button", "his-row his-trade-cols");
 		toggle.type = "button";
 		toggle.dataset.action = "toggle";
 		toggle.setAttribute("aria-expanded", "false");
 		toggle.setAttribute("aria-controls", `history-trade-${row.id}`);
 		toggle.setAttribute("aria-label", `매매 ${row.id} · ${row.symbol} · ${row.stateLabel} · 근거 펼치기`);
-		const state = badge(row.stateLabel, tradeTone(row.state));
+		const state = badge(row.stateLabel, tradeTone(row.ended ?? row.state));
 		state.dataset.role = "state";
 		const stateCell = el("span", "his-cell-state");
 		stateCell.append(state);
