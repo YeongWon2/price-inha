@@ -7,6 +7,7 @@ verify.sh 는 그 지문이 지금 규칙과 같을 때만 통과한다(규칙�
 
     python3.14 scripts/selftest.py
 """
+import json
 import os
 import shutil
 import subprocess
@@ -393,9 +394,110 @@ def main():
         case(fx, "영향 범위: scripts 를 고치면 전체",
              lambda: append(fx, "scripts/lib.sh", "# 고침"),
              ["bash", "-c", f'test "$({aff})" = "ALL" && echo 맞음'], "맞음", should_fail=False)
-        case(fx, "영향 범위: 문서만 고치면 검사할 모듈이 없다",
-             lambda: append(fx, "docs/dev/roadmap.md", "고침"),
-             verify + ["--affected", "--base", "HEAD"], "바뀐 코드 없음", should_fail=False)
+        case(fx, "영향 범위: 문서만 고치면 시험은 없고 정적 검사만 돈다",
+             lambda: append(fx, "docs/dev/decisions.md", "고침"),
+             verify + ["--affected", "--base", "HEAD"], ["바뀐 코드 없음", "✓ 5 필수 번호: store", "G2 통과"],
+             should_fail=False)
+
+        # --- 영향 시험 (2026-11-28): 바뀐 · 기대는 · 돈 · 안전 크레이트만 돌고, 건너뛴 것을 밝히고, 정적 검사는 늘 돈다
+        plan = [py, "scripts/affected.py", "--plan", "--base", "HEAD"]
+        touch = lambda m: append(fx, f"crates/{m}/src/lib.rs", "// 고침")
+        case(fx, "영향 시험: 바뀐 크레이트의 시험을 돈다 · 영향 없는 크레이트는 건너뛰고 밝힌다", lambda: touch("market"),
+             verify + ["--affected", "--base", "HEAD"],
+             ["  시험 market: 코드가 바뀜", "✓ 3 테스트: market", "건너뜀: 3 테스트 ai — 까닭(영향 없음)"], should_fail=False)
+        case(fx, "영향 시험: 기대는 크레이트(역의존)도 돈다", lambda: (dep_then_touch()),
+             plan, ["  시험 secrets: 코드가 바뀜", "  시험 ai: 기댐(secrets)"], should_fail=False)
+
+        def risk_dep():
+            add_dep(fx, "crates/gate", 'pi-ai = { path = "../ai" }')
+            sh(["git", "commit", "-qam", "gate 가 ai 에 기댐"], fx)
+            touch("ai")
+        case(fx, "영향 시험: 돈 · 안전 크레이트는 기대는 크레이트가 바뀌면 늘 돈다", risk_dep, plan,
+             ["  시험 gate: 돈 · 안전 — ai 에 기댐(늘 돈다)"], should_fail=False)
+        case(fx, "영향 시험: 시험 파일만 바뀌면 그 크레이트만 (역의존은 건너뜀)",
+             lambda: (add_dep(fx, "crates/ai", 'pi-secrets = { path = "../secrets" }'),
+                      sh(["git", "commit", "-qam", "ai 가 secrets 에 기댐"], fx),
+                      append(fx, "crates/secrets/tests/t.rs", "// 고침")),
+             plan, ["  시험 secrets: 시험만 바뀜", "건너뜀: 3 테스트 ai — 까닭(영향 없음)"], should_fail=False)
+
+        def fake_web(extra=None):
+            w = fx / "crates/server/web"
+            (w / "src/office").mkdir(parents=True)
+            (w / "src/keys").mkdir(parents=True)
+            (w / "package.json").write_text('{"name": "x", "private": true}\n')
+            (w / "src/office/a.ts").write_text("export const a = 1;\n")
+            (w / "src/keys/k.ts").write_text("export const k = 1;\n")
+            e = fx / "crates/server/tests/e2e"
+            e.mkdir(parents=True)
+            (e / "office.spec.ts").write_text('await page.goto("/office/");\n')
+            (e / "keys.spec.ts").write_text('await page.goto("/keys");\n')
+            sh(["git", "add", "-A"], fx)
+            sh(["git", "commit", "-qm", "가짜 화면"], fx)
+            if extra:
+                extra()
+        case(fx, "영향 시험: 화면이 안 바뀌면 vitest · 화면 빌드 · e2e 를 건너뛰고 밝힌다",
+             lambda: fake_web(lambda: touch("store")), plan,
+             ["VITEST_server=none", "E2E_server=none", "건너뜀: 3w 화면 시험 (vitest): server — 까닭(영향 없음",
+              "건너뜀: 3e 브라우저 e2e: server — 까닭(영향 없음"], should_fail=False)
+        case(fx, "영향 시험: 화면 하나가 바뀌면 vitest related 와 그 화면의 e2e spec 만",
+             lambda: fake_web(lambda: append(fx, "crates/server/web/src/office/a.ts", "export const b = 2;")), plan,
+             ["VITEST_server=related", "E2E_server=specs", "SPECS_server=office.spec.ts\n"], should_fail=False)
+        case(fx, "영향 시험: 공통 화면 파일이 바뀌면 vitest · e2e 전체",
+             lambda: fake_web(lambda: ((fx / "crates/server/web/src/paths.ts").write_text("export const p = 1;\n"))), plan,
+             ["VITEST_server=all", "E2E_server=all"], should_fail=False)
+        case(fx, "영향 시험: 정적 검사(필수 번호 · 원본 근거 · 아키텍처)는 영향 없는 모듈에도 늘 돈다",
+             lambda: (touch("market"), (fx / "crates/ai/src/error.rs").unlink()),
+             verify + ["--affected", "--base", "HEAD"], ["✓ 5 필수 번호: ai", "✓ 5b 원본 동작 근거: ai", "[CONV-ERROR-FILE]"])
+
+        # --- 캐시 (2026-11-28): 같은 입력 지문으로 통과한 검사는 다시 돌리지 않고 밝힌다. 실패는 캐시하지 않는다.
+        vaff = "bash scripts/verify.sh --affected --base HEAD"
+        case(fx, "캐시: 같은 입력이면 크레이트 시험 · clippy 를 다시 돌리지 않고 밝힌다", lambda: touch("market"),
+             ["bash", "-c", f"{vaff} >/dev/null && {vaff}"],
+             ["캐시: 3 테스트 market — 같은 입력으로", "캐시: 2 clippy market", "G2 통과"], should_fail=False)
+        case(fx, "캐시: 파일 하나가 바뀌면 그 크레이트와 역의존만 다시 돈다",
+             lambda: (add_dep(fx, "crates/ai", 'pi-secrets = { path = "../secrets" }'),
+                      sh(["cargo", "metadata", "-q", "--format-version", "1"], fx),  # Cargo.lock 을 맞춰 함께 커밋
+                      sh(["git", "commit", "-qam", "ai 가 secrets 에 기댐"], fx)),
+             ["bash", "-c", "bash scripts/verify.sh >/dev/null && echo '// 고침' >> crates/secrets/src/lib.rs && bash scripts/verify.sh"],
+             ["✓ 3 테스트: secrets", "✓ 3 테스트: ai", "캐시: 3 테스트 store", "캐시: 2 clippy store",
+              "캐시: 11 설치 스크립트 시험"], should_fail=False)
+        case(fx, "캐시: 실패한 결과는 캐시하지 않는다",
+             lambda: (fx / "crates/market/src/lib.rs").write_text(
+                 (fx / "crates/market/src/lib.rs").read_text().replace("a + b", "a - b")),
+             ["bash", "-c", f"{vaff} >/dev/null; {vaff}"], "✗ 3 테스트: market")
+        case(fx, "캐시: --no-cache 면 다 돈다", lambda: touch("market"),
+             ["bash", "-c", f"{vaff} >/dev/null && {vaff} --no-cache | grep -c '^캐시:' ; {vaff} --no-cache"],
+             ["0\n", "✓ 3 테스트: market"], should_fail=False)
+        case(fx, "캐시: 검사 스크립트가 바뀌면 캐시가 무효다", None,
+             ["bash", "-c", "bash scripts/verify.sh >/dev/null && echo '# 고침' >> scripts/lib.sh && bash scripts/verify.sh"],
+             ["✓ 3 테스트: store", "✓ 1 모양"], should_fail=False)
+
+        # --- 흔들림 (2026-11-28): 실패한 시험 하나만 혼자 한 번 다시 돌린다
+        flag = tmp / "flaky-once"
+        ct = [py, "scripts/cargo_tests.py", "store"]
+        case(fx, "흔들림: 한 번 떨어진 시험은 혼자 다시 돌려 통과하면 통과로 치고 기록한다",
+             lambda: append(fx, "crates/store/tests/t.rs",
+                            f'#[test]\nfn flaky_once() {{\n    let p = std::path::Path::new("{flag}");\n'
+                            '    if !p.exists() {\n        std::fs::write(p, "1").unwrap();\n        panic!("처음엔 실패");\n    }\n}'),
+             ["bash", "-c", f"rm -f {flag}; {' '.join(ct)} && cat .pipeline/flaky.json"],
+             ["흔들림: flaky_once — 혼자 다시 돌려 통과", '"count": 1'], should_fail=False)
+        case(fx, "흔들림: 혼자 다시 돌려도 떨어지면 실패다",
+             lambda: append(fx, "crates/store/tests/t.rs", '#[test]\nfn always_bad() {\n    panic!("늘 실패");\n}'),
+             ct, ["✗ 3 테스트: store", "혼자 다시 돌려도 실패: always_bad"])
+
+        # --- 동작 잠금 G1 의 범위: 바뀐 · 새 시험 대상만
+        def lock_new_test():
+            (fx / "crates/store/tests/t3.rs").write_text("#[test]\nfn more() {\n    assert_eq!(pi_store::add(2, 2), 4);\n}\n")
+        case(fx, "동작 잠금 G1: 기준 판 대비 바뀐 · 새 시험 대상만 돈다", lock_new_test,
+             ["bash", "-c", "PI_RED_BASE=HEAD bash scripts/red.sh store --lock"],
+             ["동작 잠금 범위: 바뀐 · 새 시험 대상만 — t3", "✓ 3 테스트: store (t3)", "G1 통과: store (동작 잠금)"],
+             should_fail=False)
+        case(fx, "동작 잠금 G1: 기대는 크레이트가 기준 뒤에 바뀌면 모듈 시험 전부",
+             lambda: (lock_new_test(), add_dep(fx, "crates/ai", 'pi-secrets = { path = "../secrets" }'),
+                      sh(["git", "commit", "-qam", "ai 가 secrets 에 기댐"], fx), sh(["git", "tag", "-f", "lockbase"], fx),
+                      touch("secrets")),
+             ["bash", "-c", "PI_RED_BASE=lockbase bash scripts/red.sh ai --lock"],
+             ["모듈 시험 전부", "G1 통과: ai (동작 잠금)"], should_fail=False)
 
         # --- G1 (red 확인)
         red = ["bash", "scripts/red.sh"]
@@ -522,6 +624,98 @@ def main():
                  ["bash", "-c", f"{py} scripts/pipeline.py gate G1 store; {py} -c "
                   "'import json;print(json.load(open(\".pipeline/state.json\"))[\"store\"][\"escalate_model\"])'"],
                  ["같은 실패 2번 — 이 노드를 한 등급 위 모델로", "True"], should_fail=False)
+
+            # --- 묶음 관문 · 잠금 (2026-11-28)
+            stf = fx / ".pipeline/state.json"
+
+            def set_state(**mods):
+                if stf.exists():
+                    d = json.loads(stf.read_text())
+                else:
+                    graph = tomllib.loads((fx / "docs/dev/graph.toml").read_text(encoding="utf-8"))
+                    d = {m: {"stage": "todo", "fails": 0, "last_fail": "", "rounds": 0, "log": []} for m in graph["modules"]}
+                    stf.parent.mkdir(exist_ok=True)
+                for m, kv in mods.items():
+                    d[m].update(kv)
+                stf.write_text(json.dumps(d))
+
+            def batch_g2():
+                for m in ("store", "ai"):
+                    sh(pl + ["start", "N1", m], fx)
+                set_state(store={"stage": "n2"}, ai={"stage": "n2"})
+                append(fx, "crates/store/src/lib.rs", "/// 뺀다.\npub fn sub(a: i64, b: i64) -> i64 {\n    a - b\n}")
+                p = fx / "crates/ai/src/lib.rs"
+                p.write_text(p.read_text().replace("a + b", "a - b"))
+            case(fx, "묶음 G2: verify 를 한 번 돌리고 모듈마다 나눠 기록 · 커밋한다", batch_g2,
+                 ["bash", "-c", f"{py} scripts/pipeline.py gate-batch G2 store ai; git log -1 --format=%s; {py} -c "
+                  "'import json;d=json.load(open(\".pipeline/state.json\"));print(d[\"store\"][\"stage\"], d[\"ai\"][\"stage\"])'"],
+                 ["✓ G2 store", "✗ G2 ai", "✗ 3 테스트: ai", "feat(store)", "green n2", "묶음 G2: 통과 1 / 2"],
+                 should_fail=False)
+            case(fx, "잠금: 시험이 이미 커밋돼 있으면 빈 커밋 없이 태그만 옮긴다",
+                 lambda: set_state(store={"stage": "red_ok", "mode": "lock"}),
+                 ["bash", "-c", f"n=$(git rev-list --count HEAD); {py} scripts/pipeline.py lock store && "
+                  "test \"$(git rev-list --count HEAD)\" = \"$n\" && test \"$(git rev-parse red/store)\" = \"$(git rev-parse HEAD)\" && echo 같다"],
+                 ["빈 커밋 없이 태그만", "잠갔다: red/store", "같다"], should_fail=False)
+            case(fx, "잠금: G1 이 같은 트리를 확인했으면 잠글 때 red.sh 를 다시 돌리지 않는다",
+                 lambda: (todo_lib(), sh(["git", "tag", "-d", "red/store"], fx), sh(pl + ["start", "N1", "store"], fx)),
+                 pl + ["gate", "G1", "store"], ["다시 돌리지 않는다", "잠갔다: red/store"], should_fail=False)
+
+            # --- 문서 정리 tidy (2026-11-28)
+            rounds_text = ("## 98차 작업 (시험)\n\n옛 차수 본문 한 줄.\n\n### 대조\n\n| 시험 · 문서 경로 | 판정 | 근거 |\n|---|---|---|\n"
+                           "| `crates/store/tests/t.rs` | 유지 | 옛 |\n\n## 99차 작업 (시험)\n\n이번 차수 본문.\n\n### 대조\n\n"
+                           "| 시험 · 문서 경로 | 판정 | 근거 |\n|---|---|---|\n| `crates/store/tests/t.rs` | 유지 | 지금 |")
+
+            def brief_rounds():
+                append(fx, brief, rounds_text)
+                sh(["git", "commit", "-qam", "차수 둘"], fx)
+                set_state(store={"stage": "reviewed"})
+
+            def tidy_then_reopen():
+                brief_rounds()
+                sh(pl + ["tidy", "store"], fx)
+                reopened()
+            case(fx, "tidy: 옛 차수 절은 한 줄로, 지금 차수 · 상시 절은 그대로, 필수 번호 · 원본 근거 검사 통과",
+                 lambda: (brief_rounds(), sh(pl + ["tidy", "store"], fx)),
+                 ["bash", "-c", f"grep -A2 '^## 98차' {brief}; grep -A2 '^## 99차' {brief}; git log -1 --format=%s; "
+                  "bash scripts/verify.sh store"],
+                 ["- 끝남: 옛 차수 본문 한 줄.", "이번 차수 본문.", "docs: 문서 정리", "✓ 5 필수 번호: store",
+                  "✓ 5b 원본 동작 근거: store", "G2 통과"], should_fail=False)
+            case(fx, "tidy: 다음 reopen 에서 새 대조 표 하나로 GR 통과",
+                 lambda: (tidy_then_reopen(), append(fx, brief, "## 100차 작업 (시험)\n\n새 차수."),
+                          table(("`crates/store/tests/t.rs`", "유지", "새"))),
+                 pl + ["gate", "GR", "store"], "GR 통과", should_fail=False)
+            case(fx, "tidy 뒤에도 옛 표를 고치기만 하면 GR 실패",
+                 lambda: (tidy_then_reopen(), (fx / brief).write_text((fx / brief).read_text().replace("| 지금 |", "| 고침 |"))),
+                 pl + ["gate", "GR", "store"], "✗ 대조 표 없음")
+            case(fx, "tidy: 다시 연(대조 전) 모듈의 지시서는 줄이지 않는다",
+                 lambda: (brief_rounds(), sh(pl + ["reopen", "store", "자체 시험"], fx)),
+                 pl + ["tidy", "store"], "건너뜀: tidy store — 까닭(차수 진행 중", should_fail=False)
+
+            case(fx, "tidy: backlog 의 끝난 줄 · 진행 기록 글은 지우고 남은 일(진행 기록 안의 것도)은 모두 둔다",
+                 lambda: (fx / "docs/dev/backlog.md").write_text(
+                     "# 남은 일\n\n## 묶음 A\n\n- [x] 끝남\n  - 끝난 일의 밑줄\n- [ ] 남음 하나\n\n## 묶음 B\n\n- [x] 다 끝남\n\n"
+                     "## 진행 기록 (어제)\n\n기록 글.\n- [ ] 남음 둘\n  - 남은 일의 밑줄\n", encoding="utf-8"),
+                 ["bash", "-c", f"{py} -c \"import sys;sys.argv=['x'];sys.path.insert(0,'scripts');import pipeline as p;"
+                  "p.tidy_backlog(False)\" && cat docs/dev/backlog.md"],
+                 ["- [ ] 남음 하나", "- [ ] 남음 둘", "  - 남은 일의 밑줄"], should_fail=False)
+            case(fx, "tidy: backlog 의 끝난 줄 · 기록 글 · 남은 일 없는 절은 지운다",
+                 lambda: (fx / "docs/dev/backlog.md").write_text(
+                     "# 남은 일\n\n## 묶음 A\n\n- [x] 끝남\n  - 끝난 일의 밑줄\n- [ ] 남음 하나\n\n## 묶음 B\n\n- [x] 다 끝남\n\n"
+                     "## 진행 기록 (어제)\n\n기록 글.\n- [ ] 남음 둘\n", encoding="utf-8"),
+                 ["bash", "-c", f"{py} -c \"import sys;sys.argv=['x'];sys.path.insert(0,'scripts');import pipeline as p;"
+                  "p.tidy_backlog(False)\" && ! grep -qE '끝남|끝난 일|묶음 B|기록 글' docs/dev/backlog.md && echo 지움"],
+                 "지움", should_fail=False)
+
+            def merged_tidy():
+                brief_rounds()
+                reopened()  # reopen_at = 줄이기 전 판
+                set_state(store={"stage": "reviewed", "reconcile": False})
+                sh(pl + ["tidy", "store"], fx)  # 다른 곳에서 줄인 지시서가 합쳐진 것과 같다
+                set_state(store={"stage": "r", "reconcile": True})
+                append(fx, brief, "## 100차 작업 (시험)\n\n새 차수.")
+                table(("`crates/store/tests/t.rs`", "유지", "새"))
+            case(fx, "tidy: reopen 뒤에 줄인 지시서가 합쳐져도 새 표 하나로 GR 통과", merged_tidy,
+                 pl + ["gate", "GR", "store"], "GR 통과", should_fail=False)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

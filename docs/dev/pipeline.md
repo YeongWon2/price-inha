@@ -27,9 +27,9 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 | R 대조 (다시 연 모듈만) | 모듈마다 에이전트 1 (N1과 다른 에이전트) | 지시서의 이번 차수 절, 잠겨 있던 시험, 결정 · 사용자 말 | 낡을 수 있는 시험 · 문서마다 유지 · 고침 · 지움 · 열어 둠을 정한다 | 지시서 이번 차수 절 아래 `### 대조` 표(시험 · 문서 경로 \| 판정 \| 근거) | `docs/dev/modules/<모듈>.md`뿐 |
 | GR 표 확인 | 기계 | | `pipeline.py gate GR <모듈>`: 이번 차수의 대조 표가 있고(다시 연 때보다 `### 대조`가 늘었다), 판정이 넷 가운데 하나이고, "지움" 줄마다 근거 칸에 `사용자 "…"` · `결정 <번호>` · `지시서 <N>차` 가운데 하나가 있다(형식 검사) | 지시서 커밋(실행기) | |
 | N1 테스트 작성 | 모듈마다 에이전트 1 | 작업 지시서 | 공개 API 뼈대(몸통은 `todo!()`)와 테스트를 **전부** 쓴다. 화면이 바뀌는 차수면 브라우저 e2e 시험(`crates/<모듈>/tests/e2e/*.spec.ts`)도 쓴다 — red 때는 돌리지 않고(문법 · 형 · 시험 린트만) G2에서 돈다. 영상은 찍지 않는다(결정 23) | `crates/<모듈>/tests/*.rs`, 컴파일되는 뼈대 | `crates/<모듈>/` |
-| G1 red 확인 | 기계 | | `scripts/red.sh <모듈>`: 컴파일되고, 테스트가 실패하고, 필수 번호가 다 있다. 화면이 있으면 화면 형 검사(tsc: 화면 · vitest 시험 · e2e 시험)와 시험 린트도 통과해야 한다(e2e는 돌리지 않는다). 다시 연 모듈은 잠금 판(`red/<모듈>`이 가리키던 판) 대비 지운 시험 파일 · 시험 함수가 대조 표의 "지움"에 다 있어야 한다(없으면 "대조 표에 없는 시험을 지웠다"). 동작 잠금 모드면 "실패한다" 대신 "지금 구현에서 모두 통과한다" | `red/<모듈>` 태그(조정자가 커밋 뒤 붙임) | |
+| G1 red 확인 | 기계 | | `scripts/red.sh <모듈>`: 컴파일되고, 테스트가 실패하고, 필수 번호가 다 있다. 화면이 있으면 화면 형 검사(tsc: 화면 · vitest 시험 · e2e 시험)와 시험 린트도 통과해야 한다(e2e는 돌리지 않는다). 다시 연 모듈은 잠금 판(`red/<모듈>`이 가리키던 판) 대비 지운 시험 파일 · 시험 함수가 대조 표의 "지움"에 다 있어야 한다(없으면 "대조 표에 없는 시험을 지웠다"). 동작 잠금 모드면 "실패한다" 대신 "지금 구현에서 모두 통과한다" — 이때는 다시 연 판 대비 **바뀐 · 새 시험 대상만** 돌린다(src · 기대는 크레이트 · 빌드 파일이 바뀌었거나 대상을 모르는 시험 파일이 바뀌면 모듈 전부. 나머지는 G2가 모듈 전체를 돈다) | `red/<모듈>` 태그(조정자가 커밋 뒤 붙임) | |
 | N2 구현 | 모듈마다 에이전트 1 (N1과 다른 에이전트) | 작업 지시서, 잠긴 테스트 | 테스트가 통과할 때까지 구현한다 | `crates/<모듈>/src/` | `crates/<모듈>/src/`, 자기 `Cargo.toml` |
-| G2 기계 검사 | 기계 | | `scripts/verify.sh` | 통과 또는 실패 목록 | |
+| G2 기계 검사 | 기계 | | `scripts/verify.sh --affected --base <그 차수가 열린 커밋> --focus <모듈> [--wip <작업 중인 모듈>]`(5장 영향 범위 · 캐시). 차수가 열린 커밋을 모르면 `scripts/verify.sh <모듈>` | 통과 또는 실패 목록 | |
 | N3 AI 검토 | 구현하지 않은 에이전트 | 스펙, 지시서, 바뀐 코드 | 기계가 못 보는 것(스펙과 맞는가, 보안, 빠진 경우)을 판단한다. 화면 확인은 영상이 아니라 G2의 브라우저 e2e 결과로 본다 — 화면이 바뀌었는데 e2e 시험이 그 흐름을 덮지 않으면 빠진 경우로 적는다(결정 23) | 판정과 근거(`파일:줄`) | 없음 (읽기 전용) |
 | G3 사람 확인 | 사용자 | 요약 | 커밋 · push를 정한다 | | |
 
@@ -67,7 +67,7 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 |---|---|---|
 | 1 | `cargo fmt --all --check` | 모양이 다르다 |
 | 2 | clippy (실행 코드는 엄격, 테스트는 `unwrap` 허용) | `unsafe` · `unwrap` · `expect` · `panic!` · `todo!` · `dbg!` · `println!` · 문서 주석 없는 공개 항목 등이 있다 |
-| 3 | `cargo test --workspace` | 테스트가 깨진다 |
+| 3 | `cargo test` (`scripts/cargo_tests.py`: 빌드는 한 번, 실행 · 결과는 모듈마다. 전체 범위는 모든 모듈, 영향 범위는 아래 규칙의 모듈) | 테스트가 깨진다. 실패한 시험이 5개 이하면 그 시험 하나만 곧바로 혼자 한 번 다시 돌려, 통과하면 "흔들림: <이름> — 혼자 다시 돌려 통과"로 적고 통과로 친다(`.pipeline/flaky.json`에 횟수, `pipeline.py flaky`로 고칠 후보를 본다). 다시 돌려도 실패하면 실패 |
 | 3w | 화면(Vite, `crates/<모듈>/web/package.json`이 있을 때): `npm ci` · `npm run typecheck` · `npm test`(vitest) · `npm run build` 뒤 `web/dist`가 그대로인가 | 화면 형 오류 · 화면 시험 실패 · 커밋한 `dist`가 소스와 다르다(빌드 결과를 함께 커밋한다). 화면 시험은 `crates/<모듈>/tests/web/*.test.ts`에 두어 잠금이 같이 덮는다. G1(red)은 Rust 시험이나 화면 시험 가운데 하나라도 실패하면 red다 |
 | 3l | 화면 린트 (`npm run lint`: ESLint + typescript-eslint, 규칙은 `crates/<모듈>/web/eslint.config.js`, 결정 23) | 실행 코드(`web/src`)에서 형 정보를 쓰는 규칙(recommendedTypeChecked · 기다리지 않은 Promise · Promise 오용 · `any` · `==` · 안 쓰는 매개변수)이나 금지 속성(`innerHTML` · `outerHTML` · `insertAdjacentHTML` · `document.write` · `eval` · `localStorage` · `sessionStorage` · `indexedDB` · `document.cookie`)에 걸린다. 시험(`tests/web` · `tests/e2e`)은 느슨한 묶음(기다리지 않은 Promise · `==`). 인라인 주석으로 규칙을 끌 수 없다(`noInlineConfig`) |
 | 3e | 브라우저 e2e (`npm run e2e`: Playwright, chromium headless 하나 · 병렬 1 · 재시도 0, 결정 23) | 시험(`crates/<모듈>/tests/e2e/*.spec.ts`)이 실패한다. 전역 준비가 임시 홈으로 시연 서버(가짜 시세 · 가짜 AI · 모의계좌)를 빈 포트에 띄우고 끝나면 지운다. 모든 시험에서 화면 오류(`pageerror`)와 바깥 요청을 실패로 보고, 서버가 바깥으로 나가려던 요청(기록 프록시)이 있으면 실패로 본다. chromium이 없으면 실패 — 고치기 `npx playwright install chromium`. trace · 스크린샷은 저장소 밖 임시 폴더(`$TMPDIR/price-inha-e2e`)에만. 영상은 찍지 않는다 |
@@ -83,7 +83,29 @@ N0 계획 ─→ [R 대조 ─→ GR 표 확인] ─→ N1 테스트 작성(red)
 
 기계가 볼 수 있는 것은 모두 여기에 넣는다. AI 검토는 그 뒤에 남는 것만 판단한다.
 
-**영향 범위** (QMIT 결정 6): `scripts/verify.sh --affected [--base <ref>]`는 `scripts/affected.py`가 고른 모듈만 돈다. 기준(기본 `origin/main`, 없으면 `HEAD~1`)과 작업 트리(커밋 안 된 것 포함)의 차이에서 바뀐 `crates/<모듈>/`과 그 크레이트에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존), 바뀐 지시서 `docs/dev/modules/<모듈>.md`의 모듈을 고른다. 그래프가 못 따라가는 변경(루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `.cargo/`, 그 밖에 모르는 곳)은 전체를 돈다. 문서만 바뀌었으면 "바뀐 코드 없음"으로 0이다. GitHub CI는 쓰지 않는다(2026-11-24 사용자 "깃허브 ci는 하지말자 로컬에서 다해결하면돼"): push 전 검사는 pre-push 관문이, 전체 검사는 손으로 돌리는 `scripts/verify.sh`가 맡는다.
+**세 범위**: `scripts/verify.sh`(= `--full`)는 전체, `scripts/verify.sh <모듈>…`은 그 모듈만, `scripts/verify.sh --affected [--base <ref>] [--focus a,b] [--wip c,d]`는 영향 범위다. G2(`pipeline.py gate G2`)와 push 전 관문은 영향 범위로 돈다. **릴리스 앞에는 `scripts/release.sh`가 직전 릴리스 태그 뒤로 바뀐 것의 영향 범위(`--affected --base <직전 태그>`, 캐시 그대로)를 돌린다 — 직전 태그가 없으면 `--full`(2026-11-28 사용자 "릴리즈 직전에도 전체 다 돌리는 것보다 이번에 올라가는 영향이 있는 범위만"). 캐시 없이 전부 보려면 손으로 `scripts/verify.sh --full --no-cache`.sh`가 빌드 전에 먼저 부른다(실패하면 묶지 않는다). 끝났다는 기준(verify 0)은 그대로다.
+
+**영향 범위** (QMIT 결정 6 · 2026-11-28 사용자 "수정 파일이 영향 있는 곳만 테스트 돌려야지 … 리스크 있는 곳들만 실제 영향이 있는 부분만"). `scripts/affected.py`가 기준(기본 `origin/main`, 없으면 `HEAD~1`; G2는 그 차수가 열린 커밋 — reopen 때 또는 처음 N1을 시작한 때)과 작업 트리(커밋 안 된 것 포함)의 차이로 고른다. 줄이는 것은 "영향이 없음이 확실한 시험"뿐이고, 건너뛴 것은 한 줄씩 `건너뜀: <검사> — 까닭(…)`으로 찍는다.
+
+| 바뀐 것 | 도는 시험 |
+|---|---|
+| `crates/<X>/`의 코드(`src` · `Cargo.toml` · `build.rs` · `web/` …) | X + X에 (전이적으로) 기대는 크레이트(`cargo metadata`의 path 의존, 보통 · dev · build) |
+| `crates/<X>/tests/`만 | X만(시험은 다른 크레이트가 쓰지 않는다) |
+| 다른 크레이트의 파일을 글로 읽는 크레이트(예: gate 시험이 `../store/tests/fixtures`를 연다) | 읽히는 크레이트가 바뀌면(시험만 바뀌어도) 읽는 크레이트도 |
+| 돈 · 안전 크레이트(store · rules · approval · exec · paper · gate · secrets — `scripts/affected.py` `RISK`) 자신이나 그것이 기대는 크레이트의 코드 | 그 돈 · 안전 크레이트는 늘 돈다(각 `Cargo.toml`을 따로 읽어 센다 — 영향 계산과 상관없이) |
+| `crates/server/web/src/<화면>/**` · `web/**/*.html` | vitest: `vitest related <바뀐 파일>`(import 그래프) + 파일을 직접 읽는 시험(`readFileSync` · `?raw` 등, 시험 파일을 읽어 고른다) + 바뀐 시험. e2e: import 그래프로 그 파일을 쓰는 화면을 찾아 그 화면 주소를 여는 spec만(주소를 글로 갖지 않거나 변수로 여는 spec은 늘 넣는다). 화면 빌드 · dist 대조 |
+| 화면 공통(`web/src/ui/**` · `paths.ts` · CSS) · 설정(`package.json` · `package-lock.json` · `vite.config.ts` · `tsconfig.json` · `eslint.config.js` · `playwright.config.mjs`) · `public/` · `dist/` · 시험 도움 파일(`tests/web/*.ts` 중 시험 아닌 것 · `tests/e2e/support/**`) | vitest 전체 · e2e 전체 · 화면 빌드 |
+| `tests/web/*.test.ts`만 | 그 시험만 |
+| `tests/e2e/*.spec.ts` | 그 spec |
+| server의 HTTP 경로(라우터 · 조립 `app*` · `main.rs` · `lib.rs` · `*http*.rs` · `page.rs` · `reach/**` · 시연 서버 `*demo*`) | e2e 전체 |
+| 루트 `Cargo.toml` · 판이 바뀐 `Cargo.lock` · `scripts/` · `architecture.toml` · `graph.toml` · `clippy.toml` · `deny.toml` · `.cargo/` · `rust-toolchain` · 모르는 곳 | 전체(`범위: 전체 — <까닭>`) |
+| 문서만 | 시험 없음, 정적 검사만 |
+
+늘 모든 모듈에 도는 것(빠르다): 0 자체 시험 지문 · 1 모양 · 4 잠긴 시험 · 5 필수 번호 · 5b 원본 근거 · 6 아키텍처 · 7 비밀 · 8 바깥 주소 · 9 검사 끄기 · 10 공급망 · 화면 형 검사(tsc) · 화면 린트(eslint). clippy는 시험을 도는 크레이트에만 돈다(clippy 결과는 그 크레이트와 기대는 크레이트의 코드로만 정해진다). `--focus <모듈>`(G2)은 그 모듈 폴더의 변경만 씨앗으로 삼는다 — 다른 모듈 폴더의 변경은 그 모듈의 G2와 push 전 검사(focus 없음)가 본다. `--wip`(실행기가 넘김)은 다른 노드가 작업 중인(시험이 아직 red일 수 있는) 모듈을 시험 · 정적 검사에서 빼고 `범위 밖:`으로 밝힌다.
+
+**캐시** (2026-11-28 사용자 "캐싱 처리도 해" — 범위는 줄이지 않고, 같은 입력이면 다시 하지 않는다): 검사 단위마다 입력 지문을 셈한다 — 작업 트리(커밋 안 된 것 포함)를 임시 색인으로 git 트리에 적고, 그 단위가 읽는 경로의 트리 id + 검사 스크립트 · 규칙(`scripts/` · `architecture.toml` · `graph.toml` · `deny.toml`) + 도구 판(`rustc -vV` · `cargo -V` · `rustfmt -V` · `node -v`). Rust 시험 · clippy(크레이트마다): 그 크레이트 · 기대는 내부 크레이트 · 글로 읽는 크레이트의 폴더 + 루트 `Cargo.toml` · `Cargo.lock` · `clippy.toml` · `.cargo` · `rust-toolchain`. 모양: `crates/` 전체. 화면(tsc · eslint · vitest · 빌드): `web/`(커밋된 `dist` 포함) · `tests/web` · `tests/e2e`. e2e: 화면 지문 + server 시험 지문. 설치 시험: `install.sh` · `install.ps1`. 같은 지문으로 **통과한** 기록(`.pipeline/cache/passed.json`, git 무시)이 있으면 돌리지 않고 `캐시: <검사> — 같은 입력으로 <때> 통과`로 찍는다. 실패는 적지 않는다. vitest · e2e는 그때 돈 시험(파일 · spec)이 지금 필요한 것을 다 덮을 때만 캐시로 본다. 돈 · 안전 크레이트도 지문이 같으면 같은 결과라 캐시를 쓰고, 지문이 달라지면 반드시 돈다. 그래서 G2를 통과한 바로 뒤의 push 전 검사는 같은 트리 · 같은 범위를 다시 돌리지 않는다(정적 검사만 다시 돈다). `--no-cache`는 캐시를 보지 않는다(기록은 한다). 지우기: `pipeline.py cache clear`. `npm ci`는 `package-lock.json` 지문(`node_modules/.pi-lock.sha256`)이 같고 `node_modules`가 있으면 건너뛴다. e2e가 쓰는 서버 실행 파일은 cargo 증분 빌드가 맞춘다(바뀐 것이 없으면 확인만). 새 도구(sccache 등)는 들이지 않는다.
+
+GitHub CI는 쓰지 않는다(2026-11-24 사용자 "깃허브 ci는 하지말자 로컬에서 다해결하면돼"): push 전 검사는 pre-push 관문이, 전체 검사는 손으로 돌리는 `scripts/verify.sh`와 릴리스 앞의 `--full --no-cache`가 맡는다.
 
 **로컬 pre-push 관문** (QMIT 결정 4): `.githooks/pre-push`가 push되는 범위(원격 sha 기준, 새 브랜치면 `origin/main`)로 `verify.sh --affected`를 돌리고 실패하면 push를 막는다. 저장소마다 한 번 `git config core.hooksPath .githooks`로 켠다(꺼져 있으면 `verify.sh`가 참고 줄로 알린다). 관문을 건너뛰는 push는 하지 않는다.
 
@@ -124,7 +146,7 @@ AI 검토에서 기계로 잡을 수 있는 종류의 문제가 나오면, 고�
 | office | `pi-office` | A3 사무실 서버 + A1 3D 사무실 화면 | `pi-store` |
 | notify | `pi-notify` | A3 알림 · 웹 푸시 + A1 폰 화면 | `pi-store` |
 
-새 모듈(template 아래 12개)은 2026-11-16 로드맵(`docs/dev/roadmap.md`)으로 더했다. 표의 행은 계획이고, `architecture.toml`의 `[crates.*]` 항목은 그 크레이트를 처음 만드는 N1 커밋과 함께 더한다(없는 크레이트가 표에 있으면 ARCH-CRATE가 모든 모듈 검사를 깨기 때문이다).
+새 모듈(template 아래 12개)은 2026-11-16 로드맵(T6~T22, 결정 문서 2026-11-16 절 · 옛 `docs/dev/roadmap.md`는 다 만들어 지웠다 — git 기록)으로 더했다. 표의 행은 계획이고, `architecture.toml`의 `[crates.*]` 항목은 그 크레이트를 처음 만드는 N1 커밋과 함께 더한다(없는 크레이트가 표에 있으면 ARCH-CRATE가 모든 모듈 검사를 깨기 때문이다).
 **새 모듈을 더하는 절차** (N0, 조정자): (1) `architecture.toml`에 그 크레이트 항목(과 새 금지 모양, 그 표본을 `scripts/selftest.py` `PATTERN_SAMPLES`에)을 더하고 `[crates.price-inha] internal`에 이름을 더한다. (2) 같은 커밋에 워크스페이스 뼈대 `crates/<모듈>/`(`Cargo.toml`, 문서 주석만 있는 `src/lib.rs`, `src/error.rs`)를 만든다(워크스페이스는 `crates/*`를 이미 구성원으로 둔다). (3) `python3.14 scripts/selftest.py`를 돌려 통과시키고 커밋한다. (4) 그다음 N1을 시작한다. 검사 스크립트(`scripts/lib.sh`)는 `crates/<모듈>/Cargo.toml`이 있는 모듈만 검사한다. 그래서 뼈대를 만든 뒤 G1 전까지는 전체 검사(`scripts/verify.sh`)가 그 모듈의 필수 번호 빠짐으로 실패한다. 이 사이에는 모듈별 검사(`scripts/verify.sh <모듈>`)를 쓴다.
 조립(`crates/server`)은 2026-11-16부터 gate가 아니라 server 모듈이다(`docs/dev/modules/server.md`).
 
@@ -155,8 +177,12 @@ fn 확인에_실패한_키는_저장하지_않는다() { ... }
 | `prompt <노드> <모듈>` | 그 노드에 줄 프롬프트 |
 | `start <노드> <모듈> [--lock]` | 노드 시작(`R` · `N1` · `N2` · `N3`). 앞 단계가 안 끝났으면 거부한다. 다시 연 모듈의 `N1`은 GR 통과 전이면 거부한다. `N1 --lock`은 동작 잠금 모드 |
 | `gate <GR\|G1\|G2> <모듈>` | 기계 검사와 권한 검사를 돌리고 기록한다. GR이 통과하면 지시서를 커밋한다. 같은 실패 2번이면 모델 승급 안내, 3번이면 사람에게 넘긴다 |
-| `lock <모듈>` | 테스트를 커밋하고 `red/<모듈>` 태그로 잠근다. `gate G1`이 통과하면 실행기가 바로 부른다(잠그기 직전에 red를 한 번 더 확인한다) |
-| `review <모듈> <통과\|되돌림>` | AI 검토 판정. 되돌림이면 N2로 돌아가고, 2번을 넘으면 사람에게 넘긴다 |
+| `lock <모듈>` | 테스트를 커밋하고 `red/<모듈>` 태그로 잠근다. `gate G1`이 통과하면 실행기가 바로 부른다. 잠그기 직전에 red를 한 번 더 확인하되, G1이 같은 트리(지문)를 방금 확인했으면 다시 돌리지 않는다. 바뀐 시험이 이미 커밋돼 있으면(동작 잠금 등) 빈 커밋 없이 태그만 옮긴다(작업 트리의 시험이 HEAD와 같아야 한다) |
+| `gate-batch <GR\|G1\|G2> <모듈…>` | 여러 모듈(합친 뒤의 동작 잠금 여럿 등)의 관문을 한 번에. GR은 모듈마다, G1은 시험 빌드를 한 번 하고 모듈마다 `red.sh`(통과하면 잠금), G2는 묶음의 영향 범위로 `verify.sh`를 **한 번** 돌리고 결과를 모듈마다 나눠(모듈 이름이 적힌 ✗는 그 모듈, 모양 · clippy 같은 공통 ✗는 그 출력에 적힌 `crates/<모듈>/`, 없으면 묶음 전부) 기록 · 커밋한다 |
+| `review <모듈> <통과\|되돌림>` | AI 검토 판정. 되돌림이면 N2로 돌아가고, 2번을 넘으면 사람에게 넘긴다. 통과면 그 모듈 지시서에 `tidy`를 돌린다(11장) |
+| `tidy [--all] [--dry-run] [<모듈…>]` | 문서 정리(11장) |
+| `flaky` | 흔들린 시험(혼자 다시 돌려 통과한 것)과 횟수 — 고칠 후보 |
+| `cache clear` | 검사 캐시(`.pipeline/cache`)를 지운다 |
 | `scope` | 진행 중인 노드가 맡지 않은 곳을 고쳤는지 |
 | `resume <모듈>` | 사람에게 넘어간 모듈을 사람이 다시 연다 |
 | `reopen <모듈> [--lock] <이유>` | 조정자가 모듈을 다시 연다(새 차수 · 테스트 결함). 잠금 태그를 지우고, 그 판을 `base`로 남기고, R(대조)부터 돌게 한다. `--lock`은 동작 잠금 모드 |
@@ -183,3 +209,13 @@ GitHub CI는 쓰지 않는다(2026-11-24 사용자). 게이트 자체를 재는 
 | `scripts/nightly.sh all` | audit · mutants · coverage 차례로 |
 
 놓친 변이가 보이면 해당 모듈을 다시 열 때(reopen) 시험을 보강하는 근거로 쓴다. 도구 판은 발행 14일 넘은 것만 고정한다(공급망 규칙 8 · 9): cargo-mutants 27.1.0, cargo-llvm-cov 0.9.1. 도구가 없으면 스크립트가 설치 명령을 알려 준다.
+
+## 11. 문서 정리 (`pipeline.py tidy`)
+
+2026-11-28 사용자 "다 구현하면 코드베이스로 알 수 있는 문서들은 다 제거해" · "하네스에도 문서 정리하는 거 만들어서 진행". 지난 일의 자세한 글은 git 기록이 맡고, 문서에는 지금 일에 필요한 것만 둔다.
+
+- **지시서** `docs/dev/modules/<모듈>.md`: 차수 절(`## <N>차 …`) 가운데 마지막 것(지금 차수)을 빼고, 옛 차수 절의 본문을 한 줄로 줄인다 — 머리 줄은 남기고 본문 대신 `- 끝남: <본문 첫 줄> — 커밋 <red 해시>(red) · <green 해시>(green) · 전문: git show <정리 전 해시>:<지시서>`. 그 차수의 `### 대조` 표도 함께 빠진다(git 기록). 차수 절이 아닌 절(원본 동작 근거 · 만드는 것 · 필수 번호 · 하지 않는 것 · 테스트 주의 · 다음 차수 후보 …)은 한 글자도 바꾸지 않는다 — 바뀌려 하면 tidy가 멈춘다(5 · 5b 검사가 읽는 절이 그대로다).
+- **언제**: 차수 사이에만 — 모듈이 `검토 통과`이거나 아직 연 적이 없을 때(`할 일`이고 대조 먼저가 아닐 때). 차수가 진행 중이면 `건너뜀: tidy <모듈> — 까닭(차수 진행 중 …)`. `review <모듈> 통과` 뒤 그 모듈에 자동으로 돌고, 바뀌면 `docs(<모듈>): 지시서 정리`로 커밋한다. 손으로는 `pipeline.py tidy [--all] [--dry-run] [<모듈…>]`(바뀐 것을 `docs: 문서 정리` 한 커밋으로).
+- **GR과의 관계**: GR은 "다시 연 때의 지시서보다 대조 표가 하나 늘었다"를 센다. 다시 연 때의 표 가운데 지금 지시서에서 그 절이 `- 끝남:` 한 줄로 줄여진 것은 옛 수에서 뺀다 — tidy 뒤(또는 reopen 뒤에 줄인 지시서가 합쳐져도) 새 표 하나로 통과하고, 옛 표를 고쳐 쓰기만 하면 여전히 실패한다.
+- **`--all`이 더 하는 것**: `docs/dev/backlog.md`의 끝난 줄(`- [x]`과 그 밑줄)과 "진행 기록" 절을 지우고, 남은 `- [ ]`이 없는 절도 지운다. 머리 줄 말고 글이 없는 빈 문서(`docs/**/*.md`)를 지운다(스크립트가 읽는 것은 둔다).
+- **지우지 않는 것**: 설계서(`docs/product/`) · 결정(`decisions.md`) · 조사(`docs/research/`, 빈 것 말고) · `conformance.md` · `toss-api-notes.md` · `keys-needed.md` · `architecture.toml` · 이 문서 · 프롬프트 틀.

@@ -37,49 +37,19 @@ GitHub는 로컬 가짜 서버로만 한다. age 키는 테스트 안에서 만�
 D7 C13 E15 E39 N8 V48 V49 V51 P22
 
 ## 1차 검토 참고 (다음 차수 후보)
-
-- `sqlite.rs` `is_sound`가 평문 스냅샷 사본을 설정한 `temp_root`가 아니라 시스템 임시 폴더에 쓴다(0700 · drop 때 지움이라 fail-open은 아님, 강제 종료 때 남음). `temp_root`를 쓰게 고친다.
-- 올리기는 성공했는데 원격 보존 삭제가 실패하면 전체 실패로 기록돼 `last_success`가 갱신되지 않는다.
-- 시계가 뒤로 가면 방금 올린 백업이 보존 규칙에서 지워질 수 있다.
-- 실제 GitHub의 크기 제한 · 같은 이름 충돌은 확인하지 못했다.
+- 끝남: sqlite.rs is_sound가 평문 스냅샷 사본을 설정한 temp_root가 아니라 시스템 임시 폴더에 쓴다(0700 · drop 때 지움이라 fail-o… — 커밋 —(red) · —(green) · 전문: `git show 1a73576:docs/dev/modules/backup.md`
 
 ## 2차 작업 (1차 검토 참고에서)
-
-- `sqlite.rs` `is_sound`의 평문 스냅샷 사본은 설정한 `temp_root` 안(0700)에 두고 끝나면 지운다. 시험: 검증 중에도 시스템 임시 폴더에 파일이 생기지 않는다(temp_root를 따로 주고 그 밖에 아무것도 안 생김).
-- 올리기 · 크기 확인이 성공했는데 원격 보존 삭제만 실패하면 `last_success`는 갱신하고 보존 실패를 따로 기록한다(다시 올리지 않음).
-- 보존 계획은 지금 시각보다 새 이름의 원격 파일이 있어도 이번에 올린 백업을 지우지 않는다(시계가 뒤로 간 경우).
-
-### 2차 검토 참고 (다음 차수 후보)
-
-- `restore`는 `temp_root` 인자가 없어 검증 사본을 시스템 임시 폴더(0700, drop 때 지움)에 둔다. 되살리기에도 임시 폴더를 넘긴다.
-- 보존 삭제가 중간에 실패하면 이번에 지운 목록이 `removed`에 안 담긴다(다음 백업 때 다시 계산).
+- 끝남: sqlite.rs is_sound의 평문 스냅샷 사본은 설정한 temp_root 안(0700)에 두고 끝나면 지운다. 시험: 검증 중에도 시스템 임시 폴더에 파… — 커밋 d0b11a1(red) · 98b892e(green) · 전문: `git show 1a73576:docs/dev/modules/backup.md`
 
 ## 3차 작업 (후보 일괄 처리)
-
-- 되살리기에도 임시 폴더를 넘긴다: `restore_in(암호문, identity, 대상, temp_root, 시각)`. 검증 사본은 `temp_root` 안(0700)에만 두고 끝나면 지운다. 기존 `restore`는 그대로 둔다(server가 `restore_in`으로 옮긴다). 시험: `TMPDIR`를 쓰기 막아도 되살리기가 되고 `temp_root`가 비어 있다.
-- 보존 지우기가 중간에 실패해도 그때까지 원격 · 로컬 양쪽에서 지운 시각은 `removed`에 담는다. 시험: 지우기 3번 뒤 실패 → `removed` 3개, 그 셋은 양쪽에 없고 나머지는 양쪽에 남는다.
-- 건너뜀: 실제 GitHub 크기 제한 · 같은 이름 충돌은 로컬 가짜 서버로 확인할 수 없다(실제 서비스 호출 금지).
+- 끝남: 되살리기에도 임시 폴더를 넘긴다: restore_in(암호문, identity, 대상, temp_root, 시각). 검증 사본은 temp_root 안(0700)… — 커밋 4f465b0(red) · 53df1f7(green) · 전문: `git show 1a73576:docs/dev/modules/backup.md`
 
 ## 4차 작업 (마무리)
-
-- GitHub 토큰 확인 함수 `verify_token(api_base, &SecretString) -> Result<(), VerifyFailure>`(공개). `GET {api_base}/user`를 한 번만 보낸다(다시 시도 없음 · 리다이렉트 안 따라감 · 시간 제한 10초). 200은 받아들임, 401 · 403은 `Rejected`, 그 밖(닿지 않음 · 시간 초과 · 5xx · 리다이렉트)은 `Unreachable`. 토큰 · 주소는 기록 · 오류 글에 넣지 않는다. 시험은 로컬 가짜 서버.
+- 끝남: GitHub 토큰 확인 함수 verify_token(api_base, &SecretString) -> Result<(), VerifyFailure>(공개). G… — 커밋 f278a84(red) · 022572e(green) · 전문: `git show 1a73576:docs/dev/modules/backup.md`
 
 ## 5차 작업 (2026-11-27 조정자, 결정 31 — 사용자 "경량화 작업도 해야 해")
-
-동작 잠금 차수다. 별도 작업 폴더(결정 28 방식)에서 red → green으로 만든 것을 main에 합쳤고, 이 차수는 합친 구현에서 시험이 모두 통과하는지 보고 잠근다.
-
-1. **보관 파일 담기**: `with_archive_dir`가 보관 폴더(`archive/`)의 파일을 `archive--<이름>`으로 백업 묶음에 담고, 되살리면 `archive/`로 돌린다(결정 31 — 빼낸 원문은 백업에 들어간다).
-
-- 원본 동작 근거: 결정 31(우리 것 — 보관 파일은 백업에 들어간다).
-- 시험으로 확인할 것: `tests/suite/archive.rs`(담기 · 되살리기)
-
-### 대조
-
-| 시험 · 문서 경로 | 판정 | 근거 |
-|---|---|---|
-| 새 시험 `tests/suite/archive.rs`(담기 · 되살리기) | 유지 | 기능 작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과 |
-| `tests/suite/main.rs` | 고침 | 새 시험 모듈을 잇는 줄만 더함(단언은 그대로) |
-| 그 밖의 backup 시험 | 유지 | 동작이 바뀌지 않는다 |
+- 끝남: 동작 잠금 차수다. 별도 작업 폴더(결정 28 방식)에서 red → green으로 만든 것을 main에 합쳤고, 이 차수는 합친 구현에서 시험이 모두 통과하는지… — 커밋 f967e37(red) · —(green) · 전문: `git show 1a73576:docs/dev/modules/backup.md`
 
 ## 6차 작업 (2026-11-27 조정자, 백로그 P — 사용자 "백로그 다 실행해" · "남은 것들만 다 실행해 key 제외하고")
 
