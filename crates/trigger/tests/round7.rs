@@ -204,14 +204,15 @@ async fn 장_밖에_보관한_사건도_버려_장이_열려도_깨우지_않는
             .discard_data(&[DataKind::Disclosure, DataKind::Financials, DataKind::Macro]),
         1
     );
-    b.clock
-        .set(Utc.with_ymd_and_hms(2026, 11, 16, 0, 5, 0).unwrap());
-    tick(&b).await;
-    assert!(woken_ids(&b).is_empty(), "버린 사건으로는 깨우지 않는다");
+    // 중복 기간(1시간) 안에서 본다: 버려도 중복 표는 그대로다.
     assert_eq!(
         b.trigger
             .push_data(change(DataKind::Macro, "macro-1", night)),
         DataPush::Duplicate,
         "버려도 중복 표는 그대로다(같은 사건으로 다시 깨우지 않는다)"
     );
+    b.clock
+        .set(Utc.with_ymd_and_hms(2026, 11, 16, 0, 5, 0).unwrap());
+    tick(&b).await;
+    assert!(woken_ids(&b).is_empty(), "버린 사건으로는 깨우지 않는다");
 }
