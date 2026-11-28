@@ -276,6 +276,9 @@ async fn serve(settings: Result<Settings, SettingsError>, demo: Option<DemoPlan>
     let secrets = init_tracing(settings.as_ref().ok(), true);
     // 기록 파일로 띄운 것(예약 작업)은 표준 오류를 볼 수 없다: 뜨지 못한 까닭을 기록에도 남긴다(가리기를 거친다).
     let to_file = settings.as_ref().is_ok_and(|s| s.log_file.is_some());
+    if let Some(settings) = settings.as_ref().ok().filter(|_| to_file) {
+        price_inha::cap_home_boot_log(&settings.home);
+    }
     let fail = |text: &str| {
         if to_file {
             tracing::error!("{text}");

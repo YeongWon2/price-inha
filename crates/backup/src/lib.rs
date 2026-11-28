@@ -20,6 +20,7 @@ mod archive;
 mod bundle;
 mod config;
 mod error;
+mod peek;
 mod remote;
 mod restore;
 mod retention;
@@ -30,6 +31,7 @@ mod token;
 
 pub use bundle::{Bundle, BundleFile, Manifest, ManifestFile, open, seal, sha256_hex, verify};
 pub use error::{BackupError, BundleProblem, FailureKind};
+pub use peek::read_status;
 pub use restore::{RestoreReport, restore, restore_in};
 pub use retention::{RetentionPlan, backup_file_name, parse_backup_file_name, plan_retention};
 pub use run::{

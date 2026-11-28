@@ -33,6 +33,7 @@ mod plan;
 mod player;
 mod proposal;
 mod push;
+mod read_only;
 mod receipt;
 mod restore;
 mod room;

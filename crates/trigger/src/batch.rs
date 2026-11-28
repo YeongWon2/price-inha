@@ -12,6 +12,8 @@ use pi_market::{Market, MarketCalendar, SessionKind, Symbol};
 
 use crate::{DataChange, DataKind, DataPush, DataTriggerConfig, TriggerEvent};
 
+mod give_back;
+
 /// 중복 표의 크기. 넘으면 가장 오래된 것부터 지운다.
 pub(crate) const DEDUPE_CAPACITY: usize = 4096;
 /// 동시에 열어 두는 묶음(`(시장, 종목)`)의 수 상한. 넘으면 가장 오래된 묶음을 버린다.
@@ -66,6 +68,10 @@ pub(crate) struct DataState {
     held: Vec<(Market, Vec<Pending>)>,
     dropped: usize,
     seq: u64,
+    /// (8차) 상한으로 버렸지만 그 묶음이 아직 나가지 않은 사건(묶음 열쇠와 함께). 묶음이 나가면 [`Self::returned`]로.
+    waiting: Vec<(BatchKey, DataChange)>,
+    /// (8차) 부르는 쪽에 돌려줄 사건(이른 순). 중복 표에서 이미 뺐다.
+    returned: Vec<DataChange>,
 }
 
 impl DataState {
@@ -173,8 +179,13 @@ impl DataState {
         let market = batch.key.0;
         insert_sorted(&mut batch.events, pending);
         let over = cap(&mut batch.events, limit);
-        warn_dropped(over, &[market], "한 묶음의 사건이 한 깨우기 상한을 넘었다");
-        self.dropped += over;
+        warn_dropped(
+            over.len(),
+            &[market],
+            "한 묶음의 사건이 한 깨우기 상한을 넘었다",
+        );
+        self.dropped += over.len();
+        self.hold_back(over);
     }
 
     fn drop_oldest_batch(&mut self) {
@@ -189,6 +200,7 @@ impl DataState {
             let reason = "열어 둔 묶음 수가 상한을 넘어 가장 오래된 묶음을 버린다";
             warn_dropped(batch.events.len(), &[batch.key.0], reason);
             self.dropped += batch.events.len();
+            self.hold_back(batch.events);
         }
     }
 
@@ -217,6 +229,8 @@ impl DataState {
         let reason = "전체 정지 중이라 모인 사건을 깨우지 않고 버린다";
         warn_dropped(dropped, &markets, reason);
         self.dropped += dropped;
+        // (8차) 전체 정지의 버림은 의도된 것이다(F4 7b2): 그 묶음과 함께 상한으로 버린 것도 돌려주지 않는다.
+        self.waiting.clear();
     }
 
     /// (7차) 구독을 끈 종류의 사건을 묶음 · 장 밖 보관에서 버린다(비게 된 묶음 · 보관도 지운다). 버린 수를 준다.
@@ -235,6 +249,9 @@ impl DataState {
             removed += before - events.len();
         }
         self.held.retain(|(_, events)| !events.is_empty());
+        // (8차) 구독을 끈 종류는 상한으로 버린 것도 돌려주지 않는다(같은 사건으로 다시 깨우지 않는다).
+        self.waiting
+            .retain(|(_, change)| !kinds.contains(&change.kind));
         removed
     }
 
@@ -285,13 +302,21 @@ impl DataState {
         let reason = "한 tick에 보낼 사건의 합이 한 깨우기 상한을 넘었다";
         warn_dropped(over, &markets, reason);
         self.dropped += over;
-        out.into_iter()
-            .skip(over)
+        let mut out = out.into_iter();
+        let skipped: Vec<Pending> = out
+            .by_ref()
+            .take(over)
+            .map(|(pending, _)| pending)
+            .collect();
+        self.hold_back(skipped);
+        let events = out
             .map(|(pending, held)| TriggerEvent::Data {
                 change: pending.change,
                 held,
             })
-            .collect()
+            .collect();
+        self.release();
+        events
     }
 
     /// 정규장 밖 시장의 묶음과, 이번 정규장 시작 전에 받은 사건을 보관으로 옮긴다(보관도 상한).
@@ -333,8 +358,9 @@ impl DataState {
                 insert_sorted(held, pending);
             }
             let over = cap(held, limit);
-            warn_dropped(over, &[market], "장 밖 보관이 상한을 넘었다");
-            self.dropped += over;
+            warn_dropped(over.len(), &[market], "장 밖 보관이 상한을 넘었다");
+            self.dropped += over.len();
+            self.hold_back(over);
         }
     }
 
@@ -419,11 +445,10 @@ fn insert_sorted(events: &mut Vec<Pending>, pending: Pending) {
     events.insert(index, pending);
 }
 
-/// 상한을 넘으면 가장 오래된 것부터 버리고 버린 수를 돌려준다.
-fn cap(events: &mut Vec<Pending>, limit: usize) -> usize {
+/// 상한을 넘으면 가장 오래된 것부터 버리고 버린 것들을(이른 순) 돌려준다.
+fn cap(events: &mut Vec<Pending>, limit: usize) -> Vec<Pending> {
     let over = events.len().saturating_sub(limit);
-    events.drain(..over);
-    over
+    events.drain(..over).collect()
 }
 
 /// 버린 자료 사건을 기록에 보인다: 수 · 시장 · 까닭만(글 · 제목은 싣지 않는다). 가장 오래된 것부터 버린다.

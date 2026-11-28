@@ -40,6 +40,8 @@ use super::seen::Seen;
 use super::subscribe::Resubscribe;
 use super::{Crew, facts};
 
+mod returned;
+
 /// 고리를 다시 보는 간격(시계의 쉬기로 잰다).
 const LOOP: Duration = Duration::from_secs(1);
 /// 정규장 앞뒤로 주기 가져오기를 더 도는 시간(분).
@@ -144,6 +146,7 @@ impl Poller {
                 return;
             }
             let subscribed = self.resubscribe.read(&self.crew, &self.trigger);
+            self.forget_returned();
             if self.resubscribe.take_rebase_changes() {
                 self.changes.rebase();
             }

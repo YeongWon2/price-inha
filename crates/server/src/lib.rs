@@ -8,6 +8,7 @@ mod ai_link;
 mod app;
 mod archive;
 mod backup_files;
+mod boot_log;
 mod cli;
 mod demo;
 mod demo_day;
@@ -196,3 +197,6 @@ pub use update_check::{
     UPDATE_CHECK_FILE, UpdateCheckError, UpdateNotice, check_for_update, is_newer_version,
     read_update_notice, spawn_update_check, update_check_url,
 };
+
+// (68차, 백로그 U 5번) macOS 서비스의 켜지기 전 오류 파일을 작은 상한으로 줄인다.
+pub use boot_log::{BOOT_LOG_MAX_BYTES, cap_boot_log, cap_home_boot_log};

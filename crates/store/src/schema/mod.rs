@@ -10,6 +10,7 @@ use crate::error::StoreError;
 use crate::model::StoreInfo;
 
 mod perm;
+mod read_only;
 mod v1;
 mod v10;
 mod v11;
@@ -37,6 +38,8 @@ use v11::V11;
 use v12::V12;
 
 pub(crate) use v4::{legacy_envelope_seqs, legacy_envelope_seqs_upto, legacy_envelope_until};
+
+pub(crate) use read_only::{integrity_ok, open_read_only};
 
 /// 이 저장소가 만든 파일이라는 표시(`application_id`). 글자 "PIST".
 const APPLICATION_ID: i64 = 0x5049_5354;

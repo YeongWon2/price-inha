@@ -4,14 +4,17 @@ use super::{
     CONFIG_FATAL_EXIT, LAUNCHD_LABEL, SERVER_ERROR_LOG, SERVER_LOG, SERVER_LOGS_DIR, Service,
 };
 
-/// `run`의 기록 파일 인자(Windows 예약 작업 정의가 싣는다).
+/// `run`의 기록 파일 인자(Windows 예약 작업 · macOS 사용자 에이전트 정의가 싣는다).
 const LOG_FILE_ARG: &str = "--log-file";
+
+/// (68차) macOS 정의의 표준 출력 자리: 버린다. 기록은 서버가 `--log-file`로 직접 돌려 쓴다.
+const DISCARD_OUTPUT: &str = "/dev/null";
 
 impl Service<'_> {
     /// macOS 사용자 에이전트 정의.
     pub(super) fn plist(&self) -> String {
         let args: String = std::iter::once(self.setup.exe.to_string_lossy().into_owned())
-            .chain(self.program_args())
+            .chain(self.mac_args())
             .map(|arg| format!("    <string>{}</string>\n", xml_escape(&arg)))
             .collect();
         format!(
@@ -56,7 +59,7 @@ impl Service<'_> {
             label = LAUNCHD_LABEL,
             home = xml_escape(&self.home_text()),
             path = xml_escape(&self.setup.path_env),
-            out = xml_escape(&self.log_path(SERVER_LOG)),
+            out = DISCARD_OUTPUT,
             err = xml_escape(&self.log_path(SERVER_ERROR_LOG)),
         )
     }
@@ -160,6 +163,19 @@ impl Service<'_> {
                 &self.home_text(),
                 &[SERVER_LOGS_DIR, SERVER_LOG],
             ));
+        }
+        args
+    }
+
+    /// (68차, 백로그 U 5번) macOS 사용자 에이전트의 인자: `run` 인자에 기록 파일(`<home>/logs/server.log`)을 더한다.
+    /// launchd는 표준 출력 · 오류 파일을 돌려 쓰지 못하고 끝없이 덧붙인다 — 그래서 서버가 직접 돌려 쓴다
+    /// ([`crate::RotatingLogFile`]). 표준 오류 자리는 켜지기 전 실패를 위해 남기고, 서버가 뜰 때 작은 상한으로
+    /// 줄인다([`crate::cap_boot_log`]). 사용자가 `--log-file`을 이미 줬으면 그것을 따른다.
+    fn mac_args(&self) -> Vec<String> {
+        let mut args = self.program_args();
+        if !args.iter().any(|arg| arg == LOG_FILE_ARG) {
+            args.push(LOG_FILE_ARG.to_string());
+            args.push(self.log_path(SERVER_LOG));
         }
         args
     }
