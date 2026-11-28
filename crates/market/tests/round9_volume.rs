@@ -3,6 +3,7 @@
 //! 공식 명세(REST OpenAPI v1.2.31, 2026-11-28 확인): 캔들은 최신순이고 `volume`은 십진수 글자다. 일봉의
 //! `timestamp`는 그 거래일의 현지 자정이다. 한도 그룹은 `MARKET_DATA_CHART`(초당 20회).
 //! 로컬 가짜 서버(wiremock)만 쓴다. 시간은 테스트가 정한다.
+//! (9차) 2026-11-28 V32 거래량을 합쳐 잠금.
 
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
