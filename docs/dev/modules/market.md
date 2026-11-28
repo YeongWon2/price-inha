@@ -183,3 +183,19 @@ D5 N6 V31 V32 P12
 |---|---|---|
 | `crates/market/tests/round7_status.rs` | 유지 | 보통 값의 판단은 그대로다 |
 | 그 밖의 market 시험 | 유지 | 8차와 무관 |
+
+## 9차 작업 (2026-11-28 조정자, 백로그 V32 — 사용자 "다 처리해")
+
+동작 잠금 차수다. 별도 작업 폴더(결정 28 방식)에서 red → green으로 만든 것을 main에 합쳤고, 이 차수는 합친 구현에서 시험이 모두 통과하는지 보고 잠근다.
+
+1. **그날 누적 거래량**(V32 "장 중에 관심 종목의 시세와 거래량이 실시간으로 바뀐다"): `MarketAdapter::daily_volume(&Symbol, NaiveDate) -> Result<Option<Decimal>, MarketError>`(기본은 요청 없이 `Ok(None)`). 토스 어댑터는 `GET /api/v1/candles?symbol=&interval=1d&count=1`의 맨 앞 봉을 읽는다 — 봉 날짜(그 봉 자신의 시차로 본 날짜)가 물은 날이면 그 volume, 앞이면 0(날이 바뀌면 0부터), 없거나 뒤면 None. 음수 · 숫자형 · 글자가 아닌 값은 응답 모양 오류. `FakeAdapter::set_volume`. `Quote`의 모양은 바꾸지 않는다(2차 "공개 API는 더하기만").
+
+- 원본 동작 근거: 토스 공식 명세 v1.2.31(`docs/dev/toss-api-notes.md` 거래량 · 거래량 한도 · 체결 목록 줄) — 현재가에는 거래량이 없고, 실시간 체결은 LOSSY라 누적은 일봉으로.
+- 시험으로 확인할 것: `tests/round9_volume.rs`가 합친 구현에서 통과하고, 기존 시험도 모두 통과한다.
+
+### 대조
+
+| 시험 · 문서 경로 | 판정 | 근거 |
+|---|---|---|
+| 새 시험 `tests/round9_volume.rs` | 유지 | 작업 폴더에서 red 커밋으로 먼저 쓰고 green 커밋으로 통과 |
+| 그 밖의 market 시험 | 유지 | 동작이 바뀌지 않는다 |
