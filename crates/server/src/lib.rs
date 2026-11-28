@@ -9,6 +9,7 @@ mod app;
 mod archive;
 mod cli;
 mod demo;
+mod demo_day;
 mod desk;
 mod error;
 mod feed;
@@ -65,12 +66,17 @@ pub use cli::{
     WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor, open, restore, setup,
 };
 pub use cli::{
-    DEMO_HOME_SUFFIX, DEMO_NOTICE, DEMO_TEMPLATE_NOTICE, DemoRequest, demo_from_process, demo_port,
-    demo_settings, start_demo,
+    DEMO_DAY_NOTICE, DEMO_HOME_SUFFIX, DEMO_KEYS_NOTICE, DEMO_NOTICE, DEMO_TEMPLATE_NOTICE,
+    DemoPlan, DemoRequest, demo_from_process, demo_plan, demo_port, demo_settings, start_demo,
+    start_demo_plan,
 };
 pub use demo::demo_symbols;
 pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,
+};
+pub use demo_day::{
+    DEMO_DAY_MINUTES_DEFAULT, DEMO_DAY_MINUTES_MIN, DEMO_HOME_FILE, DemoDayOrigin, demo_day_origin,
+    demo_day_time, is_demo_home, save_demo_day,
 };
 pub use desk::{AI_DAILY_LIMIT_KEY, SETUP_AI_DAILY_LIMIT};
 pub use error::ArchiveError;

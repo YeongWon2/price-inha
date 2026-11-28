@@ -40,6 +40,42 @@ pub struct DemoRequest {
     pub no_open: bool,
 }
 
+/// (결정 36) 짧은 하루를 켰을 때 찍는 안내의 앞부분.
+pub const DEMO_DAY_NOTICE: &str = "체험판의 하루는";
+
+/// (결정 36 · E56) 체험 폴더에서 키를 받아 둘 때 답에 싣는 글.
+pub const DEMO_KEYS_NOTICE: &str = "체험판 — 실제로 확인하지 않고 받아 두었습니다";
+
+/// (결정 36) `demo`의 계획: 선택과 짧은 하루 길이(분, 0이면 끔).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DemoPlan {
+    /// 선택.
+    pub request: DemoRequest,
+    /// 하루 길이(분). 0이면 짧은 하루를 끈다(시연 달력 그대로).
+    pub day_minutes: u32,
+}
+
+/// (결정 36) `--demo-day-minutes <수>`를 빼서 읽고 나머지로 [`demo_settings`]를 부른다.
+pub fn demo_plan(
+    _args: &[String],
+    _env: &dyn Fn(&str) -> Option<String>,
+    _user_home: Option<&Path>,
+    _no_open: bool,
+) -> Result<(Settings, DemoPlan), SettingsError> {
+    todo!()
+}
+
+/// (결정 36) 계획대로 띄운다(짧은 하루 · 체험 폴더 표시).
+pub async fn start_demo_plan(
+    _settings: Settings,
+    _assembly: RunAssembly,
+    _plan: &DemoPlan,
+    _output: &mut dyn Write,
+    _runner: &dyn CommandRunner,
+) -> Result<App, AppError> {
+    todo!()
+}
+
 /// 기본 포트가 차 있을 때 바로 뒤에서 찾아보는 포트 수.
 const NEARBY_PORTS: u16 = 20;
 
