@@ -145,6 +145,11 @@ async fn register_key(State(desk): State<Arc<Desk>>, request: Request) -> Respon
         }
         Err(why) => Err(why),
     };
+    // (결정 36) 체험 폴더면 실제로 확인하지 않고 받아 둔 것을 알린다.
+    if desk.trial() && outcome.is_ok() {
+        let body = json!({ "registered": true, "trial": true, "notice": crate::DEMO_KEYS_NOTICE });
+        return reply(StatusCode::OK, body);
+    }
     registered(outcome)
 }
 

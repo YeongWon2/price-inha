@@ -7,6 +7,7 @@ import { API } from "../paths";
 import { applyKeyFieldRules, submitKeyFields } from "../keys/field";
 import { aiLimitRequest, formatAiLimit, parseAiLimit, readAiLimit } from "./ai-limit";
 import { mountSetupExtras } from "./extras";
+import { placeTrialNotes } from "./trial";
 
 // 공통 메뉴(server 26차 3번): 화면 맨 위 자리에 단다.
 mountMenu(document.getElementById("menu"), "setup");
@@ -240,6 +241,8 @@ function byId(id: string): HTMLInputElement {
       "지금 종목: " + symbols.join(", ") + (fixed ? " (실행 인자로 줘서 여기서는 바꿀 수 없습니다)" :
         status.symbols_source === "demo" ? " (시연용 기본 종목 — 종목을 등록하면 그것으로 바뀝니다)" : ""));
     showView(status.started === true, status.demo === true);
+    // (결정 36) 체험 폴더면 가짜로 도는 자리마다 체험판 안내 줄.
+    placeTrialNotes(document, status);
   }
 
   function loadSetup() {

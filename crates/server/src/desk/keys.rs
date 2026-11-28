@@ -1,6 +1,8 @@
 //! 설정 책상의 키 등록: 앞 차수의 키 종류와 (8차) 바깥 키 칸(DART · ECOS · FRED · 백업 GitHub 토큰).
 
-use pi_secrets::{KeySlot, SecretsError, SlotStatus};
+use pi_secrets::{
+    Credentials, KeyKind, KeySlot, ProviderKeys, SecretsError, SlotStatus, Verifier, VerifyFailure,
+};
 
 use super::{Desk, VERIFY_TIMEOUT, allow, refusal};
 use crate::SetupRefusal;
@@ -18,7 +20,53 @@ fn settle<T>(
     }
 }
 
+/// (결정 36 · E56) 키 확인기: 체험 폴더면 바깥에 닿지 않고 받아 둔다(칸 검사는 `pi-secrets`가 이미 했다),
+/// 아니면 [`crate::KeyVerifier`]로 실제로 확인한다.
+pub(crate) struct KeyCheck<'a> {
+    real: &'a crate::KeyVerifier,
+    trial: bool,
+}
+
+impl Verifier for KeyCheck<'_> {
+    async fn verify(&self, kind: KeyKind, values: &Credentials) -> Result<(), VerifyFailure> {
+        if self.trial {
+            return Ok(());
+        }
+        self.real.verify(kind, values).await
+    }
+
+    async fn verify_slot(&self, slot: KeySlot, values: &Credentials) -> Result<(), VerifyFailure> {
+        if self.trial {
+            return Ok(());
+        }
+        self.real.verify_slot(slot, values).await
+    }
+
+    async fn verify_provider(
+        &self,
+        keys: ProviderKeys,
+        values: &Credentials,
+    ) -> Result<(), VerifyFailure> {
+        if self.trial {
+            return Ok(());
+        }
+        self.real.verify_provider(keys, values).await
+    }
+}
+
 impl Desk {
+    /// (결정 36 · E56) `price-inha demo`가 만든 체험 폴더의 시연인가: 키를 실제로 확인하지 않는다.
+    pub(crate) fn trial(&self) -> bool {
+        self.demo && crate::is_demo_home(&self.home)
+    }
+
+    fn key_check(&self) -> KeyCheck<'_> {
+        KeyCheck {
+            real: &self.verifier,
+            trial: self.trial(),
+        }
+    }
+
     /// 키를 등록한다: 입력 검사 → 시도 횟수 → 확인 → 저장. 키 종류가 등록되면 시세 흐름을 깨운다.
     ///
     /// 받은 값은 `pi-secrets`로만 넘긴다. 돌려주는 것은 까닭뿐이다.
@@ -43,9 +91,10 @@ impl Desk {
     /// (10b 10번) 공급자 선언의 키(네이버 뉴스 등). 선택 항목이라 시세 흐름을 깨우지 않는다.
     async fn register_provider(&self, request: ProviderRequest) -> Result<(), SetupRefusal> {
         let provider = request.keys.provider();
-        let registering =
-            self.secrets
-                .register_provider(request.keys, request.values, &self.verifier);
+        let check = self.key_check();
+        let registering = self
+            .secrets
+            .register_provider(request.keys, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
             Ok(()) => tracing::info!(provider, "공급자 키를 등록했습니다"),
@@ -69,7 +118,8 @@ impl Desk {
 
     async fn register_kind(&self, request: KeyRequest) -> Result<(), SetupRefusal> {
         let kind = request.kind;
-        let registering = self.secrets.register(kind, request.values, &self.verifier);
+        let check = self.key_check();
+        let registering = self.secrets.register(kind, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
             Ok(()) => {
@@ -85,9 +135,8 @@ impl Desk {
     /// (8차) 바깥 키 칸. 선택 항목이라 시세 흐름을 깨우지 않는다.
     async fn register_slot(&self, request: SlotRequest) -> Result<(), SetupRefusal> {
         let slot = request.slot;
-        let registering = self
-            .secrets
-            .register_slot(slot, request.values, &self.verifier);
+        let check = self.key_check();
+        let registering = self.secrets.register_slot(slot, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
             Ok(()) => tracing::info!(?slot, "키 칸을 등록했습니다"),

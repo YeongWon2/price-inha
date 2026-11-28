@@ -81,9 +81,14 @@ impl DemoAdapter {
         let floor = shape.floor_steps * shape.step;
         let start = floor + i64::try_from(seed % shape.span_steps).unwrap_or(0) * shape.step;
         let value = minor.entry(symbol.clone()).or_insert(start);
-        // -3 ~ +3 걸음. 0이면 한 걸음 올린다.
-        let roll = i64::try_from(mix(seed ^ tick) % 7).unwrap_or(0) - 3;
-        let steps = if roll == 0 { 1 } else { roll };
+        // -3 ~ +3 걸음. 0이면 (결정 36) 한쪽으로 쏠리지 않게 섞은 값의 다른 자리로 한 걸음 올리거나 내린다.
+        let mixed = mix(seed ^ tick);
+        let roll = i64::try_from(mixed % 7).unwrap_or(0) - 3;
+        let steps = match roll {
+            0 if (mixed >> 32) & 1 == 0 => 1,
+            0 => -1,
+            _ => roll,
+        };
         let moved = value.saturating_add(steps * shape.step);
         // 바닥 아래로 내려가려 하면 반대로 움직인다(값은 늘 바뀐다).
         *value = if moved < floor {
@@ -182,7 +187,7 @@ fn demo_day(market: Market, date: NaiveDate) -> TradingDay {
 
 /// 그 시장 날짜 · 시각(자정부터 센 분)의 UTC 시각. 국내는 UTC+9, 미국은 미 동부 시각(서머타임이면 UTC-4,
 /// 아니면 UTC-5)이다.
-fn market_time(market: Market, date: NaiveDate, minute: u32) -> Option<DateTime<Utc>> {
+pub(crate) fn market_time(market: Market, date: NaiveDate, minute: u32) -> Option<DateTime<Utc>> {
     let offset_hours: i64 = match market {
         Market::Us if us_eastern_dst(date, minute) => -4,
         Market::Us => -5,
@@ -281,6 +286,26 @@ mod tests {
             }
             last = now;
         }
+    }
+
+    /// (결정 36) 오르내림이 한쪽으로 쏠리지 않는다: 짧은 하루에서 산 값이 금방 멀어지면 체결 · 익절 · 손절이 고르게
+    /// 보이지 않는다(예전에는 0걸음을 늘 한 걸음 올려 받을 때마다 평균 1/7걸음씩 올랐다).
+    #[tokio::test]
+    async fn 오르내림이_한쪽으로_쏠리지_않는다() {
+        let adapter = DemoAdapter::new(Market::Kr, Arc::new(SystemClock));
+        let symbol = [Symbol::new("005930")];
+        let mut last = prices(&adapter, &symbol).await;
+        let (mut up, mut down) = (0_i64, 0_i64);
+        for _ in 0..7_000 {
+            let now = prices(&adapter, &symbol).await;
+            if now > last {
+                up += 1;
+            } else {
+                down += 1;
+            }
+            last = now;
+        }
+        assert!((up - down).abs() < 350, "오름 {up} · 내림 {down}");
     }
 
     #[test]
