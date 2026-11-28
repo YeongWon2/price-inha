@@ -3,7 +3,7 @@
 공식 문서에서 2026-11-14에 확인한 내용이다. 정확한 모양은 항상 공식 명세가 기준이다.
 
 - 안내: https://developers.tossinvest.com/llms.txt
-- REST 명세(OpenAPI 3.1, v1.2.28): https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
+- REST 명세(OpenAPI 3.1, v1.2.28 — 거래량 줄은 2026-11-28 v1.2.31에서 확인): https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
 - 실시간 명세(AsyncAPI): https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json
 - 개요(한도 · 오류 · 웹소켓): https://openapi.tossinvest.com/openapi-docs/overview.md
 
@@ -25,6 +25,9 @@
 | 한도 헤더 | `X-RateLimit-Limit` · `X-RateLimit-Remaining` · `X-RateLimit-Reset`, 429에는 `Retry-After`(초) |
 | 오류 모양 | `{"error":{"requestId","code","message","data"?}}`. 예: `invalid-token`, `expired-token`, `token-revoked`, `rate-limit-exceeded`, `maintenance` |
 | 실시간 | `wss://openapi-ws.tossinvest.com/ws/v1`, 같은 토큰. 계정마다 연결 2개, 연결마다 구독 100건. 이번 기반 작업에서는 쓰지 않는다 |
+| 거래량 | 현재가 응답에는 거래량 칸이 없다. `GET /api/v1/candles?symbol=&interval=1d\|1m&count=(1~200, 기본 100)&before=&adjusted=(기본 true)`로 받는다(종목은 요청 하나에 하나). 응답 `result.candles[]`는 최신순(첫 요소가 가장 최근 봉), 마지막 쪽이면 `nextBefore`가 null. 봉마다 `timestamp` · `openPrice` · `highPrice` · `lowPrice` · `closePrice` · `volume`(문자열 십진수, "거래량" — 주 수) · `currency`. 일봉 `timestamp`는 그 거래일의 현지 자정, 분봉은 봉이 끝나는 시각(`[t-1분, t)`). (2026-11-28, V32) |
+| 거래량 한도 | 캔들의 한도 그룹은 `MARKET_DATA_CHART`, 초당 20회(현재가 `MARKET_DATA` 초당 15회와 다른 그룹). |
+| 체결 목록 | `GET /api/v1/trades?symbol=&count=(1~50, 기본 50)` — 항목마다 `price` · `volume`("체결 수량", 문자열 십진수) · `timestamp` · `currency`. 최근 체결 한 건씩이며 누적이 아니다. 실시간 체결(`realtime-trade`, `trade:kr` · `trade:us`)의 `data.volume`도 한 건 수량이고, 명세가 LOSSY(밀리면 중간 프레임 유실)라 합을 내면 누적이 틀어진다 — 그래서 누적 거래량은 일봉으로 받는다. |
 
 ## 이번에 쓰지 않는 것
 
