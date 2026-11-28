@@ -40,10 +40,8 @@ async fn 고유번호가_없는_종목의_공시_자리는_공시_없음이_아�
         .await;
     bench.ready().await;
     discuss(&bench, NO_CORP).await;
-    assert!(
-        bench.ai_calls("disclosure · 받을 수 없음").await > 0,
-        "공시 자리는 받을 수 없음으로 보인다"
-    );
+    // 자료가 비면 논의가 AI를 부르기 전에 지켜보기로 끝난다(E32) — "받을 수 없음" 자리는 단위 시험
+    // (`src/team/facts.rs`)이 본다. 여기서는 "공시 없음"으로 보이지 않는 것만 본다.
     assert_eq!(
         bench.ai_calls("공시 없음").await,
         0,

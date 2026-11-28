@@ -1,4 +1,4 @@
-//! 62차 시험의 공용 도우미: 옛 기록 심기 · 실행 파일의 `--demo` 조립으로 띄우기 · 옮길 수 있는 시계 · 바깥 주소
+//! 62차 시험의 공용 도우미: 실행 파일의 `--demo` 조립으로 띄우기 · 옮길 수 있는 시계 · 바깥 주소
 //! 자리의 로컬 가짜 서버 · 세션 · 요청. round61의 도우미를 본떴다(그 폴더는 고치지 않는다). 시계를 옮기는 것만 더했다.
 
 use std::net::SocketAddr;
@@ -15,21 +15,16 @@ use pi_market::{Clock, Symbol, TossConfig};
 use pi_secrets::{
     Credentials, KeyKind, KeySlot, ProviderKeys, SecretStore, Verifier, VerifyFailure,
 };
-use pi_store::{NewRoomEvent, RoomActorKind, Store, UnixMillis};
+use pi_store::Store;
 use price_inha::{
     App, BackupWiring, DB_FILE, RunAssembly, Settings, Upstreams, run_assembly, save_watchlist,
 };
-use serde_json::json;
 use tempfile::TempDir;
 use wiremock::matchers::any;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// 한 걸음을 기다리는 가장 긴 시간.
 pub const STEP: Duration = Duration::from_secs(20);
-/// 하루(밀리초).
-pub const DAY: i64 = 86_400_000;
-/// 심는 담당들.
-pub const AGENTS: [&str; 3] = ["scout", "analyst", "lead"];
 
 // ───────────── 시계 · 날짜 ─────────────
 
@@ -72,102 +67,9 @@ pub fn today() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 11, 20).unwrap()
 }
 
-/// 오늘 장 마감 뒤(17:00 한국).
-pub fn after_close() -> DateTime<Utc> {
-    kst(today(), 17, 0)
-}
-
 /// 오늘 장중(10:00 한국).
 pub fn in_session() -> DateTime<Utc> {
     kst(today(), 10, 0)
-}
-
-/// `now`에서 `days`일 앞의 시각(밀리초).
-pub fn days_before(now: DateTime<Utc>, days: i64) -> UnixMillis {
-    UnixMillis(now.timestamp_millis() - days * DAY)
-}
-
-// ───────────── 옛 기록 심기 ─────────────
-
-/// `now` 기준 120~100일 앞의 옛 기록과 최근 기록을 심는다. 감사 기록(`rules_config` · `journal.review`)도 옛 날에 둔다.
-pub fn seed(store: &Store, now: DateTime<Utc>) {
-    for i in 0..30_i64 {
-        let agent = AGENTS[(i % 3) as usize];
-        let at = UnixMillis(days_before(now, 120).0 + i * (DAY / 2));
-        room(
-            store,
-            &format!("old-{i}"),
-            "message.member",
-            agent,
-            at,
-            i % 5,
-        );
-    }
-    for i in 0..3_i64 {
-        let at = UnixMillis(days_before(now, 118).0 + i * 1000);
-        room(store, &format!("user-{i}"), "message.user", "me", at, 0);
-    }
-    for i in 0..4_i64 {
-        let at = UnixMillis(days_before(now, 3).0 + i * 1000);
-        room(store, &format!("new-{i}"), "message.member", "scout", at, 0);
-    }
-    for i in 0..20_i64 {
-        let at = UnixMillis(days_before(now, 115).0 + i * (DAY / 4));
-        let agent = AGENTS[(i % 3) as usize];
-        store
-            .append_at(
-                "office.progress",
-                &json!({"agent": agent, "trade": 7, "step": i}),
-                at,
-            )
-            .unwrap();
-        store
-            .append_at(
-                "office.agent",
-                &json!({"agent": agent, "place": "desk"}),
-                at,
-            )
-            .unwrap();
-        if i % 4 == 0 {
-            store
-                .append_at("team.ai_used", &json!({"agent": agent, "calls": 1}), at)
-                .unwrap();
-        }
-    }
-    for i in 0..3_i64 {
-        let at = UnixMillis(days_before(now, 112).0 + i * 1000);
-        store
-            .append_at("rules_config", &json!({"changed": i}), at)
-            .unwrap();
-        store
-            .append_at("journal.review", &json!({"trade": i}), at)
-            .unwrap();
-    }
-    for i in 0..3_i64 {
-        let at = UnixMillis(days_before(now, 2).0 + i * 1000);
-        store
-            .append_at("office.progress", &json!({"agent": "scout", "step": i}), at)
-            .unwrap();
-    }
-}
-
-fn room(store: &Store, id: &str, kind: &str, actor: &str, at: UnixMillis, trade: i64) {
-    let actor_kind = if kind == "message.user" {
-        RoomActorKind::User
-    } else {
-        RoomActorKind::Member
-    };
-    store
-        .append_room_event(NewRoomEvent {
-            room: "team".into(),
-            event_id: id.into(),
-            kind: kind.into(),
-            actor_kind,
-            actor_id: actor.into(),
-            payload: json!({"text": format!("글 {id}"), "trade": trade}),
-            at,
-        })
-        .unwrap();
 }
 
 /// SQL 한 값(정수).
