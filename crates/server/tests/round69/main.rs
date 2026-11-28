@@ -8,6 +8,7 @@
 //!   상태는 그대로 `discussing`이다. 상태 거르기는 `discussing` · `watched` · `failed`로 나뉜다.
 //!
 //! 화면 쪽(히스토리 · 사무실 근거 패널의 "지켜봄 — <까닭 글>")은 vitest(`tests/web/discussion-end.test.ts`)에 있다.
+//! (46차) 2026-11-28 체험판 · 백로그 U · V32와 함께 잠금.
 
 mod common;
 mod ended;
