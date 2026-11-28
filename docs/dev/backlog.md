@@ -15,33 +15,33 @@
 - [x] (결정 15로 닫음) store + exec: 매매(Trade)에 시장 칸 — exec의 종목 글자 모양 추정을 걷어냄 (exec.md:256)
 - [x] gate: 세션 확인 때 저장소 세대도 본다(다른 프로세스가 키를 바꾼 경우) (server.md:221)
 - [x] (결정 15로 닫음) approval + store: 승인에 대상 종류 · 번호 칸(주문 승인을 다른 대상에 못 쓰게) · 전체 정지 중 승격 막기 (approval.md:31)
-- [ ] approval: `unhandled_due`가 닫힌 요청을 매번 다 읽음 · `Blocked.reason` 길이 상한 (server.md:357)
-- [ ] server: 자료 이상 멈춤 · 풀림 알림 시간당 묶기, scout 세션 지우기, 본 것 기억 기록 시점, 개선안 답과 하루 마감 승격 판정 겹침 잠금 (server.md:277 · 310)
-- [ ] notify: `release_held` 동시 두 번 시험 (notify.md:73)
+- [x] approval: `unhandled_due`가 닫힌 요청을 매번 다 읽음 · `Blocked.reason` 길이 상한 (server.md:357) — 끝남(approval 6차)
+- [x] server: 자료 이상 멈춤 · 풀림 알림 시간당 묶기, scout 세션 지우기, 본 것 기억 기록 시점, 개선안 답과 하루 마감 승격 판정 겹침 잠금 (server.md:277 · 310) — 끝남(server 45차 Q(본 것 기억 시점은 46차 U · trigger 8차))
+- [x] notify: `release_held` 동시 두 번 시험 (notify.md:73) — 끝남(notify 6차)
 
 ## 묶음 C — 기능
 
 - [x] (server 22 · 원본 맞춤은 23) server: 팀 논의 글을 사무실에 보인다(R5-2 · 사용 흐름 4번 — 방 로그에만 있고 화면에 안 옴), 머리 위 말풍선(원본 DeskRPG), 지나가며 잡담(원본) (사용자 "서로 대화하는 게 보여야")
 - [x] server: 설정 화면에 하루 AI 호출 상한 (server.md:591)
 - [x] server: 담당 모델을 사용자가 고르는 설정 (server.md:66) — 끝남(server 43차 기능 I(`/api/setup/models`))
-- [ ] server + knowledge + store: `hybrid_search` 잇기(store 모델별 조각 벡터 조회 API 먼저) · 시장 메모 색인 · 한가할 때만 재색인 시험 (server.md:345, knowledge.md:85)
-- [ ] server 운영: systemd `%` · `$` 이스케이프, Windows 경로 끝 `\` 따옴표, `--bind` · `--port` 환경 변수 안내, macOS 죽는 서비스 알림, 기록 파일 돌려 쓰기, doctor 읽기 전용 손잡이 (server.md:221)
-- [ ] server: 설치 스크립트 · 자동 업데이트 "알리기만" (server.md:211)
-- [ ] server: 공시 — 고유번호 없는 종목 "받을 수 없음", DART 키 없을 때 하루 수 안 쓰기, scout 답의 부정 문맥 종목 코드 (server.md:316)
-- [ ] server: 구독 — 템플릿 구독 매 tick 읽기, 다시 켤 때 쌓인 사건 한꺼번에 깨우기 막기, 해제 직전 대기열 사건 버리기, 값 바뀜 · 멈춤 → 재시작 시험 (server.md:331)
-- [ ] conformance: C12 이벤트 로그 용량 상한, A12 자격 풀 (conformance.md:196)
-- [ ] ai: 같은 집 다른 기기 Ollama 허용 (ai.md:191, 결정 필요)
+- [x] server + knowledge + store: `hybrid_search` 잇기(store 모델별 조각 벡터 조회 API 먼저) · 시장 메모 색인 · 한가할 때만 재색인 시험 (server.md:345, knowledge.md:85) — 끝남(knowledge 6차 · server 45차 R)
+- [x] server 운영: systemd `%` · `$` 이스케이프, Windows 경로 끝 `\` 따옴표, `--bind` · `--port` 환경 변수 안내, macOS 죽는 서비스 알림, 기록 파일 돌려 쓰기, doctor 읽기 전용 손잡이 (server.md:221) — 끝남(server 45차 S · 46차 U)
+- [x] server: 설치 스크립트 · 자동 업데이트 "알리기만" (server.md:211) — 끝남(server 45차 S(알리기만))
+- [x] server: 공시 — 고유번호 없는 종목 "받을 수 없음", DART 키 없을 때 하루 수 안 쓰기, scout 답의 부정 문맥 종목 코드 (server.md:316) — 끝남(server 45차 R)
+- [x] server: 구독 — 템플릿 구독 매 tick 읽기, 다시 켤 때 쌓인 사건 한꺼번에 깨우기 막기, 해제 직전 대기열 사건 버리기, 값 바뀜 · 멈춤 → 재시작 시험 (server.md:331) — 끝남(server 45차 R · 46차 U)
+- [x] conformance: C12 이벤트 로그 용량 상한, A12 자격 풀 (conformance.md:196) — 끝남(결정 35)
+- [x] ai: 같은 집 다른 기기 Ollama 허용 (ai.md:191, 결정 필요) — 끝남(결정 34 · ai 11차)
 
 ## 묶음 D — 정리
 
-- [ ] server: `proposal_notices` 이벤트를 매번 처음부터 읽음 (review.rs:207)
-- [ ] server: 사무실 따라가기 카메라 인원 문턱값(회의 3 · 쉼 4) 근거 (server.md:633)
-- [ ] server 10c 하 항목: 날짜 조건 근거 `updated_at`, 끄는 순간 재색인 끊기, doctor Ollama 확인 제한, 뜻 검색 도구 시간 제한, snippet "바깥 글" 표시, 원격 설정 POST 403 시험, 루프백 아닌 설정 주소 진단 글, 접수번호 없는 공시 기록 키 중복 (server.md:347)
-- [ ] server: 진단 곁 파일 경쟁, 실전 템플릿 주문이 막힐 때 매매에 이유 (server.md:270)
-- [ ] server 17차 N3: 장부 없을 때 exec 남은 수량 공개 API, 폰 POST 중 새 승인 카드 시험 (server.md:536)
-- [ ] server: V32 거래량 덮기 (server.md:67)
-- [ ] server: 하루 AI 상한 저장(ai-limit.json)이 백업에 드는지 확인하고, 안 들면 넣는다 (server 22차 검토 참고)
-- [ ] server: 실시간 연결을 다시 이을 때 다시 받은 옛 논의 글이 말풍선으로 잠깐 뜨지 않게 (server 22차 N2 참고)
+- [x] server: `proposal_notices` 이벤트를 매번 처음부터 읽음 (review.rs:207) — 끝남(server 45차 Q)
+- [x] server: 사무실 따라가기 카메라 인원 문턱값(회의 3 · 쉼 4) 근거 (server.md:633) — 끝남(server 45차 S(조정자 값으로 근거 적음))
+- [x] server 10c 하 항목: 날짜 조건 근거 `updated_at`, 끄는 순간 재색인 끊기, doctor Ollama 확인 제한, 뜻 검색 도구 시간 제한, snippet "바깥 글" 표시, 원격 설정 POST 403 시험, 루프백 아닌 설정 주소 진단 글, 접수번호 없는 공시 기록 키 중복 (server.md:347) — 끝남(server 45차 R)
+- [x] server: 진단 곁 파일 경쟁, 실전 템플릿 주문이 막힐 때 매매에 이유 (server.md:270) — 끝남(server 45차 Q)
+- [x] server 17차 N3: 장부 없을 때 exec 남은 수량 공개 API, 폰 POST 중 새 승인 카드 시험 (server.md:536) — 끝남(server 45차 Q(이미 되어 있었음))
+- [x] server: V32 거래량 덮기 (server.md:67) — 끝남(V32 — server 46차 · market 9차(일봉))
+- [x] server: 하루 AI 상한 저장(ai-limit.json)이 백업에 드는지 확인하고, 안 들면 넣는다 (server 22차 검토 참고) — 끝남(server 45차 P · backup 6차)
+- [x] server: 실시간 연결을 다시 이을 때 다시 받은 옛 논의 글이 말풍선으로 잠깐 뜨지 않게 (server 22차 N2 참고) — 끝남(23차(이미 되어 있었음))
 
 ## 묶음 E — 사무실을 게임 · 메타버스처럼 (2026-11-25 사용자 "진짜 게임처럼" · "실제 메타버스 환경 같은 느낌" · "추천순으로 다 넣어")
 
@@ -69,7 +69,7 @@
 - [x] 히스토리 화면(R6-3 · F7-7 · F7-9 · R4-3): 매매 목록 → 근거 요약, 상태 변화 · 체결, 하루 정리(컴퓨터 화면에도), 복기, 승인 요청 기록. 매매 목록 · 승인 기록 API가 없다 — 끝남(server 26~30차)
 - [x] 계좌 · 운용 화면(R3-3 · R14-1 · R16-5 · F1-6 · 2c1 · 3a1): 팀 상태 · 오늘 시작/쉬는 이유, 모의계좌 잔고 · 보유 · 손익 · 낙폭, 전체 정지 뒤 "다시 시작" 단추. 계좌를 읽는 API가 없다 — 끝남(server 26~30차 · 40차(전체 정지))
 - [x] 설정 화면 보강: 시장(kr/us) · 담당 모델 · 뜻 검색(`/api/setup/semantic`은 화면이 없다), 되살리기 안내(R16-4), 진단(doctor) 결과 — 끝남(server 31차 · 43차 I)
-- [ ] 확인: 폰 · 사무실 승인 카드로 규칙 개선안을 승인하면 제대로 반영되는가(`reach/` · `trading/answer.rs`에 개선안 갈래가 안 보인다)
+- [x] 확인: 폰 · 사무실 승인 카드로 규칙 개선안을 승인하면 제대로 반영되는가(`reach/` · `trading/answer.rs`에 개선안 갈래가 안 보인다) — 끝남(server 45차 Q(시험 더함))
 
 ## 진행 기록 (2026-11-25)
 
@@ -150,9 +150,9 @@
 ## 진행 기록 (2026-11-27 — 결정 29~31 · 윈도 · v0.1.0)
 
 - 끝남: server 43차(F~J 합침) · 44차(K 모이기 · L 팀 지침 · M 경량화 합침), store 21차(판 12) · knowledge 5차 · backup 5차 · journal 7차 · agent 12차 · office 7차. 윈도 교차 빌드(mingw-w64 · rustup 1.98.0) 확인, v0.1.0 릴리스(macOS arm64 · 윈도 x86_64 묶음 · install.sh · install.ps1).
-- [ ] **모의계좌 스냅샷이 기록량의 대부분**(시연 하루 실측 약 790KB 중 `paper_snapshots` 약 770KB → 10년 약 2.7GB). 감사 표라 결정 31의 덜어 내기 대상이 아니다 — "바뀐 때만 남기기" 또는 "하루 끝값 + 바뀐 때"로 줄이는 store · paper 차수(돈 기록이라 설계 결정 필요).
-- [ ] 보관 파일이 무압축 `.jsonl`(gzip 크레이트 없음 — 새 의존성 승인이 필요). 백업이 매번 보관 파일 전체를 담는다(늘어남).
-- [ ] 팀 지침: 1층 길로 가는 후보는 `to_rules` 이벤트만 — 개선안 자동 생성 없음. 지침 성적(익절 · 손절)의 서버 끝까지 시험 없음. 오류로 끝난 논의의 쓰임 기록이 장부에 남음. "날 수"는 하루 정리를 돈 날만 센다.
-- [ ] 모이기: 메신저 팀 방 글(브리지) 길의 직접 시험 없음. 3D 장면이 뜨는 동안 탭 누르기가 느릴 수 있음(e2e 40초 기다림).
-- [ ] 윈도 실기 확인(이 맥에서는 실행 파일을 돌려 볼 수 없음 · pwsh 없음), 인텔 맥 · 리눅스 묶음(그 컴퓨터에서 `scripts/release.sh`).
-- [ ] 판 12의 incremental vacuum 전환(첫 한 번 VACUUM) 동안 저장소가 막힌다 — 큰 파일에서 시간 재기.
+- [x] **모의계좌 스냅샷이 기록량의 대부분**(시연 하루 실측 약 790KB 중 `paper_snapshots` 약 770KB → 10년 약 2.7GB). 감사 표라 결정 31의 덜어 내기 대상이 아니다 — "바뀐 때만 남기기" 또는 "하루 끝값 + 바뀐 때"로 줄이는 store · paper 차수(돈 기록이라 설계 결정 필요). — 끝남(결정 32 · store 22차)
+- [ ] 보관 파일이 무압축 `.jsonl`(gzip 크레이트 없음 — 새 의존성 승인이 필요). 백업이 매번 보관 파일 전체를 담는다(늘어남). — 남음(결정 33 미룸(규칙 파일에 flate2를 사람이 더하면 되살림))
+- [x] 팀 지침: 1층 길로 가는 후보는 `to_rules` 이벤트만 — 개선안 자동 생성 없음. 지침 성적(익절 · 손절)의 서버 끝까지 시험 없음. 오류로 끝난 논의의 쓰임 기록이 장부에 남음. "날 수"는 하루 정리를 돈 날만 센다. — 끝남(server 45차 T · journal 8차)
+- [x] 모이기: 메신저 팀 방 글(브리지) 길의 직접 시험 없음. 3D 장면이 뜨는 동안 탭 누르기가 느릴 수 있음(e2e 40초 기다림). — 끝남(server 45차 T)
+- [ ] 윈도 실기 확인(이 맥에서는 실행 파일을 돌려 볼 수 없음 · pwsh 없음), 인텔 맥 · 리눅스 묶음(그 컴퓨터에서 `scripts/release.sh`). — 남음(맥 2 · 윈도 · 리눅스 2 묶음은 교차 빌드로 만듦 — 윈도 · 리눅스 실기 확인은 아직)
+- [x] 판 12의 incremental vacuum 전환(첫 한 번 VACUUM) 동안 저장소가 막힌다 — 큰 파일에서 시간 재기. — 끝남(store 22차(0.27초 — 그대로))
