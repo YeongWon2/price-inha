@@ -62,7 +62,7 @@ pub struct DemoPlan {
 }
 
 /// (결정 36) 짧은 하루의 가짜 시세 간격(장중 15분 안에 익절 · 손절까지 닿을 만큼 움직이게).
-pub const DEMO_DAY_QUOTE_INTERVAL: Duration = Duration::from_secs(1);
+pub const DEMO_DAY_QUOTE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// (결정 36) 하루 길이를 받는 인자.
 const ARG_DAY: &str = "--demo-day-minutes";
@@ -96,7 +96,12 @@ pub fn demo_plan(
             .filter(|minutes| *minutes == 0 || *minutes >= DEMO_DAY_MINUTES_MIN)
             .ok_or_else(|| invalid.clone())?;
     }
-    let settings = demo_settings(&rest, env, user_home)?;
+    let mut settings = demo_settings(&rest, env, user_home)?;
+    let paced = rest.iter().any(|arg| arg == "--interval-ms")
+        || env(crate::ENV_QUOTE_INTERVAL_MS).is_some();
+    if day_minutes > 0 && !paced {
+        settings.quote_interval = DEMO_DAY_QUOTE_INTERVAL;
+    }
     let request = DemoRequest { no_open };
     Ok((
         settings,
