@@ -131,10 +131,11 @@ fn same_place(a: &Path, b: &Path) -> bool {
         )
 }
 
-/// 백업 상태 파일(보관 폴더의 `backups/` 아래, `pi-backup`이 쓴다). 비밀 값이 없다.
-const BACKUP_STATUS: [&str; 2] = ["backups", "backup-status.json"];
+/// 백업 상태 파일을 두는 폴더(보관 폴더의 `backups/`, `pi-backup`이 쓴다 — 서버 조립의 `local_dir`). 비밀 값이 없다.
+const BACKUP_DIR: &str = "backups";
 
-/// 진단 7: 백업이 켜졌으면 마지막 백업 시각.
+/// 진단 7: 백업이 켜졌으면 마지막 백업 시각. 상태는 backup의 읽기 전용 상태 읽기([`pi_backup::read_status`])로 본다
+/// (68차 백로그 U 2번 — 백업기를 만들지 않으므로 저장소를 열지 않는다).
 pub(super) fn check_backup(home: &Path) -> Check {
     let item = CheckItem::Backup;
     let configured = std::fs::read_to_string(home.join(BACKUP_SETTINGS_FILE))
@@ -147,16 +148,9 @@ pub(super) fn check_backup(home: &Path) -> Check {
     if !configured {
         return good(item, "백업이 꺼져 있습니다");
     }
-    let status: Value = std::fs::read_to_string(
-        BACKUP_STATUS
-            .iter()
-            .fold(home.to_path_buf(), |p, n| p.join(n)),
-    )
-    .ok()
-    .and_then(|text| serde_json::from_str(&text).ok())
-    .unwrap_or(Value::Null);
-    let last = status["last_success"].as_i64().map(kst_text);
-    let pending = status["retry_pending"].as_bool().unwrap_or(false);
+    let status = pi_backup::read_status(&home.join(BACKUP_DIR)).unwrap_or_default();
+    let last = status.last_success.map(|at| kst_text(at.0));
+    let pending = status.retry_pending;
     let last_text = last.map_or_else(
         || "아직 백업한 적이 없습니다".to_string(),
         |at| format!("마지막 백업 {at}"),

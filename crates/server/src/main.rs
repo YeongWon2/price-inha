@@ -271,6 +271,9 @@ async fn serve(args: &[String]) -> ExitCode {
     let secrets = init_tracing(settings.as_ref().ok(), true);
     // 기록 파일로 띄운 것(예약 작업)은 표준 오류를 볼 수 없다: 뜨지 못한 까닭을 기록에도 남긴다(가리기를 거친다).
     let to_file = settings.as_ref().is_ok_and(|s| s.log_file.is_some());
+    if let Some(settings) = settings.as_ref().ok().filter(|_| to_file) {
+        cap_boot_log(&settings.home);
+    }
     let fail = |text: &str| {
         if to_file {
             tracing::error!("{text}");
@@ -283,6 +286,19 @@ async fn serve(args: &[String]) -> ExitCode {
         Err(Failure::Settings(error)) => settings_failed(&error),
         Err(Failure::App(error)) => fail(&format!("서버 오류: {error}")),
         Err(Failure::Signal) => fail("끄기 신호를 기다릴 수 없습니다"),
+    }
+}
+
+/// (68차, 백로그 U 5번) 기록 파일로 띄울 때(서비스): 켜지기 전 오류 파일(`<home>/logs/server.error.log`)이 상한을
+/// 넘었으면 마지막 줄들만 남긴다. 못 줄여도 띄우기는 그대로 한다(기록에만 남긴다).
+fn cap_boot_log(home: &Path) {
+    let path = home
+        .join(price_inha::SERVER_LOGS_DIR)
+        .join(price_inha::SERVER_ERROR_LOG);
+    match price_inha::cap_boot_log(&path, price_inha::BOOT_LOG_MAX_BYTES) {
+        Ok(true) => tracing::info!("켜지기 전 오류 파일을 상한으로 줄였다"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(kind = %error.kind(), "켜지기 전 오류 파일을 줄이지 못했다"),
     }
 }
 

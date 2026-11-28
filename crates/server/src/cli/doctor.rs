@@ -4,11 +4,11 @@
 use std::path::Path;
 
 use pi_secrets::{KeyKind, KeySlot, SecretStore};
-use rusqlite::OptionalExtension;
+use pi_store::{Store, TemplateId, TemplateState};
 use serde_json::{Value, json};
 
 use crate::ai_link::{AiMethod, load_ai_choice};
-use crate::cli::peek::{access_key_generation, is_busy, open_read_only};
+use crate::cli::peek::is_busy;
 use crate::cli::service::Service;
 use crate::{DB_FILE, Settings};
 
@@ -311,8 +311,9 @@ fn in_use() -> Check {
 
 /// 진단 2: 저장소가 열리고 `PRAGMA integrity_check`가 ok, 스키마 버전을 안다. 접속 키가 있는지도 함께 읽는다
 /// (읽지 못했으면 `None` — "없다"가 아니라 "확인하지 못함"이다).
-/// 새로 만들거나 이전하거나 권한을 바꾸지 않으려고 `pi_store::Store::open`이 아니라 있는 파일만 **읽기 전용**으로
-/// 연다(9차 보강 2). 곁 파일이 없으면 `immutable=1`로 열어 아무 파일도 만들지 않는다(10차 10a 0번).
+/// 새로 만들거나 이전하거나 권한을 바꾸지 않으려고 store의 **읽기 전용 손잡이**([`Store::open_read_only`])로 연다
+/// (9차 보강 2 · 68차 백로그 U 2번): 판이 낮으면 올리지 않고 그 판을 알리고, 곁 파일이 없으면 곁 파일도 만들지
+/// 않는다(10차 10a 0번). 도는 서버의 쓰기 잠금을 잡지 않는다.
 /// 잠금에 걸린 것은 깨진 것이 아니다: 다른 프로그램(도는 서버)이 쓰는 중이라고 알린다.
 fn check_database(home: &Path) -> (Check, Option<bool>) {
     let item = CheckItem::Database;
@@ -325,28 +326,24 @@ fn check_database(home: &Path) -> (Check, Option<bool>) {
     }
     let restore_fix = "백업이 있으면 price-inha restore <백업 파일> --identity <비밀키 파일> --into <빈 폴더> \
 로 되살린 뒤 그 폴더로 띄웁니다";
-    let conn = match open_read_only(&path) {
-        Ok(conn) => conn,
-        Err(error) if is_busy(&error) => return (in_use(), None),
+    let store = match Store::open_read_only(&path) {
+        Ok(store) => store,
+        Err(error) if store_busy(&error) => return (in_use(), None),
         Err(_) => return (bad(item, "저장소 파일을 열 수 없습니다", restore_fix), None),
     };
-    let integrity: Result<String, _> =
-        conn.query_row("PRAGMA integrity_check", [], |row| row.get(0));
-    match integrity {
-        Ok(text) if text == "ok" => {}
-        Err(error) if is_busy(&error) => return (in_use(), None),
+    match store.integrity_ok() {
+        Ok(true) => {}
+        Err(error) if store_busy(&error) => return (in_use(), None),
         _ => {
             let what = "저장소가 깨졌습니다(integrity_check 실패)";
             return (bad(item, what, restore_fix), None);
         }
     }
-    let version: Result<i64, _> = conn.query_row("PRAGMA user_version", [], |row| row.get(0));
-    let has_key = access_key_generation(&conn)
-        .ok()
-        .map(|found| found.is_some());
+    let version = store.info().map(|info| i64::from(info.schema_version));
+    let has_key = store.access_key().ok().map(|found| found.is_some());
     let known = i64::from(pi_store::SCHEMA_VERSION);
     // (10차 10b 0번 다) 쓰는 템플릿이 멈춤이거나 없으면 매수가 막힌 까닭을 같은 ✓ 줄에 덧붙인다(문제로 세지 않는다).
-    let notice = template_notice(&conn)
+    let notice = template_notice(&store)
         .map(|notice| format!(" · {notice}"))
         .unwrap_or_default();
     let check = match version {
@@ -365,19 +362,24 @@ fn check_database(home: &Path) -> (Check, Option<bool>) {
     (check, has_key)
 }
 
+/// 잠금에 걸린 저장소 오류인가(다른 프로그램이 쓰는 중).
+fn store_busy(error: &pi_store::StoreError) -> bool {
+    matches!(error, pi_store::StoreError::Sqlite(inner) if is_busy(inner))
+}
+
 /// 쓰는 템플릿(가장 나중에 고른 것)이 없거나 멈춤이면 그 안내. 템플릿 표를 읽지 못하면(옛 스키마 등) 없음.
-fn template_notice(conn: &rusqlite::Connection) -> Option<&'static str> {
-    let state: Result<Option<String>, _> = conn
-        .query_row(
-            "SELECT state FROM templates ORDER BY id DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional();
-    match state {
-        Ok(None) => Some(crate::trading::CHOOSE_TEMPLATE_NOTICE),
-        Ok(Some(state)) if state == "stopped" => Some(crate::trading::CHOOSE_TEMPLATE_NOTICE),
-        _ => None,
+fn template_notice(store: &Store) -> Option<&'static str> {
+    let mut latest: Option<(TemplateId, TemplateState)> = None;
+    for state in TemplateState::ALL {
+        for template in store.templates_in_state(state).ok()? {
+            if latest.is_none_or(|(id, _)| template.id > id) {
+                latest = Some((template.id, template.state));
+            }
+        }
+    }
+    match latest {
+        None | Some((_, TemplateState::Stopped)) => Some(crate::trading::CHOOSE_TEMPLATE_NOTICE),
+        Some(_) => None,
     }
 }
 
