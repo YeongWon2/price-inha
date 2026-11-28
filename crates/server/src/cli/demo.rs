@@ -12,9 +12,10 @@
 //! 바깥(증권사 · AI · 자료 · 메신저)으로 나가지 않는 것은 `run --demo`와 같다(E56). 주문은 모의계좌뿐이다.
 
 use std::io::Write;
-use std::net::IpAddr;
-use std::path::Path;
+use std::net::{IpAddr, TcpListener};
+use std::path::{Path, PathBuf};
 
+use super::open::{OpenScreen, open_browser};
 use super::runner::CommandRunner;
 use crate::{App, AppError, RunAssembly, Settings, SettingsError};
 
@@ -32,27 +33,78 @@ pub struct DemoRequest {
     pub no_open: bool,
 }
 
+/// 기본 포트가 차 있을 때 바로 뒤에서 찾아보는 포트 수.
+const NEARBY_PORTS: u16 = 20;
+
 /// 시연 설정을 읽는다(모듈 문서의 보관 폴더 · 포트 규칙). 늘 시연 모드다.
 pub fn demo_settings(
-    _args: &[String],
-    _env: &dyn Fn(&str) -> Option<String>,
-    _user_home: Option<&Path>,
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+    user_home: Option<&Path>,
 ) -> Result<Settings, SettingsError> {
-    todo!()
+    let mut given = args.to_vec();
+    if !given.iter().any(|arg| arg == ARG_DEMO) {
+        given.push(ARG_DEMO.to_string());
+    }
+    let mut settings = Settings::parse(&given, env, user_home)?;
+    if !args.iter().any(|arg| arg == ARG_HOME) {
+        let mut home = settings.home.into_os_string();
+        home.push(DEMO_HOME_SUFFIX);
+        settings.home = PathBuf::from(home);
+    }
+    let explicit = args.iter().any(|arg| arg == ARG_PORT) || env(crate::ENV_PORT).is_some();
+    settings.port = demo_port(settings.bind, settings.port, explicit);
+    Ok(settings)
 }
 
-/// 시연이 열 포트: 직접 줬으면(`explicit`) 그대로, 비어 있으면 그대로, 차 있으면 다른 빈 포트.
-pub fn demo_port(_bind: IpAddr, _wanted: u16, _explicit: bool) -> u16 {
-    todo!()
+/// (67차) 받은 인자와 프로세스의 환경 변수 · 홈 폴더로 [`demo_settings`]를 부른다(실행 파일의 `demo`).
+pub fn demo_from_process(args: &[String]) -> Result<Settings, SettingsError> {
+    let env = |name: &str| std::env::var(name).ok();
+    demo_settings(args, &env, std::env::home_dir().as_deref())
+}
+
+/// 설정 인자 이름들(`crate::Settings`와 같은 글자).
+const ARG_DEMO: &str = "--demo";
+const ARG_HOME: &str = "--home";
+const ARG_PORT: &str = "--port";
+
+/// 시연이 열 포트: 직접 줬으면(`explicit`) 그대로, 비어 있으면 그대로, 차 있으면 바로 뒤 [`NEARBY_PORTS`]개 중
+/// 첫 빈 포트, 그것도 없으면 운영체제가 고른 빈 포트. 아무것도 못 고르면 `wanted`(띄울 때 까닭을 알린다).
+pub fn demo_port(bind: IpAddr, wanted: u16, explicit: bool) -> u16 {
+    if explicit || wanted == 0 || is_free(bind, wanted) {
+        return wanted;
+    }
+    let nearby = (1..=NEARBY_PORTS).filter_map(|step| wanted.checked_add(step));
+    if let Some(port) = nearby.into_iter().find(|port| is_free(bind, *port)) {
+        return port;
+    }
+    TcpListener::bind((bind, 0))
+        .and_then(|listener| listener.local_addr())
+        .map_or(wanted, |addr| addr.port())
+}
+
+/// 그 주소 · 포트를 지금 열 수 있는가(열어 보고 바로 닫는다).
+fn is_free(bind: IpAddr, port: u16) -> bool {
+    TcpListener::bind((bind, port)).is_ok()
 }
 
 /// 시연 서버를 띄우고 안내 · 사무실 주소를 찍고 브라우저를 연다. 뜬 앱을 돌려준다(끄는 것은 부르는 쪽).
 pub async fn start_demo(
-    _settings: Settings,
-    _assembly: RunAssembly,
-    _request: &DemoRequest,
-    _output: &mut dyn Write,
-    _runner: &dyn CommandRunner,
+    settings: Settings,
+    assembly: RunAssembly,
+    request: &DemoRequest,
+    output: &mut dyn Write,
+    runner: &dyn CommandRunner,
 ) -> Result<App, AppError> {
-    todo!()
+    let home = settings.home.clone();
+    let app = App::launch_run(settings, assembly).await?;
+    let addr = crate::announce_addr(app.local_addr());
+    let url = format!("http://{addr}{}", OpenScreen::Office.path());
+    let _ = writeln!(output, "{DEMO_NOTICE}");
+    let _ = writeln!(output, "시연 보관 폴더: {}", home.display());
+    let _ = writeln!(output, "{url}");
+    if !request.no_open && !open_browser(runner, &url) {
+        let _ = writeln!(output, "브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
+    }
+    Ok(app)
 }

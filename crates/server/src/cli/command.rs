@@ -144,6 +144,10 @@ impl Command {
             "restore" => parse_restore(rest),
             "setup" => parse_setup(rest),
             "open" => parse_open(rest),
+            "demo" => {
+                let (no_open, args) = take_flag(rest, "--no-open");
+                Ok(Command::Demo { no_open, args })
+            }
             other => Err(CliError::UnknownCommand(other.to_string())),
         }
     }
