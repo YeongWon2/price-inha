@@ -6,9 +6,8 @@
 //! - 재기([`storage_report`]): 저장소의 종류별 쓰임에서 하루 평균(묶음마다 처음과 마지막 시각 사이의 날로 나눈 것의
 //!   합)과 10년 추정(하루 평균 × 3650)을 낸다. `price-inha doctor` · 설정 화면 진단 · [`SETUP_STORAGE_PATH`].
 //! - 덜어 내기([`run_archive`]): 보관 기간([`ArchiveJob::keep_days`], 기본 [`ARCHIVE_KEEP_DAYS_DEFAULT`]일)이 지난
-//!   주(한국 시각 월요일 0시부터 한 주)마다 원문을 보관 폴더 [`ARCHIVE_DIR`]`/<종류>-<기간>.jsonl.gz`(0600, gzip —
-//!   62차 결정 33, 옛 무압축 `.jsonl`도 [`read_archive_file`]로 읽는다)로 빼내고, 풀어 본 원문의 줄 수 · SHA-256을
-//!   확인한 뒤에만 요약 한 행을 남기고 원문 행을 지운다.
+//!   주(한국 시각 월요일 0시부터 한 주)마다 원문을 보관 폴더 [`ARCHIVE_DIR`]`/<종류>-<기간>.jsonl`(0600, 무압축 —
+//!   쓰는 크레이트에 gzip이 없다)로 빼내고, 파일의 줄 수 · SHA-256을 확인한 뒤에만 요약 한 행을 남기고 원문 행을 지운다.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,8 +20,6 @@ mod file;
 mod job;
 mod measure;
 mod summary;
-
-pub use file::read_archive_file;
 
 /// 보관 폴더 이름(보관 폴더 `--home` 아래).
 pub const ARCHIVE_DIR: &str = "archive";

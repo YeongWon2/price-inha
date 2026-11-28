@@ -49,7 +49,6 @@ pub use app::{
     KIND_QUOTES, KIND_QUOTES_STALE, KIND_SYMBOLS_REJECTED, Launch, RunAssembly, Wiring,
     announce_addr, run_assembly,
 };
-pub use archive::read_archive_file;
 pub use archive::{
     ARCHIVE_DIR, ARCHIVE_KEEP_DAYS_DEFAULT, ArchiveJob, ArchiveRun, ArchivedPeriod, GroupReport,
     SETUP_STORAGE_PATH, StorageReport, run_archive, storage_line, storage_report,

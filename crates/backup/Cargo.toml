@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 age.workspace = true
 base64.workspace = true
-flate2.workspace = true
 hex.workspace = true
 pi-secrets.workspace = true
 pi-store.workspace = true

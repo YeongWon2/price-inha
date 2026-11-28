@@ -35,8 +35,6 @@ async-trait = "0.1.92"
 axum = "0.8.9"
 base64 = "0.23.1"
 chrono = { version = "0.4.45", default-features = false }
-# (결정 33) 보관 파일 gzip. 기본 백엔드 miniz_oxide(순수 Rust — C 라이브러리 없이).
-flate2 = "1.1.10"
 futures = "0.3.34"
 hex = "0.4.3"
 hkdf = "0.13.0"

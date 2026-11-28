@@ -251,14 +251,12 @@ impl Backup {
             },
             files,
         };
-        for file in &bundle.files {
-            // (6차) gzip 보관 파일은 풀어 본 원문도 본다(압축된 바이트에서는 비밀이 숨는다).
-            let plain = crate::archive::plain_view(file)?;
-            let found = self.secrets.contains_registered(&file.bytes)
-                || plain.is_some_and(|p| self.secrets.contains_registered(&p));
-            if found {
-                return Err(BackupError::SecretFound);
-            }
+        if bundle
+            .files
+            .iter()
+            .any(|f| self.secrets.contains_registered(&f.bytes))
+        {
+            return Err(BackupError::SecretFound);
         }
         crate::bundle::verify_in(&bundle, root)?;
         let sealed = seal(&bundle, &self.settings.recipient)?;
