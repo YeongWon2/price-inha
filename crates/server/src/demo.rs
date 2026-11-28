@@ -283,6 +283,26 @@ mod tests {
         }
     }
 
+    /// (결정 36) 오르내림이 한쪽으로 쏠리지 않는다: 짧은 하루에서 산 값이 금방 멀어지면 체결 · 익절 · 손절이 고르게
+    /// 보이지 않는다(예전에는 0걸음을 늘 한 걸음 올려 받을 때마다 평균 1/7걸음씩 올랐다).
+    #[tokio::test]
+    async fn 오르내림이_한쪽으로_쏠리지_않는다() {
+        let adapter = DemoAdapter::new(Market::Kr, Arc::new(SystemClock));
+        let symbol = [Symbol::new("005930")];
+        let mut last = prices(&adapter, &symbol).await;
+        let (mut up, mut down) = (0_i64, 0_i64);
+        for _ in 0..7_000 {
+            let now = prices(&adapter, &symbol).await;
+            if now > last {
+                up += 1;
+            } else {
+                down += 1;
+            }
+            last = now;
+        }
+        assert!((up - down).abs() < 350, "오름 {up} · 내림 {down}");
+    }
+
     #[test]
     fn 미국_시연_달력은_서머타임이면_utc_4로_센다() {
         let summer = NaiveDate::from_ymd_opt(2026, 7, 15).unwrap_or_default();
