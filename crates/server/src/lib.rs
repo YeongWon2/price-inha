@@ -66,9 +66,9 @@ pub use cli::{
     WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor, open, restore, setup,
 };
 pub use cli::{
-    DEMO_DAY_NOTICE, DEMO_HOME_SUFFIX, DEMO_KEYS_NOTICE, DEMO_NOTICE, DEMO_TEMPLATE_NOTICE,
-    DemoPlan, DemoRequest, demo_from_process, demo_plan, demo_port, demo_settings, start_demo,
-    start_demo_plan,
+    DEMO_DAY_NOTICE, DEMO_DAY_QUOTE_INTERVAL, DEMO_HOME_SUFFIX, DEMO_KEYS_NOTICE, DEMO_NOTICE,
+    DEMO_TEMPLATE_NOTICE, DemoPlan, DemoRequest, demo_from_process, demo_plan, demo_port,
+    demo_settings, start_demo, start_demo_plan,
 };
 pub use demo::demo_symbols;
 pub use demo::{

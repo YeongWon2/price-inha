@@ -18,6 +18,7 @@ mod clock;
 mod common;
 mod day;
 mod flow;
+mod pace;
 mod parse;
 mod place;
 mod plan;

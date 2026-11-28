@@ -61,6 +61,9 @@ pub struct DemoPlan {
     pub day_minutes: u32,
 }
 
+/// (결정 36) 짧은 하루의 가짜 시세 간격(장중 15분 안에 익절 · 손절까지 닿을 만큼 움직이게).
+pub const DEMO_DAY_QUOTE_INTERVAL: Duration = Duration::from_secs(1);
+
 /// (결정 36) 하루 길이를 받는 인자.
 const ARG_DAY: &str = "--demo-day-minutes";
 

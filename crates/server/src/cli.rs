@@ -19,9 +19,9 @@ mod setup;
 pub use access::{AccessKeyRequest, ShownAccessKey, access_key, access_key_with};
 pub use command::{Command, ServiceAction, VERSION};
 pub use demo::{
-    DEMO_DAY_NOTICE, DEMO_HOME_SUFFIX, DEMO_KEYS_NOTICE, DEMO_NOTICE, DEMO_TEMPLATE_NOTICE,
-    DemoPlan, DemoRequest, demo_from_process, demo_plan, demo_port, demo_settings, start_demo,
-    start_demo_plan,
+    DEMO_DAY_NOTICE, DEMO_DAY_QUOTE_INTERVAL, DEMO_HOME_SUFFIX, DEMO_KEYS_NOTICE, DEMO_NOTICE,
+    DEMO_TEMPLATE_NOTICE, DemoPlan, DemoRequest, demo_from_process, demo_plan, demo_port,
+    demo_settings, start_demo, start_demo_plan,
 };
 pub use doctor::{Check, CheckItem, DoctorReport, doctor};
 pub use open::{OPEN_NO_SERVER, OPEN_NO_SERVER_EXIT, OPEN_SCREENS, OpenRequest, OpenScreen, open};
