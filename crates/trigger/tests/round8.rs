@@ -8,6 +8,7 @@
 //!   않는다), 실패한 깨우기에 실렸던 것(6차 — 다시 보내지 않는다).
 //!
 //! 잠긴 `tests/suite.rs` 묶음을 고치지 않으려고 따로 둔 시험 바이너리다. 시각은 가짜 시계로만 움직인다.
+//! (8차) 2026-11-28 백로그 U를 합쳐 잠금.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
