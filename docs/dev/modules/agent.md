@@ -28,56 +28,7 @@
 6. AI로 보내는 글은 `Redactor` 포트를 거친다(E38).
 
 ## 9차 작업 (2026-11-21 발표 자료 대조)
-
-근거: `spec.md` F2 8b("보유 종목 팔기 흐름으로 넘어간다") · F4 시작("팀장이 팔기로 정하거나") · F4 기본 흐름 1 · 2("매매 담당이 파는 주문 안을 만든다"), `dev.md` V4 · E20 · E32, `principles.md` P7 · P9, `docs/dev/decisions.md` 2026-11-16 agent 1차 모호한 곳 2번("판단됨은 곧 사기 · 팔기로 이어지게 해 E20을 지킨다").
-지금은 팀장이 팔기로 정하면 판단만 남고 주문 안이 생기지 않는다(`src/team.rs:363`의 `Side::Sell => (Decision::Sell, None)`, `draft_order`는 팔기를 `TradeNotBuy`로 거부). 이 차수는 팔기 판단 뒤 매매 담당이 **보유 종목을 파는 주문 안**을 만든다. 사기 길(`draft_order` · `OrderDraft` · `submit_order_draft`)의 모양과 동작은 바꾸지 않는다.
-
-### (a) 공개 API 바뀜
-- 새 타입 `pub struct SellDraft { pub judged: TradeId, pub holding: TradeId, pub symbol: String, pub note: String, pub ai_quantity: Option<Decimal>, pub ai_price: Option<Decimal> }`. `judged`는 팔기로 판단된 논의 매매, `holding`은 팔 보유 매매(보유중). 수량 · 가격은 참고값뿐이다(P7, rules가 정한다).
-- `Tools`에 기본 구현이 있는 메서드를 더한다: `async fn submit_sell_draft(&self, draft: &SellDraft) -> Result<(), ToolError>`. 기본은 `Err(ToolError("팔기 주문 안을 받지 않습니다"))`(잠긴 테스트의 `FakeTools`가 그대로 컴파일되게).
-- `pub async fn Team::draft_sell(&self, trade: TradeId) -> Result<Vec<SellDraft>, Error>`.
-- `Error`(`non_exhaustive`)에 `TradeNotSell { trade }`를 더한다.
-- `DiscussionOutcome`에 `pub sells: Vec<SellDraft>`를 더한다(팔기로 판단되고 주문 안이 만들어졌을 때만 차 있다. `order`는 지금처럼 사기에만).
-- `Decision::Sell`의 문서를 "팔기. 매매는 판단됨이고, 같은 종목을 가지고 있으면 `sells`에 파는 주문 안이 있다"로 고친다.
-
-### (b) 동작 규칙 · 경계
-1. `draft_sell(trade)`:
-   - 매매가 판단됨이 아니면 `TradeNotJudged`(E20), 저장소의 방향(`trade_side`)이 팔기가 아니면(사기 · 없음) `TradeNotSell`. 둘 다 AI를 부르지 않는다.
-   - 팔 것 찾기: 저장소 `trades_in_state(TradeState::Holding)` 가운데 종목 · 계좌 종류가 판단 매매와 같은 것(만든 순서). 하나도 없으면 AI를 부르지 않고 `Ok(빈 목록)`이고, 방 로그에 `room.activity`(`{"status": "nothing_held", "trade": <번호>}`)를 하나 남긴다(F4 사전 조건 "팔 종목을 보유하고 있다").
-   - 있으면 매매 담당 턴 한 번(입력은 판단의 근거 · 보유 매매 번호들 · 금액 단위 안내, 5차와 같은 단위). 답은 `{"side": "sell", "note": 글, "quantity"?: 수, "price"?: 수}` 객체 하나. `side`가 `sell`이 아니거나 모양이 틀리면 매매 담당 응답 실패(`RoleUnavailable`, `InvalidStructuredReply`).
-   - 보유 매매마다 `SellDraft` 하나(같은 `note` · 참고값). 참고 수량은 0 · 음수 · 숫자 아님이면 `None`(사기 길과 같다). 하나씩 `submit_sell_draft`로 넘기고, 넘긴 것만 돌려준다. 넘기기가 실패하면 그 오류로 끝난다(앞에서 넘긴 것은 이미 넘어갔다).
-   - 글은 저장 · 넘기기 전에 `Redactor`를 거친다(E38, 3차와 같다).
-2. `discuss`: 팀장이 팔기로 정하면(근거가 찼을 때만, 2차 P9 그대로) 판단을 남긴 뒤 `draft_sell`과 같은 길로 간다. 매매 담당이 답하지 못하면 사기와 같이 방 로그에 실패를 남기고 `sells`는 빈 목록(논의 결과는 팔기 그대로).
-3. `draft_order`(사기)는 그대로 팔기 매매를 `TradeNotBuy`로 거부한다.
-4. 팔 때의 목적: server가 `SellDraft`를 rules의 `Purpose::TeamExit`(rules 4차 1번)로 바꿔 점검에 넣는다. 전체 정지에서는 rules가 막는다(F4 7b2). 손절값에 닿은 손절(F4 1a "논의 없이")은 지금처럼 exec가 하고 이 길을 거치지 않는다.
-5. 판단된 논의 매매(`judged`)의 상태를 옮기지 않는다(판단됨 그대로, 매매 기록으로 남음). 보유 매매의 상태 · 주문은 포트 너머(server · exec)다.
-
-### (c) 원본 동작 근거
-- 원본에 없음(매매 판단은 우리 고유, 결정 15번) — 스펙 F2 8b · F4 시작 · F4 기본 흐름 2.
-- 한 턴의 고리 · 도구 결과 · 구조화된 답의 실패 처리는 1차 근거 그대로: `docs/research/agent-runtime-deep.md` 1장, 도구 호출은 글 안의 JSON 행동 형식(결정 2026-11-16 12번, 의도해서 다름).
-
-### (d) 테스트로 확인할 것 (검증 주석: V4 E20 P7 P9 E38)
-- 같은 종목 보유 매매 둘이 있는 팔기 판단 → 매매 담당 1번 호출, `sells` 둘(각 `holding`), `submit_sell_draft` 두 번, `order`는 `None`.
-- 보유 없음 → 매매 담당 0번, `sells` 빈 목록, 방 로그에 `nothing_held`.
-- 다른 종목 · 다른 계좌 종류의 보유는 고르지 않는다.
-- 매매 담당이 `{"side": "buy"}`나 깨진 JSON을 주면 응답 실패, `sells` 빈 목록, 판단은 팔기 그대로.
-- 참고 수량 · 가격은 버리지 않고 참고값으로(0 · 음수는 `None`).
-- 사기 판단 매매로 `draft_sell` → `TradeNotSell`, 논의중 매매 → `TradeNotJudged`, 둘 다 AI 0번.
-- 다시 띄운 팀도 저장소의 방향으로 같은 결과.
-- 넘긴 `note`에 표시 글자가 가려져 있다.
-- 새 테스트는 `submit_sell_draft`를 기록하는 가짜 도구를 새 파일에 둔다(잠긴 `tests/suite/common.rs`의 `FakeTools`는 그대로 두고 기본 구현을 쓴다).
-
-### (e) 잠긴 옛 테스트와 부딪히는 곳
-없음(설계가 피한다). 확인한 곳:
-- `tests/suite/second.rs:31-52`: 팔기 판단 뒤 `out.order == None`, `draft_order`가 `TradeNotBuy`, 매매 담당 호출 0번. 이 테스트의 매매는 같은 종목 보유가 없어 새 규칙에서도 매매 담당을 부르지 않는다(보유 없음 → AI 0번).
-- `tests/suite/side.rs:28-90`: 방향 저장 · `TradeNotBuy`를 확인한다. 그대로 맞다.
-- `tests/suite/order.rs:28` · `:52`: `OrderDraft`를 구조체 문장으로 만든다. `OrderDraft`에 칸을 더하지 않으므로 깨지지 않는다.
-- `tests/suite/common.rs:181-205`: `Tools` 구현. 새 메서드에 기본 구현이 있어 깨지지 않는다.
-만약 "보유가 없어도 매매 담당에게 묻는다"로 정하면 `second.rs:50`(`calls(Role::Trader) == 0`)이 반대가 되어 **reopen 필요**.
-
-### 물을 것
-- 같은 종목 보유가 여럿일 때 모두 파는 주문 안을 만들지(추천: 보유 매매마다 하나), 매매 담당이 고르게 할지.
-- 팔기 판단된 논의 매매를 판단됨으로 남길지(추천), 다른 상태로 닫을지(store 상태표를 바꾸는 일이라 스펙 결정).
+- 끝남: 근거: spec.md F2 8b("보유 종목 팔기 흐름으로 넘어간다") · F4 시작("팀장이 팔기로 정하거나") · F4 기본 흐름 1 · 2("매매 담당이 … — 커밋 94b5455(red) · 4182c54(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 하지 않는 것
 
@@ -92,85 +43,31 @@ AI는 대본대로 답하는 가짜 AiProvider만 쓴다. 담당 하나가 실�
 M2 E6 E20 E27 E32 E38 V2 V3 V4 P7 P9 P21
 
 ## 1차 검토 참고 (다음 차수 후보)
-
-- 방 로그 · 세션에는 가리지 않은 원문이 저장되고 공급자 오류 문구도 `turn.failed`에 그대로 남는다. T18(기록 가리기)과 맞춰 저장 전에도 redactor를 거친다.
-- 공개 `draft_order`가 판단 방향을 보지 않아 팔기로 판단된 매매에 부르면 사기 주문 안이 나온다.
-- 팔기는 근거가 비어도 판단됨이 된다(P9 원문은 "매매"). 금액 칸 0 · 음수도 근거가 찬 것으로 본다.
-- P7 "AI 값과 다르면 작은 쪽": AI가 적은 수량 · 가격을 버려 rules가 비교할 수 없다. 참고값으로 넘긴다.
-- 빈 답이 원본처럼 "넘김"이 아니라 응답 실패가 된다. 방 로그 줄 id가 같은 시각 재논의에서 겹칠 수 있다. 세션 압축은 2차.
+- 끝남: 방 로그 · 세션에는 가리지 않은 원문이 저장되고 공급자 오류 문구도 turn.failed에 그대로 남는다. T18(기록 가리기)과 맞춰 저장 전에도 redac… — 커밋 —(red) · —(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 2차 작업 (1차 검토 참고에서)
-
-- `draft_order`는 판단 방향이 사기일 때만 사기 주문 안을 만든다(팔기면 거부).
-- 팔기도 근거 칸이 비면 지켜보기(P9 "근거 기록 없는 매매 금지"). 금액 칸이 0 · 음수면 근거가 찬 것으로 보지 않는다.
-- P7 "AI 값과 다르면 작은 쪽": 매매 담당이 적은 수량 · 가격을 버리지 않고 `OrderDraft`의 참고값(`ai_quantity` 등)으로 넘긴다(rules가 작은 쪽을 고른다).
+- 끝남: draft_order는 판단 방향이 사기일 때만 사기 주문 안을 만든다(팔기면 거부). — 커밋 5359e00(red) · 91d373a(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 3차 작업 (후보 일괄 처리)
-
-- 저장 전 가리기(E38 "기록 … 어디에도"): 세션 메시지(받은 글 · 답 · 도구 결과), 방 로그 내용(글 · 실패 까닭), 판단(근거 · 담당 점수 까닭 · 자료 이름), 주문 안 설명을 `Redactor`로 가린 뒤 저장 · 넘긴다.
-- 빈 답(원본): 턴 실행기는 빈 답 3번이면 `(empty)` 표식을 assistant 행으로 남기고 응답 실패로 끝난다. 팀 논의 뒤 라운드에서 그 실패는 넘김이다(0라운드 지명 담당은 그대로 실패).
-- 방 로그 줄 id: 같은 시각에 같은 매매를 다시 논의해도 겹치지 않게 방의 마지막 번호를 접두에 넣는다.
-- 남김: 세션 압축(하지 않는 것, 2차). 다시 띄운 뒤 팔기 매매의 `draft_order` 거부는 판단에 방향 칸이 없어 store 몫.
-
-### 3차 검토 참고
-- 논의마다 방 줄을 500개씩 읽어 `last_seq`를 찾는다(방이 길어지면 store에 마지막 번호 조회 API).
+- 끝남: 저장 전 가리기(E38 "기록 … 어디에도"): 세션 메시지(받은 글 · 답 · 도구 결과), 방 로그 내용(글 · 실패 까닭), 판단(근거 · 담당 점수 까닭… — 커밋 9de573a(red) · f8e5995(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 새 store API 쓰기 (store 12차에서 넘어옴)
 - 팔기 매매의 `draft_order`는 `judge_trade_with_side`로 방향을 저장하고 `trade_side`로 막는다(다시 띄운 뒤에도). Team 메모리에만 기대지 않는다.
 
 ## 4차 작업 (후보 일괄 처리: 새 store API)
-- 팀장 판단은 `judge_trade_with_side`로 근거와 방향을 한 묶음에 남긴다.
-- `draft_order`는 저장소의 `trade_side`가 팔기면 `TradeNotBuy`로 거부한다(AI를 부르지 않는다). 다시 띄운 팀 · 팀을 거치지 않고 저장소에 팔기로 판단된 매매도 같다. Team 메모리의 팔기 목록은 걷어냈다.
-- 남김: 3차 검토 참고의 방 마지막 번호 조회 API(store 몫).
+- 끝남: 팀장 판단은 judge_trade_with_side로 근거와 방향을 한 묶음에 남긴다. — 커밋 —(red) · —(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 5차 작업 (server 마지막 차수에서 넘어옴)
-- AI가 내는 판단 금액(손절값 · 목표가 등)은 통화의 최소 단위다: 국내는 원, 미국은 센트. 담당 프롬프트 · 도구 설명에 시장별 단위를 알리고, 받은 값을 `Amount`로 그대로 받되 단위 안내가 빠지지 않는지 시험한다.
-
-### 5차 구현 메모
-- 팀장 판단 입력(`prompt::leader_turn`)에 금액 단위 안내를 넣었다: entry · stop · target · expected_value는 통화의 최소 단위 정수(국내 원, 미국 센트). Trade에 시장 칸이 없어 두 시장을 함께 적는다. 시험: `tests/suite/unit.rs`.
+- 끝남: AI가 내는 판단 금액(손절값 · 목표가 등)은 통화의 최소 단위다: 국내는 원, 미국은 센트. 담당 프롬프트 · 도구 설명에 시장별 단위를 알리고, 받은 값을… — 커밋 3df2ce3(red) · 0bd700d(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 8차 작업 (후보 일괄 처리)
-- 방 줄 id에 넣는 방의 마지막 번호를 store `room_last_seq(room)`로 바로 읽는다(500줄씩 읽어 세던 것을 없앴다). 줄 id 모양(`trade-<매매>-<시각>-<마지막 번호>-<순번>`)은 그대로다.
-- 시험: `tests/suite/longroom.rs`(1203줄 방에서 마지막 번호가 id에 들어감 · 줄을 읽어 세지 않음).
-- 3차 검토 참고의 "마지막 번호 조회 API" 항목과 4차의 "남김"은 이로써 처리했다.
+- 끝남: 방 줄 id에 넣는 방의 마지막 번호를 store room_last_seq(room)로 바로 읽는다(500줄씩 읽어 세던 것을 없앴다). 줄 id 모양(trad… — 커밋 —(red) · 30779f5(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 10차 작업 (2026-11-25 조정자, 결정 17 — 논의 진행 신호 · 정리 모드 · 팀장 예비분)
-
-근거: `docs/product/stock-team/additions.md`의 R1-5 · R5-11 · C21 · M13 · E51 · E52 · N14 · V53 · T30(차수 표 20번). 레퍼런스: `docs/research/invest-agent-teams.md` F 5 · 6.
-
-1. **논의 진행 신호**: 논의([`Team::discuss`])가 도는 동안 담당별 단계를 알리는 포트를 둔다 — 대기 · 진행 · 완료 · 오류, 다시 시도면 `n/3`. 논의 시작 · 담당 턴 시작 · 턴 끝 · 턴 실패 · 다시 시도 · 점수 턴 · 팀장 판단 · 논의 끝마다 한 번씩 낸다. 포트가 없으면(기본) 아무것도 하지 않는다. 신호를 내다 실패해도 논의는 그대로 간다.
-2. **호출 예산**: 논의를 열 때 부르는 쪽이 남은 AI 호출 수를 넘길 수 있다. 팀장 판단 턴을 위한 예비분(N14: 하루 상한의 10%, 최소 2번 — 값은 부르는 쪽이 넘긴다)은 담당 턴이 쓰지 못한다.
-3. **정리 모드**: 남은 호출이 문턱(예비분 + 상한의 20% — 값은 부르는 쪽이 넘긴다) 이하면 새 라운드를 열지 않고 팀장 판단으로 넘어간다. 그때 팀장 턴에 "호출이 얼마 남지 않았으니 지금까지의 글로 정리하라"는 한 줄을 넣는다. 방 로그에 `room.activity`(`{"status": "wrap_up"}`)를 남긴다.
-4. 예산을 넘기지 않으면(기본) 지금과 똑같이 돈다.
-
-- 원본 동작 근거: 원본(Hermes)에 없음 — additions.md C21 · M13 · E51 · E52 · N14, 결정 17. 모양 근거는 `docs/research/invest-agent-teams.md` F 5 · 6(TradingAgents의 단계 표시 · 한도 · 정리 지시).
-- 시험으로 확인할 것(V53): 가짜 턴 실행기로 논의를 돌리면 신호가 순서대로(담당마다 대기 → 진행 → 완료) / 턴 실패는 오류 · 다시 시도 1/3 / 예산이 넉넉하면 지금과 같은 글 수 / 문턱 이하면 다음 라운드 없이 팀장 판단 · 팀장 턴에 정리 한 줄 · 방 로그 wrap_up / 예비분은 담당 턴이 쓰지 못함(예산 = 예비분이면 담당 턴 0, 팀장 턴 1) / 신호 포트가 실패해도 논의 결과는 같다 / 예산 없이 부르면 기존 시험과 같은 결과.
-
-### 대조
-
-| 시험 · 문서 경로 | 판정 | 근거 |
-|---|---|---|
-| `crates/agent/tests/` 전부 | 유지 | 10차는 신호 포트 · 호출 예산을 더한다 — 넘기지 않으면 지금과 똑같이 돈다 |
+- 끝남: 근거: docs/product/stock-team/additions.md의 R1-5 · R5-11 · C21 · M13 · E51 · E52 · N14 · V5… — 커밋 d521bd2(red) · fb59965(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 11차 작업 (2026-11-25 조정자, 결정 17 — 담당 의견 칸 · 팀장 요약 · 뒤집힐 조건 · 공지를 논의 자료에)
-
-근거: `docs/product/stock-team/additions.md`의 R6-4 · R6-5 · R17-2 · M9 · D13 · T29(차수 표 16번). 저장은 store 19차(`judge_trade_with_opinions` · `RoleOpinion` · `TradeSummary` · `notices_between`)를 쓴다. 레퍼런스: `docs/research/invest-agent-teams.md` F 1 · 2.
-
-1. **담당 의견 칸**(D13): 점수 턴의 답 JSON에 점수 · 근거 옆으로 방향(`bullish` · `bearish` · `neutral`) · 확신도(`low` · `medium` · `high`) · 한 줄 이유 · 보는 기간(거래일 수, 없을 수 있다)을 받는다. 새 칸이 없거나 틀린 옛 모양 답은 지금처럼 점수만 받고 그 담당의 의견은 "기록 없음"으로 둔다(점수 턴을 실패로 치지 않는다). 호출이 모자라 점수를 못 낸 담당(10차 기권)이 있으면 10차 검토 규칙대로 그 논의는 지켜보기로 끝나므로(판단을 저장하지 않는다) 기권 의견이 저장되는 일은 없다 — 기권은 논의 진행 신호로만 보인다(조정자, 11차 N1 뒤: 안전 규칙을 유지한다). 이유 글은 가린다. 답 JSON의 칸 이름: 점수 턴 `stance` · `conviction` · `opinion_reason` · `horizon_days`, 팀장 턴 `summary` · `reversal`. 보는 기간이 0이거나 틀린 모양이면 기간만 비운다(의견은 남긴다).
-2. **팀장 요약 · 뒤집힐 조건**: 팀장 판단 턴의 답 JSON에 `summary`(2~4문장)와 `reversal`("이러면 뒤집힌다" 한 줄)을 받는다. 사기 · 팔기 판단이고 두 칸이 있으면 판단을 저장할 때 의견들과 함께 한 쓰기로 남긴다(`judge_trade_with_opinions`). 두 칸이 없으면 지금처럼 `judge_trade_with_side`로 저장한다(옛 모양 답도 그대로 매매가 된다 — 근거 칸 완전성 규칙 P9는 그대로).
-3. **담당 프롬프트**: 점수 턴 · 팀장 턴의 지시 글에 새 칸의 모양을 적는다(기존 칸 설명은 그대로).
-4. **공지를 논의 자료에**(R17-2): 논의 요청에 공지 글 목록(보낸 시각과 함께)을 넘길 수 있다 — 넘기면 담당 브리핑의 자료 뒤에 "사용자 공지" 묶음으로 넣는다(가린 글, 보낸 시각 순서). 공지는 자료 완전성(E32) 판정에 들지 않고, 판단의 자료 목록(sources)에는 이름 "사용자 공지"와 가장 늦은 보낸 시각으로 한 줄 들어간다. 넘기지 않으면 지금과 같다. 기존 `DiscussionRequest`에 칸을 더하지 않는다(server가 글자로 만든다) — 10차의 `DiscussionOptions`에 얹는다.
-5. 논의 결과(`DiscussionOutcome`)를 읽는 쪽이 의견 · 요약을 볼 수 있게 따로 읽는 길을 둔다(구조체에 칸을 더하지 않는다 — 저장소의 `trade_opinions`로 읽으면 되므로 새 길이 필요 없으면 두지 않는다).
-
-- 원본 동작 근거: 원본(Hermes)에 없음 — additions.md M9 · D13 · R6-4 · R6-5 · R17-2, 결정 17. 모양 근거는 `docs/research/invest-agent-teams.md` F 1 · 2(신호 칸 · 팀장 결정 칸).
-- 시험으로 확인할 것: 새 칸이 있는 점수 답 → 판단 저장 뒤 저장소 `trade_opinions`에 담당별 방향 · 확신도 · 이유 · 기간, 팀장 요약 · 뒤집힐 조건 / 옛 모양 점수 답 → 점수는 그대로 · 그 담당 의견 없음 / 틀린 방향 글자 → 점수는 받고 의견 없음 / 팀장 답에 요약이 없으면 옛 길로 저장되고 매매는 판단됨 / 이유 · 요약 글이 가려짐 / 공지를 넘기면 브리핑에 "사용자 공지"가 들어가고 sources에 한 줄 · 자료 완전성에는 영향 없음 / 옵션 없이 부르면 기존 시험과 같은 결과.
-
-### 대조
-
-| 시험 · 문서 경로 | 판정 | 근거 |
-|---|---|---|
-| `crates/agent/tests/` 전부 | 유지 | 11차는 점수 · 팀장 답의 새 칸과 공지 자료를 더한다 — 옛 모양 답 · 옵션 없는 논의는 지금과 똑같다 |
-
+- 끝남: 근거: docs/product/stock-team/additions.md의 R6-4 · R6-5 · R17-2 · M9 · D13 · T29(차수 표 16번).… — 커밋 15c5d12(red) · 1ec6c57(green) · 전문: `git show 1a73576:docs/dev/modules/agent.md`
 
 ## 12차 작업 (2026-11-27 조정자, 결정 30 — 사용자 "사람이 정한 규칙들은 강제성이고 AI가 자가 루프 학습")
 

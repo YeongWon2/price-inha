@@ -23,140 +23,28 @@
 7. **키 확인기**: `pi-secrets`의 확인기 trait을 구현해 AI 키가 실제로 닿는지 확인한다(가장 싼 요청 한 번).
 
 ## 3차 작업 (원본 대조의 "모르고 다름" + 1 · 2차 AI 검토의 참고 — 2026-11-15 사용자 "다 개선")
-
-근거: `docs/dev/conformance.md` A15 · A17 · A18 · A19(모르고 다름 8 · 9 · 10 · 16번), `docs/research/hermes-agent.md` 3.2 표, `docs/research/cli-backend.md` 2.7 · 5.6. **공개 API는 더하기만 한다**(지금 있는 함수 · 타입 · 칸의 모양을 바꾸지 않는다 — server가 기대어 컴파일한다).
-
-API 키 쪽 (Anthropic 공급자):
-
-1. **다시 시도 간격 (A17)**: n번째 다시 시도 전 간격은 `min(2초 × 2^(n-1), 60초)`에 균등 jitter `[0, 간격의 절반]`을 더한다. 무작위는 씨앗을 받을 수 있게 한다(테스트가 정한다). 간격 크기는 설정으로 줄일 수 있다(테스트용).
-2. **`Retry-After` (A18)**: 초 숫자와 HTTP 날짜 둘 다 읽는다. 다시 시도하는 모든 오류(429 · 5xx · 529)에 쓴다. 상한 600초(그보다 길면 600초). 헤더가 없으면 본문의 `retry_after`를 본다. 읽을 수 없는 값은 없는 것으로 본다. "30초를 넘으면 기다리지 않음"은 지운다(원본에 없다).
-3. **시간 초과 · 연결 실패도 다시 시도한다 (A15)**: 원본처럼 다시 시도할 수 있는 오류다. 횟수와 간격은 1번과 같다.
-4. **연결 시간 제한 (A19)**: 연결은 따로 10초(설정값). 전체 요청 시간 제한은 그대로다.
-5. **평문 주소를 막는다**: 기본 주소가 `https`가 아니면 공급자를 만들 때 거부한다. 루프백(`127.0.0.1` · `::1` · `localhost`)만 예외다.
-6. **응답 크기에 끝이 있다**: 정한 크기(설정값, 기본 10MB)를 넘는 응답은 끝까지 읽지 않고 읽지 못한 응답 오류로 끝낸다.
-7. **키 확인은 응답 모양도 본다**: 2xx여도 공식 문서의 모델 목록 모양(`data` 배열)이 아니면 실패다.
-8. **헤더로 보낼 수 없는 자격은 따로 구분한다**: 줄바꿈 · 제어 문자가 든 키는 "설정 안 됨"이 아니라 "자격 모양이 잘못됨"으로 알린다(값은 오류에 담지 않는다).
-
-CLI 쪽:
-
-9. **정상으로 끝난 뒤에도 그룹을 치운다**: 자식이 거둬진 뒤에도 그룹에 SIGTERM을 한 번 보내 남은 손주를 끝낸다.
-10. **확인 명령이 쌓이지 않는다**: 시간 초과된 `--version` · `auth status`의 표준 출력을 끝까지 읽어 버리는 쪽을 남겨(EPIPE로 죽지 않게) 그 프로세스가 스스로 끝나게 한다. 확인은 한 공급자에서 동시에 하나만 돈다(두 번째는 첫 번째를 기다린다). 읽기 상한은 실제 호출과 같다.
-11. **`NotFound`를 나눈다**: 실행 파일이 없을 때만 "설정 안 됨" / "설치 안 됨"이다. 작업 폴더가 없으면 연결 실패 / 확인하지 못함이다(띄우기 전에 작업 폴더를 확인한다).
-12. **끝내기 함수**: `ClaudeCliProvider::shutdown()`(비동기)은 새 호출을 받지 않게 하고(이후 호출은 연결 실패), 살아 있는 모든 그룹에 SIGTERM → 유예 → SIGKILL을 보내고 기다린다. 서버가 꺼질 때 부른다(gate 7차).
-13. **끝내기 전 표준 입력 닫기 (원본 2.7)**: 끝낼 때 표준 입력이 아직 열려 있으면 먼저 닫는다.
-14. **표준 오류 가리기 (원본 2.7)**: 오류에 붙이는 표준 오류 첫 줄에서 `sk-ant-`로 시작하는 낱말과 32자 이상 이어진 `[A-Za-z0-9_-]` 덩어리를 `***`로 바꾼 뒤 200자로 자른다.
-15. **시스템 글도 크기 상한에 든다**: 시스템 글과 표준 입력을 합쳐 10MB를 넘으면 띄우기 전에 잘못된 요청이다.
-
-하지 않는 것(3차): 워크스페이스 헤더(공식 문서에서 확인하지 못함), 스트리밍 · 폴백 · 자동 복구 · 세부 오류 구분(T9).
+- 끝남: 근거: docs/dev/conformance.md A15 · A17 · A18 · A19(모르고 다름 8 · 9 · 10 · 16번), docs/research… — 커밋 179ffb9(red) · 98ac220(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 4차 작업 (3차 검토의 참고 + gate 6차 검토 참고 2 — 2026-11-15 결정)
-
-아래를 **테스트로 먼저 쓰고** 구현한다. 공개 API는 더하기만 한다. 2 · 3 · 4번은 `docs/dev/decisions.md` 2026-11-15의 조정자 추천을 따른다.
-
-
-1. 호출이 띄우는 중에 `shutdown()`이 오면 끝내기가 그 호출을 기다리지 않는다: 자리표를 받는 순간부터 명부에 세거나, 등록이 거부되면 그 자리에서 동기로 끝낸다.
-2. 멈춘 로그인 확인 프로세스가 확인마다 쌓일 수 있다: 앞의 확인 프로세스가 살아 있으면 새로 띄우지 않고 "확인하지 못함"으로 돌려줄지 정한다.
-3. 429에 `Retry-After`가 없을 때 Hermes의 적응형 물러서기(`docs/research/agent-runtime-deep.md`)를 대조표에 기록하고 따를지 정한다.
-4. 끝낼 때 표준 입력 닫고 0.5초 기다리기(원본 2.7)를 맞출지 정한다.
-5. 테스트 빈칸: chunked 응답의 상한(길이 없이 답하는 로컬 TCP 가짜 서버), `retry_after_unit`이 아주 클 때 공황 대신 상한.
-6. 호출하는 쪽(T9)이 알 것: 시간 초과 다시 시도로 같은 요청이 여러 번 과금될 수 있다(원본과 같음). 공개 문서 주석에 적는다.
-7. **확인 명령이 끝나지 않아도 남지 않는다** (gate 6차 검토 참고 2): `check`의 버전 · 로그인 확인 프로세스는 시간 제한이 지나면 프로세스 묶음째 끝내고 거둔다. 끝없이 출력하는 가짜 실행 파일로 확인 뒤에 자식이 남지 않음을 테스트한다.
+- 끝남: 아래를 테스트로 먼저 쓰고 구현한다. 공개 API는 더하기만 한다. 2 · 3 · 4번은 docs/dev/decisions.md 2026-11-15의 조정자 추… — 커밋 a685804(red) · 5c89062(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 5차 작업 (4차 검토의 참고 + gate 7차 검토 참고 1 — 2026-11-15 조정자 결정, 사용자 "알아서 개선")
-
-아래를 **테스트로 먼저 쓰고** 구현한다. 공개 API는 더하기만 한다.
-
-1. 확인 · 호출 제한값이 아주 커도(`Duration::MAX`) 공황하지 않는다: 끝 시각은 `checked_add`로 세고 넘치면 "제한 없음"과 같이 다룬다. 셈은 자식을 띄우기 **전에** 한다(셈이 실패해 자식이 남는 길이 없다).
-2. 신호 명령을 띄우지 못해도 `ProbeAlive`가 내려간다: `child.start_kill()`로 물러서고, 마지막 `wait`에 상한을 둔다.
-3. **확인 프로세스도 `shutdown()`이 끝낸다**(연구 `cli-backend.md` 5.6-3 "꺼질 때 모두 끝내고 기다린다"). 꺼지는 중이 아닐 때 확인을 도중에 죽이지 않는 것(5.6-5)은 그대로다.
-4. 확인이 정상으로 끝나도 그 묶음(프로세스 그룹)에 남은 손주를 끝낸다.
-5. "앞 확인이 아직 돈다"를 다른 "확인하지 못함"과 가를 수 있는 상태(갈래)를 공개한다.
-6. 이미 거둔 그룹 번호에는 신호를 다시 보내지 않는다.
-7. **이 모듈이 작업 폴더에 두는 임시 파일을 알아보는 함수를 공개한다**: `pub fn is_own_work_file(name: &std::ffi::OsStr) -> bool`. 시스템 글 임시 파일(`.pi-ai-system-…`)이면 참, 나머지는 거짓. 서버가 비정상으로 꺼진 뒤 남은 그 파일 때문에 작업 폴더가 "비어 있지 않음"이 되지 않게, 조립(gate 8차)이 이 함수로 가른다.
+- 끝남: 아래를 테스트로 먼저 쓰고 구현한다. 공개 API는 더하기만 한다. — 커밋 b6392e5(red) · 68ce6d5(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 6차 작업 (5차 검토의 참고 — 2026-11-15 조정자 결정)
-
-1. **정상으로 끝난 확인 · 호출의 남은 손주도 끝까지 끝낸다**: 그룹에 `SIGTERM`을 보낸 뒤 끝낼 때의 유예가 지나도 그룹이 남아 있으면 `SIGKILL`을 보낸다(SIGTERM을 무시하고 출력 파이프도 닫은 손주가 쌓이지 않는다).
-2. **호출 쪽 신호 명령도 바꿔 넣을 수 있게 해 물러서기를 시험한다**: 확인 쪽처럼 호출 쪽(`GroupGuard`)도 신호 명령 경로를 안에서 바꿔 넣을 수 있게 하고(공개 API는 바꾸지 않는다), 신호 명령을 못 띄우면 `start_kill`로 자식을 끝내는 것을 `src` 안 단위 테스트로 확인한다.
+- 끝남: 정상으로 끝난 확인 · 호출의 남은 손주도 끝까지 끝낸다: 그룹에 SIGTERM을 보낸 뒤 끝낼 때의 유예가 지나도 그룹이 남아 있으면 SIGKILL을 보낸다(… — 커밋 11967fd(red) · 68b8332(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 7차 작업 (6차 검토의 참고 + 로드맵 W1 — 2026-11-16 결정)
-
-근거: `dev.md` E38 · V47 · D24, 원본 근거 `docs/research/cli-backend.md` 5.6, `docs/research/hermes-agent.md` 3.8 "프로필별 모델".
-아래를 **테스트로 먼저 쓰고** 구현한다. 공개 API는 더하기만 한다.
-
-1. **나가는 글 가리기 자리** (E38 · V47): 요청 글과 CLI 표준 입력에 `Redactor` 포트를 거는 자리를 둔다(가리기 자체는 조립에서 pi-secrets로 끼운다).
-2. **요청별 모델 · 최대 토큰** (D24): 담당마다 다른 모델과 최대 토큰을 요청에 실을 수 있다.
-3. 호출 쪽 `terminate`에서 자식을 거둔 바로 뒤에 `set_reaped()`를 먼저 부른다(남은 손주를 지켜보는 동안 명부에 거둔 그룹 번호가 남아 끝내기가 확인 없이 신호를 보낼 틈, 약 20ms).
-4. 남은 손주를 기다리느라 확인이 제한 시간을 넘으면 `TimedOut`이 된다는 것을 문서 주석에 적는다.
-5. `terminate`에서 TERM은 갔는데 KILL 명령만 실패하면 Drop이 다시 보낸다(5차부터 있던 아주 드문 틈).
-6. init 없는 컨테이너에서 좀비 손주가 남으면 매번 유예를 끝까지 기다린다는 것을 문서 주석에 적는다(상한이 있어 자원 문제는 아님).
-
-이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): E38 V47 D24
+- 끝남: 근거: dev.md E38 · V47 · D24, 원본 근거 docs/research/cli-backend.md 5.6, docs/research/hermes-… — 커밋 77b4b54(red) · 6e03aac(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 8차 작업 (후보 일괄 처리 — 2026-11-16 사용자 "다 처리해")
-
-1. `terminate`가 남은 손주를 기다리는 도중 취소돼도(끝내기와 띄우기가 겹치고 호출이 버려질 때) Drop이 그룹이 남아 있으면 `SIGKILL`을 보낸다: 기다리는 중 표시(`lingering`)를 두고 Drop에서 `kill_lingering(ZERO)`. `src` 단위 테스트로 확인한다(공개 API로 틈을 일으킬 수 없다).
-2. 가린 뒤 길이 기준 경계 시험: 가린 뒤 정확히 상한이면 통과, 한 바이트 크면 잘못된 요청. `tests/cli8.rs`.
-3. 가리기 전 길이(시스템 글 + 대화 글)가 `CLI_MAX_STDIN_BYTES`의 4배를 넘으면 가리기를 부르지 않고 잘못된 요청으로 거절한다(복사를 줄임). 4배 이하에서는 가린 뒤 길이로 판단한다(7차 1 유지). 4배는 정한 값이다(가리기가 이만큼 줄이는 일은 없다).
+- 끝남: terminate가 남은 손주를 기다리는 도중 취소돼도(끝내기와 띄우기가 겹치고 호출이 버려질 때) Drop이 그룹이 남아 있으면 SIGKILL을 보낸다: 기다… — 커밋 —(red) · —(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 9차 작업 (Linux CI에서 드러난 띄우기 실패 — 2026-11-17 조정자 결정, 사용자 "알아서 추천대로")
-
-D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에서 40번 중 4번, 실행 파일을 띄울 때 `ETXTBSY`(`io::ErrorKind::ExecutableFileBusy`)가 났다. 다른 스레드가 fork한 순간 그 실행 파일이 쓰기용으로 열려 있으면 생긴다(CLI가 스스로 새 버전으로 바꾸는 중에도 생긴다).
-
-1. 띄우기(호출 · 확인 모두)가 `ExecutableFileBusy`로 실패하면 잠깐 쉬고 다시 띄운다. 모두 5번까지, 쉬는 시간은 20ms × 시도 번호. 그래도 바쁘면 지금처럼 연결 실패로 본다.
-2. 다른 오류(`NotFound` 등)는 다시 띄우지 않는다(지금 분류 그대로).
-3. 공개 API는 바꾸지 않는다. 운영체제가 내는 오류를 공개 API로 일으킬 수 없으므로 `src` 단위 테스트로 확인한다(8차 1과 같은 방식).
+- 끝남: D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에서 40번 중 4번, 실행 파일을 띄울 때 ETXTBSY(io::ErrorKind::Exe… — 커밋 0a4b12f(red) · c94036e(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 2차 작업: 구독은 공식 Claude Code CLI로 (CLI 백엔드)
-
-근거: 사용자 결정(`docs/dev/decisions.md` 2026-11-15), `docs/research/cli-backend.md` 5장. 원본은 OpenClaw `claude-cli`의 "곁가지 한 번 호출"(2.5의 전부 끄는 인자 묶음)이다.
-
-1. **구독 토큰 자리를 없앤다**: `Credential`에서 구독 OAuth 토큰 갈래와 `Authorization: Bearer`로 보내는 길을 지운다. 자격은 API 키 하나다. 이 갈래를 시험하던 테스트도 지운다.
-2. **두 번째 공급자 `ClaudeCliProvider`**(이름은 N1이 정한다)가 `AiProvider`를 구현한다. 설정은 모두 인자로 받는다(라이브러리는 환경 변수를 읽지 않는다):
-   - 실행 파일 절대 경로(없으면 `NotConfigured`, 아무것도 띄우지 않는다 — V31), 전용 로그인 폴더(선택), 작업 폴더(비어 있는 전용 폴더), 자식에게 줄 환경 전부(`base_env`), 호출 하나의 전체 제한, 동시 실행 수(기본 2), 출력 상한(바이트), 끝낼 때의 유예.
-   - 추가 인자를 받는 설정 칸은 만들지 않는다.
-3. **인자 묶음** — 이 순서, 빠짐없이. 시스템 글이 없으면 `--system-prompt-file` 두 칸만 빠진다:
-   ```text
-   -p --output-format stream-json --verbose --model <모델>
-   --system-prompt-file <파일>
-   --safe-mode --tools "" --disallowedTools mcp__* --strict-mcp-config
-   --setting-sources "" --settings <제한 설정 JSON>
-   --disable-slash-commands --no-chrome
-   --no-session-persistence --max-turns 1
-   --permission-mode dontAsk --permission-prompts none
-   ```
-   - `""`는 빈 글자 인자 하나다. 제한 설정 JSON은 `{"disableAllHooks":true,"enabledPlugins":{},"autoMemoryEnabled":false,"claudeMdExcludes":["**/CLAUDE.md","**/CLAUDE.local.md","**/.claude/rules/**"]}`(`cli-backend.md` 2.5).
-   - 어떤 경우에도 인자에 `--bare` · `bypassPermissions` · `--dangerously-skip-permissions` · `--allowedTools` · `--mcp-config` · `--add-dir` · `--plugin-dir` · `--session-id` · `--resume` · `--continue`가 없다. 대화 글은 인자에 없다.
-   - 시스템 글은 작업 폴더 안의 0600 임시 파일에 쓰고, 호출이 끝나면(성공 · 실패 · 시간 초과 · 버려짐 모두) 지운다. 이름은 호출마다 다르다.
-4. **환경**: 부모 환경을 물려주지 않는다(통째로 비우고 `base_env`만 넣는다). `base_env`에 있어도 빼는 것: `ANTHROPIC_`로 시작하는 것, `CLAUDE_CODE_USE_`로 시작하는 것, `OTEL_`로 시작하는 것, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`(`cli-backend.md` 2.2 — 남아 있으면 구독이 아니라 API 키로 과금된다). 넣는 것: `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1`, 요청의 최대 토큰을 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`로, 전용 로그인 폴더가 있으면 `CLAUDE_CONFIG_DIR`. 작업 폴더는 설정의 전용 폴더다.
-5. **표준 입력**: 대화를 글 하나로 만들어 한 번 쓰고 닫는다(`cli-backend.md` 5.2 4번, Hermes 3.2를 줄임). 사용자 글 하나뿐이면 그 글 그대로. 둘 이상이면 각 줄을 `[사용자]` 또는 `[담당]` 머리 줄 다음에 글을 두고 빈 줄로 나누어 이은 뒤, 끝에 빈 줄과 `마지막 사용자 요청에 이어서 답한다.` 한 줄. 10MB(10,000,000바이트)를 넘으면 띄우지 않고 `InvalidRequest`(`cli-backend.md` 4.3).
-6. **출력 읽기** (`stream-json`, 줄마다 JSON — 원본 2.4):
-   - 성공: 끝 코드 0, `type == "result"` 줄이 있고, `is_error`가 참이 아니고, `result`가 글자. 글은 `result`, 멈춘 이유는 `stop_reason`(`end_turn` · `max_tokens` · `stop_sequence` · `refusal` 등 지금 `StopReason`으로, 모르는 값과 `null`은 `Other`), 토큰은 `usage.input_tokens` · `usage.output_tokens`.
-   - 도구 뚫림: 결과의 `permission_denials`가 비어 있지 않거나 `num_turns`가 1보다 크면 `InvalidResponse`(`cli-backend.md` 5.5 7겹).
-   - JSON이 아닌 줄은 건너뛴다. `result` 줄이 없으면 `InvalidResponse`.
-   - 표준 출력 · 표준 오류 가운데 하나라도 출력 상한을 넘으면 프로세스를 끝내고 `InvalidResponse`.
-7. **오류 옮기기** — 지금 `AiError` 종류에만 옮긴다(`cli-backend.md` 5.4 표). 먼저 `result` 줄의 `api_error_status`(숫자)를 본다: 401 · 403 → `Auth`, 429 → `RateLimited`, 500 이상 · 529 → `ProviderUnavailable`, 400 · 404 · 413 → `InvalidRequest`. 없으면 `result` 글을 본다: `Not logged in` · `Login expired` → `Auth{401}`, `hit your` 와 `limit` → `RateLimited`, `another Claude Code process is refreshing` → `ProviderUnavailable{503}`. 그래도 없으면 마지막 `type == "system"`, `subtype == "api_retry"` 줄의 `error`: `authentication_failed` → `Auth{401}`, `oauth_org_not_allowed` · `account_on_hold` · `billing_error` → `Auth{403}`, `rate_limit` → `RateLimited`, `overloaded` → `ProviderUnavailable{529}`, `server_error` → `ProviderUnavailable{500}`, `invalid_request` · `model_not_found` → `InvalidRequest`. 끝 코드가 0이 아니고 결과 줄이 없으면 `InvalidRequest`(표준 오류 첫 줄을 200자로 자른 것). 분류하지 못한 실패 결과는 `InvalidResponse`. 실행 파일이 없으면(띄울 때 `NotFound`) `NotConfigured`, 그 밖에 띄우기 실패 · 신호로 죽음은 `Connection`. `RateLimited`의 기다릴 시간은 이번에는 늘 없음(`None`)이다 — 풀리는 시각의 실제 모양을 확인하지 못했다.
-   - `result` 줄이 실패면 그 뒤에 프로세스가 늦게 끝나도 그 결과가 우선이다(원본 2.7).
-   - 오류 문장 · `Debug`에 표준 출력 · 표준 오류의 원문(200자로 자른 첫 줄 말고는), 환경 값, 대화 글이 들어가지 않는다(E38).
-8. **다시 시도하지 않는다**: CLI가 안에서 이미 다시 시도한다(`api_retry`). CLI 공급자는 어떤 오류도 다시 부르지 않고 바로 올린다. API 키로 몰래 넘어가지도 않는다(원본 2.8 — 과금 주체가 바뀌는 일은 사용자가 정한다).
-9. **동시 실행과 시간**: 세마포어로 동시에 산 자식 수를 묶는다(기본 2). 줄에서 기다린 시간도 전체 제한에 든다. 제한을 넘기면 `Timeout`.
-10. **끝내기**: 자식은 자기 프로세스 그룹으로 띄운다. 제한을 넘기거나 호출이 버려지면(drop) 그룹 전체에 `SIGTERM`, 유예 뒤 살아 있으면 `SIGKILL`. 버려진 경우에도 자식과 그 자식이 남지 않는다. `unsafe` 없이 한다(필요하면 시스템의 `kill` 명령을 부른다).
-11. **설치 · 로그인 확인** (모델을 부르지 않는다 — `cli-backend.md` 5.7):
-   - 버전: `<실행 파일> --version`, 5초 제한. 첫 낱말을 `주.부.수` 버전으로 읽는다. 2.1.259보다 낮으면 "너무 낮음"(`--permission-prompts`가 그 버전부터다).
-   - 로그인: `<실행 파일> auth status --json`, 10초 제한, 환경 · 작업 폴더 · 로그인 폴더는 실제 호출과 같다. 결과는 다섯 가지 + 하나: 로그인됨(`authMethod` · `subscriptionType`을 담는다), 로그인 안 됨(끝 코드 1 또는 `loggedIn` 거짓), 설치 안 됨(실행 파일 없음), 시간 초과, 읽지 못함(JSON이 아님 등), 그리고 로그인됐지만 `authMethod`가 `claude.ai`가 아님("구독이 아님"). 시간 초과여도 **프로세스를 죽이지 않는다**(토큰 갱신 잠금 — 원본 2.6). 기다리기만 그만둔다.
-   - 확인 함수 하나가 둘을 차례로 하고, 설정 화면이 보여 줄 수 있는 상태 하나를 돌려준다.
-
-### 2차가 다른 모듈에 남기는 것
-
-1번으로 `Credential`의 구독 토큰 갈래가 없어지면 조립(`crates/server`의 `keys.rs`)이 컴파일되지 않는다. 이 모듈의 검사(`verify.sh ai`)는 `pi-ai`만 보므로 막히지 않는다. 조립은 다음 차례(gate 6차 · secrets 3차)에서 CLI 공급자를 잇고 구독 토큰 칸을 지우면서 고친다. 그때까지 전체 `verify.sh`는 실패한다.
-
-### 2차의 하지 않는 것
-
-세션 이어 가기(`--session-id` · `--resume`), 오래 사는 프로세스, MCP로 도구 넘기기, `claude setup-token` 토큰 보관, 서버가 갑자기 죽은 뒤 남은 자식 치우기, `--restricted`. 설정 화면 · `pi-secrets` · 조립은 이 모듈 밖이다(다음 작업).
-
-### 2차 테스트 주의
-
-실제 `claude`를 부르지 않는다. 테스트가 임시 폴더에 가짜 실행 파일(셸 스크립트)을 만들어 경로로 준다. 가짜는 받은 인자(한 줄에 하나) · 표준 입력 · 환경 · 작업 폴더를 파일에 적고, 정해 둔 출력 · 끝 코드 · 지연을 낸다. 위 1~11을 모두 이 가짜로 확인한다: 인자 순서, 금지 인자 없음, 프롬프트가 인자에 없음, 환경 지우기와 넣기, 출력 읽기, 오류 표의 줄마다, 시간 초과 뒤 가짜와 그 자식이 죽어 있음, 버려진 호출 뒤 남은 프로세스와 임시 파일 없음, 동시 실행 상한, 출력 상한, 비밀이 새지 않음, 실행 파일 없음, 확인 결과 여섯 가지와 시간 초과 때 죽이지 않음. 오래 자는 가짜는 쓰지 않는다(제한을 짧게 준다).
+- 끝남: 근거: 사용자 결정(docs/dev/decisions.md 2026-11-15), docs/research/cli-backend.md 5장. 원본은 OpenCl… — 커밋 5793154(red) · cff3042(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## pi-secrets와 잇는 법
 
@@ -165,63 +53,7 @@ D1(모든 운영체제)에 따라 Linux에서도 같아야 한다. CI 진단에�
 이 모듈에서는 "이 자격으로 닿는지 확인하는 함수 `verify`"까지만 만든다. 위 본문에서 "`pi-secrets`에서 읽는다"는 말은 이 trait을 거친다는 뜻이다.
 
 ## 10차 작업 (2026-11-21 발표 자료 대조 — 로컬 임베딩)
-
-근거: `docs/dev/decisions.md` 2026-11-21 2번(공급자 확장 구조: trait 하나 + 등록부, "구조는 다, 구현은 하나씩") · 15번(사용자 결정: 임베딩은 **로컬 Ollama**, 무료 · 기록은 밖으로 0건), `dev.md` D10 · V23 · V31 · E38 · V47. 아래를 **테스트로 먼저 쓰고** 구현한다. **공개 API는 더하기만 한다**(`AiProvider` · `AiError` · `Credential` · `CredentialSource` · `Redactor`의 모양을 바꾸지 않는다 — server · agent가 기대어 컴파일한다).
-
-### 공개 API (더하는 것)
-
-1. **임베딩 공급자 trait `EmbeddingProvider`** (`Send + Sync`, 비동기):
-   - `fn id(&self) -> &'static str` — 공급자 ID(등록부의 열쇠, 소문자 영문). Ollama는 `"ollama"` = 공개 상수 `OLLAMA_PROVIDER_ID`.
-   - `fn key_slots(&self) -> &'static [&'static str]` — 이 공급자가 쓰는 `pi-secrets` 키 칸 이름. Ollama는 키가 없어 `&[]`. (나중에 붙일 바깥 공급자 — Voyage · OpenAI 등 — 는 자기 칸을 선언한다.)
-   - `fn limits(&self) -> EmbeddingLimits` — 한 요청의 입력 개수 상한, 입력 하나의 글자 수 상한.
-   - `async fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, AiError>`.
-2. **값 타입**:
-   - `EmbeddingRequest { model: String, inputs: Vec<String>, purpose: EmbedPurpose, dimensions: Option<u32> }`. 모델 이름은 늘 요청(설정값)에서 받는다. 라이브러리 안에 기본 모델을 박지 않는다(1차 3번과 같다. server 설정의 기본은 `bge-m3`, 결정 15번).
-   - `EmbedPurpose`: `Document`(색인할 글) · `Query`(검색 질의). Ollama는 둘을 같게 보낸다(bge-m3는 접두어가 필요 없다). 공급자마다 다르게 다룰 수 있게 값으로 둔다.
-   - `EmbeddingResponse { vectors: Vec<Vec<f32>>, model: String, usage: EmbeddingUsage }` — `vectors[i]`는 `inputs[i]`의 벡터(같은 순서 · 같은 개수). `EmbeddingUsage { total_tokens: u64 }`.
-   - `EmbeddingLimits { max_inputs_per_request: usize, max_input_chars: usize }`.
-3. **등록부 `EmbeddingRegistry`**: `new()`, `register(Arc<dyn EmbeddingProvider>) -> Result<(), RegistryError>`(같은 ID를 두 번 올리면 `RegistryError::Duplicate(id)`이고 앞의 것이 남는다), `get(id) -> Option<Arc<dyn EmbeddingProvider>>`, `ids() -> Vec<&'static str>`(이름순). 새 공급자는 어댑터 파일 하나 + `register` 한 줄로 붙는다(결정 2번). `RegistryError`는 `error.rs`에 **새 enum**으로 둔다(`AiError`에 갈래를 더하지 않는다 — 밖의 `match`가 깨진다).
-4. **Ollama 공급자 `OllamaEmbeddingProvider`**:
-   - `OllamaConfig { base_url, timeout, max_retries, retry_base_delay, max_inputs_per_request, max_input_chars }`와 `OllamaConfig::default()`(기본 주소 공개 상수 `OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"`, 다시 시도 `DEFAULT_MAX_RETRIES`, 한 요청 64개, 입력 하나 8,192자). 연결 제한 · 응답 크기 상한은 Anthropic의 `AnthropicLimits`와 같은 값 · 같은 뜻으로 `with_limits`에 받는다.
-   - `new(config)`, `with_redactor(Arc<dyn Redactor>)`, `check(model) -> Result<(), AiError>`(Ollama가 떠 있고 그 모델을 받아 두었는지 확인. server의 진단 · 설정 화면이 쓴다).
-
-### 동작 규칙 · 경계
-
-5. **요청 모양 (Ollama 공식 API 문서 `https://github.com/ollama/ollama/blob/main/docs/api.md` "Generate Embeddings" 기준 — 기억으로 짓지 않는다, N1이 다시 확인한다)**: `POST {base_url}/api/embed`, `content-type: application/json`, 인증 헤더 없음. 본문 `{"model": "<모델>", "input": [글…]}`, `dimensions`가 `Some(n)`일 때만 `"dimensions": n`(문서가 그 칸을 주는지 N1이 확인하고, 없으면 `Some`일 때 요청 없이 `InvalidRequest`). `truncate`는 보내지 않는다 — 6번에서 길이를 먼저 막는다. 옛 `/api/embeddings`(입력 하나)는 쓰지 않는다.
-6. **바깥으로 나가지 않는다 (V23)**: `base_url`은 **루프백만** 받는다(`127.0.0.1` · `::1` · `localhost`). 그 밖은 만들 때 `InsecureBaseUrl`(같은 집 다른 기기의 Ollama를 쓰는 것은 다음 차수 후보 — 쓰려면 사용자 결정). 리다이렉트를 따라가지 않는다.
-7. **길이 · 개수 상한**: 입력 하나가 `max_input_chars`(기본 8,192자 = knowledge의 `INDEX_PREFIX_CHARS`)를 넘거나 빈 글이면 **요청을 보내지 않고** `InvalidRequest`. 입력이 `max_inputs_per_request`보다 많으면 그 크기로 **잘라 차례로** 보내고 이어 붙인다. 한 조각이라도 실패하면 전체가 그 오류(전부 아니면 없음). 입력이 0개면 요청 없이 빈 응답.
-8. **가리기 (E38 · V47)**: 로컬이어도 보내는 글마다 끼운 `Redactor`를 거친다(기록 · Ollama 로그에 비밀이 남지 않게). 길이 판단은 **가린 뒤** 글로 한다.
-9. **응답 읽기**: 2xx 본문의 `embeddings` 배열 길이가 보낸 개수와 같아야 하고, 모든 벡터 길이가 같아야 하며, `dimensions`가 `Some(n)`이면 길이가 `n`이어야 한다. 숫자가 아니거나 하나라도 어긋나면 `InvalidResponse`. `model`은 응답의 것(없으면 요청 모델), `usage.total_tokens`는 `prompt_eval_count`(없으면 0).
-10. **오류 · 다시 시도**: 연결 실패(Ollama가 꺼짐) → `Connection`(받는 쪽 knowledge에서 "쓸 수 없음"이 된다), 404 또는 본문 `error`가 "모델 없음" → `InvalidRequest`이고 다시 시도하지 않음(모델을 받아 두지 않았다 — 오류 문장에 `ollama pull <모델>` 안내), 400 → `InvalidRequest`, 500 이상 → `ProviderUnavailable`. 다시 시도는 Anthropic 공급자와 **같은 함수**(3차 1~4: 간격 · jitter, 시간 초과 · 연결 실패 · 5xx는 다시 시도, 잘못된 요청은 안 함). 응답 크기 상한(3차 6), 연결 제한(3차 4)도 같다. 첫 요청은 모델을 메모리에 올리느라 느릴 수 있으니 `timeout` 기본은 60초.
-10-1. (N1이 남긴 모호한 곳 — 조정자 결정) 나눠 보낼 때 `usage.total_tokens`는 조각의 합, `model`은 첫 조각의 것. `check`는 다시 시도하지 않는다(Anthropic `verify`와 같다). 429는 `RateLimited`로 다시 시도한다. 리다이렉트 응답(3xx)은 따라가지 않고 `InvalidResponse`. 루프백이 아닌 주소의 `InsecureBaseUrl` 문장은 "루프백 주소만 받는다"는 뜻이 드러나게 쓴다(https여도 거부).
-11. **`check(model)`**: `GET {base_url}/api/tags`로 받아 둔 모델 목록을 보고, `name`이 `<모델>` 또는 `<모델>:latest`인 것이 있으면 성공, 없으면 `InvalidRequest`("`ollama pull <모델>`"), 연결 실패면 `Connection`. 임베딩을 돌리지 않으니 싸다.
-
-### 원본 동작 근거
-
-원본에 없음 — 사용자 결정 2026-11-21 2번 · 15번. Hermes · OpenClaw의 임베딩 공급자는 OpenAI 기본이고 로컬 모델도 고를 수 있다(`docs/research/triggers-approval-memory-deep.md` 4.1 끝 "공급자"). 따르는 것: 다시 시도 · 오류 구분은 이 모듈의 Hermes 근거(`docs/research/hermes-agent.md` 3.2, 3차)를 그대로 쓴다. 요청 · 응답 모양은 Ollama 공식 API 문서가 근거다.
-
-### 테스트로 확인할 것 (가짜 서버만 — `wiremock`을 루프백에 띄운다. 실제 Ollama를 부르지 않는다)
-
-- 요청: 경로 `/api/embed`, 인증 헤더 없음, 본문의 `model` · `input`, `dimensions`가 있을 때만 그 칸, `truncate`가 없음. `Document` · `Query`가 같은 본문.
-- 루프백이 아닌 기본 주소(`http://192.168.0.2:11434`, `https://example.com`)는 만들 때 거부. 리다이렉트를 따라가지 않음.
-- 가리기: 가리개가 `SECRET`을 `***`로 바꾸면 서버가 받은 `input`에 `SECRET`이 없다(E38 · V47). 가린 뒤 정확히 상한이면 통과, 한 글자 크면 요청 0건 `InvalidRequest`.
-- 나누기: 150개를 상한 64로 → 요청 3번(64 · 64 · 22), 결과 150개가 입력 순서대로. 두 번째 요청이 500을 다시 시도 끝까지 내면 전체 실패. 빈 입력 목록은 요청 0건 빈 응답.
-- 응답: 개수 모자람 · 길이 다른 벡터 · `dimensions`와 다른 길이 · 숫자 아닌 값 → `InvalidResponse`. `prompt_eval_count`가 `usage`로.
-- 오류: 연결 실패(아무것도 안 뜬 포트) → `Connection`이고 다시 시도 횟수, 404 모델 없음 → `InvalidRequest` · 다시 시도 0 · 문장에 `ollama pull`, 503 → 다시 시도.
-- `check`: `/api/tags`에 `bge-m3:latest`가 있으면 `bge-m3`로 성공, 없으면 `InvalidRequest`, 꺼져 있으면 `Connection`.
-- 등록부: 같은 ID 두 번 → `Duplicate`이고 첫 것이 남음, `get` 모르는 ID → `None`, `ids()` 이름순.
-
-### 잠긴 옛 테스트와 부딪히는 곳
-
-- 없앨 것이 없다. 새 trait · 타입 · 등록부 · 공급자를 **더하기만** 한다. `AiProvider` · `AiError` 갈래 · `Credential`은 그대로다.
-- 다시 시도 · 주소 검사 · 응답 크기 상한 코드를 Ollama와 나눠 쓰도록 안에서 옮겨도 Anthropic 쪽 잠긴 테스트(`tests/anthropic*.rs`)는 그대로 통과해야 한다.
-- `Cargo.toml`: 새 바깥 의존이 필요 없다(`reqwest` · `serde_json` 안에서 한다). `architecture.toml`은 고치지 않는다.
-
-### server 차수에서 잇는 것 (이 모듈 밖)
-
-`pi-knowledge`의 `Embedder` 포트와 이 모듈의 `EmbeddingProvider`는 **직접 이을 수 없다**(`architecture.toml`: `pi-ai`는 `pi-secrets`만, `pi-knowledge`는 `pi-store`만). server가 감싸는 타입 하나로 `pi_knowledge::Embedder`를 구현하고 안에서 `EmbeddingProvider::embed`를 부른다(`model()` · `dims()`는 설정값 — 기본 `bge-m3` · 1024, 색인 글은 `Document`, 질의는 `Query`). 오류는 `Connection` · `RateLimited` · `ProviderUnavailable` · `Timeout` → `EmbedError::Unavailable`, 그 밖 → `EmbedError::Failed`. 설정 화면의 "뜻 검색 켜기"(Ollama 주소 · 모델 · `check` 결과), `doctor`의 Ollama 항목도 server 차수다. 뜻 검색은 사용자가 켜야 동작한다(기본 꺼짐).
-
-이 차수의 필수 번호(N1을 시작할 때 조정자가 아래 필수 번호 절에 더한다): D10 V23
+- 끝남: 근거: docs/dev/decisions.md 2026-11-21 2번(공급자 확장 구조: trait 하나 + 등록부, "구조는 다, 구현은 하나씩") · 15… — 커밋 6928536(red) · 9221ac3(green) · 전문: `git show 1a73576:docs/dev/modules/ai.md`
 
 ## 하지 않는 것
 

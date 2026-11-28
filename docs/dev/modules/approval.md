@@ -32,56 +32,10 @@
 - 전체 정지 중 실전 승격을 막을지 정한다(추천: 막는다 — 전체 정지는 재개를 사람만 한다).
 
 ## 2차 작업 (1차 검토 되돌림)
-
-1. 실전 승격 · 규칙 개선은 이 크레이트로만 끝까지 간다: `promote_live(번호, 템플릿 번호)` · `approve_proposal(번호, 개선안 번호)`가 무효 번호 · 전체 정지를 확인하고, 대상에서 지문을 계산해 store의 `promote_template_live` · `approve_proposal`을 부른다. 실전 승격 지문에는 템플릿 판(revision)도 넣는다.
-2. 실행 때 지문이 달라 무효가 된 승인은 `get()`에서 `Rejected`(까닭: 내용 바뀜)로 보인다. 다시 켜도 같다.
-3. 기다릴 시간(`wait_until`)이 지난 뒤 온 답은 만료로 닫는다(원본 3.2-2). 기한이 지난 기다림에는 합치지 않는다.
+- 끝남: 실전 승격 · 규칙 개선은 이 크레이트로만 끝까지 간다: promote_live(번호, 템플릿 번호) · approve_proposal(번호, 개선안 번호)가 … — 커밋 db33492(red) · 0b6eef3(green) · 전문: `git show 1a73576:docs/dev/modules/approval.md`
 
 ## 4차 작업 (2026-11-21 발표 자료 대조)
-
-근거: `spec.md` FN2 3b(답 없음) · F6 5~8(승격), `dev.md` E22("보이는 것: 답이 없어 팀이 어떻게 처리했는지 기록이 보인다") · E36 · V42, `docs/dev/decisions.md` 2026-11-16 5 · 6번, 2026-11-21 6번(승격은 상태 · 승인까지 서버에 잇는다).
-지금 `expire_due`(`src/due.rs:18-53`)는 답 없음으로 닫고 할 일(`DueAction`)을 한 번만 돌려준다. 그 뒤 무엇을 했는지 남길 곳이 없고, 돌려받은 뒤 처리 전에 프로그램이 꺼지면 할 일을 잃는다. server는 아직 `expire_due` · `promote_live`를 부르지 않는다. 이 차수는 **모듈 쪽에 빠진 공개 API**만 더한다. 줄인 수량 계산은 rules 4차 4번(`reduce_within_limit`), 부르는 고리(주기적으로 `expire_due` → 할 일 → 기록, 승격 `evaluate_promotion` → 승격대기 → `request` → `promote_live`)는 server 차수다.
-
-### (a) 공개 API 바뀜
-- `pub enum DueHandling { Reduced { quantity: u64 }, NotBought, TeamSold, TeamKept, Blocked { reason: String }, Dropped }`. 뜻: 줄여서 냄(줄인 수량) · 사지 않음(P20) · 팀이 팔기로 판단 · 팀이 들고 있기로 판단 · 다시 점검에서 막힘(막힌 까닭 글, 가린 것) · 신호가 지나 아무것도 안 함.
-- `pub fn Approvals::record_due_handling(&self, number: &ApprovalNumber, handling: DueHandling) -> Result<(), Error>`.
-- `pub fn Approvals::due_handling(&self, number: &ApprovalNumber) -> Result<Option<DueHandling>, Error>`.
-- `pub fn Approvals::unhandled_due(&self) -> Result<Vec<DueOutcome>, Error>`.
-- `Error`(`non_exhaustive`)에 `NotDue`(답 없음 · 만료로 닫힌 주문 요청이 아님) · `AlreadyHandled`를 더한다.
-- `DueOutcome` · `DueAction` · `ApprovalView`의 모양은 바꾸지 않는다.
-
-### (b) 동작 규칙 · 경계
-1. `record_due_handling`
-   - 그 번호가 주문 대상이고 결과가 답 없음 또는 만료일 때만 받는다. 아니면 `NotDue`(번호가 없어도 `NotDue`).
-   - 한 번만 남는다. 두 번째는 `AlreadyHandled`이고 처음 기록이 그대로다.
-   - 할 일과 맞지 않는 기록은 거부한다(`NotDue`): `ReduceWithinLimit` ← `Reduced` · `Blocked` · `Dropped`, `DoNotBuy` ← `NotBought`, `TeamDecides` ← `TeamSold` · `TeamKept` · `Blocked` · `Dropped`, `Dropped` ← `Dropped`. 할 일은 `expire_due`와 같은 규칙으로 다시 센다.
-   - `Reduced { quantity }`는 0보다 크고 승인 요청의 수량보다 작거나 같아야 한다(아니면 `NotDue`). 줄이는 셈은 rules가 했다.
-   - 저장은 지금 알림 결과(`record_notice`)와 같이 저장소 이벤트로 남기고, 다시 켠 뒤에도 메모(`record.rs`의 `refresh`)로 읽힌다. 글(`Blocked`의 까닭)은 남기기 전에 가린 것을 받는다(가리는 일은 부르는 쪽, E38).
-2. `unhandled_due`
-   - 답 없음 · 만료로 닫힌 주문 요청 가운데 처리 기록이 없는 것을 닫힌 순서로 돌려준다. 할 일은 `expire_due`와 같은 규칙이다. 다만 지금 시각(시계)이 신호 유효 시간의 끝 이후면 `Dropped`로 돌려준다(꺼졌다 켜진 사이 신호가 지나면 줄여서 사거나 팀이 팔지 않는다 — 결정 6번과 같은 생각).
-   - 읽기만 한다(상태를 바꾸지 않는다). server는 켤 때와 `expire_due` 뒤에 이것을 보고 남은 할 일을 마저 한다.
-3. 답 없음 처리에서 사는 주문을 줄여 낼 때는 새 승인 요청을 만들지 않는다(줄인 주문은 금액 한도 안이라 승인이 필요 없다). 답 없음으로 닫힌 요청은 지금처럼 `consume`으로 쓸 수 없다.
-4. 다시 시작 · 규칙 개선 · 실전 승격은 지금처럼 계속 기다린다(V42). 이 셋에는 `record_due_handling`이 `NotDue`다.
-5. 승격: 모듈 쪽 API(`request(Subject::LivePromotion { .. })` · `promote_live`)는 이미 있다. 더할 것이 없다. 전체 정지 중 승격을 막는 것도 2차 · store 12차 그대로.
-
-### (c) 원본 동작 근거
-- 한 번만 바뀌는 상태 · 한 번만 소비 · 다시 켠 뒤 정리: `docs/research/triggers-approval-memory-deep.md` 3.2 · 3.4, `docs/research/openclaw.md` 2.2.
-- 답 없음의 처리 갈래는 원본에 없음(원본은 거절 하나) — 의도해서 다름(1차 그대로), 스펙 FN2 3b · `dev.md` E22. 승인 경로가 막혔을 때의 보수적 처리: `docs/research/remote-access-security.md` 5.4.
-- 처리 기록을 남기는 것은 원본에 없음 — `dev.md` E22 "보이는 것"을 지키려고 더한다.
-
-### (d) 테스트로 확인할 것 (임시 폴더의 실제 `pi-store`, 가짜 시계. 검증 주석: E22 N2 P20 V42)
-- 알림이 간 사기 → 답 없음 → `unhandled_due`에 `ReduceWithinLimit` 하나 → `Reduced { 3 }` 기록 → `unhandled_due` 빔, `due_handling`이 그 값. 두 번째 기록은 `AlreadyHandled`.
-- 할 일과 맞지 않는 기록(`DoNotBuy`에 `Reduced`, 팔기에 `NotBought`), 수량 0 · 승인 수량보다 큰 수량은 `NotDue`.
-- 기다림 · 승인됨 · 거절된 요청, 실전 승격 · 규칙 개선 · 다시 시작 요청에 기록하면 `NotDue`.
-- 기록 전에 다시 켠 `Approvals`(같은 저장소)도 `unhandled_due`에 같은 것을 준다. 기록 뒤에 다시 켜면 비어 있고 `due_handling`이 남아 있다.
-- 신호 유효 시간이 지난 뒤의 `unhandled_due`는 `Dropped`.
-- `expire_due`의 반환은 지금과 같다(한 번 닫은 요청은 다시 돌려주지 않음).
-
-### (e) 잠긴 옛 테스트와 부딪히는 곳
-없음. `expire_due` · `on_restart` · `DueOutcome`을 바꾸지 않는다. 확인한 곳: `tests/suite/no_answer.rs:29-136`(할 일 갈래), `tests/suite/restart.rs`(다시 켠 뒤 만료).
-
-### 물을 것
-- 꺼졌다 켜진 사이 신호 유효 시간이 지난 답 없음 할 일을 `Dropped`로 둘지(추천), 그래도 팔기(`TeamDecides`)는 팀에게 넘길지.
+- 끝남: 근거: spec.md FN2 3b(답 없음) · F6 5~8(승격), dev.md E22("보이는 것: 답이 없어 팀이 어떻게 처리했는지 기록이 보인다") · … — 커밋 8351ab8(red) · 55d626a(green) · 전문: `git show 1a73576:docs/dev/modules/approval.md`
 
 ## 하지 않는 것
 
@@ -96,34 +50,13 @@
 C7 C12 M5 E7 E8 E22 N2 V42 V43 V44 V45 P18 P19 P20
 
 ## 3차 작업: 개선안 승인을 journal 판정에 맡기기 (server W5 2차 보강에서 나옴)
-
-조정자 결정(2026-11-16): 개선안 승인은 승인 소비를 이 모듈에 두되, 반영 판정(지금 규칙과 비교한 위험 재판정 → 냉각)은 journal의 `Journal::approve`가 하게 한다. 그러려면 소비한 승인(`ApprovalUse`)을 정해진 범위 안에서만 내준다.
-
-- `Approvals::with_proposal_approval(number, proposal_id, f)` 같은 공개 메서드: 승인 번호의 기다림 · 지문(개선안 번호와 판) 확인 → 소비 → `f(ApprovalUse, at)` 호출 → `f`의 결과를 돌려준다. `ApprovalUse`는 이 호출 안에서만 쓰이고, `f`가 실패하면 소비를 되돌리지 않고(이미 쓴 승인) 오류를 돌려준다 — 기존 `approve_proposal`의 실패 규칙과 같게.
-- 기존 `approve_proposal`은 그대로 둔다.
-- 시험: 지문이 다른 개선안 · 이미 쓴 승인 · 거절된 승인으로는 `f`가 불리지 않는다; `f` 안에서 받은 `ApprovalUse`로 `Journal::approve`를 부르면 위험한 경우 냉각중이 된다(테스트 dev-dependency로 pi-journal 사용 가능).
+- 끝남: 조정자 결정(2026-11-16): 개선안 승인은 승인 소비를 이 모듈에 두되, 반영 판정(지금 규칙과 비교한 위험 재판정 → 냉각)은 journal의 Jour… — 커밋 46dfb10(red) · 51a06f2(green) · 전문: `git show 1a73576:docs/dev/modules/approval.md`
 
 ## 새 store API 쓰기 (store 12차에서 넘어옴)
 - 실전 승격은 `promote_template_live_checked`를 부른다(전체 정지 · 템플릿 판을 같은 묶음에서 본다).
 
 ## 5차 작업 (2026-11-25 조정자, 결정 17 — 승인 카드에 투표 수 · 한도 전 → 후)
-
-근거: `docs/product/stock-team/additions.md`의 R4-4 · C24 · V55 · T32(차수 표 18번). rules 5차의 `LimitClamp`(한도 적용 전 → 후)와 store 19차의 담당 의견(`trade_opinions`의 방향 · 기권)을 승인 요청의 **보이는 내용**(summary)에 싣는다. 레퍼런스: `docs/research/invest-agent-teams.md` F 8.
-
-1. **투표 수**: 주문 승인 요청을 만들 때 그 매매의 담당 의견에서 강세 · 약세 · 중립 · 기권 수를 세어 summary에 `"votes": {"bull", "bear", "neutral", "abstain"}`로 싣는다. 의견 기록이 없는 매매(옛 매매 · 옛 모양 답)는 칸을 싣지 않는다.
-2. **한도 적용 전 → 후**: 요청을 만드는 쪽이 넘긴 한도 적용 기록(rules `LimitClamp` 목록)을 summary에 `"clamps": [{"limit", "before", "after"}]`로 싣는다(적용한 순서, `limit`은 안정된 영문 키). 기록이 비면 칸을 싣지 않는다.
-3. **지문은 그대로**(결정 15 · V55): 두 칸은 보여 주기용이다. 승인 지문(`subject.rs`의 대상 종류 · 번호 · 주문 내용)에는 넣지 않는다 — 같은 주문이면 두 칸을 싣기 전과 뒤의 지문이 글자 하나 다르지 않다. 승인 · 소비 · 만료 규칙도 그대로.
-4. 기존 요청 만들기 함수의 시그니처는 그대로 둔다(다른 크레이트가 부른다) — 두 칸을 함께 넘기는 새 길을 더한다.
-
-- 원본 동작 근거: 원본에 없음 — additions.md R4-4 · C24 · V55, 결정 15 · 17. 모양 근거는 `docs/research/invest-agent-teams.md` F 8(승인 창의 투표 수 · 한도 전 → 후).
-- 시험으로 확인할 것: 의견이 있는 매매의 주문 승인 요청 summary에 투표 수(강세 2 · 약세 1 · 중립 1 · 기권 0 같은 사례) / 의견이 없으면 칸 없음 / 한도 기록 한 줄 · 두 줄이 순서대로 / 기록이 비면 칸 없음 / 두 칸을 싣기 전 · 뒤 지문이 같고 그 지문으로 승인 · 소비가 된다 / 기존 요청 길의 summary는 그대로.
-
-### 대조
-
-| 시험 · 문서 경로 | 판정 | 근거 |
-|---|---|---|
-| `crates/approval/tests/` 전부 | 유지 | 5차는 승인 요청의 보이는 내용에 두 칸을 싣는 새 길을 더한다 — 지문 · 승인 · 소비 · 만료 규칙과 기존 요청 길은 그대로 |
-
+- 끝남: 근거: docs/product/stock-team/additions.md의 R4-4 · C24 · V55 · T32(차수 표 18번). rules 5차의 Lim… — 커밋 4e160ff(red) · ca1d34b(green) · 전문: `git show 1a73576:docs/dev/modules/approval.md`
 
 ## 6차 작업 (2026-11-27 조정자, 백로그 Q — 사용자 "백로그 다 실행해" · "남은 것들만 다 실행해 key 제외하고")
 
