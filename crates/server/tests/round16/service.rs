@@ -77,7 +77,8 @@ fn macos_정의의_칸과_dry_run의_명령_순서() {
         format!(
             "<key>ProgramArguments</key><array><string>{EXE}</string><string>run</string>\
              <string>--home</string><string>{h}</string><string>--port</string>\
-             <string>8123</string></array>"
+             <string>8123</string><string>--log-file</string><string>{}</string></array>",
+            s(&home.path().join(SERVER_LOGS_DIR).join(SERVER_LOG))
         ),
         "<key>RunAtLoad</key><true/>".to_string(),
         "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>".to_string(),
@@ -86,10 +87,7 @@ fn macos_정의의_칸과_dry_run의_명령_순서() {
         format!(
             "<key>EnvironmentVariables</key><dict><key>PATH</key><string>{PATH_ENV}</string></dict>"
         ),
-        format!(
-            "<key>StandardOutPath</key><string>{}</string>",
-            s(&home.path().join(SERVER_LOGS_DIR).join(SERVER_LOG))
-        ),
+        "<key>StandardOutPath</key><string>/dev/null</string>".to_string(),
         format!(
             "<key>StandardErrorPath</key><string>{}</string>",
             s(&home.path().join(SERVER_LOGS_DIR).join(SERVER_ERROR_LOG))

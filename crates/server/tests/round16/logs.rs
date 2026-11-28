@@ -29,19 +29,22 @@ fn 운영체제마다_정의가_기록_자리를_가리킨다() {
 
     let plist = squash(&contents(Os::MacOs, home.path(), defs.path()));
     let logs = home.path().join(SERVER_LOGS_DIR);
-    for (key, file) in [
-        ("StandardOutPath", SERVER_LOG),
-        ("StandardErrorPath", SERVER_ERROR_LOG),
-    ] {
+    for (key, file) in [("StandardErrorPath", SERVER_ERROR_LOG)] {
         let wanted = format!(
             "<key>{key}</key><string>{}</string>",
             logs.join(file).to_str().unwrap()
         );
         assert!(plist.contains(&wanted), "{wanted} 없음:\n{plist}");
     }
+    // (68차, 백로그 U 5번) 표준 출력은 버리고 서버가 `--log-file`로 돌려 쓴다.
+    assert!(plist.contains("<key>StandardOutPath</key><string>/dev/null</string>"));
+    let wanted = format!(
+        "<string>{LOG_FILE_ARG}</string><string>{}</string>",
+        logs.join(SERVER_LOG).to_str().unwrap()
+    );
     assert!(
-        !plist.contains(LOG_FILE_ARG),
-        "macOS는 지금 그대로(인자를 더하지 않는다):\n{plist}"
+        plist.contains(&wanted),
+        "macOS는 인자로 기록 파일을 싣는다:\n{plist}"
     );
 
     let unit = contents(Os::Linux, home.path(), defs.path());
