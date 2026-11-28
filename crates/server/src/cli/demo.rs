@@ -26,6 +26,10 @@ pub const DEMO_HOME_SUFFIX: &str = "-demo";
 pub const DEMO_NOTICE: &str =
     "시연 모드입니다 — 가짜 시세 · 가짜 AI, 바깥으로 나가지 않습니다. 끄려면 Ctrl+C";
 
+/// 템플릿을 고르지 않은 시연 보관 폴더에 스윙 템플릿을 골라 두었을 때 찍는 안내.
+pub const DEMO_TEMPLATE_NOTICE: &str =
+    "시연용으로 스윙 템플릿(모의중)을 골라 두었습니다. 템플릿 화면에서 바꿀 수 있습니다";
+
 /// `demo`의 선택.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DemoRequest {
