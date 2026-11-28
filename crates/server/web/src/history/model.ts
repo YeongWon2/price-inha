@@ -1,5 +1,6 @@
 // 히스토리 화면의 화면 모델(server 29차 · C30 · V83 · V84 · F7-7 · F7-9): 서버 응답을 화면이 그릴 줄로 바꾸는 순수 함수.
 // DOM을 만지지 않는다(그리기는 view.ts, 서버 부르기는 screen.ts). 금액은 그 시장 돈 모양, 시각은 한국 시각 글이다.
+import type { DiscussionEnd, EndKind } from "../ui/discussion-end";
 
 /** 매매 상태 글자(서버 그대로, 스펙의 매매 상태표 차례). */
 export type TradeState =
@@ -24,6 +25,14 @@ export const TRADE_STATES: readonly TradeState[] = [
   "reviewed",
 ];
 
+/** (69차) 매매 거르기 글자: 논의중을 셋(논의중 · 지켜봄 · 끝나지 못함)으로 나눈 뒤 나머지 상태. */
+export const TRADE_FILTERS: readonly string[] = [];
+
+/** (69차) 매매 거르기 글자의 글. 모르는 글자는 그대로. */
+export function tradeFilterLabel(word: string): string {
+  return word;
+}
+
 /** 승인 요청 결과 글자(서버 그대로). */
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "no_answer" | "expired";
 
@@ -42,9 +51,13 @@ export interface TradeItem {
   created_at: number;
   updated_at: number;
   decided_at: number | null;
+  /** (69차) 논의중인데 마지막 논의가 지켜보기로 끝났으면 그 까닭 코드 · 시각. */
+  watched?: DiscussionEnd;
+  /** (69차) 논의중인데 마지막 논의가 오류로 끝났으면 그 까닭 코드 · 시각. */
+  failed?: DiscussionEnd;
 }
 
-/** 매매 목록 응답. `next`는 다음 쪽의 `before` 값(더 없으면 없음). */
+/** 매매 목록 응답.`next`는 다음 쪽의 `before` 값(더 없으면 없음). */
 export interface TradesReply {
   trades: TradeItem[];
   next: number | null;
@@ -115,8 +128,10 @@ export interface TradeRow {
   id: number;
   symbol: string;
   state: string;
-  /** 상태 글(스펙의 이름). */
+  /** 상태 글(스펙의 이름). 끝난 논의면 그 글(69차). */
   stateLabel: string;
+  /** (69차) 끝난 논의의 종류. 아니면 없음. */
+  ended: EndKind | null;
   /** 만든 시각 글(한국 시각). */
   created: string;
   /** 바뀐 시각 글. */
@@ -264,6 +279,7 @@ export function tradeRows(reply: TradesReply): TradeRow[] {
     symbol: item.symbol,
     state: item.state,
     stateLabel: tradeStateLabel(item.state),
+    ended: null,
     created: timeText(item.created_at),
     updated: timeText(item.updated_at),
     decided: item.decided_at === null ? null : timeText(item.decided_at),
