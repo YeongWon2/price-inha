@@ -691,6 +691,21 @@ def main():
                  lambda: (brief_rounds(), sh(pl + ["reopen", "store", "자체 시험"], fx)),
                  pl + ["tidy", "store"], "건너뜀: tidy store — 까닭(차수 진행 중", should_fail=False)
 
+            case(fx, "tidy: backlog 의 끝난 줄 · 진행 기록 글은 지우고 남은 일(진행 기록 안의 것도)은 모두 둔다",
+                 lambda: (fx / "docs/dev/backlog.md").write_text(
+                     "# 남은 일\n\n## 묶음 A\n\n- [x] 끝남\n  - 끝난 일의 밑줄\n- [ ] 남음 하나\n\n## 묶음 B\n\n- [x] 다 끝남\n\n"
+                     "## 진행 기록 (어제)\n\n기록 글.\n- [ ] 남음 둘\n  - 남은 일의 밑줄\n", encoding="utf-8"),
+                 ["bash", "-c", f"{py} -c \"import sys;sys.argv=['x'];sys.path.insert(0,'scripts');import pipeline as p;"
+                  "p.tidy_backlog(False)\" && cat docs/dev/backlog.md"],
+                 ["- [ ] 남음 하나", "- [ ] 남음 둘", "  - 남은 일의 밑줄"], should_fail=False)
+            case(fx, "tidy: backlog 의 끝난 줄 · 기록 글 · 남은 일 없는 절은 지운다",
+                 lambda: (fx / "docs/dev/backlog.md").write_text(
+                     "# 남은 일\n\n## 묶음 A\n\n- [x] 끝남\n  - 끝난 일의 밑줄\n- [ ] 남음 하나\n\n## 묶음 B\n\n- [x] 다 끝남\n\n"
+                     "## 진행 기록 (어제)\n\n기록 글.\n- [ ] 남음 둘\n", encoding="utf-8"),
+                 ["bash", "-c", f"{py} -c \"import sys;sys.argv=['x'];sys.path.insert(0,'scripts');import pipeline as p;"
+                  "p.tidy_backlog(False)\" && ! grep -qE '끝남|끝난 일|묶음 B|기록 글' docs/dev/backlog.md && echo 지움"],
+                 "지움", should_fail=False)
+
             def merged_tidy():
                 brief_rounds()
                 reopened()  # reopen_at = 줄이기 전 판

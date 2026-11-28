@@ -759,12 +759,12 @@ def tidy_backlog(dry):
     if not p.is_file():
         return []
     text = p.read_text(encoding="utf-8")
-    lines, out, skip_indent, drop_sec = text.split("\n"), [], None, False
+    lines, out, skip_indent, log_sec, keep_indent = text.split("\n"), [], None, False, None
     for line in lines:
         if line.startswith("## "):
-            drop_sec = line.startswith("## 진행 기록")
-            skip_indent = None
-        if drop_sec:
+            log_sec = line.startswith("## 진행 기록")
+            skip_indent = keep_indent = None
+            out.append(line)
             continue
         ind = len(line) - len(line.lstrip())
         if skip_indent is not None:
@@ -773,6 +773,16 @@ def tidy_backlog(dry):
             skip_indent = None
         if re.match(r"^\s*- \[[xX]\]", line):
             skip_indent = ind
+            continue
+        if log_sec:
+            # 진행 기록 절: 기록 글은 지우고(git 이 기록), 그 안의 남은 일(- [ ])과 그 밑줄만 둔다.
+            if re.match(r"^\s*- \[ \]", line):
+                keep_indent = ind
+                out.append(line)
+            elif keep_indent is not None and line.strip() and ind > keep_indent:
+                out.append(line)
+            else:
+                keep_indent = None
             continue
         out.append(line)
     # 남은 - [ ] 이 없는 절은 지운다(머리말 앞부분은 둔다)
