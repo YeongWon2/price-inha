@@ -117,12 +117,19 @@ impl SetupView {
         &self.desk
     }
 
+    /// (48차) 3차 조립(알림 · 백업). 3차 조립 없이 띄웠으면 없음.
+    pub(crate) fn linked(&self) -> Option<&Arc<Linked>> {
+        self.linked.as_ref()
+    }
+
     /// 설정 상태에 더하는 칸: `market` · `models`.
     pub(crate) fn add_to_status(&self, body: &mut Value) {
         // (결정 36) `price-inha demo`의 체험 폴더면 화면이 체험판 안내 줄을 그린다.
         if self.desk.trial() {
             body["trial"] = json!(true);
         }
+        // (48차) 시연에서 받아 둔 키의 확인 상태.
+        crate::unverified::add_to_status(self.desk.home(), body);
         body["market"] = json!(market_id(self.market));
         body["models"] = Value::Array(
             self.models

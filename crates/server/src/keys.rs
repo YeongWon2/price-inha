@@ -43,6 +43,10 @@ impl BrokerKeys {
 
 impl pi_market::CredentialSource for BrokerKeys {
     fn credentials(&self) -> Option<pi_market::Credentials> {
+        // (48차) 시연에서 받아 둔 채 아직 확인되지 않은 키는 쓰지 않는다.
+        if crate::unverified::held(self.store.dir(), crate::setup::KEY_BROKER) {
+            return None;
+        }
         let values = read_kind(&self.store, KeyKind::Broker, &self.quiet)?;
         broker_credentials(&values)
     }
@@ -167,6 +171,10 @@ impl AiKeys {
 #[async_trait]
 impl pi_ai::CredentialSource for AiKeys {
     async fn current(&self) -> Option<pi_ai::Credential> {
+        // (48차) 시연에서 받아 둔 채 아직 확인되지 않은 키는 쓰지 않는다.
+        if crate::unverified::held(self.store.dir(), crate::setup::KEY_AI_API_KEY) {
+            return None;
+        }
         read_kind(&self.store, KeyKind::AiApiKey, &self.quiet_api_key)
             .and_then(|values| field(&values, "api_key").map(pi_ai::Secret::new))
             .map(pi_ai::Credential::ApiKey)

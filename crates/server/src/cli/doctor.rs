@@ -15,6 +15,7 @@ use crate::{DB_FILE, Settings};
 mod host;
 mod ollama;
 mod settle;
+mod unverified;
 mod update;
 
 use host::{check_access_key, check_address, check_backup, check_service};
@@ -160,6 +161,8 @@ pub fn doctor(settings: &Settings, service: &Service<'_>) -> DoctorReport {
     let home_check = check_home(home);
     let (database, has_access_key) = settle::database(home);
     let keys = check_keys(home, home_check.ok);
+    // (48차) 시연에서 받아 둔 키가 있으면 키 줄에 "다음 실행에서 확인합니다"를 더한다.
+    let keys = unverified::with_line(keys, home);
     DoctorReport {
         checks: vec![
             home_check,

@@ -413,6 +413,10 @@ impl Linked {
 
     /// 지금 한 번 백업한다. 실패하면 백업 실패 알림을 낸다(E15).
     pub(crate) async fn back_up(&self) -> Result<BackupReport, AppError> {
+        // (48차) 시연에서 받아 둔 채 아직 확인되지 않은 토큰으로는 올리지 않는다.
+        if crate::unverified::held(self.secrets.dir(), crate::KEY_BACKUP_GITHUB_TOKEN) {
+            return Err(AppError::BackupNotConfigured);
+        }
         let backup = self.backup().ok_or(AppError::BackupNotConfigured)?;
         match backup.run(self.now()).await {
             Ok(report) => Ok(report),

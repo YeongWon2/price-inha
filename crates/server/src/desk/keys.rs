@@ -69,6 +69,19 @@ impl Desk {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// (48차) 시연이면 저장하기 전에 그 칸을 "확인 대기"로 표시한다. 표시하지 못하면 저장하지 않는다.
+    fn mark_trial(&self, item: &str) -> Result<(), SetupRefusal> {
+        crate::unverified::before_register(&self.home, item, self.trial()).map_err(|error| {
+            tracing::warn!(item, %error, "시연 표시를 남기지 못해 키를 받아 두지 않습니다");
+            SetupRefusal::SaveFailed
+        })
+    }
+
+    /// (48차) 키 등록과 같은 확인기(시연에서 받아 둔 키를 시연이 아닌 실행이 확인할 때 쓴다).
+    pub(crate) fn key_verifier(&self) -> &crate::KeyVerifier {
+        &self.verifier
+    }
+
     fn key_check(&self) -> KeyCheck<'_> {
         KeyCheck {
             real: &self.verifier,
@@ -100,13 +113,17 @@ impl Desk {
     /// (10b 10번) 공급자 선언의 키(네이버 뉴스 등). 선택 항목이라 시세 흐름을 깨우지 않는다.
     async fn register_provider(&self, request: ProviderRequest) -> Result<(), SetupRefusal> {
         let provider = request.keys.provider();
+        self.mark_trial(provider)?;
         let check = self.key_check();
         let registering = self
             .secrets
             .register_provider(request.keys, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
-            Ok(()) => tracing::info!(provider, "공급자 키를 등록했습니다"),
+            Ok(()) => {
+                crate::unverified::after_register(&self.home, provider, check.trial);
+                tracing::info!(provider, "공급자 키를 등록했습니다");
+            }
             Err(why) => tracing::warn!(provider, %why, "공급자 키를 등록하지 못했습니다"),
         }
         outcome
@@ -127,11 +144,14 @@ impl Desk {
 
     async fn register_kind(&self, request: KeyRequest) -> Result<(), SetupRefusal> {
         let kind = request.kind;
+        self.mark_trial(crate::unverified::kind_item(kind))?;
         let check = self.key_check();
         let registering = self.secrets.register(kind, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
             Ok(()) => {
+                let item = crate::unverified::kind_item(kind);
+                crate::unverified::after_register(&self.home, item, check.trial);
                 tracing::info!(?kind, "키를 등록했습니다");
                 self.wake.notify_one();
             }
@@ -144,11 +164,16 @@ impl Desk {
     /// (8차) 바깥 키 칸. 선택 항목이라 시세 흐름을 깨우지 않는다.
     async fn register_slot(&self, request: SlotRequest) -> Result<(), SetupRefusal> {
         let slot = request.slot;
+        self.mark_trial(crate::unverified::slot_item(slot))?;
         let check = self.key_check();
         let registering = self.secrets.register_slot(slot, request.values, &check);
         let outcome = settle(tokio::time::timeout(VERIFY_TIMEOUT, registering).await);
         match outcome {
-            Ok(()) => tracing::info!(?slot, "키 칸을 등록했습니다"),
+            Ok(()) => {
+                let item = crate::unverified::slot_item(slot);
+                crate::unverified::after_register(&self.home, item, check.trial);
+                tracing::info!(?slot, "키 칸을 등록했습니다");
+            }
             Err(why) => tracing::warn!(?slot, %why, "키 칸을 등록하지 못했습니다"),
         }
         outcome
