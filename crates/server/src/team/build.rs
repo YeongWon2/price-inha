@@ -137,7 +137,8 @@ fn sources(
             Arc::new(super::demo_data::DemoData::new(Arc::clone(clock))),
         ));
     }
-    let keys: Arc<dyn KeySource> = secrets;
+    // (48차) 시연에서 받아 둔 채 아직 확인되지 않은 자료 칸은 "없음"으로 본다.
+    let keys: Arc<dyn KeySource> = Arc::new(crate::unverified::check::HeldKeys(secrets));
     Ok((news, data_adapter(wiring, keys, shared, store, clock)?))
 }
 

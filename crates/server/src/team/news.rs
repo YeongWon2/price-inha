@@ -81,7 +81,9 @@ impl NewsDesk {
     ) -> NewsDesk {
         let mut registry = NewsRegistry::new();
         let base_url = config.base_url.trim_end_matches('/').to_string();
-        let source: Arc<dyn NewsKeySource> = Arc::clone(&keys) as Arc<dyn NewsKeySource>;
+        // (48차) 시연에서 받아 둔 채 아직 확인되지 않은 뉴스 키는 "없음"으로 본다.
+        let source: Arc<dyn NewsKeySource> =
+            Arc::new(crate::unverified::check::HeldKeys(Arc::clone(&keys)));
         match NaverNews::new(config, source, clock) {
             Ok(naver) => registry.register(Arc::new(naver)),
             Err(error) => tracing::warn!(%error, "네이버 뉴스 공급자를 만들지 못했습니다"),
@@ -104,7 +106,9 @@ impl NewsDesk {
 
     /// 뉴스 키가 등록돼 있나(바깥으로 묻지 않게 했으면 거짓).
     pub(super) fn has_key(&self) -> bool {
-        !self.offline && matches!(self.keys.read_news_keys(NAVER_NEWS_KEYS), Ok(Some(_)))
+        let held =
+            crate::unverified::held(self.keys.dir(), NAVER_NEWS_KEYS.provider_keys().provider());
+        !self.offline && !held && matches!(self.keys.read_news_keys(NAVER_NEWS_KEYS), Ok(Some(_)))
     }
 
     /// 오늘(한국 날짜) 요청 하나를 쓴다. 상한에 닿았으면 거짓. 센 수는 저장소에 남긴다.

@@ -141,6 +141,8 @@ pub(super) async fn open_gate(
     protected: axum::Router,
     lock_alert: Option<Arc<dyn pi_gate::LockAlert>>,
 ) -> Result<(GateServer, RunProofFile), AppError> {
+    // (48차) 시세 흐름 · AI · 자료를 시작하기 전에 시연에서 받아 둔 키를 확인한다(시연이면 아무것도 하지 않는다).
+    crate::unverified::check::StartCheck::run(settings, secrets, view.desk(), view.linked()).await;
     let token = Token::fresh()?;
     let bound_port: crate::run_proof::BoundPort = Arc::default();
     let config = GateConfig {
