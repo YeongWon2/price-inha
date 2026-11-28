@@ -15,6 +15,9 @@ use std::io::Write;
 use std::net::{IpAddr, TcpListener};
 use std::path::{Path, PathBuf};
 
+use pi_store::{NewTemplate, TemplateState, UnixMillis};
+use pi_template::{Style, Template};
+
 use super::open::{OpenScreen, open_browser};
 use super::runner::CommandRunner;
 use crate::{App, AppError, RunAssembly, Settings, SettingsError};
@@ -107,8 +110,32 @@ pub async fn start_demo(
     let _ = writeln!(output, "{DEMO_NOTICE}");
     let _ = writeln!(output, "시연 보관 폴더: {}", home.display());
     let _ = writeln!(output, "{url}");
+    match seed_template(&app) {
+        Ok(true) => {
+            let _ = writeln!(output, "{DEMO_TEMPLATE_NOTICE}");
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!("시연 템플릿을 골라 두지 못했습니다: {error}"),
+    }
     if !request.no_open && !open_browser(runner, &url) {
         let _ = writeln!(output, "브라우저를 열지 못했습니다. 위 주소를 직접 여세요");
     }
     Ok(app)
+}
+
+/// 고른 템플릿이 하나도 없으면(어느 상태든) 스윙 템플릿을 모의중으로 하나 만든다(템플릿 화면에서 고른 것과 같은 값).
+/// 만들었는가. 쓰는 템플릿이 없으면 팀이 시세 조건 · 공시를 걸지 않아 체험 동안 흐름이 보이지 않는다.
+fn seed_template(app: &App) -> Result<bool, pi_store::StoreError> {
+    let store = app.store();
+    for state in TemplateState::ALL {
+        if !store.templates_in_state(state)?.is_empty() {
+            return Ok(false);
+        }
+    }
+    let Ok(value) = serde_json::from_str(&Template::new(Style::Swing).to_json()) else {
+        return Ok(false);
+    };
+    let at = UnixMillis(chrono::Utc::now().timestamp_millis());
+    store.create_template(NewTemplate { value, at })?;
+    Ok(true)
 }
