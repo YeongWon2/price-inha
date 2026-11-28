@@ -98,6 +98,9 @@ fi
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then echo "- 참고: 작업 폴더에 커밋하지 않은 변경이 있다(묶음에 들어간다)"; fi
 if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "- 참고: 태그 $tag 가 아직 없다 — 올리기 전에 git tag $tag 를 만든다"; fi
 
+# 릴리스 앞 전체 검사 한 번, 캐시 없이(2026-11-28): 평소 G2 · push 전 검사는 영향 범위 · 캐시만 보므로
+# 여기서 모든 모듈의 시험 · 화면 · e2e · 설치 스크립트 시험을 다시 돌린다. docs/dev/pipeline.md 5장.
+run bash scripts/verify.sh --full --no-cache
 run "${build[@]}"
 if [ "$dry" -eq 0 ]; then
   if [ -z "$target" ]; then

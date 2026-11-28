@@ -38,11 +38,18 @@ module_web() {
   for d in $(module_dirs "$1"); do [ -f "$d/web/package.json" ] && echo "$d/web"; done
 }
 
-web_deps() { # node_modules 를 package-lock 그대로 맞춘다(없거나 lock 이 더 새로우면 npm ci)
-  local w="$1"
-  if [ ! -f "$w/node_modules/.package-lock.json" ] || [ "$w/package-lock.json" -nt "$w/node_modules/.package-lock.json" ]; then
-    (cd "$w" && npm ci --no-audit --no-fund --loglevel=error)
+web_deps() { # node_modules 를 package-lock 그대로 맞춘다. package-lock 지문이 지난 npm ci 때와 같고 node_modules 가 있으면 건너뛴다
+  local w="$1" want have stamp="$1/node_modules/.pi-lock.sha256"
+  want=$(shasum -a 256 "$w/package-lock.json" | cut -d' ' -f1)
+  have=$(cat "$stamp" 2>/dev/null)
+  if [ -f "$w/node_modules/.package-lock.json" ]; then
+    [ "$want" = "$have" ] && return 0
+    # 지문을 적기 전에 깐 것: lock 이 더 새롭지 않으면 그대로 쓰고 지문만 적는다(예전 규칙과 같은 판단)
+    if [ -z "$have" ] && ! [ "$w/package-lock.json" -nt "$w/node_modules/.package-lock.json" ]; then
+      echo "$want" >"$stamp"; return 0
+    fi
   fi
+  (cd "$w" && npm ci --no-audit --no-fund --loglevel=error) && echo "$want" >"$stamp"
 }
 
 dist_hash() { # 빌드 결과 폴더의 지문(파일 이름 + 내용)
@@ -82,10 +89,11 @@ if (!fs.existsSync(path.join(dir, "INSTALLATION_COMPLETE"))) {
 }
 
 # 브라우저 e2e(결정 23): 시연 서버를 띄워 화면을 기계가 누른다. 실행 파일을 먼저 맞춘다(바뀐 것이 없으면 그대로).
-web_e2e() { # web_e2e <모듈> <web 폴더>
+web_e2e() { # web_e2e <모듈> <web 폴더> [spec 거르개…] — 실행 파일은 cargo 증분 빌드가 맞춘다(바뀐 것이 없으면 확인만)
+  local m="$1" w="$2"; shift 2
   # shellcheck disable=SC2046
-  cargo build -q $(module_pkgs "$1") --bins || return 1
-  npm --prefix "$2" run --silent e2e
+  cargo build -q $(module_pkgs "$m") --bins || return 1
+  npm --prefix "$w" run --silent e2e -- "$@"
 }
 
 # 검사를 끈 곳(화면 · 시험 TS): 린트 · 형 검사를 끄는 주석과 시험 건너뛰기 · 하나만 돌리기. verify.sh 9번.
