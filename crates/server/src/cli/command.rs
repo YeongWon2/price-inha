@@ -73,6 +73,13 @@ pub enum Command {
         /// 설정 인자.
         args: Vec<String>,
     },
+    /// (67차) 시연 서버를 켜고 사무실을 연다: `demo [--no-open] [설정 인자들]`(`crate::cli` demo 모듈 문서).
+    Demo {
+        /// 브라우저를 열지 않고 주소만 찍는다.
+        no_open: bool,
+        /// 설정 인자.
+        args: Vec<String>,
+    },
 }
 
 /// `service`의 할 일.

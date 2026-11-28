@@ -64,6 +64,7 @@ pub use cli::{
     ServiceStatus, SetupContext, SetupRequest, SetupSection, ShownAccessKey, SystemRunner, VERSION,
     WINDOWS_TASK, WINDOWS_TASK_FILE, access_key, access_key_with, doctor, open, restore, setup,
 };
+pub use cli::{DEMO_HOME_SUFFIX, DEMO_NOTICE, DemoRequest, demo_port, demo_settings, start_demo};
 pub use demo::demo_symbols;
 pub use demo::{
     DEMO_AI_PAUSE, DEMO_DISCLOSURE_EVERY, DEMO_DISCLOSURE_MARK, DemoWiring, demo_calendar,

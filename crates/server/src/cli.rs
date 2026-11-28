@@ -6,6 +6,7 @@
 
 mod access;
 mod command;
+mod demo;
 mod doctor;
 mod open;
 mod peek;
@@ -17,6 +18,7 @@ mod setup;
 
 pub use access::{AccessKeyRequest, ShownAccessKey, access_key, access_key_with};
 pub use command::{Command, ServiceAction, VERSION};
+pub use demo::{DEMO_HOME_SUFFIX, DEMO_NOTICE, DemoRequest, demo_port, demo_settings, start_demo};
 pub use doctor::{Check, CheckItem, DoctorReport, doctor};
 pub use open::{OPEN_NO_SERVER, OPEN_NO_SERVER_EXIT, OPEN_SCREENS, OpenRequest, OpenScreen, open};
 pub use restore::{RestoreRequest, RestoreSummary, restore};
