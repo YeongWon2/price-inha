@@ -70,8 +70,12 @@ fn 기본_포트가_비어_있으면_그_포트다() {
 fn 기본_포트가_차_있으면_다른_빈_포트를_고른다() {
     let busy = TcpListener::bind((LOOPBACK, 0)).unwrap();
     let port = busy.local_addr().unwrap().port();
-    let chosen = demo_port(LOOPBACK, port, false);
-    assert_ne!(chosen, port, "차 있는 포트를 고르면 안 된다");
-    assert_ne!(chosen, 0, "실제 포트 번호여야 한다");
-    TcpListener::bind((LOOPBACK, chosen)).expect("고른 포트는 비어 있어야 한다");
+    // 고른 뒤 열기 전에 같이 도는 다른 시험이 그 포트를 잡을 수 있어, 한 번 더 고를 기회를 준다.
+    let opened = (0..2).find_map(|_| {
+        let chosen = demo_port(LOOPBACK, port, false);
+        assert_ne!(chosen, port, "차 있는 포트를 고르면 안 된다");
+        assert_ne!(chosen, 0, "실제 포트 번호여야 한다");
+        TcpListener::bind((LOOPBACK, chosen)).ok()
+    });
+    assert!(opened.is_some(), "고른 포트는 비어 있어야 한다");
 }
