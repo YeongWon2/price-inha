@@ -96,6 +96,9 @@ fn basis_card(crew: &Crew, id: TradeId) -> Result<serde_json::Map<String, Value>
         .map(|s| json!({ "name": hide(&s.name), "known_at": s.known_at.0 }))
         .collect();
     fields.insert("sources".to_string(), Value::Array(sources));
+    // (69차) 논의중이면 끝난 논의 칸(지켜봄 · 끝나지 못함).
+    let end = super::discussion_end::discussion_end(&crew.store, id, trade.state)?;
+    fields.extend(super::discussion_end::end_fields(end.as_ref()));
     Ok(fields)
 }
 

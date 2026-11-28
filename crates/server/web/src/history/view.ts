@@ -5,8 +5,8 @@
 // - 탭 줄 `[role="tablist"]` 안에 탭 셋 `button[role="tab"][data-tab="trades" | "summary" | "approvals"]`
 //   (글 "매매" · "하루 정리" · "승인 기록", 고른 탭만 `aria-selected="true"`, `aria-controls`는 그 판의 id).
 //   판 `[role="tabpanel"][data-tab=같은 이름]`은 고른 탭의 것만 보이고 나머지는 `hidden`.
-// - 매매 판: 상태 거르기 `select[data-role="trade-state"]`(첫 칸 값 ""은 전체, 이어서 `TRADE_STATES`),
-//   목록 `[data-role="trades"]`의 줄 `[data-trade=번호]`(`data-state`=상태 글자) 안에 종목 `[data-role="symbol"]` ·
+// - 매매 판: 상태 거르기 `select[data-role="trade-state"]`(첫 칸 값 ""은 전체, 이어서 `TRADE_FILTERS`),
+//   목록 `[data-role="trades"]`의 줄 `[data-trade=번호]`(`data-state`=상태 글자, 끝난 논의면 `data-ended`) 안에 종목 `[data-role="symbol"]` ·
 //   상태 글 `[data-role="state"]` · 만든 시각 글 `[data-role="time"]` · 펼치기 단추 `button[data-action="toggle"]`
 //   (`aria-expanded`). 펼친 줄 안에 `[data-role="detail"]`: 근거 요약 `[data-role="basis"]`의 줄 `[data-key=칸]`
 //   (`basisLines` 차례, 글에 이름과 값), 상태 흐름 `[data-role="flow"]`의 줄 `[data-state=상태 글자]`(시각 순서,
@@ -23,9 +23,9 @@ import { el } from "../ui/call";
 import { badge, type BadgeTone } from "../ui/parts";
 import {
   APPROVAL_STATUSES,
-  TRADE_STATES,
+  TRADE_FILTERS,
   approvalStatusLabel,
-  tradeStateLabel,
+  tradeFilterLabel,
   type ApprovalRow,
   type BasisLine,
   type DailySummary,
@@ -110,7 +110,8 @@ export function renderFilter(
 
 /** 매매 상태 거르기. */
 export function renderTradeFilter(): HTMLElement {
-  return renderFilter("trade-state", "상태", TRADE_STATES, tradeStateLabel);
+  // (69차) 논의중은 논의중 · 지켜봄 · 끝나지 못함으로 나뉜다.
+  return renderFilter("trade-state", "상태", TRADE_FILTERS, tradeFilterLabel);
 }
 
 /** 승인 결과 거르기. */
@@ -121,7 +122,7 @@ export function renderApprovalFilter(): HTMLElement {
 /** 매매 상태의 배지 색. */
 function tradeTone(state: string): BadgeTone {
   if (state === "blocked") return "danger";
-  if (state === "awaiting_approval") return "warning";
+  if (state === "awaiting_approval" || state === "failed") return "warning";
   if (state === "sold" || state === "reviewed" || state === "holding") return "success";
   return "neutral";
 }
@@ -155,13 +156,15 @@ export function renderTradeRows(rows: readonly TradeRow[]): HTMLElement[] {
     const item = el("li", "his-trade");
     item.dataset.trade = String(row.id);
     item.dataset.state = row.state;
+    // (69차) 끝난 논의(지켜봄 · 끝나지 못함)면 그 종류.
+    if (row.ended !== null) item.dataset.ended = row.ended;
     const toggle = el("button", "his-row his-trade-cols");
     toggle.type = "button";
     toggle.dataset.action = "toggle";
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-controls", `history-trade-${row.id}`);
     toggle.setAttribute("aria-label", `매매 ${row.id} · ${row.symbol} · ${row.stateLabel} · 근거 펼치기`);
-    const state = badge(row.stateLabel, tradeTone(row.state));
+    const state = badge(row.stateLabel, tradeTone(row.ended ?? row.state));
     state.dataset.role = "state";
     const stateCell = el("span", "his-cell-state");
     stateCell.append(state);
