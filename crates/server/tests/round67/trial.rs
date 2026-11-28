@@ -1,6 +1,6 @@
 //! (결정 36 · E56) 체험 폴더(`price-inha demo`가 만든 폴더)의 키 등록은 바깥에 닿지 않는다: 빈 값이 아니면 받아 두고
 //! 답에 "체험판 — 실제로 확인하지 않음"을 싣는다. 설정 상태에는 `"trial": true`가 붙어 화면이 안내 줄을 그린다.
-//! `run --demo`(체험 폴더 표시가 없는 폴더)는 지금 동작 그대로다.
+//! (47차) `run --demo`로 띄워도 시연이면 같다(E56) — 그 자리는 `round71`이 본다.
 
 use std::net::SocketAddr;
 
@@ -122,18 +122,5 @@ async fn 체험_폴더면_설정_상태에_trial이_붙는다() {
     assert_eq!(status, 200);
     assert_eq!(setup["trial"], json!(true), "{setup}");
     assert_eq!(setup["demo"], json!(true));
-    app.shutdown().await.unwrap();
-}
-
-// 검증: E56
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn run_demo의_폴더에는_trial이_없다() {
-    let dir = tempfile::tempdir().unwrap();
-    let outside = Outside::start().await;
-    let settings = demo_run_settings(dir.path());
-    let built = assembly(&settings, &outside);
-    let app = App::launch_run(settings, built).await.unwrap();
-    let (_, setup) = call(app.local_addr(), SETUP_PATH, None).await;
-    assert!(setup.get("trial").is_none(), "{setup}");
     app.shutdown().await.unwrap();
 }

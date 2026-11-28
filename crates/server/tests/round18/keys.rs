@@ -61,7 +61,7 @@ async fn 키_칸_목록은_공급자_선언에서_나오고_네이버_두_칸이
 // 검증: C3 E4 N8 E38
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 네이버_키는_검색_한_번으로_확인되고_받아들여지면_저장된다() {
-    let bench = Plan::demo().start(kst(monday(), 10, 0)).await;
+    let bench = Plan::live().start(kst(monday(), 10, 0)).await;
     let reply = post(bench.addr(), SETUP_KEYS_PATH, &naver_body()).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     assert_eq!(reply.body, json!({"registered": true}));
@@ -92,7 +92,7 @@ async fn 네이버_키는_검색_한_번으로_확인되고_받아들여지면_�
 // 검증: C3 E4
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 네이버가_키를_거절하면_저장하지_않는다() {
-    let bench = Plan::demo().start(kst(monday(), 10, 0)).await;
+    let bench = Plan::live().start(kst(monday(), 10, 0)).await;
     bench.data.reject_news_keys();
     let reply = post(bench.addr(), SETUP_KEYS_PATH, &naver_body()).await;
     assert_eq!(reply.status, 422, "{}", reply.text);
