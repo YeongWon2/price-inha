@@ -55,9 +55,18 @@ impl Verifier for KeyCheck<'_> {
 }
 
 impl Desk {
-    /// (결정 36 · E56) `price-inha demo`가 만든 체험 폴더의 시연인가: 키를 실제로 확인하지 않는다.
+    /// (결정 36 · E56) 키를 실제로 확인하지 않는 시연인가: `price-inha demo`가 만든 체험 폴더이거나, (47차) 실행
+    /// 파일의 시연 띄우기(`run --demo` · `demo` — [`Desk::use_trial_keys`])다. 시연은 바깥에 닿지 않는다.
     pub(crate) fn trial(&self) -> bool {
-        self.demo && crate::is_demo_home(&self.home)
+        self.demo
+            && (crate::is_demo_home(&self.home)
+                || self.trial_keys.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// (47차) 실행 파일의 시연 띄우기가 부른다: 이 시연에서는 키를 실제로 확인하지 않는다.
+    pub(crate) fn use_trial_keys(&self) {
+        self.trial_keys
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn key_check(&self) -> KeyCheck<'_> {

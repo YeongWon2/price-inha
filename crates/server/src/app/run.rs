@@ -93,6 +93,8 @@ pub(crate) struct DemoRun {
     pub(crate) ai_pause: Duration,
     /// (35차 4번) 조립이 준 업종표를 시연 업종으로 따로 쥐고, 업종이 없는 지켜보는 종목에 더한다.
     pub(crate) sectors: bool,
+    /// (47차, E56) 실행 파일의 시연 띄우기다: 키를 실제로 확인하지 않는다([`crate::desk::Desk::use_trial_keys`]).
+    pub(crate) trial_keys: bool,
     /// (다듬기 E 1번) 지켜보는 종목이 없으면 시연 기본 종목([`crate::demo_symbols`])을 조립 값으로 쓴다.
     pub(crate) default_symbols: bool,
 }
@@ -110,6 +112,9 @@ impl DemoRun {
         let desk = super::open_desk(settings, wiring, secrets, verifier).await?;
         if self.default_symbols {
             desk.use_demo_symbols(crate::demo::demo_symbols(settings.market));
+        }
+        if self.trial_keys {
+            desk.use_trial_keys();
         }
         Ok(desk)
     }
@@ -158,6 +163,7 @@ impl App {
                 ai_pause: assembly.demo_ai_pause,
                 sectors: true,
                 default_symbols: true,
+                trial_keys: true,
             }
         } else {
             DemoRun::default()

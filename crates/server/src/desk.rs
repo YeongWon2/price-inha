@@ -67,13 +67,11 @@ pub(crate) struct Desk {
     home: PathBuf,
     demo: bool,
     watching: Mutex<Watching>,
-    /// 키 등록 시도의 횟수 제한(모든 종류가 함께 쓴다).
+    /// 키 등록 시도의 횟수 제한(모든 종류가 함께 쓴다) · 종목 등록 시도의 횟수 제한(키 등록과 따로 센다).
     limit: Mutex<AttemptLimit>,
-    /// 종목 등록 시도의 횟수 제한(키 등록과 따로 센다).
     symbols_limit: Mutex<AttemptLimit>,
-    /// 시세 받기를 시작했는가(시세 흐름이 적는다).
+    /// 시세 받기를 시작했는가(시세 흐름이 적는다) · 등록이 시세 흐름을 깨우는 알림.
     started: AtomicBool,
-    /// 등록이 시세 흐름을 깨우는 알림.
     wake: Notify,
     /// (6차) AI 연결을 잇는 데 드는 것(바뀌지 않는다).
     ai_parts: AiParts,
@@ -81,8 +79,7 @@ pub(crate) struct Desk {
     ai: Mutex<AiNow>,
     /// (6차) AI 연결 고르기를 하나씩 한다(저장 · 공급자 · 확인 결과가 어긋나지 않게).
     choosing: tokio::sync::Mutex<()>,
-    /// (7차 5번) 다시 고르기로 물러난 CLI 공급자. 아직 도는 호출이 있을 수 있어 바로 끝내지 않고,
-    /// 서버가 꺼질 때 함께 끝낸다.
+    /// (7차 5번) 다시 고르기로 물러난 CLI 공급자. 아직 도는 호출이 있을 수 있어 서버가 꺼질 때 함께 끝낸다.
     retired: Mutex<Vec<Arc<ClaudeCliProvider>>>,
     /// (8차 3번) 서버가 꺼지기 시작했다. 고르기 잠금을 기다리기 전에 세운다. 선 뒤의 고르기는 거부한다.
     closing: AtomicBool,
@@ -90,6 +87,8 @@ pub(crate) struct Desk {
     ai_limit: limit::AiLimit,
     /// (57차) 설정 화면에서 고른 담당 모델(보관 폴더의 설정 파일).
     pub(crate) team_models: crate::setup_models::TeamModels,
+    /// (47차, E56) 실행 파일의 시연 띄우기면 참 — [`Desk::trial`].
+    trial_keys: AtomicBool,
 }
 
 impl Desk {
@@ -131,6 +130,7 @@ impl Desk {
             choosing: tokio::sync::Mutex::new(()),
             retired: Mutex::new(Vec::new()),
             closing: AtomicBool::new(false),
+            trial_keys: AtomicBool::new(false),
         };
         // 띄우자마자 읽는 설정 상태도 사실과 같게 한다(시세 흐름이 곧 이어서 적는다).
         desk.set_started(desk.demo || desk.ready());
